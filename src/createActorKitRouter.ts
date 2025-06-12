@@ -1,6 +1,5 @@
 import {
   DurableObjectNamespace,
-  ExecutionContext,
 } from "@cloudflare/workers-types";
 import { AnyEventSchema } from "./schemas";
 import {
@@ -47,8 +46,7 @@ export const createActorKitRouter = <Env extends EnvWithDurableObjects>(
 
   return async (
     request: Request,
-    env: Env,
-    ctx: ExecutionContext
+    env: Env
   ): Promise<Response> => {
     const url = new URL(request.url);
     const pathParts = url.pathname.split("/").filter(Boolean);

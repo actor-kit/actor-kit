@@ -83,8 +83,7 @@ export const createMachineServer = <
   options?: MachineServerOptions;
 }): new (
   state: DurableObjectState,
-  env: EnvFromMachine<TMachine>,
-  ctx: ExecutionContext
+  env: EnvFromMachine<TMachine>
 ) => ActorServer<TMachine> =>
   class MachineServerImpl
     extends DurableObject
@@ -115,8 +114,7 @@ export const createMachineServer = <
      */
     constructor(
       state: DurableObjectState,
-      env: EnvFromMachine<TMachine>,
-      ctx: ExecutionContext
+      env: EnvFromMachine<TMachine>
     ) {
       super(state, env);
       this.state = state;
@@ -134,9 +132,6 @@ export const createMachineServer = <
             this.storage.get("initialCaller"),
             this.storage.get("input"),
           ]);
-        console.debug(
-          `[${this.actorId}] Attempting to load actor data from storage`
-        );
 
         if (actorType && actorId && initialCallerString && inputString) {
           try {
@@ -165,12 +160,13 @@ export const createMachineServer = <
               this.#ensureActorRunning();
             }
           } catch (error) {
-            console.error("Failed to parse stored data:", error);
+            // Error handling without logging
           }
         }
 
         // Resume all existing WebSockets
-        this.state.getWebSockets().forEach((ws) => {
+        const existingWebSockets = this.state.getWebSockets();
+        existingWebSockets.forEach((ws) => {
           this.#subscribeSocketToActor(ws);
         });
       });
@@ -189,7 +185,6 @@ export const createMachineServer = <
       assert(this.initialCaller, "initialCaller is not set");
 
       if (!this.actor) {
-        console.debug(`[${this.actorId}] Creating new actor`);
         const input = {
           id: this.actorId,
           caller: this.initialCaller,
@@ -197,17 +192,14 @@ export const createMachineServer = <
           storage: this.storage,
           ...this.input,
         } satisfies ActorKitInputProps;
+        
         this.actor = createActor(machine, { input } as any);
 
         if (options?.persisted) {
-          console.debug(
-            `[${this.actorId}] Setting up persistence for new actor`
-          );
           this.#setupStatePersistence(this.actor);
         }
 
         this.actor.start();
-        console.debug(`[${this.actorId}] New actor started`);
       }
       return this.actor;
     }
@@ -223,13 +215,12 @@ export const createMachineServer = <
         this.#sendStateUpdate(ws);
 
         // Set up subscription for this WebSocket
-        const sub = this.actor!.subscribe((snapshot) => {
+        const sub = this.actor!.subscribe(() => {
           this.#sendStateUpdate(ws);
         });
         this.subscriptions.set(ws, sub);
       } catch (error) {
-        console.error("Failed to subscribe WebSocket to actor:", error);
-        // Optionally, handle the error (e.g., close the WebSocket)
+        // Error handling without logging
       }
     }
 
@@ -287,8 +278,7 @@ export const createMachineServer = <
      * @private
      */
     #setupStatePersistence(actor: Actor<TMachine>) {
-      console.debug(`[${this.actorId}] Setting up state persistence`);
-      actor.subscribe((state) => {
+      actor.subscribe(() => {
         const fullSnapshot = actor.getSnapshot();
         if (fullSnapshot) {
           this.#persistSnapshot(fullSnapshot);
@@ -306,52 +296,154 @@ export const createMachineServer = <
           !this.lastPersistedSnapshot ||
           compare(this.lastPersistedSnapshot, snapshot).length > 0
         ) {
-          console.debug(`[${this.actorId}] Persisting new snapshot`);
           await this.storage.put(
             PERSISTED_SNAPSHOT_KEY,
             JSON.stringify(snapshot)
           );
           this.lastPersistedSnapshot = snapshot;
-        } else {
-          console.debug(
-            `[${this.actorId}] No changes in snapshot, skipping persistence`
-          );
         }
       } catch (error) {
-        console.error(`[${this.actorId}] Error persisting snapshot:`, error);
+        // Error handling without logging
       }
+    }
+
+    /**
+     * Validates and sets up the actor with input from the request
+     * @private
+     */
+    async #setupActorFromRequest(request: Request): Promise<Response | null> {
+      const url = new URL(request.url);
+      const inputString = url.searchParams.get("input");
+      const pathParts = url.pathname.split("/").filter(Boolean);
+      const [, actorType, actorId] = pathParts;
+      
+      if (!actorType || !actorId) {
+        return new Response("Invalid actor path", { status: 400 });
+      }
+
+      // Check if input is required by looking at the schema
+      const inputSchema = schemas.inputProps;
+      const hasRequiredFields = Object.values(inputSchema.shape).some(
+        (field) => !field.isOptional()
+      );
+
+      // If input is required but not provided, return error
+      if (hasRequiredFields && !inputString) {
+        return new Response("Input parameters required for initial actor setup", { status: 400 });
+      }
+
+      try {
+        const input = inputString ? JSON.parse(inputString) : {};
+
+        // Validate input against schema if provided
+        if (inputString) {
+          try {
+            inputSchema.parse(input);
+          } catch (error: any) {
+            return new Response(`Invalid input: ${error.message}`, { status: 400 });
+          }
+        }
+
+        // Get caller from request
+        const caller = await this.#getValidatedCaller(request, actorType, actorId);
+        if (!caller) {
+          return new Response("Unauthorized", { status: 401 });
+        }
+
+        // Store actor data
+        await this.#storeActorData(actorType, actorId, caller, input);
+
+        // Update instance properties
+        this.actorType = actorType;
+        this.actorId = actorId;
+        this.initialCaller = caller;
+        this.input = input;
+
+        return null;
+      } catch (error: any) {
+        return new Response(`Error parsing input: ${error.message}`, { status: 400 });
+      }
+    }
+
+    /**
+     * Validates and returns the caller from the request
+     * @private
+     */
+    async #getValidatedCaller(
+      request: Request,
+      actorType: string,
+      actorId: string
+    ): Promise<Caller | null> {
+      try {
+        const caller = await getCallerFromRequest(
+          request,
+          actorType,
+          actorId,
+          this.env.ACTOR_KIT_SECRET
+        );
+        return caller;
+      } catch (error: any) {
+        return null;
+      }
+    }
+
+    /**
+     * Stores actor data in storage
+     * @private
+     */
+    async #storeActorData(
+      actorType: string,
+      actorId: string,
+      caller: Caller,
+      input: Record<string, unknown>
+    ): Promise<void> {
+      await Promise.all([
+        this.storage.put("actorType", actorType),
+        this.storage.put("actorId", actorId),
+        this.storage.put("initialCaller", JSON.stringify(caller)),
+        this.storage.put("input", JSON.stringify(input)),
+      ]);
+    }
+
+    /**
+     * Checks if the actor is already running
+     * @private
+     */
+    #isActorRunning(): boolean {
+      return !!this.actorType;
     }
 
     /**
      * Handles incoming HTTP requests and sets up WebSocket connections.
      */
     async fetch(request: Request): Promise<Response> {
-      const actor = this.#ensureActorRunning();
+      const url = new URL(request.url);
+      const clientChecksum = url.searchParams.get("checksum");
+
+      // If actor is not running yet, set it up
+      if (!this.#isActorRunning()) {
+        const setupError = await this.#setupActorFromRequest(request);
+        if (setupError) {
+          return setupError;
+        }
+      }
+
+      this.#ensureActorRunning();
       assert(this.actorType, "actorType is not set");
       assert(this.actorId, "actorId is not set");
 
       const webSocketPair = new WebSocketPair();
       const [client, server] = Object.values(webSocketPair);
 
-      let caller: Caller | undefined;
-      try {
-        caller = await getCallerFromRequest(
-          request,
-          this.actorType,
-          this.actorId,
-          this.env.ACTOR_KIT_SECRET
-        );
-      } catch (error: any) {
-        return new Response(`Error: ${error.message}`, { status: 401 });
-      }
-
+      // Get caller for this connection
+      const caller = await this.#getValidatedCaller(
+        request,
+        this.actorType,
+        this.actorId
+      );
       if (!caller) {
         return new Response("Unauthorized", { status: 401 });
       }
-
-      // Parse the checksum from the request, if provided
-      const url = new URL(request.url);
-      const clientChecksum = url.searchParams.get("checksum");
 
       this.state.acceptWebSocket(server);
       const initialAttachment = {
@@ -405,12 +497,8 @@ export const createMachineServer = <
     /**
      * Handles WebSocket errors.
      */
-    async webSocketError(ws: WebSocket, error: Error) {
-      console.error(
-        "[MachineServerImpl] WebSocket error:",
-        error.message,
-        error.stack
-      );
+    async webSocketError(_ws: WebSocket, _error: Error) {
+      // Error handling without logging
     }
 
     /**
@@ -419,8 +507,8 @@ export const createMachineServer = <
     async webSocketClose(
       ws: WebSocket,
       code: number,
-      reason: string,
-      wasClean: boolean
+      _reason: string,
+      _wasClean: boolean
     ) {
       ws.close(code, "Durable Object is closing WebSocket");
       // Remove the subscription for the socket
@@ -513,8 +601,8 @@ export const createMachineServer = <
     }
 
     #matchesEvent(
-      snapshot: SnapshotFrom<TMachine>,
-      event: ClientEventFrom<TMachine>
+      _snapshot: SnapshotFrom<TMachine>,
+      _event: ClientEventFrom<TMachine>
     ): boolean {
       // todo implement later
       return true;
@@ -579,17 +667,15 @@ export const createMachineServer = <
       input: Record<string, unknown>;
     }) {
       if (!this.actorType && !this.actorId && !this.initialCaller) {
-        // Store actor data in storage
-        await Promise.all([
-          this.storage.put("actorType", props.actorType),
-          this.storage.put("actorId", props.actorId),
-          this.storage.put("initialCaller", JSON.stringify(props.caller)),
-          this.storage.put("input", JSON.stringify(props.input)),
-        ]).catch((error) => {
-          console.error("Error storing actor data:", error);
-        });
+        // Store actor data
+        await this.#storeActorData(
+          props.actorType,
+          props.actorId,
+          props.caller,
+          props.input
+        );
 
-        // Update the instance properties
+        // Update instance properties
         this.actorType = props.actorType;
         this.actorId = props.actorId;
         this.initialCaller = props.caller;
@@ -638,19 +724,13 @@ export const createMachineServer = <
     async loadPersistedSnapshot(): Promise<SnapshotFrom<TMachine> | null> {
       const snapshotString = await this.storage.get(PERSISTED_SNAPSHOT_KEY);
       if (snapshotString) {
-        console.debug(`[${this.actorId}] Loaded persisted snapshot`);
         return JSON.parse(snapshotString as string);
       }
-      console.debug(`[${this.actorId}] No persisted snapshot found`);
       return null;
     }
 
     // Add this method to restore the persisted actor
     restorePersistedActor(persistedSnapshot: SnapshotFrom<TMachine>) {
-      console.debug(
-        `[${this.actorId}] Restoring persisted actor from `,
-        persistedSnapshot
-      );
       assert(this.actorId, "actorId is not set");
       assert(this.actorType, "actorType is not set");
       assert(this.initialCaller, "initialCaller is not set");
@@ -680,14 +760,10 @@ export const createMachineServer = <
       });
 
       if (options?.persisted) {
-        console.debug(
-          `[${this.actorId}] Setting up persistence for restored actor`
-        );
         this.#setupStatePersistence(this.actor);
       }
 
       this.actor.start();
-      console.debug(`[${this.actorId}] Restored actor started`);
 
       this.actor.send({
         type: "RESUME",
@@ -695,7 +771,6 @@ export const createMachineServer = <
         env: this.env,
         storage: this.storage,
       } as any);
-      console.debug(`[${this.actorId}] Sent RESUME event to restored actor`);
 
       this.lastPersistedSnapshot = restoredSnapshot as any;
     }

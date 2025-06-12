@@ -72,22 +72,33 @@ export const CallerStringSchema = z.string().transform((val, ctx) => {
     return { type: "client" as const, id: "anonymous" };
   }
 
-  // Regular expression to validate the UUID format
-  const callerTypeParseResult = CallerIdTypeSchema.safeParse(val.split("-")[0]);
+  const parts = val.split("-");
+  if (parts.length < 2) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: `Caller string must be in the format 'type-id' or 'anonymous'. Received '${val}'.`,
+    });
+    return z.NEVER;
+  }
+
+  const typeStr = parts[0];
+  const id = parts.slice(1).join("-"); // Rejoin in case id contains hyphens
+
+  const callerTypeParseResult = CallerIdTypeSchema.safeParse(typeStr);
   if (!callerTypeParseResult.success) {
     callerTypeParseResult.error.issues.forEach(ctx.addIssue);
     return z.NEVER;
   }
   const type = callerTypeParseResult.data;
 
-  const id = val.substring(val.indexOf("-") + 1);
-  if (z.string().uuid().safeParse(id).success) {
+  // Basic validation: Ensure the ID part is not empty
+  if (id.length > 0) {
     return { type, id };
   } else {
-    // If not valid, add a custom issue
+    // If the ID part is empty, add a custom issue
     ctx.addIssue({
       code: z.ZodIssueCode.custom,
-      message: `Must be a valid uuid or 'anonymous'. Received '${id}' on value '${val}'.`,
+      message: `The ID part cannot be empty after the type prefix. Received '${id}' for value '${val}'.`,
     });
     // Return the special NEVER symbol to indicate a validation failure
     return z.NEVER;

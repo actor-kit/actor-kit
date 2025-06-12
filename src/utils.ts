@@ -1,7 +1,8 @@
-import { jwtVerify, SignJWT } from "jose";
-import { PERSISTED_SNAPSHOT_KEY } from "./constants";
+import { jwtVerify } from "jose";
 import { CallerStringSchema } from "./schemas";
 import { Caller } from "./types";
+import { Actor, SnapshotFrom } from "xstate";
+import { BaseActorKitStateMachine } from "./types";
 
 // Define log levels
 export enum LogLevel {
@@ -168,4 +169,10 @@ export async function parseAccessTokenForCaller({
     throw new Error("Expected accessToken to have subject");
   }
   return CallerStringSchema.parse(verified.payload.sub);
+}
+
+export function getSnapshot<TMachine extends BaseActorKitStateMachine>(
+  actor: Actor<TMachine>
+): SnapshotFrom<TMachine> | undefined {
+  return actor.getSnapshot();
 }

@@ -107,8 +107,6 @@ async function verifyToken(token: string) {
     );
     return verified.payload as { userId: string; sessionId: string };
   } catch {
-    // Remove unused variable
-    // } catch (error) {
     return null;
   }
 }
