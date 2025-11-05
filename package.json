@@ -43,7 +43,6 @@
     "prepublishOnly": "npm run build"
   },
   "keywords": [
-    "xstate",
     "partykit",
     "actor",
     "state-machine"
@@ -53,15 +52,13 @@
   "peerDependencies": {
     "@cloudflare/workers-types": "^4.20240925.0",
     "react": "^17.0.0 || ^18.0.0",
-    "xstate": "^5.18.0",
     "zod": "^3.23.0"
   },
   "dependencies": {
     "cloudflare": "^3.5.0",
     "fast-json-patch": "^3.1.1",
     "immer": "^10.1.1",
-    "jose": "^5.8.0",
-    "xstate-migrate": "^0.0.5"
+    "jose": "^5.8.0"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20240925.0",
@@ -77,7 +74,6 @@
     "rollup-plugin-preserve-directives": "^0.4.0",
     "rollup-plugin-typescript2": "^0.36.0",
     "typescript": "^5.6.2",
-    "xstate": "^5.18.2",
     "zod": "^3.23.8"
   },
   "type": "module"

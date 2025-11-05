@@ -82,7 +82,7 @@ The project uses two main actors: Todo and Session. Here's how the Todo machine 
 
 ```typescript
 import { ActorKitStateMachine } from "actor-kit";
-import { assign, setup } from "xstate";
+import { assign, setup } from "actor-kit";
 import type {
   TodoEvent,
   TodoInput,

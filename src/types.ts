@@ -6,7 +6,7 @@ import type {
   SnapshotFrom,
   StateMachine,
   StateValueFrom,
-} from "xstate";
+} from "./stateMachine";
 import type { z } from "zod";
 import type {
   AnyEventSchema,
@@ -99,18 +99,7 @@ export type ActorKitStateMachine<
 > = StateMachine<
   TContext,
   TEvent & EventObject,
-  any,
-  any,
-  any,
-  any,
-  any,
-  any,
-  any,
-  TInput,
-  any,
-  any,
-  any,
-  any
+  TInput
 >;
 
 export type BaseActorKitInput<TEnv = EnvWithDurableObjects> = {
@@ -200,17 +189,6 @@ export type ClientEventFrom<T extends AnyActorKitStateMachine> =
   T extends StateMachine<
     any,
     infer TEvent,
-    any,
-    any,
-    any,
-    any,
-    any,
-    any,
-    any,
-    any,
-    any,
-    any,
-    any,
     any
   >
     ? TEvent extends WithActorKitEvent<infer E, "client">
@@ -222,17 +200,6 @@ export type ServiceEventFrom<T extends AnyActorKitStateMachine> =
   T extends StateMachine<
     any,
     infer TEvent,
-    any,
-    any,
-    any,
-    any,
-    any,
-    any,
-    any,
-    any,
-    any,
-    any,
-    any,
     any
   >
     ? TEvent extends WithActorKitEvent<infer E, "service">

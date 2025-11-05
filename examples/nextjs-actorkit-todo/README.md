@@ -9,7 +9,7 @@ Try it live: [https://nextjs-actor-kit-todo.vercel.app/](https://nextjs-actor-ki
 - 🚀 Next.js app with Cloudflare Worker for Actor Kit backend
 - 🔄 Real-time synchronization across clients
 - 🖥️ Server-side rendering with Next.js
-- 🎭 State management using XState and Actor Kit
+- 🎭 State management using Actor Kit's built-in state machine utility
 - 🛡️ Type-safe interactions with TypeScript and Zod
 - 🔐 Secure handling of public and private data
 - 🔒 JWT-based authentication

@@ -11,7 +11,7 @@ import React, {
   useRef,
   useSyncExternalStore,
 } from "react";
-import { matchesState, StateValueFrom } from "xstate";
+import { matchesState, StateValueFrom } from "./stateMachine";
 import type { ActorKitClientProps } from "./createActorKitClient";
 import { createActorKitClient } from "./createActorKitClient";
 import type {

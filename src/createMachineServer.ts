@@ -10,8 +10,8 @@ import {
   SnapshotFrom,
   StateValueFrom,
   Subscription,
-} from "xstate";
-import { xstateMigrate } from "xstate-migrate";
+  xstateMigrate,
+} from "./stateMachine";
 import { z } from "zod";
 import { PERSISTED_SNAPSHOT_KEY } from "./constants";
 import { CallerSchema } from "./schemas";

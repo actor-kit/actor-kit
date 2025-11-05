@@ -1,6 +1,6 @@
 # 🎭 Actor Kit
 
-Actor Kit is a library for running state machines in Cloudflare Workers, leveraging XState for robust state management. It provides a framework for managing the logic, lifecycle, persistence, synchronization, and access control of actors in a distributed environment.
+Actor Kit is a library for running state machines in Cloudflare Workers, with a built-in lightweight state machine utility for robust state management. It provides a framework for managing the logic, lifecycle, persistence, synchronization, and access control of actors in a distributed environment.
 
 ## 📚 Table of Contents
 
@@ -40,11 +40,11 @@ Actor Kit is a library for running state machines in Cloudflare Workers, leverag
 To install Actor Kit, use your preferred package manager:
 
 ```bash
-npm install actor-kit xstate zod jose react
+npm install actor-kit zod jose react
 # or
-yarn add actor-kit xstate zod jose react
+yarn add actor-kit zod jose react
 # or
-pnpm add actor-kit xstate zod jose react
+pnpm add actor-kit zod jose react
 ```
 
 ## 🌟 Key Concepts
@@ -53,7 +53,7 @@ pnpm add actor-kit xstate zod jose react
 - ⚡ **Real-time Updates**: Changes are immediately reflected across all connected clients, ensuring a responsive user experience.
 - 🛡️ **Type Safety**: Leverage TypeScript and Zod for robust type checking and runtime validation.
 - 🎭 **Event-Driven Architecture**: All state changes are driven by events, providing a clear and predictable data flow.
-- 🧠 **State Machine Logic**: Powered by XState, making complex state management more manageable and visualizable.
+- 🧠 **State Machine Logic**: Built-in lightweight state machine utility, making complex state management more manageable and visualizable.
 - 🔄 **Seamless Synchronization**: Actor Kit handles state synchronization between server and clients automatically.
 - 🔐 **Public and Private Data**: Manage shared data across all clients and caller-specific information securely.
 - 🌐 **Distributed Systems**: Built for scalable, distributed applications running on edge computing platforms.
@@ -71,7 +71,7 @@ graph TD
         C[Actor Kit Router<br>API: createActorKitRouter]
         subgraph "Actor Server"
             D[Machine Server DO<br>API: createMachineServer]
-            X[XState Machine]
+            X[State Machine]
             F[(Durable Object Storage)]
         end
     end
@@ -196,7 +196,7 @@ Now that we have our event types defined, we can create our state machine:
 ```typescript
 // src/todo.machine.ts
 import { ActorKitStateMachine } from "actor-kit";
-import { assign, setup } from "xstate";
+import { assign, setup } from "actor-kit";
 import type {
   TodoEvent,
   TodoInput,
@@ -480,7 +480,7 @@ This example demonstrates how to set up and use Actor Kit in a Next.js applicati
 1. Install dependencies:
 
    ```bash
-   npm install actor-kit xstate zod
+   npm install actor-kit zod
    npm install -D wrangler
    ```
 
@@ -595,7 +595,7 @@ The `actor-kit/worker` package provides the core functionality for running state
 Creates a server instance of a state machine that runs in a Cloudflare Worker Durable Object.
 
 Parameters:
-- `machine`: The XState machine to run on the server
+- `machine`: The state machine to run on the server
 - `schemas`: Zod schemas for validating events and input
   - `clientEvent`: Schema for events from clients
   - `serviceEvent`: Schema for events from trusted services
@@ -758,7 +758,7 @@ Returns a function with the following signature:
 The `waitForEvent`, `waitForState`, and `errorOnWaitTimeout` parameters allow you to specify conditions for when and how the snapshot should be returned:
 
 - `waitForEvent`: Waits for a specific event to be received by the actor before returning the snapshot. The event object must match exactly (deep equality check) with the received event.
-- `waitForState`: Waits for the actor to reach a specific state before returning the snapshot. State matching is performed as described in the XState documentation.
+- `waitForState`: Waits for the actor to reach a specific state before returning the snapshot. State matching is performed using the built-in state matching utility.
 - `errorOnWaitTimeout`: Determines the behavior when a timeout occurs while waiting for an event or state. Default is `true`.
   - If `true` (default), throws a 408 (Request Timeout) error on timeout.
   - If `false`, returns a 200 status with the current snapshot, even if the wait condition wasn't met.
@@ -1618,7 +1618,7 @@ Example usage:
 
 ```typescript
 import { ActorKitStateMachine } from "actor-kit";
-import { setup } from "xstate";
+import { setup } from "actor-kit";
 import type {
   TodoEvent,
   TodoInput,
@@ -2030,12 +2030,10 @@ Actor Kit is [MIT licensed](LICENSE.md).
 
 Actor Kit builds upon and draws inspiration from several excellent technologies:
 
-- [XState](https://xstate.js.org/): A powerful state management library for JavaScript and TypeScript applications.
 - [Cloudflare Workers](https://workers.cloudflare.com/): A serverless platform for building and deploying applications at the edge.
 - [Zod](https://zod.dev/): A TypeScript-first schema declaration and validation library.
 - [PartyKit](https://www.partykit.io/): An inspiration for Actor Kit, providing real-time multiplayer infrastructure.
 - [PartyServer](https://github.com/threepointone/partyserver/tree/main): PartyKit, for workers
-- [xstate-migrate](https://github.com/jonmumm/xstate-migrate): A migration library for persisted XState machines, designed to facilitate state machine migrations when updating your XState configurations.
 
 ## 🚧 Development Status
 

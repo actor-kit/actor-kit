@@ -1,4 +1,4 @@
-import { StateValueFrom } from "xstate";
+import { StateValueFrom } from "./stateMachine";
 import { z } from "zod";
 import { AnyActorKitStateMachine, CallerSnapshotFrom, ClientEventFrom } from "./types";
 
