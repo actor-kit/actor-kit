@@ -162,6 +162,14 @@ export async function parseAccessTokenForCaller({
       `Expected accessToken audience to match actor type: ${type}`
     );
   }
+  const audience = Array.isArray(verified.payload.aud)
+    ? verified.payload.aud
+    : [verified.payload.aud];
+  if (!audience.includes(type)) {
+    throw new Error(
+      `Expected accessToken audience to match actor type: ${type}`
+    );
+  }
   if (!verified.payload.sub) {
     throw new Error("Expected accessToken to have subject");
   }

@@ -108,6 +108,69 @@ describe("createActorFetch", () => {
     });
   });
 
+  it("always includes an input payload and omits optional wait params when absent", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        checksum: "checksum-3",
+        snapshot: {
+          public: { todos: [] },
+          private: {},
+          value: "ready",
+        },
+      }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const fetchActor = createActorFetch({
+      actorType: "todo",
+      host: "localhost:8788",
+    });
+
+    await fetchActor({
+      actorId: "list-3",
+      accessToken: "token-789",
+    });
+
+    const [url] = fetchMock.mock.calls[0] as [string, RequestInit];
+    const requestUrl = new URL(url);
+
+    expect(requestUrl.origin).toBe("http://localhost:8788");
+    expect(requestUrl.searchParams.get("input")).toBe("{}");
+    expect(requestUrl.searchParams.has("waitForEvent")).toBe(false);
+    expect(requestUrl.searchParams.has("waitForState")).toBe(false);
+    expect(requestUrl.searchParams.has("timeout")).toBe(false);
+    expect(requestUrl.searchParams.has("errorOnWaitTimeout")).toBe(false);
+  });
+
+  it("treats 0.0.0.0 as a local host", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        checksum: "checksum-4",
+        snapshot: {
+          public: { todos: [] },
+          private: {},
+          value: "ready",
+        },
+      }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const fetchActor = createActorFetch({
+      actorType: "todo",
+      host: "0.0.0.0:8788",
+    });
+
+    await fetchActor({
+      actorId: "list-4",
+      accessToken: "token-local",
+    });
+
+    const [url] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(new URL(url).origin).toBe("http://0.0.0.0:8788");
+  });
+
   it("throws a descriptive error when the host is missing", async () => {
     const fetchActor = createActorFetch({
       actorType: "todo",

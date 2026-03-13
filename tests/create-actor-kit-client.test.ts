@@ -124,6 +124,47 @@ describe("createActorKitClient", () => {
     ]);
   });
 
+  it("builds websocket URLs for local and remote hosts", async () => {
+    const localClient = createActorKitClient<TestMachine>({
+      accessToken: "token-123",
+      actorId: "list-1",
+      actorType: "todo",
+      checksum: "",
+      host: "192.168.1.25:8788",
+      initialSnapshot: {
+        private: {},
+        public: { todos: [] },
+        value: "ready",
+      },
+    });
+
+    const localConnection = localClient.connect();
+    expect(MockWebSocket.instances[0]?.url).toBe(
+      "ws://192.168.1.25:8788/api/todo/list-1?accessToken=token-123"
+    );
+    MockWebSocket.instances[0]?.open();
+    await localConnection;
+
+    const remoteClient = createActorKitClient<TestMachine>({
+      accessToken: "token-remote",
+      actorId: "list-2",
+      actorType: "todo",
+      checksum: "checksum-2",
+      host: "actors.example.com",
+      initialSnapshot: {
+        private: {},
+        public: { todos: [] },
+        value: "ready",
+      },
+    });
+    const remoteConnection = remoteClient.connect();
+    expect(MockWebSocket.instances[1]?.url).toBe(
+      "wss://actors.example.com/api/todo/list-2?accessToken=token-remote&checksum=checksum-2"
+    );
+    MockWebSocket.instances[1]?.open();
+    await remoteConnection;
+  });
+
   it("applies incoming patches and notifies subscribers", async () => {
     const onStateChange = vi.fn();
     const subscriber = vi.fn();
@@ -205,6 +246,43 @@ describe("createActorKitClient", () => {
     );
   });
 
+  it("handles binary websocket messages and tolerates missing callbacks", async () => {
+    const client = createTestClient();
+    const subscriber = vi.fn();
+    client.subscribe(subscriber);
+
+    const connectionPromise = client.connect();
+    const socket = MockWebSocket.instances[0];
+    socket.open();
+    await connectionPromise;
+
+    socket.emitMessage(
+      new TextEncoder().encode(
+        JSON.stringify({
+          checksum: "checksum-2",
+          operations: [
+            {
+              op: "add",
+              path: "/public/todos/0",
+              value: {
+                id: "todo-1",
+                text: "Binary payload",
+                completed: false,
+              },
+            },
+          ],
+        })
+      )
+    );
+
+    expect(client.getState().public.todos[0]).toEqual({
+      id: "todo-1",
+      text: "Binary payload",
+      completed: false,
+    });
+    expect(subscriber).toHaveBeenCalledOnce();
+  });
+
   it("reports an error when sending while disconnected", () => {
     const onError = vi.fn();
     const client = createTestClient({ onError });
@@ -214,6 +292,21 @@ describe("createActorKitClient", () => {
     expect(onError).toHaveBeenCalledWith(
       new Error("Cannot send event: WebSocket is not connected")
     );
+  });
+
+  it("does not throw when optional error callbacks are omitted", async () => {
+    const client = createTestClient();
+    const connectionPromise = client.connect();
+    const socket = MockWebSocket.instances[0];
+    socket.open();
+    await connectionPromise;
+
+    expect(() => socket.emitMessage("{bad-json")).not.toThrow();
+    expect(() => socket.emitError("socket")).not.toThrow();
+    client.disconnect();
+    expect(() =>
+      client.send({ type: "ADD_TODO", text: "No callback installed" })
+    ).not.toThrow();
   });
 
   it("waits for state changes and times out when the predicate is not met", async () => {
@@ -277,5 +370,45 @@ describe("createActorKitClient", () => {
 
     expect(MockWebSocket.instances).toHaveLength(2);
     expect(MockWebSocket.instances[1]?.readyState).toBe(MockWebSocket.CLOSED);
+  });
+
+  it("uses exponential backoff and stops after the max reconnect attempts", async () => {
+    vi.useFakeTimers();
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const client = createTestClient();
+    const connectionPromise = client.connect();
+    const firstSocket = MockWebSocket.instances[0];
+    firstSocket.open();
+    await connectionPromise;
+
+    firstSocket.close();
+    await vi.advanceTimersByTimeAsync(1999);
+    expect(MockWebSocket.instances).toHaveLength(1);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(MockWebSocket.instances).toHaveLength(2);
+
+    MockWebSocket.instances[1]?.close();
+    await vi.advanceTimersByTimeAsync(4000);
+    expect(MockWebSocket.instances).toHaveLength(3);
+
+    MockWebSocket.instances[2]?.close();
+    await vi.advanceTimersByTimeAsync(8000);
+    expect(MockWebSocket.instances).toHaveLength(4);
+
+    MockWebSocket.instances[3]?.close();
+    await vi.advanceTimersByTimeAsync(16000);
+    expect(MockWebSocket.instances).toHaveLength(5);
+
+    MockWebSocket.instances[4]?.close();
+    await vi.advanceTimersByTimeAsync(30000);
+    expect(MockWebSocket.instances).toHaveLength(6);
+
+    MockWebSocket.instances[5]?.close();
+    await vi.advanceTimersByTimeAsync(30000);
+    expect(MockWebSocket.instances).toHaveLength(6);
+    expect(errorSpy).toHaveBeenCalledWith(
+      "[ActorKitClient] Max reconnection attempts reached"
+    );
   });
 });

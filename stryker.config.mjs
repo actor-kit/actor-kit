@@ -1,3 +1,5 @@
+const incremental = process.env.STRYKER_INCREMENTAL !== "false";
+
 /** @type {import('@stryker-mutator/api/core').PartialStrykerOptions} */
 const config = {
   plugins: [
@@ -18,7 +20,7 @@ const config = {
   jsonReporter: {
     fileName: "reports/mutation/mutation.json",
   },
-  incremental: true,
+  incremental,
   incrementalFile: "reports/stryker-incremental.json",
   thresholds: {
     high: 90,
