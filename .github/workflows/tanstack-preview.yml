@@ -13,6 +13,11 @@ concurrency:
   group: tanstack-preview-${{ github.event.pull_request.number }}
   cancel-in-progress: true
 
+permissions:
+  contents: read
+  issues: write
+  pull-requests: write
+
 env:
   CLOUDFLARE_ACCOUNT_ID: ccf4d9a0a3b76ffae0b6ee048de66f07
 
