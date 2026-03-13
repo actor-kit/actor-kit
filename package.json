@@ -40,7 +40,17 @@
   ],
   "scripts": {
     "build": "rollup -c --bundleConfigAsCjs",
-    "prepublishOnly": "npm run build"
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "eslint src tests e2e playwright.config.ts examples/remix-actorkit-todo examples/tanstack-start-actorkit-todo && npm --prefix examples/nextjs-actorkit-todo run lint",
+    "test": "npm run test:unit",
+    "test:unit": "vitest run",
+    "test:coverage": "vitest run --coverage",
+    "test:e2e": "npm run test:e2e:nextjs && npm run test:e2e:remix && npm run test:e2e:tanstack-start",
+    "test:e2e:nextjs": "playwright test --config playwright.next.config.ts",
+    "test:e2e:remix": "playwright test --config playwright.remix.config.ts",
+    "test:e2e:tanstack-start": "playwright test --config playwright.tanstack.config.ts",
+    "check": "npm run build && npm run typecheck && npm run lint && npm run test:coverage",
+    "prepublishOnly": "npm run check"
   },
   "keywords": [
     "xstate",
@@ -52,33 +62,43 @@
   "license": "ISC",
   "peerDependencies": {
     "@cloudflare/workers-types": "^4.20240925.0",
-    "react": "^17.0.0 || ^18.0.0",
+    "react": "^17.0.0 || ^18.0.0 || ^19.0.0",
     "xstate": "^5.18.0",
     "zod": "^3.23.0"
   },
   "dependencies": {
     "cloudflare": "^3.5.0",
     "fast-json-patch": "^3.1.1",
-    "immer": "^10.1.1",
-    "jose": "^5.8.0",
-    "xstate-migrate": "^0.0.5"
+    "immer": "^10.2.0",
+    "jose": "^5.10.0"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20240925.0",
+    "@playwright/test": "^1.58.2",
     "@rollup/plugin-alias": "^5.1.1",
     "@rollup/plugin-terser": "^0.4.4",
-    "@storybook/react": "^8.4.2",
-    "@types/node": "^22.7.4",
-    "@types/react": "^18.3.9",
+    "@storybook/react": "^8.6.18",
+    "@types/node": "^22.19.15",
+    "@types/react": "^19.2.2",
     "@types/use-sync-external-store": "^0.0.6",
-    "react": "^18.3.1",
-    "rollup": "^4.24.0",
-    "rollup-plugin-dts": "^6.1.1",
+    "@typescript-eslint/eslint-plugin": "^8.57.0",
+    "@typescript-eslint/parser": "^8.57.0",
+    "@vitest/coverage-v8": "^4.1.0",
+    "eslint": "^9.39.1",
+    "eslint-plugin-react-hooks": "^7.0.1",
+    "eslint-plugin-react-refresh": "^0.4.24",
+    "jsondiffpatch": "^0.7.3",
+    "react": "^19.2.0",
+    "rollup": "^4.59.0",
+    "rollup-plugin-dts": "^6.4.0",
     "rollup-plugin-preserve-directives": "^0.4.0",
     "rollup-plugin-typescript2": "^0.36.0",
-    "typescript": "^5.6.2",
-    "xstate": "^5.18.2",
-    "zod": "^3.23.8"
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.57.0",
+    "vitest": "^4.1.0",
+    "xstate": "^5.28.0",
+    "xstate-migrate": "^0.0.5",
+    "zod": "^3.25.76"
   },
   "type": "module"
 }

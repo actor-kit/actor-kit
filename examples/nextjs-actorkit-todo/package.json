@@ -4,14 +4,16 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
+    "dev:e2e": "NODE_OPTIONS=--preserve-symlinks ACTOR_KIT_HOST=127.0.0.1:8788 ACTOR_KIT_SECRET=actor-kit-dev-secret next dev --port 3001",
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
-    "dev-api": "wrangler dev",
-    "deploy-api": "wrangler deploy"
+    "dev-api": "ACTOR_KIT_HOST=127.0.0.1:8788 ACTOR_KIT_SECRET=actor-kit-dev-secret wrangler dev --port 8788",
+    "deploy-api": "wrangler deploy",
+    "cf-typegen": "wrangler types"
   },
   "dependencies": {
-    "actor-kit": "^0.47.0",
+    "actor-kit": "file:../..",
     "cookie": "^0.6.0",
     "next": "14.2.13",
     "react": "^18",
@@ -20,7 +22,6 @@
     "zod": "^3.23.8"
   },
   "devDependencies": {
-    "@cloudflare/workers-types": "^4.20241004.0",
     "@types/cookie": "^0.6.0",
     "@types/node": "^20",
     "@types/react": "^18",

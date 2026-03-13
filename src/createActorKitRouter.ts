@@ -1,19 +1,57 @@
-import {
-  DurableObjectNamespace,
-} from "@cloudflare/workers-types";
+import { z } from "zod";
 import { AnyEventSchema } from "./schemas";
 import {
-  AnyActorKitStateMachine,
   AnyEvent,
   Caller,
-  DurableObjectActor,
-  EnvWithDurableObjects,
+  ActorKitEnv,
   KebabToScreamingSnake,
   ScreamingSnakeToKebab,
 } from "./types";
 import { getCallerFromRequest } from "./utils";
 
-export const createActorKitRouter = <Env extends EnvWithDurableObjects>(
+const SnapshotRequestSearchSchema = z.object({
+  waitForEvent: z.string().optional(),
+  waitForState: z.string().optional(),
+  timeout: z
+    .string()
+    .transform((value) => Number.parseInt(value, 10))
+    .pipe(z.number().int().positive())
+    .optional(),
+  errorOnWaitTimeout: z
+    .enum(["true", "false"])
+    .transform((value) => value === "true")
+    .optional(),
+});
+
+type ActorKitDurableObjectStub = {
+  spawn(props: {
+    actorType: string;
+    actorId: string;
+    caller: Caller;
+    input: Record<string, unknown>;
+  }): Promise<void> | void;
+  getSnapshot(
+    caller: Caller,
+    options?: {
+      waitForEvent?: unknown;
+      waitForState?: unknown;
+      timeout?: number;
+      errorOnWaitTimeout?: boolean;
+    }
+  ): Promise<{
+    checksum: string;
+    snapshot: unknown;
+  }>;
+  send(event: { caller: Caller; type: string }): void;
+  fetch(request: Request): Promise<Response>;
+};
+
+type ActorKitNamespace = {
+  idFromName(name: string): unknown;
+  get(id: unknown): ActorKitDurableObjectStub;
+};
+
+export const createActorKitRouter = <Env extends ActorKitEnv>(
   routes: Array<ScreamingSnakeToKebab<Extract<keyof Env, string>>>
 ) => {
   type ActorType = ScreamingSnakeToKebab<Extract<keyof Env, string>>;
@@ -26,9 +64,7 @@ export const createActorKitRouter = <Env extends EnvWithDurableObjects>(
   >(
     env: Env,
     key: T
-  ):
-    | DurableObjectNamespace<DurableObjectActor<AnyActorKitStateMachine>>
-    | undefined {
+  ): ActorKitNamespace | undefined {
     const envKey = key.toUpperCase() as KebabToScreamingSnake<T> & keyof Env;
     const namespace = env[envKey];
     if (
@@ -37,16 +73,15 @@ export const createActorKitRouter = <Env extends EnvWithDurableObjects>(
       "get" in namespace &&
       "idFromName" in namespace
     ) {
-      return namespace as unknown as DurableObjectNamespace<
-        DurableObjectActor<AnyActorKitStateMachine>
-      >;
+      return namespace as unknown as ActorKitNamespace;
     }
     return undefined;
   }
 
   return async (
     request: Request,
-    env: Env
+    env: Env,
+    _ctx?: unknown
   ): Promise<Response> => {
     const url = new URL(request.url);
     const pathParts = url.pathname.split("/").filter(Boolean);
@@ -55,7 +90,7 @@ export const createActorKitRouter = <Env extends EnvWithDurableObjects>(
     }
     const [, actorType, actorId] = pathParts;
 
-    if (!routes.includes(actorType as any)) {
+    if (!routes.includes(actorType as ActorType)) {
       return new Response(`Unknown actor type: ${actorType}`, { status: 400 });
     }
 
@@ -83,9 +118,11 @@ export const createActorKitRouter = <Env extends EnvWithDurableObjects>(
         actorId,
         env.ACTOR_KIT_SECRET
       );
-    } catch (error: any) {
+    } catch (error: unknown) {
+      const errorMessage =
+        error instanceof Error ? error.message : "Unknown error";
       return new Response(
-        `Error: ${error.message}. API requests must specify a valid caller in Bearer token in the Authorization header using fetch method created from 'createActorFetch' or use 'createAccessToken' directly.`,
+        `Error: ${errorMessage}. API requests must specify a valid caller in Bearer token in the Authorization header using fetch method created from 'createActorFetch' or use 'createAccessToken' directly.`,
         { status: 401 }
       );
     }
@@ -106,18 +143,23 @@ export const createActorKitRouter = <Env extends EnvWithDurableObjects>(
     }
 
     if (request.headers.get("Upgrade") === "websocket") {
-      return durableObjectStub.fetch(request as any) as any; // Handle WebSocket upgrade
+      return durableObjectStub.fetch(request);
     }
 
     if (request.method === "GET") {
-      const { waitForEvent, waitForState, timeout, errorOnWaitTimeout } = 
-        Object.fromEntries(new URL(request.url).searchParams);
-      
+      const searchParams = SnapshotRequestSearchSchema.parse(
+        Object.fromEntries(new URL(request.url).searchParams)
+      );
+
       const result = await durableObjectStub.getSnapshot(caller, {
-        waitForEvent: waitForEvent ? JSON.parse(waitForEvent) : undefined,
-        waitForState: waitForState ? JSON.parse(waitForState) : undefined,
-        timeout: timeout ? parseInt(timeout, 10) : undefined,
-        errorOnWaitTimeout: errorOnWaitTimeout ? errorOnWaitTimeout === 'true' : undefined,
+        waitForEvent: searchParams.waitForEvent
+          ? AnyEventSchema.parse(JSON.parse(searchParams.waitForEvent))
+          : undefined,
+        waitForState: searchParams.waitForState
+          ? JSON.parse(searchParams.waitForState)
+          : undefined,
+        timeout: searchParams.timeout,
+        errorOnWaitTimeout: searchParams.errorOnWaitTimeout,
       });
       return new Response(JSON.stringify(result), {
         headers: { "Content-Type": "application/json" },
@@ -127,8 +169,9 @@ export const createActorKitRouter = <Env extends EnvWithDurableObjects>(
       try {
         const json = await request.json();
         event = AnyEventSchema.parse(json);
-      } catch (ex: any) {
-        return new Response(JSON.stringify({ error: ex.message }), {
+      } catch (ex: unknown) {
+        const errorMessage = ex instanceof Error ? ex.message : "Invalid JSON";
+        return new Response(JSON.stringify({ error: errorMessage }), {
           status: 400,
         });
       }

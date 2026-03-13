@@ -1,5 +1,6 @@
 import { applyPatch } from "fast-json-patch";
 import { produce } from "immer";
+import { z } from "zod";
 
 import {
   ActorKitClient,
@@ -8,6 +9,18 @@ import {
   CallerSnapshotFrom,
   ClientEventFrom,
 } from "./types";
+
+const EmittedEventSchema = z.object({
+  operations: z.array(
+    z.object({
+      op: z.string(),
+      path: z.string(),
+      value: z.unknown().optional(),
+      from: z.string().optional(),
+    })
+  ),
+  checksum: z.string(),
+});
 
 export type ActorKitClientProps<TMachine extends AnyActorKitStateMachine> = {
   host: string;
@@ -34,7 +47,9 @@ export function createActorKitClient<TMachine extends AnyActorKitStateMachine>(
 ): ActorKitClient<TMachine> {
   let currentSnapshot = props.initialSnapshot;
   let socket: WebSocket | null = null;
+  let socketReady = false;
   const listeners: Set<Listener<CallerSnapshotFrom<TMachine>>> = new Set();
+  const pendingEvents: ClientEventFrom<TMachine>[] = [];
   let reconnectAttempts = 0;
   const maxReconnectAttempts = 5;
 
@@ -53,18 +68,21 @@ export function createActorKitClient<TMachine extends AnyActorKitStateMachine>(
     const url = getWebSocketUrl(props);
 
     socket = new WebSocket(url);
+    socketReady = false;
 
     socket.addEventListener("open", () => {
       reconnectAttempts = 0;
+      socketReady = true;
+      flushPendingEvents();
     });
 
     socket.addEventListener("message", (event: MessageEvent) => {
       try {
-        const data = JSON.parse(
+        const data = EmittedEventSchema.parse(JSON.parse(
           typeof event.data === "string"
             ? event.data
             : new TextDecoder().decode(event.data)
-        ) as ActorKitEmittedEvent;
+        )) as ActorKitEmittedEvent;
 
         currentSnapshot = produce(currentSnapshot, (draft) => {
           applyPatch(draft, data.operations);
@@ -72,27 +90,27 @@ export function createActorKitClient<TMachine extends AnyActorKitStateMachine>(
 
         props.onStateChange?.(currentSnapshot);
         notifyListeners();
-      } catch (error) {
+      } catch (error: unknown) {
         console.error(`[ActorKitClient] Error processing message:`, error);
-        props.onError?.(error as Error);
+        props.onError?.(
+          error instanceof Error
+            ? error
+            : new Error("Unknown WebSocket message error")
+        );
       }
     });
 
-    socket.addEventListener("error", (error: any) => {
+    socket.addEventListener("error", (error: Event) => {
       console.error(`[ActorKitClient] WebSocket error:`, error);
-      console.error(`[ActorKitClient] Error details:`, {
-        message: error.message,
-        type: error.type,
-        target: error.target,
-        eventPhase: error.eventPhase,
-      });
-      props.onError?.(new Error(`WebSocket error: ${JSON.stringify(error)}`));
+      props.onError?.(new Error(`WebSocket error: ${error.type}`));
     });
 
     // todo, how do we reconnect when a user returns to the tab
     // later after it's disconnected
 
-    socket.addEventListener("close", (event) => {
+    socket.addEventListener("close", (_event) => {
+      socketReady = false;
+
       // Implement reconnection logic
       if (reconnectAttempts < maxReconnectAttempts) {
         reconnectAttempts++;
@@ -116,6 +134,17 @@ export function createActorKitClient<TMachine extends AnyActorKitStateMachine>(
       socket.close();
       socket = null;
     }
+    socketReady = false;
+  };
+
+  const flushPendingEvents = () => {
+    while (socket && socket.readyState === WebSocket.OPEN && pendingEvents.length > 0) {
+      const event = pendingEvents.shift();
+      if (!event) {
+        continue;
+      }
+      socket.send(JSON.stringify(event));
+    }
   };
 
   /**
@@ -125,6 +154,11 @@ export function createActorKitClient<TMachine extends AnyActorKitStateMachine>(
   const send = (event: ClientEventFrom<TMachine>) => {
     if (socket && socket.readyState === WebSocket.OPEN) {
       socket.send(JSON.stringify(event));
+      return;
+    }
+
+    if (socket && !socketReady) {
+      pendingEvents.push(event);
     } else {
       props.onError?.(
         new Error("Cannot send event: WebSocket is not connected")
@@ -200,7 +234,9 @@ export function createActorKitClient<TMachine extends AnyActorKitStateMachine>(
   };
 }
 
-function getWebSocketUrl(props: ActorKitClientProps<any>): string {
+function getWebSocketUrl(
+  props: ActorKitClientProps<AnyActorKitStateMachine>
+): string {
   const { host, actorId, actorType, accessToken, checksum } = props;
 
   // Determine protocol (ws or wss)

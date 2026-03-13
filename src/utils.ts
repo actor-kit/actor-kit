@@ -34,7 +34,7 @@ const getCurrentLogLevel = (): LogLevel => {
 export function debug(
   message: string,
   level: LogLevel = LogLevel.DEBUG,
-  data?: any
+  data?: unknown
 ) {
   const currentLogLevel = getCurrentLogLevel();
   if (level <= currentLogLevel) {
@@ -59,11 +59,11 @@ export function debug(
 }
 
 // Convenience methods for different log levels
-export const logError = (message: string, data?: any) =>
+export const logError = (message: string, data?: unknown) =>
   debug(message, LogLevel.ERROR, data);
-export const logWarn = (message: string, data?: any) =>
+export const logWarn = (message: string, data?: unknown) =>
   debug(message, LogLevel.WARN, data);
-export const logInfo = (message: string, data?: any) =>
+export const logInfo = (message: string, data?: unknown) =>
   debug(message, LogLevel.INFO, data);
 
 export const json = <T>(data: T, status = 200) =>
@@ -150,10 +150,7 @@ export async function parseAccessTokenForCaller({
   id: string;
   secret: string;
 }): Promise<Caller> {
-  const verified = await jwtVerify(
-    accessToken,
-    new TextEncoder().encode(secret)
-  );
+  const verified = await jwtVerify(accessToken, new TextEncoder().encode(secret));
   if (!verified.payload.jti) {
     throw new Error("Expected JTI on accessToken");
   }

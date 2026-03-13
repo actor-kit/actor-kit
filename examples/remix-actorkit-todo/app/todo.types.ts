@@ -1,7 +1,7 @@
 import type {
   ActorKitSystemEvent,
   BaseActorKitEvent,
-  EnvWithDurableObjects,
+  ActorKitEnv,
   WithActorKitEvent,
   WithActorKitInput,
 } from "actor-kit";
@@ -12,17 +12,25 @@ import {
   TodoServiceEventSchema,
 } from "./todo.schemas";
 
+declare global {
+  interface Env extends ActorKitEnv {
+    REMIX: DurableObjectNamespace;
+    TODO: DurableObjectNamespace;
+    SESSION: DurableObjectNamespace;
+  }
+}
+
 export type TodoClientEvent = z.infer<typeof TodoClientEventSchema>;
 export type TodoServiceEvent = z.infer<typeof TodoServiceEventSchema>;
 export type TodoInputProps = z.infer<typeof TodoInputPropsSchema>;
-export type TodoInput = WithActorKitInput<TodoInputProps, EnvWithDurableObjects>;
+export type TodoInput = WithActorKitInput<TodoInputProps, Env>;
 
 export type TodoEvent = (
   | WithActorKitEvent<TodoClientEvent, "client">
   | WithActorKitEvent<TodoServiceEvent, "service">
   | ActorKitSystemEvent
 ) &
-  BaseActorKitEvent<EnvWithDurableObjects>;
+  BaseActorKitEvent<Env>;
 
 export type Todo = {
   id: string;

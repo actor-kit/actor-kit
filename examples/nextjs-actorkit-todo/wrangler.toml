@@ -3,6 +3,10 @@ name = "nextjs-actorkit-todo"
 main = "src/server.ts"
 compatibility_date = "2024-09-25"
 
+[vars]
+ACTOR_KIT_HOST = "127.0.0.1:8788"
+ACTOR_KIT_SECRET = "actor-kit-dev-secret"
+
 [[durable_objects.bindings]]
 name = "TODO"
 class_name = "Todo"

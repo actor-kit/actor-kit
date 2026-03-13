@@ -1,15 +1,15 @@
+// @ts-ignore - TypeScript declarations may be outdated
 import { createRequestHandler, logDevReady } from "@remix-run/cloudflare";
 import * as build from "@remix-run/dev/server-build";
 import { DurableObject } from "cloudflare:workers";
 import { SignJWT, jwtVerify } from "jose";
-import type { Env } from "./env";
 
 const JWT_SECRET = "your-secret-key"; // Move this to your env variables
 const ACCESS_TOKEN_COOKIE_KEY = "access-token";
 const REFRESH_TOKEN_COOKIE_KEY = "refresh-token";
 
-// eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
 if (process.env.NODE_ENV === "development") {
+  // @ts-ignore - TypeScript declarations may be outdated
   logDevReady(build);
 }
 
@@ -19,7 +19,7 @@ export class Remix extends DurableObject<Env> {
   async fetch(request: Request) {
     let userId: string;
     let sessionId: string;
-    let pageSessionId: string;
+    const pageSessionId = crypto.randomUUID();
     let newAccessToken: string | undefined;
     let newRefreshToken: string | undefined;
 
@@ -50,8 +50,6 @@ export class Remix extends DurableObject<Env> {
       [userId, sessionId, newAccessToken, newRefreshToken] =
         await this.createNewUserSession();
     }
-
-    pageSessionId = crypto.randomUUID();
 
     const response = await handleRemixRequest(request, {
       env: this.env,

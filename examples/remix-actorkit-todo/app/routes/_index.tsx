@@ -13,7 +13,7 @@ export const meta: MetaFunction = () => {
   ];
 };
 
-export const loader = async (args: LoaderFunctionArgs) => {
+export const loader = async (_args: LoaderFunctionArgs) => {
   const listId = crypto.randomUUID();
   return json({ listId });
 };

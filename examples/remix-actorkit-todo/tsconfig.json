@@ -35,10 +35,11 @@
     // "typeRoots": [],                                  /* Specify multiple folders that act like `./node_modules/@types`. */
     "types": [
       "@remix-run/cloudflare",
-      "@cloudflare/workers-types/2023-07-01",
       "react",
       "react-dom",
-      "node"
+      "node",
+      "./worker-configuration",
+      "./.wrangler/types/runtime.d.ts"
     ] /* Specify type package names to be included without being referenced in a source file. */,
     // "allowUmdGlobalAccess": true,                     /* Allow accessing UMD globals from modules. */
     "resolveJsonModule": true /* Enable importing .json files */,
@@ -108,7 +109,12 @@
   },
 
   // Specifies an array of glob patterns that match files to be included in compilation
-  "include": ["remix.env.d.ts", "**/*.ts", "**/*.tsx", "../nextjs-actorkit-todo/src/session.ts"],
+  "include": [
+    "remix.env.d.ts",
+    "worker-configuration.d.ts",
+    "**/*.ts",
+    "**/*.tsx"
+  ],
 
   // Specifies an array of glob patterns that match files to be excluded from compilation
   "exclude": ["node_modules", "dist", "**/*.test.ts"]

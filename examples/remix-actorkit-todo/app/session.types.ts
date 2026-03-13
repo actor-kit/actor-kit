@@ -1,7 +1,7 @@
-import type { Env } from "./types";
 import type {
   ActorKitSystemEvent,
   BaseActorKitEvent,
+  ActorKitEnv,
   WithActorKitEvent,
   WithActorKitInput,
 } from "actor-kit";
@@ -11,6 +11,14 @@ import {
   SessionInputPropsSchema,
   SessionServiceEventSchema,
 } from "./session.schemas";
+
+declare global {
+  interface Env extends ActorKitEnv {
+    REMIX: DurableObjectNamespace;
+    TODO: DurableObjectNamespace;
+    SESSION: DurableObjectNamespace;
+  }
+}
 
 export type SessionClientEvent = z.infer<typeof SessionClientEventSchema>;
 export type SessionServiceEvent = z.infer<typeof SessionServiceEventSchema>;
@@ -39,3 +47,11 @@ export type SessionServerContext = {
   private: Record<string, SessionPrivateContext>;
   history: string[];
 };
+
+export const SessionInputPropsSchema = z.object({
+  userId: z.string(),
+});
+
+export const SessionClientEventSchema = z.discriminatedUnion("type", [
+  z.object({ type: z.literal("PING") }),
+]);
