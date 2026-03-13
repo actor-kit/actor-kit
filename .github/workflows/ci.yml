@@ -59,3 +59,26 @@ jobs:
 
       - name: Run Next.js E2E
         run: pnpm --filter nextjs-actorkit-todo test:e2e
+
+  tanstack-start-e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.28.2
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Playwright browsers
+        run: pnpm --filter tanstack-start-actorkit-todo exec playwright install --with-deps chromium
+
+      - name: Run TanStack Start E2E
+        run: pnpm --filter tanstack-start-actorkit-todo test:e2e

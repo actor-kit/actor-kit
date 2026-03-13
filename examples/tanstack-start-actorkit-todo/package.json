@@ -6,14 +6,14 @@
     "#/*": "./src/*"
   },
   "scripts": {
-    "dev": "vite dev --port 3000",
-    "dev:e2e": "ACTOR_KIT_HOST=127.0.0.1:8790 ACTOR_KIT_SECRET=actor-kit-dev-secret vite dev --port 3002",
-    "dev:api": "ACTOR_KIT_HOST=127.0.0.1:8790 ACTOR_KIT_SECRET=actor-kit-dev-secret wrangler dev --port 8790",
+    "dev": "pnpm build && wrangler dev -c .output/server/wrangler.json --port 3000 --inspector-port 0",
+    "dev:e2e": "pnpm build && wrangler dev -c .output/server/wrangler.json --port 3002 --inspector-port 0",
     "build": "vite build",
-    "preview": "vite preview",
+    "preview": "pnpm build && wrangler dev -c .output/server/wrangler.json --port 3000 --inspector-port 0",
+    "deploy": "pnpm build && wrangler deploy -c .output/server/wrangler.json",
     "test": "vitest run",
     "test:e2e": "playwright test",
-    "lint": "eslint",
+    "lint": "eslint src server e2e playwright.config.ts nitro.config.ts exports.cloudflare.ts",
     "format": "prettier --check .",
     "check": "prettier --write . && eslint --fix"
   },
@@ -24,9 +24,10 @@
     "@tanstack/react-router-devtools": "latest",
     "@tanstack/react-router-ssr-query": "latest",
     "@tanstack/react-start": "latest",
-    "@tanstack/router-plugin": "^1.132.0",
+    "@tanstack/router-plugin": "latest",
     "actor-kit": "workspace:*",
-    "lucide-react": "^0.545.0",
+    "h3": "^2.0.1-rc.16",
+    "lucide-react": "^0.577.0",
     "nitro": "npm:nitro-nightly@latest",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
@@ -35,8 +36,8 @@
     "zod": "^3.25.76"
   },
   "devDependencies": {
-    "@playwright/test": "^1.58.2",
     "@cloudflare/workers-types": "^4.20240925.0",
+    "@playwright/test": "^1.58.2",
     "@tailwindcss/typography": "^0.5.16",
     "@tanstack/devtools-vite": "latest",
     "@tanstack/eslint-config": "latest",
@@ -50,8 +51,8 @@
     "prettier": "^3.8.1",
     "typescript": "^5.7.2",
     "vite": "^7.3.1",
-    "vite-tsconfig-paths": "^5.1.4",
-    "vitest": "^3.0.5",
-    "wrangler": "^3.114.17"
+    "vite-tsconfig-paths": "^6.1.1",
+    "vitest": "^4.1.0",
+    "wrangler": "^4.72.0"
   }
 }

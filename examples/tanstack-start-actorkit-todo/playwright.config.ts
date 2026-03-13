@@ -9,18 +9,10 @@ export default defineConfig({
     trace: "on-first-retry",
     video: "retain-on-failure",
   },
-  webServer: [
-    {
-      command: "pnpm dev:e2e",
-      reuseExistingServer: !process.env.CI,
-      timeout: 120_000,
-      url: "http://localhost:3002",
-    },
-    {
-      command: "pnpm dev:api",
-      reuseExistingServer: !process.env.CI,
-      timeout: 120_000,
-      url: "http://localhost:8790",
-    },
-  ],
+  webServer: {
+    command: "pnpm dev:e2e",
+    reuseExistingServer: !process.env.CI,
+    timeout: 120_000,
+    url: "http://localhost:3002/health",
+  },
 });

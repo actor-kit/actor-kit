@@ -35,9 +35,11 @@ export const CallerSchema = z.object({
   type: z.enum(["client", "system", "service"]),
 });
 
-export const AnyEventSchema = z.object({
-  type: z.string(),
-});
+export const AnyEventSchema = z
+  .object({
+    type: z.string(),
+  })
+  .passthrough();
 
 export const SystemEventSchema = z.discriminatedUnion("type", [
   z.object({

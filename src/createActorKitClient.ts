@@ -48,6 +48,7 @@ export function createActorKitClient<TMachine extends AnyActorKitStateMachine>(
   let currentSnapshot = props.initialSnapshot;
   let socket: WebSocket | null = null;
   let socketReady = false;
+  let shouldReconnect = true;
   const listeners: Set<Listener<CallerSnapshotFrom<TMachine>>> = new Set();
   const pendingEvents: ClientEventFrom<TMachine>[] = [];
   let reconnectAttempts = 0;
@@ -65,6 +66,7 @@ export function createActorKitClient<TMachine extends AnyActorKitStateMachine>(
    * @returns {Promise<void>} A promise that resolves when the connection is established.
    */
   const connect = async () => {
+    shouldReconnect = true;
     const url = getWebSocketUrl(props);
 
     socket = new WebSocket(url);
@@ -112,11 +114,11 @@ export function createActorKitClient<TMachine extends AnyActorKitStateMachine>(
       socketReady = false;
 
       // Implement reconnection logic
-      if (reconnectAttempts < maxReconnectAttempts) {
+      if (shouldReconnect && reconnectAttempts < maxReconnectAttempts) {
         reconnectAttempts++;
         const delay = Math.min(1000 * Math.pow(2, reconnectAttempts), 30000);
         setTimeout(connect, delay);
-      } else {
+      } else if (shouldReconnect) {
         console.error(`[ActorKitClient] Max reconnection attempts reached`);
       }
     });
@@ -130,6 +132,7 @@ export function createActorKitClient<TMachine extends AnyActorKitStateMachine>(
    * Closes the WebSocket connection to the Actor Kit server.
    */
   const disconnect = () => {
+    shouldReconnect = false;
     if (socket) {
       socket.close();
       socket = null;

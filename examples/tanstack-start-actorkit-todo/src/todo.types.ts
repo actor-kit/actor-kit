@@ -4,9 +4,9 @@ import type {
   WithActorKitEvent,
   WithActorKitInput,
 } from "actor-kit";
-import { z } from "zod";
+import type { z } from "zod";
 import type { ActorEnv } from "./actor-env";
-import {
+import type {
   TodoClientEventSchema,
   TodoInputPropsSchema,
   TodoServiceEventSchema,

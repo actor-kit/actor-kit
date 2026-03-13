@@ -1,11 +1,11 @@
-import { Link, createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
 
 export const Route = createFileRoute("/")({
   component: HomePage,
 });
 
 function HomePage() {
-  const listId = crypto.randomUUID();
+  const navigate = useNavigate();
 
   return (
     <main className="page-wrap px-4 py-12">
@@ -19,18 +19,18 @@ function HomePage() {
           app shell and route loaders.
         </p>
         <div>
-          <Link
-            to="/lists/$listId"
-            params={{ listId }}
-            className="inline-flex"
+          <button
+            className="rounded-full border border-[rgba(50,143,151,0.3)] bg-[rgba(79,184,178,0.14)] px-5 py-2.5 text-sm font-semibold text-[var(--lagoon-deep)] transition hover:-translate-y-0.5 hover:bg-[rgba(79,184,178,0.24)]"
+            onClick={() =>
+              navigate({
+                to: "/lists/$listId",
+                params: { listId: crypto.randomUUID() },
+              })
+            }
+            type="button"
           >
-            <button
-              className="rounded-full border border-[rgba(50,143,151,0.3)] bg-[rgba(79,184,178,0.14)] px-5 py-2.5 text-sm font-semibold text-[var(--lagoon-deep)] transition hover:-translate-y-0.5 hover:bg-[rgba(79,184,178,0.24)]"
-              type="button"
-            >
-              New List
-            </button>
-          </Link>
+            New List
+          </button>
         </div>
       </section>
     </main>

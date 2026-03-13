@@ -147,9 +147,18 @@ export const createActorKitRouter = <Env extends ActorKitEnv>(
     }
 
     if (request.method === "GET") {
-      const searchParams = SnapshotRequestSearchSchema.parse(
-        Object.fromEntries(new URL(request.url).searchParams)
-      );
+      let searchParams: z.infer<typeof SnapshotRequestSearchSchema>;
+      try {
+        searchParams = SnapshotRequestSearchSchema.parse(
+          Object.fromEntries(new URL(request.url).searchParams)
+        );
+      } catch (error: unknown) {
+        const errorMessage =
+          error instanceof Error ? error.message : "Invalid search params";
+        return new Response(JSON.stringify({ error: errorMessage }), {
+          status: 400,
+        });
+      }
 
       const result = await durableObjectStub.getSnapshot(caller, {
         waitForEvent: searchParams.waitForEvent

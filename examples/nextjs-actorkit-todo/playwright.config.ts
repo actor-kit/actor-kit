@@ -20,7 +20,7 @@ export default defineConfig({
       command: "pnpm dev-api",
       reuseExistingServer: !process.env.CI,
       timeout: 120_000,
-      url: "http://localhost:8788",
+      url: "http://localhost:8788/health",
     },
   ],
 });

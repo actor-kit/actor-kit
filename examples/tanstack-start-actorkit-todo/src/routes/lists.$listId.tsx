@@ -5,7 +5,7 @@ import { z } from "zod";
 import { TodoActorKitProvider } from "../todo.context";
 import type { TodoMachine } from "../todo.machine";
 import { TodoList } from "../components/TodoList";
-import { ServerEnvSchema } from "../server-env";
+import { getServerEnv } from "../server-env";
 
 const ListRouteInputSchema = z.object({
   listId: z.string().min(1),
@@ -14,7 +14,7 @@ const ListRouteInputSchema = z.object({
 const loadTodoRoute = createServerFn({ method: "GET" })
   .inputValidator((input: unknown) => ListRouteInputSchema.parse(input))
   .handler(async ({ data }) => {
-    const env = ServerEnvSchema.parse(process.env);
+    const env = getServerEnv();
     const fetchTodoActor = createActorFetch<TodoMachine>({
       actorType: "todo",
       host: env.ACTOR_KIT_HOST,

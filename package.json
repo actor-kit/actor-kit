@@ -42,15 +42,18 @@
   "scripts": {
     "build": "rollup -c --bundleConfigAsCjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "lint": "eslint src tests vitest.config.ts eslint.config.js examples/nextjs-actorkit-todo/e2e examples/nextjs-actorkit-todo/playwright.config.ts examples/remix-actorkit-todo examples/tanstack-start-actorkit-todo && pnpm --filter nextjs-actorkit-todo lint",
+    "lint": "eslint src tests vitest.config.ts eslint.config.js && pnpm --filter nextjs-actorkit-todo lint && pnpm --filter tanstack-start-actorkit-todo lint",
     "test": "pnpm run test:unit",
     "test:unit": "vitest run",
     "test:coverage": "vitest run --coverage",
-    "test:e2e": "pnpm run test:e2e:nextjs && pnpm run test:e2e:remix && pnpm run test:e2e:tanstack-start",
+    "test:mutate": "stryker run",
+    "test:mutate:incremental": "stryker run --incremental",
+    "analyze:crap": "node scripts/report-crap.mjs",
+    "test:e2e": "pnpm run test:e2e:nextjs && pnpm run test:e2e:tanstack-start",
     "test:e2e:nextjs": "pnpm --filter nextjs-actorkit-todo test:e2e",
-    "test:e2e:remix": "pnpm --filter remix-actorkit-todo test:e2e",
     "test:e2e:tanstack-start": "pnpm --filter tanstack-start-actorkit-todo test:e2e",
     "check": "pnpm run build && pnpm run typecheck && pnpm run lint && pnpm run test:coverage",
+    "prepare": "husky",
     "prepublishOnly": "pnpm run check"
   },
   "keywords": [
@@ -68,26 +71,32 @@
     "zod": "^3.23.0"
   },
   "dependencies": {
-    "cloudflare": "^3.5.0",
+    "cloudflare": "^5.2.0",
     "fast-json-patch": "^3.1.1",
-    "immer": "^10.2.0",
-    "jose": "^5.10.0"
+    "immer": "^11.1.4",
+    "jose": "^6.2.1"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20240925.0",
     "@rollup/plugin-alias": "^5.1.1",
     "@rollup/plugin-terser": "^0.4.4",
     "@storybook/react": "^8.6.18",
+    "@stryker-mutator/core": "^9.6.0",
+    "@stryker-mutator/typescript-checker": "^9.6.0",
+    "@stryker-mutator/vitest-runner": "^9.6.0",
     "@types/node": "^22.19.15",
     "@types/react": "^19.2.2",
     "@types/use-sync-external-store": "^0.0.6",
     "@typescript-eslint/eslint-plugin": "^8.57.0",
     "@typescript-eslint/parser": "^8.57.0",
     "@vitest/coverage-v8": "^4.1.0",
+    "complexity-report": "^2.0.0-alpha",
     "eslint": "^9.39.1",
     "eslint-plugin-react-hooks": "^7.0.1",
-    "eslint-plugin-react-refresh": "^0.4.24",
+    "eslint-plugin-react-refresh": "^0.5.2",
+    "husky": "^9.1.7",
     "jsondiffpatch": "^0.7.3",
+    "lint-staged": "^16.3.3",
     "react": "^19.2.0",
     "rollup": "^4.59.0",
     "rollup-plugin-dts": "^6.4.0",
@@ -108,6 +117,9 @@
       "unrs-resolver",
       "workerd"
     ]
+  },
+  "lint-staged": {
+    "*.{js,mjs,cjs,ts,tsx}": "eslint --fix"
   },
   "type": "module"
 }
