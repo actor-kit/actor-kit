@@ -7,11 +7,12 @@
   },
   "scripts": {
     "dev": "vite dev --port 3000",
-    "dev:e2e": "NODE_OPTIONS=--preserve-symlinks ACTOR_KIT_HOST=127.0.0.1:8790 ACTOR_KIT_SECRET=actor-kit-dev-secret vite dev --port 3002",
+    "dev:e2e": "ACTOR_KIT_HOST=127.0.0.1:8790 ACTOR_KIT_SECRET=actor-kit-dev-secret vite dev --port 3002",
     "dev:api": "ACTOR_KIT_HOST=127.0.0.1:8790 ACTOR_KIT_SECRET=actor-kit-dev-secret wrangler dev --port 8790",
     "build": "vite build",
     "preview": "vite preview",
     "test": "vitest run",
+    "test:e2e": "playwright test",
     "lint": "eslint",
     "format": "prettier --check .",
     "check": "prettier --write . && eslint --fix"
@@ -24,7 +25,7 @@
     "@tanstack/react-router-ssr-query": "latest",
     "@tanstack/react-start": "latest",
     "@tanstack/router-plugin": "^1.132.0",
-    "actor-kit": "file:../..",
+    "actor-kit": "workspace:*",
     "lucide-react": "^0.545.0",
     "nitro": "npm:nitro-nightly@latest",
     "react": "^19.2.0",
@@ -34,6 +35,7 @@
     "zod": "^3.25.76"
   },
   "devDependencies": {
+    "@playwright/test": "^1.58.2",
     "@cloudflare/workers-types": "^4.20240925.0",
     "@tailwindcss/typography": "^0.5.16",
     "@tanstack/devtools-vite": "latest",
@@ -51,11 +53,5 @@
     "vite-tsconfig-paths": "^5.1.4",
     "vitest": "^3.0.5",
     "wrangler": "^3.114.17"
-  },
-  "pnpm": {
-    "onlyBuiltDependencies": [
-      "esbuild",
-      "lightningcss"
-    ]
   }
 }

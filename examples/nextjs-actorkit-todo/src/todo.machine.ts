@@ -1,12 +1,6 @@
 import type { ActorKitStateMachine } from "actor-kit";
 import { assign, setup } from "xstate";
-import type {
-  TodoEvent,
-  TodoInput,
-  TodoPrivateContext,
-  TodoPublicContext,
-  TodoServerContext,
-} from "./todo.types";
+import type { TodoEvent, TodoInput, TodoServerContext } from "./todo.types";
 
 export const todoMachine = setup({
   types: {
@@ -91,12 +85,7 @@ export const todoMachine = setup({
       },
     },
   },
-}) satisfies ActorKitStateMachine<
-  TodoEvent,
-  TodoInput,
-  TodoPrivateContext,
-  TodoPublicContext
->;
+}) satisfies ActorKitStateMachine<TodoEvent, TodoInput, TodoServerContext>;
 
 export type TodoMachine = typeof todoMachine;
 export default TodoMachine;

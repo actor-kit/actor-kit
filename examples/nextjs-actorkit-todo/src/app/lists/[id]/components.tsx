@@ -3,10 +3,13 @@
 
 import React, { useContext, useState, useSyncExternalStore } from "react";
 import { TodoActorKitContext } from "../../../todo.context";
+import type { TodoPublicContext } from "../../../todo.types";
 import { UserContext } from "../../user-context";
 
 export function TodoList() {
-  const todos = TodoActorKitContext.useSelector((state) => state.public.todos);
+  const todos = TodoActorKitContext.useSelector(
+    (state): TodoPublicContext["todos"] => state.public.todos
+  );
   const send = TodoActorKitContext.useSend();
   const [newTodoText, setNewTodoText] = useState("");
   const isHydrated = useHydrated();

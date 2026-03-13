@@ -6,9 +6,11 @@
     "deploy": "remix build && wrangler deploy",
     "dev": "NODE_PATH=./node_modules NODE_OPTIONS=--preserve-symlinks remix dev -c \"wrangler dev\"",
     "dev:e2e": "NODE_PATH=./node_modules NODE_OPTIONS=--preserve-symlinks ACTOR_KIT_HOST=127.0.0.1:8789 ACTOR_KIT_SECRET=actor-kit-dev-secret remix dev --manual --port 3003 -c \"wrangler dev --port 8789\"",
+    "test:e2e": "playwright test",
     "cf-typegen": "wrangler types"
   },
   "devDependencies": {
+    "@playwright/test": "^1.58.2",
     "@remix-run/dev": "^2.12.1",
     "@types/node": "^22.7.4",
     "@types/react": "^18.3.23",
@@ -22,7 +24,7 @@
     "@remix-run/css-bundle": "^2.12.1",
     "@remix-run/react": "^2.12.1",
     "@remix-run/server-runtime": "^2.12.1",
-    "actor-kit": "file:../..",
+    "actor-kit": "workspace:*",
     "isbot": "^4",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",

@@ -38,19 +38,20 @@
     "src",
     "dist"
   ],
+  "packageManager": "pnpm@10.28.2",
   "scripts": {
     "build": "rollup -c --bundleConfigAsCjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "lint": "eslint src tests e2e playwright.config.ts examples/remix-actorkit-todo examples/tanstack-start-actorkit-todo && npm --prefix examples/nextjs-actorkit-todo run lint",
-    "test": "npm run test:unit",
+    "lint": "eslint src tests vitest.config.ts eslint.config.js examples/nextjs-actorkit-todo/e2e examples/nextjs-actorkit-todo/playwright.config.ts examples/remix-actorkit-todo examples/tanstack-start-actorkit-todo && pnpm --filter nextjs-actorkit-todo lint",
+    "test": "pnpm run test:unit",
     "test:unit": "vitest run",
     "test:coverage": "vitest run --coverage",
-    "test:e2e": "npm run test:e2e:nextjs && npm run test:e2e:remix && npm run test:e2e:tanstack-start",
-    "test:e2e:nextjs": "playwright test --config playwright.next.config.ts",
-    "test:e2e:remix": "playwright test --config playwright.remix.config.ts",
-    "test:e2e:tanstack-start": "playwright test --config playwright.tanstack.config.ts",
-    "check": "npm run build && npm run typecheck && npm run lint && npm run test:coverage",
-    "prepublishOnly": "npm run check"
+    "test:e2e": "pnpm run test:e2e:nextjs && pnpm run test:e2e:remix && pnpm run test:e2e:tanstack-start",
+    "test:e2e:nextjs": "pnpm --filter nextjs-actorkit-todo test:e2e",
+    "test:e2e:remix": "pnpm --filter remix-actorkit-todo test:e2e",
+    "test:e2e:tanstack-start": "pnpm --filter tanstack-start-actorkit-todo test:e2e",
+    "check": "pnpm run build && pnpm run typecheck && pnpm run lint && pnpm run test:coverage",
+    "prepublishOnly": "pnpm run check"
   },
   "keywords": [
     "xstate",
@@ -74,7 +75,6 @@
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20240925.0",
-    "@playwright/test": "^1.58.2",
     "@rollup/plugin-alias": "^5.1.1",
     "@rollup/plugin-terser": "^0.4.4",
     "@storybook/react": "^8.6.18",
@@ -99,6 +99,15 @@
     "xstate": "^5.28.0",
     "xstate-migrate": "^0.0.5",
     "zod": "^3.25.76"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "esbuild",
+      "lightningcss",
+      "sharp",
+      "unrs-resolver",
+      "workerd"
+    ]
   },
   "type": "module"
 }
