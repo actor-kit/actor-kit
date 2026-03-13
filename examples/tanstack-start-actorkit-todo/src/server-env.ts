@@ -39,6 +39,10 @@ export function getActorRuntimeEnv(): ActorEnv {
   return globalThis.__env__;
 }
 
+export function tryGetActorRuntimeEnv(): ActorEnv | undefined {
+  return isActorEnv(globalThis.__env__) ? globalThis.__env__ : undefined;
+}
+
 export function getServerEnv() {
   if (isActorEnv(globalThis.__env__)) {
     return {
