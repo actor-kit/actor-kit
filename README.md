@@ -19,7 +19,7 @@ Actor Kit is a library for running state machines in Cloudflare Workers, leverag
 - [🚀 Getting Started](#-getting-started)
 - [🗂️ Framework Examples](#️-framework-examples)
   - [⚛️ Next.js](/examples/nextjs-actorkit-todo/README.md)
-  - [🎸 Remix](/examples/remix-actorkit-todo/README.md)
+  - [⛰️ TanStack Start](/examples/tanstack-start-actorkit-todo/README.md)
 - [📖 API Reference](#-api-reference)
   - [🔧 actor-kit/worker](#-actor-kitworker)
   - [🖥️ actor-kit/server](#%EF%B8%8F-actor-kitserver)
@@ -569,7 +569,7 @@ This example demonstrates how to set up and use Actor Kit in a Next.js applicati
 
 7. If you're using Next.js or another external server, set up your `ACTOR_KIT_HOST` environment variable to point to your deployed Worker's URL.
 
-By following these steps, you'll have a basic Actor Kit setup running on Cloudflare Workers. For more detailed, framework-specific instructions, please refer to our example projects for [Next.js](/examples/nextjs-actorkit-todo/README.md) and [Remix](/examples/remix-actorkit-todo/README.md).
+By following these steps, you'll have a basic Actor Kit setup running on Cloudflare Workers. For more detailed, framework-specific instructions, please refer to our example projects for [Next.js](/examples/nextjs-actorkit-todo/README.md) and [TanStack Start](/examples/tanstack-start-actorkit-todo/README.md).
 
 ## 🗂️ Framework Examples
 
@@ -579,8 +579,8 @@ Actor Kit includes example todo list applications demonstrating integration with
 
   - Live demo: [https://nextjs-actorkit-todo.vercel.app/](https://nextjs-actorkit-todo.vercel.app/)
 
-- [Remix example](/examples/remix-actorkit-todo/README.md) in `/examples/remix-actorkit-todo`
-  - Live demo: [https://remix-actorkit-todo.jonathanrmumm.workers.dev/](https://remix-actorkit-todo.jonathanrmumm.workers.dev/)
+- [TanStack Start example](/examples/tanstack-start-actorkit-todo/README.md) in `/examples/tanstack-start-actorkit-todo`
+  - Live demo: [https://tanstack-start-actorkit-todo.jonathanrmumm.workers.dev/](https://tanstack-start-actorkit-todo.jonathanrmumm.workers.dev/)
 
 These examples showcase how to integrate Actor Kit with different frameworks, demonstrating real-time, event-driven todo lists with owner-based access control. Visit the live demos to see Actor Kit in action!
 

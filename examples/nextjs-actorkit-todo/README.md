@@ -242,7 +242,6 @@ These events are defined in the todo state machine and processed accordingly, up
 
 3. Set up environment variables:
 
-   a. For Next.js:
    Create a `.env.local` file in the root of your project:
 
    ```bash
@@ -258,20 +257,7 @@ These events are defined in the todo state machine and processed accordingly, up
 
    Replace `your-secret-key` with a secure, randomly generated secret.
 
-   b. For Cloudflare Worker:
-   Create a `.dev.vars` file in the root of your project:
-
-   ```bash
-   cp .dev.vars.example .dev.vars
-   ```
-
-   Edit `.dev.vars` and set the following variable:
-
-   ```
-   ACTOR_KIT_SECRET=your-secret-key
-   ```
-
-   Use the same `your-secret-key` as in the Next.js configuration.
+   The local Cloudflare Worker uses the same host and secret during development via the example's Wrangler config and dev scripts, so you do not need a separate `.dev.vars` file for local setup.
 
 4. Start the development server:
 
@@ -299,7 +285,7 @@ To deploy the API as a Cloudflare Worker:
    npx wrangler secret put ACTOR_KIT_SECRET
    ```
 
-   Enter the same secret key you used in your local `.dev.vars` file.
+   Enter the same secret key you used in your local `.env.local` file.
 
 2. Deploy the Cloudflare Worker:
 
