@@ -13,6 +13,9 @@ concurrency:
   group: tanstack-preview-${{ github.event.pull_request.number }}
   cancel-in-progress: true
 
+env:
+  CLOUDFLARE_ACCOUNT_ID: ccf4d9a0a3b76ffae0b6ee048de66f07
+
 jobs:
   deploy-preview:
     if: github.event.action != 'closed' && github.event.pull_request.head.repo.fork == false
@@ -49,7 +52,6 @@ jobs:
         id: deploy
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           WORKER_NAME: ${{ steps.naming.outputs.worker_name }}
         run: |
           set -euo pipefail
@@ -135,6 +137,5 @@ jobs:
       - name: Delete preview Worker
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           WORKER_NAME: ak-ts-preview-pr-${{ github.event.pull_request.number }}
         run: printf 'y\n' | pnpm --filter tanstack-start-actorkit-todo exec wrangler delete --name "$WORKER_NAME"
