@@ -54,6 +54,9 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Build library
+        run: pnpm run build
+
       - name: Install Playwright browsers
         run: pnpm --filter nextjs-actorkit-todo exec playwright install --with-deps chromium
 
@@ -76,6 +79,9 @@ jobs:
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
+
+      - name: Build library
+        run: pnpm run build
 
       - name: Install Playwright browsers
         run: pnpm --filter tanstack-start-actorkit-todo exec playwright install --with-deps chromium
