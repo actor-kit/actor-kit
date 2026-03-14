@@ -18,8 +18,9 @@ Actor Kit is a library for running state machines in Cloudflare Workers, leverag
   - [8️⃣ Create a client-side component](#8️⃣-create-a-client-side-component)
 - [🚀 Getting Started](#-getting-started)
 - [🗂️ Framework Examples](#️-framework-examples)
-  - [⚛️ Next.js](/examples/nextjs-actorkit-todo/README.md)
   - [⛰️ TanStack Start](/examples/tanstack-start-actorkit-todo/README.md)
+  - [⚛️ Next.js](/examples/nextjs-actorkit-todo/README.md)
+- [📄 Documentation](#-documentation)
 - [📖 API Reference](#-api-reference)
   - [🔧 actor-kit/worker](#-actor-kitworker)
   - [🖥️ actor-kit/server](#%EF%B8%8F-actor-kitserver)
@@ -40,12 +41,12 @@ Actor Kit is a library for running state machines in Cloudflare Workers, leverag
 To install Actor Kit, use your preferred package manager:
 
 ```bash
-npm install actor-kit xstate zod jose react
+npm install actor-kit xstate zod react
 # or
-yarn add actor-kit xstate zod jose react
-# or
-pnpm add actor-kit xstate zod jose react
+pnpm add actor-kit xstate zod react
 ```
+
+> **Note:** `react` is only required if using `actor-kit/react`. The core library (`actor-kit/worker`, `actor-kit/browser`, `actor-kit/server`) works without React.
 
 ## 🌟 Key Concepts
 
@@ -77,7 +78,7 @@ graph TD
     end
 
     subgraph "Server-Side Rendering"
-        E[Next.js/Remix/etc<br>APIs: createActorFetch, createAccessToken]
+        E[Next.js/TanStack Start/etc<br>APIs: createActorFetch, createAccessToken]
     end
 
     G[External API]
@@ -112,7 +113,7 @@ graph TD
 
 ## 🛠️ Usage
 
-Here's a comprehensive example of how to use Actor Kit to create a todo list application with Next.js and Cloudflare Workers:
+Here's a comprehensive example of how to use Actor Kit to create a todo list application with TanStack Start and Cloudflare Workers:
 
 ### 1️⃣ Define your event schemas and types
 
@@ -359,38 +360,56 @@ export const TodoActorKitProvider = TodoActorKitContext.Provider;
 
 ### 7️⃣ Fetch data server-side
 
+Using TanStack Start's `createServerFn` for server-side data loading:
+
 ```typescript
-// src/app/lists/[id]/page.tsx
-import { getUserId } from "@/session";
+// src/routes/lists.$listId.tsx
+import { createFileRoute } from "@tanstack/react-router";
+import { createServerFn } from "@tanstack/react-start";
 import { createAccessToken, createActorFetch } from "actor-kit/server";
-import { TodoActorKitProvider } from "./todo.context";
-import type { TodoMachine } from "./todo.machine";
-import { TodoList } from "./components";
+import type { Caller } from "actor-kit";
+import { z } from "zod";
+import { TodoActorKitProvider } from "../todo.context";
+import type { TodoMachine } from "../todo.machine";
+import { TodoList } from "../components/TodoList";
 
-const host = process.env.ACTOR_KIT_HOST!;
-const signingKey = process.env.ACTOR_KIT_SECRET!;
+const ListRouteInputSchema = z.object({ listId: z.string().min(1) });
 
-const fetchTodoActor = createActorFetch<TodoMachine>({
-  actorType: "todo",
-  host,
+const loadTodoRoute = createServerFn({ method: "GET" })
+  .inputValidator((input: unknown) => ListRouteInputSchema.parse(input))
+  .handler(async ({ data }) => {
+    const host = process.env.ACTOR_KIT_HOST!;
+    const signingKey = process.env.ACTOR_KIT_SECRET!;
+    const caller: Caller = { id: "demo-user", type: "client" };
+
+    const accessToken = await createAccessToken({
+      signingKey,
+      actorId: data.listId,
+      actorType: "todo",
+      callerId: caller.id,
+      callerType: caller.type,
+    });
+
+    const fetchTodoActor = createActorFetch<TodoMachine>({
+      actorType: "todo",
+      host,
+    });
+
+    const payload = await fetchTodoActor({
+      actorId: data.listId,
+      accessToken,
+    });
+
+    return { accessToken, host, listId: data.listId, payload, userId: caller.id };
+  });
+
+export const Route = createFileRoute("/lists/$listId")({
+  loader: ({ params }) => loadTodoRoute({ data: { listId: params.listId } }),
+  component: TodoRouteComponent,
 });
 
-export default async function TodoPage(props: { params: { id: string } }) {
-  const listId = props.params.id;
-  const userId = await getUserId();
-
-  const accessToken = await createAccessToken({
-    signingKey,
-    actorId: listId,
-    actorType: "todo",
-    callerId: userId,
-    callerType: "client",
-  });
-
-  const payload = await fetchTodoActor({
-    actorId: listId,
-    accessToken,
-  });
+function TodoRouteComponent() {
+  const { accessToken, host, listId, payload, userId } = Route.useLoaderData();
 
   return (
     <TodoActorKitProvider
@@ -400,7 +419,7 @@ export default async function TodoPage(props: { params: { id: string } }) {
       checksum={payload.checksum}
       initialSnapshot={payload.snapshot}
     >
-      <TodoList />
+      <TodoList userId={userId} />
     </TodoActorKitProvider>
   );
 }
@@ -409,16 +428,18 @@ export default async function TodoPage(props: { params: { id: string } }) {
 ### 8️⃣ Create a client-side component
 
 ```typescript
-// src/app/lists/[id]/components.tsx
+// src/components/TodoList.tsx
 "use client";
 
-import React, { useState } from "react";
-import { TodoActorKitContext } from "./todo.context";
+import { useState } from "react";
+import { TodoActorKitContext } from "../todo.context";
 
-export function TodoList() {
+export function TodoList({ userId }: { userId: string }) {
   const todos = TodoActorKitContext.useSelector((state) => state.public.todos);
+  const ownerId = TodoActorKitContext.useSelector((state) => state.public.ownerId);
   const send = TodoActorKitContext.useSend();
   const [newTodoText, setNewTodoText] = useState("");
+  const isOwner = ownerId === userId;
 
   const handleAddTodo = (e: React.FormEvent) => {
     e.preventDefault();
@@ -534,9 +555,10 @@ This example demonstrates how to set up and use Actor Kit in a Next.js applicati
    import { createActorKitRouter } from "actor-kit/worker";
    import { YourActor } from "./your-actor.server";
 
-   const actorKitRouter = createActorKitRouter({
-     yourActor: YourActor,
-   });
+   // Routes: /api/your-actor/{actorId}
+   const actorKitRouter = createActorKitRouter(["your-actor"]);
+
+   export { YourActor };
 
    export default {
      async fetch(
@@ -554,6 +576,8 @@ This example demonstrates how to set up and use Actor Kit in a Next.js applicati
      },
    };
    ```
+
+   > **Note:** The route name in the array (e.g., `"your-actor"`) maps to the Durable Object binding name in SCREAMING_SNAKE_CASE (e.g., `YOUR_ACTOR` in `wrangler.toml`). Routes are served at `/api/{actor-type}/{actor-id}`.
 
 5. Start the Cloudflare Worker development server:
 
@@ -575,12 +599,12 @@ By following these steps, you'll have a basic Actor Kit setup running on Cloudfl
 
 Actor Kit includes example todo list applications demonstrating integration with popular web frameworks.
 
-- [Next.js example](/examples/nextjs-actorkit-todo/README.md) in `/examples/nextjs-actorkit-todo`
-
-  - Live demo: [https://nextjs-actorkit-todo.vercel.app/](https://nextjs-actorkit-todo.vercel.app/)
-
 - [TanStack Start example](/examples/tanstack-start-actorkit-todo/README.md) in `/examples/tanstack-start-actorkit-todo`
-  - Live demo: [https://tanstack-start-actorkit-todo.jonathanrmumm.workers.dev/](https://tanstack-start-actorkit-todo.jonathanrmumm.workers.dev/)
+  - Full Cloudflare Workers deployment with Durable Objects
+  - E2E tests with Playwright (15 tests covering CRUD, persistence, multi-client sync)
+  - Preview deploys on every PR
+
+- [Next.js example](/examples/nextjs-actorkit-todo/README.md) in `/examples/nextjs-actorkit-todo`
 
 These examples showcase how to integrate Actor Kit with different frameworks, demonstrating real-time, event-driven todo lists with owner-based access control. Visit the live demos to see Actor Kit in action!
 
@@ -2037,6 +2061,15 @@ Actor Kit builds upon and draws inspiration from several excellent technologies:
 - [PartyServer](https://github.com/threepointone/partyserver/tree/main): PartyKit, for workers
 - [xstate-migrate](https://github.com/jonmumm/xstate-migrate): A migration library for persisted XState machines, designed to facilitate state machine migrations when updating your XState configurations.
 
+## 📄 Documentation
+
+Detailed documentation lives in the [`docs/`](docs/) directory:
+
+- [Architecture](docs/architecture.md) — system diagram, data flow, module boundaries, sync protocol
+- [Testing Strategy](docs/testing-strategy.md) — seam boundaries, fakes, mutation testing, Storybook patterns
+- [Roadmap](docs/roadmap/README.md) — improvement proposals with code examples and test plans
+- [Architecture Decision Records](docs/adrs/) — key design decisions and rationale
+
 ## 🚧 Development Status
 
-Actor Kit is currently in active development and is considered alpha software. It is not yet stable or recommended for production use. Use at your own risk and expect frequent changes.
+Actor Kit is under active development. Expect breaking changes between minor versions until 1.0. The API surface is stabilizing but not yet frozen.
