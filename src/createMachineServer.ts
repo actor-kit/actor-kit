@@ -244,13 +244,13 @@ export const createMachineServer = <
       }
     }
 
-    #sendStateUpdate(ws: ActorKitWebSocket) {
+    async #sendStateUpdate(ws: ActorKitWebSocket) {
       assert(this.actor, "actor is not running");
       const attachment = this.attachments.get(ws);
       assert(attachment, "Attachment missing for WebSocket");
 
       const fullSnapshot = this.actor.getSnapshot();
-      const currentChecksum = this.#calculateChecksum(fullSnapshot);
+      const currentChecksum = await this.#calculateChecksum(fullSnapshot);
 
       this.snapshotCache.set(currentChecksum, {
         snapshot: fullSnapshot,
@@ -507,18 +507,18 @@ export const createMachineServer = <
       this.#ensureActorRunning();
 
       if (!options?.waitForEvent && !options?.waitForState) {
-        return this.#getCurrentSnapshot(caller);
+        return await this.#getCurrentSnapshot(caller);
       }
 
       const timeoutPromise = new Promise<{
         checksum: string;
         snapshot: CallerSnapshotFrom<TMachine>;
       }>((resolve, reject) => {
-        setTimeout(() => {
+        setTimeout(async () => {
           if (options.errorOnWaitTimeout !== false) {
             reject(new Error("Timeout waiting for event or state"));
           } else {
-            resolve(this.#getCurrentSnapshot(caller));
+            resolve(await this.#getCurrentSnapshot(caller));
           }
         }, options.timeout ?? 5000);
       });
@@ -527,7 +527,7 @@ export const createMachineServer = <
         checksum: string;
         snapshot: CallerSnapshotFrom<TMachine>;
       }>((resolve) => {
-        const subscription = this.actor?.subscribe((snapshot) => {
+        const subscription = this.actor?.subscribe(async (snapshot) => {
           if (
             (options.waitForEvent &&
               this.#matchesEvent(snapshot, options.waitForEvent)) ||
@@ -535,7 +535,7 @@ export const createMachineServer = <
               this.#matchesState(snapshot, options.waitForState))
           ) {
             subscription?.unsubscribe();
-            resolve(this.#getCurrentSnapshot(caller));
+            resolve(await this.#getCurrentSnapshot(caller));
           }
         });
       });
@@ -543,12 +543,12 @@ export const createMachineServer = <
       return Promise.race([waitPromise, timeoutPromise]);
     }
 
-    #getCurrentSnapshot(caller: Caller) {
+    async #getCurrentSnapshot(caller: Caller) {
       const fullSnapshot = this.actor?.getSnapshot();
       assert(fullSnapshot, "Actor snapshot is not available");
       return {
         snapshot: this.#createCallerSnapshot(fullSnapshot, caller.id),
-        checksum: this.#calculateChecksum(fullSnapshot),
+        checksum: await this.#calculateChecksum(fullSnapshot),
       };
     }
 
@@ -566,18 +566,12 @@ export const createMachineServer = <
       return matchesState(stateValue, snapshot);
     }
 
-    #calculateChecksum(snapshot: SnapshotFrom<TMachine>) {
-      return this.#hashString(JSON.stringify(snapshot));
-    }
-
-    #hashString(value: string) {
-      let hash = 0;
-      for (let index = 0; index < value.length; index += 1) {
-        const character = value.charCodeAt(index);
-        hash = (hash << 5) - hash + character;
-        hash &= hash;
-      }
-      return hash.toString(16);
+    async #calculateChecksum(snapshot: SnapshotFrom<TMachine>) {
+      const str = JSON.stringify(snapshot);
+      const buffer = new TextEncoder().encode(str);
+      const hash = await crypto.subtle.digest("SHA-256", buffer);
+      const array = new Uint8Array(hash);
+      return Array.from(array, (b) => b.toString(16).padStart(2, "0")).join("");
     }
 
     #createCallerSnapshot(
