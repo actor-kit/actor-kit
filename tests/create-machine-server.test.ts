@@ -320,6 +320,8 @@ describe("createMachineServer", () => {
     );
 
     expect(response.status).toBe(101);
+    // Wait for async checksum computation to complete
+    await new Promise((r) => setTimeout(r, 10));
     const acceptedSocket = state.getWebSockets()[0];
     expect(acceptedSocket).toBeDefined();
     expect(acceptedSocket?.sent).toHaveLength(1);
@@ -419,6 +421,90 @@ describe("createMachineServer", () => {
       "Second",
       "Third",
     ]);
+  });
+
+  it("produces collision-resistant checksums (64-char hex)", async () => {
+    const state = new FakeDurableObjectState();
+    const server = new TodoServer(state, {
+      ACTOR_KIT_SECRET: "super-secret",
+      EMAIL_SERVICE_API_KEY: "key",
+    });
+    await state.idle();
+
+    await server.spawn({
+      actorType: "todo",
+      actorId: "list-1",
+      caller: { id: "user-1", type: "client" },
+      input: { foo: "bar" },
+    });
+
+    const snap1 = await server.getSnapshot({ id: "user-1", type: "client" });
+
+    // SHA-256 hex should be 64 characters
+    expect(snap1.checksum).toMatch(/^[0-9a-f]{64}$/);
+  });
+
+  it("produces different checksums for different states", async () => {
+    const state = new FakeDurableObjectState();
+    const server = new TodoServer(state, {
+      ACTOR_KIT_SECRET: "super-secret",
+      EMAIL_SERVICE_API_KEY: "key",
+    });
+    await state.idle();
+
+    await server.spawn({
+      actorType: "todo",
+      actorId: "list-1",
+      caller: { id: "user-1", type: "client" },
+      input: { foo: "bar" },
+    });
+
+    const snap1 = await server.getSnapshot({ id: "user-1", type: "client" });
+
+    server.send({
+      type: "ADD_TODO",
+      text: "Change state",
+      caller: { id: "user-1", type: "client" },
+    });
+    await Promise.resolve();
+
+    const snap2 = await server.getSnapshot({ id: "user-1", type: "client" });
+
+    expect(snap1.checksum).not.toBe(snap2.checksum);
+    expect(snap2.checksum).toMatch(/^[0-9a-f]{64}$/);
+  });
+
+  it("produces identical checksums for identical states", async () => {
+    // Two separate servers with the same state should produce the same checksum
+    const state1 = new FakeDurableObjectState();
+    const state2 = new FakeDurableObjectState();
+    const env = {
+      ACTOR_KIT_SECRET: "super-secret",
+      EMAIL_SERVICE_API_KEY: "key",
+    };
+
+    const server1 = new TodoServer(state1, env);
+    await state1.idle();
+    const server2 = new TodoServer(state2, env);
+    await state2.idle();
+
+    await server1.spawn({
+      actorType: "todo",
+      actorId: "list-1",
+      caller: { id: "user-1", type: "client" },
+      input: { foo: "bar" },
+    });
+    await server2.spawn({
+      actorType: "todo",
+      actorId: "list-1",
+      caller: { id: "user-1", type: "client" },
+      input: { foo: "bar" },
+    });
+
+    const snap1 = await server1.getSnapshot({ id: "user-1", type: "client" });
+    const snap2 = await server2.getSnapshot({ id: "user-1", type: "client" });
+
+    expect(snap1.checksum).toBe(snap2.checksum);
   });
 
   it("preserves todo completion state across restart", async () => {
