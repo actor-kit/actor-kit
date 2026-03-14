@@ -1,8 +1,14 @@
 # 001: Explicit Persistence Control
 
 **Priority**: P0
-**Status**: Proposal
+**Status**: Proposal (revisit after 012)
 **Affects**: `createMachineServer.ts`, types
+
+---
+
+> **Note (2026-03-14)**: This proposal should be revisited after [012: SQLite Storage Layer](./012-sqlite-storage-layer.md) lands. Proposal 012 switches persistence from `actor.getSnapshot()` to `actor.getPersistedSnapshot()` and moves all storage to DO SQLite. The `getPersistedSnapshot()` fix alone may resolve the root cause of Piqolo's "dirty detection" hacks, since XState's persisted snapshot includes the full internal state tree (child actors, history states, delayed transitions) rather than just the live in-memory representation. If the persistence bugs disappear after 012, the `flush()` action and `checkpoint()` mechanism proposed here may become unnecessary. If they don't, this proposal's API remains the right solution — just implemented against SQLite instead of KV storage.
+
+---
 
 ## Problem
 
@@ -39,6 +45,17 @@ Actor-kit persists snapshots automatically after state transitions, but develope
    ```
 
 None of these should be necessary. The framework should provide explicit control.
+
+## Root Cause Analysis
+
+Part of this problem may stem from actor-kit using `actor.getSnapshot()` for persistence. XState distinguishes between:
+
+- **`actor.getSnapshot()`** — the live in-memory snapshot (context + value), used for rendering
+- **`actor.getPersistedSnapshot()`** — the serializable snapshot that includes internal XState state (history, child actors, delayed transitions)
+
+If a state change only affects XState internals (e.g., a child actor transition) but not the top-level context, `getSnapshot()` may return an object that compares as "unchanged" even though meaningful state has shifted. This would explain why Piqolo's object-spread hacks "work" — they force a context-level diff.
+
+Proposal [012](./012-sqlite-storage-layer.md) addresses this by switching to `getPersistedSnapshot()`.
 
 ## Proposed API
 
@@ -116,13 +133,13 @@ Stored at `checkpoint:{label}` in DO storage. Recoverable via a new system event
 
 Current:
 ```
-Event → XState transition → snapshot subscription fires → persist
+Event -> XState transition -> snapshot subscription fires -> persist
 ```
 
 Proposed (with flush):
 ```
-Event → XState transition → flush action detected → persist immediately
-                          → snapshot subscription fires → persist (deduplicated by checksum)
+Event -> XState transition -> flush action detected -> persist immediately
+                           -> snapshot subscription fires -> persist (deduplicated by checksum)
 ```
 
 The checksum comparison already prevents double-writes, so flush + automatic persistence won't conflict.
