@@ -507,6 +507,46 @@ describe("createMachineServer", () => {
     expect(snap1.checksum).toBe(snap2.checksum);
   });
 
+  it("uses getPersistedSnapshot for persistence, not getSnapshot", async () => {
+    const state = new FakeDurableObjectState();
+    const env = {
+      ACTOR_KIT_SECRET: "super-secret",
+      EMAIL_SERVICE_API_KEY: "key",
+    };
+
+    const server = new TodoServer(state, env);
+    await state.idle();
+
+    await server.spawn({
+      actorType: "todo",
+      actorId: "list-1",
+      caller: { id: "user-1", type: "client" },
+      input: { foo: "bar" },
+    });
+
+    server.send({
+      type: "ADD_TODO",
+      text: "Persist test",
+      caller: { id: "user-1", type: "client" },
+    });
+    await Promise.resolve();
+
+    // Read the persisted snapshot from storage
+    const persisted = await state.storage.get("persistedSnapshot");
+    expect(persisted).toBeDefined();
+
+    const parsed = JSON.parse(persisted as string);
+    // Verify the persisted snapshot has the XState persisted format
+    // getPersistedSnapshot includes children map for deep persistence
+    expect(parsed).toHaveProperty("status");
+    expect(parsed.status).toBe("active");
+    expect(parsed).toHaveProperty("value");
+    expect(parsed).toHaveProperty("context");
+    // getPersistedSnapshot includes "children" for deep persistence of
+    // invoked/spawned actors — getSnapshot does not
+    expect(parsed).toHaveProperty("children");
+  });
+
   it("preserves todo completion state across restart", async () => {
     const state = new FakeDurableObjectState();
     const env = {

@@ -7,6 +7,7 @@ import {
   EventFromLogic,
   InputFrom,
   matchesState,
+  Snapshot,
   SnapshotFrom,
   StateValueFrom,
   Subscription,
@@ -130,7 +131,7 @@ export const createMachineServer = <
     actorId: string | undefined;
     input: Record<string, unknown> | undefined;
     initialCaller: Caller | undefined;
-    lastPersistedSnapshot: SnapshotFrom<TMachine> | null = null;
+    lastPersistedSnapshot: Snapshot<unknown> | null = null;
     snapshotCache = new Map<
       string,
       { snapshot: SnapshotFrom<TMachine>; timestamp: number }
@@ -291,14 +292,14 @@ export const createMachineServer = <
 
     #setupStatePersistence(actor: Actor<TMachine>) {
       actor.subscribe(() => {
-        const fullSnapshot = actor.getSnapshot();
-        this.#persistSnapshot(fullSnapshot).catch(() => {
+        const persistedSnapshot = actor.getPersistedSnapshot();
+        this.#persistSnapshot(persistedSnapshot).catch(() => {
           // Ignore persistence errors.
         });
       });
     }
 
-    async #persistSnapshot(snapshot: SnapshotFrom<TMachine>) {
+    async #persistSnapshot(snapshot: ReturnType<Actor<TMachine>["getPersistedSnapshot"]>) {
       if (
         this.lastPersistedSnapshot &&
         compare(this.lastPersistedSnapshot, snapshot).length === 0
