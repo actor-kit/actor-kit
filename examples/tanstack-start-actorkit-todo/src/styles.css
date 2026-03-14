@@ -7,6 +7,7 @@
 }
 
 :root {
+  color-scheme: light;
   --sea-ink: #173a40;
   --sea-ink-soft: #416166;
   --lagoon: #4fb8b2;
@@ -26,9 +27,21 @@
   --link-bg-hover: rgba(255, 255, 255, 0.9);
   --hero-a: rgba(79, 184, 178, 0.36);
   --hero-b: rgba(47, 106, 74, 0.2);
+  --control-surface: rgba(255, 255, 255, 0.94);
+  --control-surface-strong: rgba(255, 255, 255, 0.98);
+  --control-line: rgba(23, 58, 64, 0.14);
+  --control-placeholder: rgba(65, 97, 102, 0.52);
+  --control-shadow: rgba(23, 58, 64, 0.08);
+  --todo-card: rgba(255, 255, 255, 0.82);
+  --todo-card-line: rgba(23, 58, 64, 0.12);
+  --todo-button: rgba(255, 255, 255, 0.56);
+  --todo-button-hover: rgba(255, 255, 255, 0.82);
+  --danger-line: rgba(181, 89, 70, 0.24);
+  --danger-text: rgb(143, 63, 47);
 }
 
 :root[data-theme="dark"] {
+  color-scheme: dark;
   --sea-ink: #d7ece8;
   --sea-ink-soft: #afcdc8;
   --lagoon: #60d7cf;
@@ -48,10 +61,22 @@
   --link-bg-hover: rgba(24, 44, 49, 0.8);
   --hero-a: rgba(96, 215, 207, 0.18);
   --hero-b: rgba(110, 200, 154, 0.12);
+  --control-surface: rgba(20, 38, 43, 0.96);
+  --control-surface-strong: rgba(22, 42, 48, 0.98);
+  --control-line: rgba(141, 229, 219, 0.22);
+  --control-placeholder: rgba(175, 205, 200, 0.48);
+  --control-shadow: rgba(0, 0, 0, 0.22);
+  --todo-card: rgba(26, 46, 52, 0.94);
+  --todo-card-line: rgba(141, 229, 219, 0.16);
+  --todo-button: rgba(24, 45, 50, 0.82);
+  --todo-button-hover: rgba(34, 61, 67, 0.96);
+  --danger-line: rgba(240, 134, 112, 0.24);
+  --danger-text: rgb(255, 171, 153);
 }
 
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
+    color-scheme: dark;
     --sea-ink: #d7ece8;
     --sea-ink-soft: #afcdc8;
     --lagoon: #60d7cf;
@@ -71,6 +96,17 @@
     --link-bg-hover: rgba(24, 44, 49, 0.8);
     --hero-a: rgba(96, 215, 207, 0.18);
     --hero-b: rgba(110, 200, 154, 0.12);
+    --control-surface: rgba(20, 38, 43, 0.96);
+    --control-surface-strong: rgba(22, 42, 48, 0.98);
+    --control-line: rgba(141, 229, 219, 0.22);
+    --control-placeholder: rgba(175, 205, 200, 0.48);
+    --control-shadow: rgba(0, 0, 0, 0.22);
+    --todo-card: rgba(26, 46, 52, 0.94);
+    --todo-card-line: rgba(141, 229, 219, 0.16);
+    --todo-button: rgba(24, 45, 50, 0.82);
+    --todo-button-hover: rgba(34, 61, 67, 0.96);
+    --danger-line: rgba(240, 134, 112, 0.24);
+    --danger-text: rgb(255, 171, 153);
   }
 }
 
@@ -184,6 +220,71 @@ pre code {
 .feature-card:hover {
   transform: translateY(-2px);
   border-color: color-mix(in oklab, var(--lagoon-deep) 35%, var(--line));
+}
+
+.todo-input {
+  border: 1px solid var(--control-line);
+  background: linear-gradient(
+    180deg,
+    var(--control-surface-strong),
+    var(--control-surface)
+  );
+  color: var(--sea-ink);
+  box-shadow:
+    0 1px 0 var(--inset-glint) inset,
+    0 10px 24px var(--control-shadow);
+}
+
+.todo-input::placeholder {
+  color: var(--control-placeholder);
+}
+
+.todo-input:focus {
+  border-color: color-mix(in oklab, var(--lagoon-deep) 60%, var(--control-line));
+}
+
+.todo-primary-button {
+  background: linear-gradient(135deg, var(--lagoon-deep), var(--lagoon));
+  color: #f5fffd;
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.18) inset,
+    0 14px 24px color-mix(in oklab, var(--lagoon-deep) 30%, transparent);
+}
+
+.todo-primary-button:hover:not(:disabled) {
+  filter: brightness(1.04);
+}
+
+.todo-item {
+  border: 1px solid var(--todo-card-line);
+  background: linear-gradient(
+    180deg,
+    color-mix(in oklab, var(--todo-card) 94%, white 6%),
+    var(--todo-card)
+  );
+  box-shadow:
+    0 1px 0 var(--inset-glint) inset,
+    0 12px 26px rgba(8, 18, 21, 0.12);
+}
+
+.todo-secondary-button {
+  border: 1px solid var(--chip-line);
+  background: var(--todo-button);
+  color: var(--sea-ink);
+}
+
+.todo-secondary-button:hover:not(:disabled) {
+  background: var(--todo-button-hover);
+}
+
+.todo-danger-button {
+  border: 1px solid var(--danger-line);
+  background: color-mix(in oklab, var(--todo-button) 82%, transparent);
+  color: var(--danger-text);
+}
+
+.todo-danger-button:hover:not(:disabled) {
+  background: color-mix(in oklab, var(--danger-line) 24%, var(--todo-button-hover));
 }
 
 button,
