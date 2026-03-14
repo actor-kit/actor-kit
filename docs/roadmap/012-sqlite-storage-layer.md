@@ -575,22 +575,215 @@ async #pruneOldEvents() {
 ### Configuration
 
 ```typescript
+import { createAnalyticsEngineSink, createConsoleSink } from "actor-kit/sinks";
+
 export const Todo = createMachineServer({
   machine: todoMachine,
   schemas: { /* ... */ },
   options: {
     persisted: true,
     sqlite: {
-      eventLog: true,             // Enable event logging (default: false)
+      eventLog: true,             // Enable SQLite event logging (default: false)
       maxEvents: 10_000,          // Rolling window size (0 = unlimited)
       redact: ["storage", "env"], // Fields to strip from logged events
-      observability: true,        // Enable inspect-based observability (default: false)
     },
+    eventSinks: (env) => [
+      // CF Analytics Engine — free, built-in, queryable via SQL API
+      createAnalyticsEngineSink(env.EVENTS),
+      // Console — dev/debugging
+      createConsoleSink(),
+    ],
   },
 });
 ```
 
 Note: `getPersistedSnapshot()` and SQLite migration happen regardless of `sqlite` options — they are correctness fixes, not optional features.
+
+## Event Sink Adapters
+
+SQLite is the **source of truth** for state persistence and replay. Event sinks are **projections** — fire-and-forget streams to external analytics/observability systems. This follows the CQRS pattern: one write model (SQLite), many read models (sinks).
+
+```
+XState Machine
+     │
+     ├─ inspect callback (every event, snapshot, microstep)
+     │
+     ▼
+  Event Router (in createMachineServer)
+     │
+     ├─► DO SQLite (always, sync) ── state persistence, replay
+     │     via workers-qb DOQB
+     │
+     └─► EventSink[] (pluggable, async) ── analytics, audit, debugging
+           ├─ AnalyticsEngineSink (CF built-in)
+           ├─ PostHogSink
+           ├─ ConsoleSink (dev)
+           └─ custom
+```
+
+### The `ActorEventSink` interface
+
+```typescript
+// In actor-kit/types
+interface ActorEvent {
+  actorType: string;
+  actorId: string;
+  seq: number;
+  timestamp: number;
+  type: string;
+  callerId: string;
+  callerType: string;
+  stateValue: string;
+  checksum: string;
+  payload?: Record<string, unknown>;
+}
+
+interface ActorEventSink {
+  send(events: ActorEvent[]): void | Promise<void>;
+}
+```
+
+Sinks receive batches of `ActorEvent` objects. They can be sync or async — the framework calls them with `Promise.resolve(sink.send(events)).catch(...)` so failures never block state transitions.
+
+### Built-in sinks
+
+#### CF Analytics Engine (recommended default)
+
+Free, built into Workers, queryable via SQL API. Designed for high-volume event data with no external service required.
+
+```typescript
+// actor-kit/sinks
+export function createAnalyticsEngineSink(
+  dataset: AnalyticsEngineDataset
+): ActorEventSink {
+  return {
+    send(events) {
+      for (const event of events) {
+        dataset.writeDataPoint({
+          indexes: [event.actorId],
+          blobs: [
+            event.actorType,
+            event.type,
+            event.callerId,
+            event.callerType,
+            event.stateValue,
+            JSON.stringify(event.payload ?? {}),
+          ],
+          doubles: [event.seq, event.timestamp],
+        });
+      }
+    },
+  };
+}
+```
+
+Query via CF SQL API:
+
+```sql
+SELECT blob2 as event_type, count() as count
+FROM EVENTS
+WHERE index1 = 'game-123'
+  AND timestamp > now() - interval '1 hour'
+GROUP BY event_type
+ORDER BY count DESC
+```
+
+Wrangler config:
+
+```toml
+[[analytics_engine_datasets]]
+binding = "EVENTS"
+```
+
+#### Console sink (dev/debugging)
+
+```typescript
+export function createConsoleSink(): ActorEventSink {
+  return {
+    send(events) {
+      for (const event of events) {
+        console.log(
+          `[${event.actorType}:${event.actorId}] ${event.type} → ${event.stateValue} (seq:${event.seq})`
+        );
+      }
+    },
+  };
+}
+```
+
+#### PostHog sink
+
+```typescript
+export function createPostHogSink(opts: {
+  apiKey: string;
+  host: string;
+}): ActorEventSink {
+  return {
+    async send(events) {
+      await fetch(`https://${opts.host}/capture/batch`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          api_key: opts.apiKey,
+          batch: events.map((e) => ({
+            event: e.type,
+            distinct_id: e.callerId,
+            timestamp: new Date(e.timestamp).toISOString(),
+            properties: {
+              actor_type: e.actorType,
+              actor_id: e.actorId,
+              state: e.stateValue,
+              seq: e.seq,
+              ...e.payload,
+            },
+          })),
+        }),
+      });
+    },
+  };
+}
+```
+
+#### Custom sink
+
+```typescript
+eventSinks: (env) => [
+  {
+    send(events) {
+      // Write to ClickHouse, Kafka, R2, a webhook — anything
+    },
+  },
+],
+```
+
+### Why SQLite is NOT an adapter
+
+If someone swaps out SQLite for an external store, they lose:
+- **Event replay** — state recovery from events requires local, fast, indexed queries
+- **Transactional consistency** — event + snapshot must be atomic within one DO
+- **Offline recovery** — DO restarts before network is available
+- **Checkpoint snapshots** — fast restore without replaying all events
+
+SQLite is the write model. Sinks are read model projections. They're independent: you can have `eventLog: true` without any sinks (local-only), sinks without `eventLog` (stream-only, no local replay), or both.
+
+### Sink failure handling
+
+Sinks are best-effort. A failing sink never blocks state transitions:
+
+```typescript
+// In createMachineServer.ts
+#fanOutToSinks(events: ActorEvent[]) {
+  for (const sink of this.eventSinks) {
+    try {
+      Promise.resolve(sink.send(events)).catch((err) => {
+        console.error(`[actor-kit] EventSink error:`, err);
+      });
+    } catch (err) {
+      console.error(`[actor-kit] EventSink error:`, err);
+    }
+  }
+}
+```
 
 ## Event Replay from Checkpoint
 
@@ -661,19 +854,28 @@ async #reconstructAtSeq(targetSeq: number): Promise<Snapshot<unknown>> {
 3. Persist `_seq` in meta table
 4. Add `new_sqlite_classes` migration guide to docs
 
-### Phase 2: Event Log
+### Phase 2: Event Log + SQLite
 
-5. Create SQLite schema (events, snapshots, meta tables) via `#initializeStorage`
-6. Record events to `events` table after each transition
-7. Implement rolling window pruning
-8. Add event query endpoint for service callers
-9. KV-to-SQLite migration path
+5. Add `workers-qb` dependency
+6. Create SQLite schema (events, snapshots, meta tables) via `#initializeStorage`
+7. Record events to `events` table after each transition
+8. Implement rolling window pruning
+9. Add event query endpoint for service callers
+10. KV-to-SQLite migration path
 
-### Phase 3: Observability
+### Phase 3: Event Sinks
 
-10. Wire up XState `inspect` callback in `createActor()`
-11. Record transition durations
-12. Add query helpers for slow transitions, event-type filtering, time-range queries
+11. Define `ActorEventSink` interface and `ActorEvent` type
+12. Implement sink fan-out in `#fanOutToSinks` (fire-and-forget, error-safe)
+13. Ship `createAnalyticsEngineSink` and `createConsoleSink` as built-in sinks
+14. Ship `createPostHogSink` as example/community sink
+15. Wire sinks into the inspect callback alongside SQLite logging
+
+### Phase 4: Observability
+
+16. Wire up XState `inspect` callback in `createActor()`
+17. Record transition durations
+18. Add query helpers for slow transitions, event-type filtering, time-range queries
 
 ### Key files to change
 
@@ -691,6 +893,10 @@ async #reconstructAtSeq(targetSeq: number): Promise<Snapshot<unknown>> {
 |------|---------|
 | `src/sqlite.ts` | Schema definitions, migration logic, query helpers |
 | `src/eventLog.ts` | Event logging, redaction, pruning logic |
+| `src/sinks.ts` | `ActorEventSink` interface, built-in sink implementations |
+| `src/sinks/analytics-engine.ts` | CF Analytics Engine sink |
+| `src/sinks/console.ts` | Console sink for dev/debugging |
+| `src/sinks/posthog.ts` | PostHog sink |
 
 ## Test Plan
 
@@ -761,14 +967,51 @@ async #reconstructAtSeq(targetSeq: number): Promise<Snapshot<unknown>> {
     - Act: Call `#initializeStorage` twice
     - Assert: No errors, tables exist with correct schema
 
+### Event sink tests
+
+15. **Sinks receive events after transition**
+    - Setup: Register a mock sink via `eventSinks`
+    - Act: Send event
+    - Assert: Mock sink's `send()` called with `ActorEvent` containing correct actorType, actorId, seq, type
+
+16. **Multiple sinks all receive events**
+    - Setup: Register 3 mock sinks
+    - Act: Send event
+    - Assert: All 3 sinks called
+
+17. **Sink failure does not block state transition**
+    - Setup: Register a sink that throws
+    - Act: Send event
+    - Assert: State transition completes, other sinks still called
+
+18. **Async sink failure does not block state transition**
+    - Setup: Register a sink that returns a rejected promise
+    - Act: Send event
+    - Assert: State transition completes normally
+
+19. **Sinks work without eventLog (stream-only mode)**
+    - Setup: `eventLog: false`, one mock sink
+    - Act: Send event
+    - Assert: Sink called, no rows in `events` table
+
+20. **Analytics Engine sink writes correct data points**
+    - Setup: Mock `AnalyticsEngineDataset`
+    - Act: Send event through `createAnalyticsEngineSink`
+    - Assert: `writeDataPoint` called with correct indexes, blobs, doubles
+
+21. **Console sink logs in expected format**
+    - Setup: Spy on `console.log`
+    - Act: Send event through `createConsoleSink`
+    - Assert: Log matches `[actorType:actorId] eventType → stateValue (seq:N)` format
+
 ### Integration tests
 
-15. **Full lifecycle: boot -> events -> persist -> restart -> restore -> continue**
+22. **Full lifecycle: boot -> events -> persist -> restart -> restore -> continue**
     - Setup: Create actor, send 5 events
     - Act: Simulate DO restart
     - Assert: Actor restores from SQLite snapshot, `_seq` continues at 6, event log preserved
 
-16. **Replay from checkpoint produces identical state**
+23. **Replay from checkpoint produces identical state**
     - Setup: Send 10 events, snapshot at seq 5
     - Act: Reconstruct state at seq 8 via `#reconstructAtSeq`
     - Assert: Reconstructed state matches actual state after event 8
@@ -785,3 +1028,6 @@ async #reconstructAtSeq(targetSeq: number): Promise<Snapshot<unknown>> {
 - Rolling window deletion threshold
 - KV migration detection and cleanup
 - Transaction commit/rollback boundaries
+- Sink fan-out (all sinks called, not just first)
+- Sink error isolation (failure in one doesn't skip others)
+- Sink receives correct `ActorEvent` shape (all fields populated)
