@@ -40,7 +40,7 @@ export function TodoList({ userId }: { userId: string }) {
           }}
         >
           <input
-            className="min-w-0 flex-1 rounded-2xl border border-[rgba(23,58,64,0.15)] bg-white px-4 py-3 text-base text-[var(--sea-ink)] outline-none transition focus:border-[rgba(50,143,151,0.55)]"
+            className="todo-input min-w-0 flex-1 rounded-2xl px-4 py-3 text-base outline-none transition"
             disabled={!isHydrated}
             onChange={(event) => setText(event.target.value)}
             placeholder="Add a new todo"
@@ -48,7 +48,7 @@ export function TodoList({ userId }: { userId: string }) {
             value={text}
           />
           <button
-            className="rounded-2xl bg-[var(--lagoon-deep)] px-5 py-3 text-sm font-semibold text-white transition hover:-translate-y-0.5"
+            className="todo-primary-button rounded-2xl px-5 py-3 text-sm font-semibold transition hover:-translate-y-0.5"
             disabled={!isHydrated}
             type="submit"
           >
@@ -61,7 +61,7 @@ export function TodoList({ userId }: { userId: string }) {
         {todos.map((todo) => (
           <li
             key={todo.id}
-            className="flex flex-col gap-3 rounded-2xl border border-[rgba(23,58,64,0.12)] bg-white/80 px-4 py-4 sm:flex-row sm:items-center sm:justify-between"
+            className="todo-item flex flex-col gap-3 rounded-2xl px-4 py-4 sm:flex-row sm:items-center sm:justify-between"
           >
             <span
               className="text-base text-[var(--sea-ink)]"
@@ -74,7 +74,7 @@ export function TodoList({ userId }: { userId: string }) {
             {isOwner ? (
               <div className="flex gap-2">
                 <button
-                  className="rounded-full border border-[rgba(23,58,64,0.16)] px-3 py-1.5 text-sm font-medium text-[var(--sea-ink)]"
+                  className="todo-secondary-button rounded-full px-3 py-1.5 text-sm font-medium"
                   disabled={!isHydrated}
                   onClick={() => send({ type: "TOGGLE_TODO", id: todo.id })}
                   type="button"
@@ -82,7 +82,7 @@ export function TodoList({ userId }: { userId: string }) {
                   {todo.completed ? "Undo" : "Complete"}
                 </button>
                 <button
-                  className="rounded-full border border-[rgba(181,89,70,0.2)] px-3 py-1.5 text-sm font-medium text-[rgb(143,63,47)]"
+                  className="todo-danger-button rounded-full px-3 py-1.5 text-sm font-medium"
                   disabled={!isHydrated}
                   onClick={() => send({ type: "DELETE_TODO", id: todo.id })}
                   type="button"
