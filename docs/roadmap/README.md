@@ -38,6 +38,7 @@ These proposals have been consolidated into [012: SQLite Storage Layer](./012-sq
 
 | Proposal | Problem | Doc | Status |
 |----------|---------|-----|--------|
+| [Docs Site + Monorepo + tsdown](./013-docs-site-monorepo.md) | No docs site, heavyweight Rollup build, split repos, no LLM-friendly output | `013` | Open |
 | [DO Alarm-Based Persistence](./005-alarm-persistence.md) | No protection against Durable Object eviction data loss | `005` | Open |
 | [First-Class Remote Actor References](./003-remote-actor-refs.md) | Inter-actor communication requires custom workarounds and manual state sync | `003` | Open |
 
