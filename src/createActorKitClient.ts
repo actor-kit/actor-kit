@@ -47,12 +47,13 @@ export function createActorKitClient<TMachine extends AnyActorKitStateMachine>(
 ): ActorKitClient<TMachine> {
   let currentSnapshot = props.initialSnapshot;
   let socket: WebSocket | null = null;
-  let socketReady = false;
+
   let shouldReconnect = true;
   const listeners: Set<Listener<CallerSnapshotFrom<TMachine>>> = new Set();
   const pendingEvents: ClientEventFrom<TMachine>[] = [];
   let reconnectAttempts = 0;
   const maxReconnectAttempts = 5;
+  const maxQueueSize = 100;
 
   /**
    * Notifies all registered listeners with the current state.
@@ -70,11 +71,10 @@ export function createActorKitClient<TMachine extends AnyActorKitStateMachine>(
     const url = getWebSocketUrl(props);
 
     socket = new WebSocket(url);
-    socketReady = false;
+
 
     socket.addEventListener("open", () => {
       reconnectAttempts = 0;
-      socketReady = true;
       flushPendingEvents();
     });
 
@@ -111,7 +111,7 @@ export function createActorKitClient<TMachine extends AnyActorKitStateMachine>(
     // later after it's disconnected
 
     socket.addEventListener("close", (_event) => {
-      socketReady = false;
+  
 
       // Implement reconnection logic
       if (shouldReconnect && reconnectAttempts < maxReconnectAttempts) {
@@ -137,7 +137,7 @@ export function createActorKitClient<TMachine extends AnyActorKitStateMachine>(
       socket.close();
       socket = null;
     }
-    socketReady = false;
+
   };
 
   const flushPendingEvents = () => {
@@ -160,13 +160,11 @@ export function createActorKitClient<TMachine extends AnyActorKitStateMachine>(
       return;
     }
 
-    if (socket && !socketReady) {
-      pendingEvents.push(event);
-    } else {
-      props.onError?.(
-        new Error("Cannot send event: WebSocket is not connected")
-      );
+    // Queue the event for delivery when connection is (re)established
+    if (pendingEvents.length >= maxQueueSize) {
+      pendingEvents.shift(); // Drop oldest
     }
+    pendingEvents.push(event);
   };
 
   /**
