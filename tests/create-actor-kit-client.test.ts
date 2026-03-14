@@ -283,15 +283,90 @@ describe("createActorKitClient", () => {
     expect(subscriber).toHaveBeenCalledOnce();
   });
 
-  it("reports an error when sending while disconnected", () => {
-    const onError = vi.fn();
-    const client = createTestClient({ onError });
+  it("queues events sent before connect and flushes them on open", async () => {
+    const client = createTestClient();
 
-    client.send({ type: "ADD_TODO", text: "Buy milk" });
+    // Send BEFORE calling connect — should queue, not error
+    client.send({ type: "ADD_TODO", text: "Before connect" });
+    client.send({ type: "ADD_TODO", text: "Also before" });
 
-    expect(onError).toHaveBeenCalledWith(
-      new Error("Cannot send event: WebSocket is not connected")
+    const connectionPromise = client.connect();
+    const socket = MockWebSocket.instances[0];
+    socket.open();
+    await connectionPromise;
+
+    expect(socket.sent).toEqual([
+      JSON.stringify({ type: "ADD_TODO", text: "Before connect" }),
+      JSON.stringify({ type: "ADD_TODO", text: "Also before" }),
+    ]);
+  });
+
+  it("queues events during reconnection and flushes on reconnect", async () => {
+    vi.useFakeTimers();
+
+    const client = createTestClient();
+    const connectionPromise = client.connect();
+    const firstSocket = MockWebSocket.instances[0];
+    firstSocket.open();
+    await connectionPromise;
+
+    // Disconnect
+    firstSocket.close();
+
+    // Send during disconnection — should queue
+    client.send({ type: "ADD_TODO", text: "During disconnect" });
+
+    // Reconnect
+    await vi.advanceTimersByTimeAsync(2000);
+    const secondSocket = MockWebSocket.instances[1];
+    secondSocket.open();
+
+    expect(secondSocket.sent).toEqual([
+      JSON.stringify({ type: "ADD_TODO", text: "During disconnect" }),
+    ]);
+  });
+
+  it("respects max queue size and drops oldest events", async () => {
+    const client = createTestClient();
+
+    // Queue more events than default max (100)
+    for (let i = 0; i < 105; i++) {
+      client.send({ type: "ADD_TODO", text: `Event ${i}` });
+    }
+
+    const connectionPromise = client.connect();
+    const socket = MockWebSocket.instances[0];
+    socket.open();
+    await connectionPromise;
+
+    // Should have dropped the oldest 5
+    expect(socket.sent).toHaveLength(100);
+    expect(JSON.parse(socket.sent[0])).toEqual({
+      type: "ADD_TODO",
+      text: "Event 5",
+    });
+    expect(JSON.parse(socket.sent[99])).toEqual({
+      type: "ADD_TODO",
+      text: "Event 104",
+    });
+  });
+
+  it("preserves queue order across multiple send calls", async () => {
+    const client = createTestClient();
+
+    client.send({ type: "ADD_TODO", text: "A" });
+    client.send({ type: "ADD_TODO", text: "B" });
+    client.send({ type: "ADD_TODO", text: "C" });
+
+    const connectionPromise = client.connect();
+    const socket = MockWebSocket.instances[0];
+    socket.open();
+    await connectionPromise;
+
+    const sentTexts = socket.sent.map(
+      (s) => (JSON.parse(s) as TestEvent).text
     );
+    expect(sentTexts).toEqual(["A", "B", "C"]);
   });
 
   it("does not throw when optional error callbacks are omitted", async () => {
@@ -303,6 +378,7 @@ describe("createActorKitClient", () => {
 
     expect(() => socket.emitMessage("{bad-json")).not.toThrow();
     expect(() => socket.emitError("socket")).not.toThrow();
+    // Sending while disconnected now queues — should not throw
     client.disconnect();
     expect(() =>
       client.send({ type: "ADD_TODO", text: "No callback installed" })
