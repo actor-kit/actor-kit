@@ -369,6 +369,215 @@ describe("createMachineServer", () => {
     await expect(invalidInput.text()).resolves.toContain("Invalid input");
   });
 
+  it("persists state changes and restores multiple todos after restart", async () => {
+    const state = new FakeDurableObjectState();
+    const env = {
+      ACTOR_KIT_SECRET: "super-secret",
+      EMAIL_SERVICE_API_KEY: "key",
+    };
+
+    const server = new TodoServer(state, env);
+    await state.idle();
+
+    await server.spawn({
+      actorType: "todo",
+      actorId: "list-1",
+      caller: { id: "user-1", type: "client" },
+      input: { foo: "bar" },
+    });
+
+    // Add multiple todos
+    server.send({
+      type: "ADD_TODO",
+      text: "First",
+      caller: { id: "user-1", type: "client" },
+    });
+    server.send({
+      type: "ADD_TODO",
+      text: "Second",
+      caller: { id: "user-1", type: "client" },
+    });
+    server.send({
+      type: "ADD_TODO",
+      text: "Third",
+      caller: { id: "user-1", type: "client" },
+    });
+    await Promise.resolve();
+
+    // Verify state before restart
+    const before = await server.getSnapshot({ id: "user-1", type: "client" });
+    expect(before.snapshot.public.todos).toHaveLength(3);
+
+    // Restart
+    const restored = new TodoServer(state, env);
+    await state.idle();
+
+    const after = await restored.getSnapshot({ id: "user-1", type: "client" });
+    expect(after.snapshot.public.todos).toHaveLength(3);
+    expect(after.snapshot.public.todos.map((t) => t.text)).toEqual([
+      "First",
+      "Second",
+      "Third",
+    ]);
+  });
+
+  it("preserves todo completion state across restart", async () => {
+    const state = new FakeDurableObjectState();
+    const env = {
+      ACTOR_KIT_SECRET: "super-secret",
+      EMAIL_SERVICE_API_KEY: "key",
+    };
+
+    const server = new TodoServer(state, env);
+    await state.idle();
+
+    await server.spawn({
+      actorType: "todo",
+      actorId: "list-1",
+      caller: { id: "user-1", type: "client" },
+      input: { foo: "bar" },
+    });
+
+    server.send({
+      type: "ADD_TODO",
+      text: "Toggle me",
+      caller: { id: "user-1", type: "client" },
+    });
+    await Promise.resolve();
+
+    // Get the todo ID
+    const snap1 = await server.getSnapshot({ id: "user-1", type: "client" });
+    const todoId = snap1.snapshot.public.todos[0].id;
+    expect(snap1.snapshot.public.todos[0].completed).toBe(false);
+
+    // Toggle it
+    server.send({
+      type: "TOGGLE_TODO",
+      id: todoId,
+      caller: { id: "user-1", type: "client" },
+    });
+    await Promise.resolve();
+
+    // Verify toggled
+    const snap2 = await server.getSnapshot({ id: "user-1", type: "client" });
+    expect(snap2.snapshot.public.todos[0].completed).toBe(true);
+
+    // Restart and verify
+    const restored = new TodoServer(state, env);
+    await state.idle();
+
+    const snap3 = await restored.getSnapshot({ id: "user-1", type: "client" });
+    expect(snap3.snapshot.public.todos[0].completed).toBe(true);
+    expect(snap3.snapshot.public.todos[0].text).toBe("Toggle me");
+  });
+
+  it("preserves owner identity across restart", async () => {
+    const state = new FakeDurableObjectState();
+    const env = {
+      ACTOR_KIT_SECRET: "super-secret",
+      EMAIL_SERVICE_API_KEY: "key",
+    };
+
+    const server = new TodoServer(state, env);
+    await state.idle();
+
+    await server.spawn({
+      actorType: "todo",
+      actorId: "list-1",
+      caller: { id: "owner-abc", type: "client" },
+      input: { foo: "bar" },
+    });
+
+    // Verify owner set
+    const snap1 = await server.getSnapshot({ id: "owner-abc", type: "client" });
+    expect(snap1.snapshot.public.ownerId).toBe("owner-abc");
+
+    // Restart
+    const restored = new TodoServer(state, env);
+    await state.idle();
+
+    const snap2 = await restored.getSnapshot({ id: "owner-abc", type: "client" });
+    expect(snap2.snapshot.public.ownerId).toBe("owner-abc");
+  });
+
+  it("enforces owner guard after restart", async () => {
+    const state = new FakeDurableObjectState();
+    const env = {
+      ACTOR_KIT_SECRET: "super-secret",
+      EMAIL_SERVICE_API_KEY: "key",
+    };
+
+    const server = new TodoServer(state, env);
+    await state.idle();
+
+    await server.spawn({
+      actorType: "todo",
+      actorId: "list-1",
+      caller: { id: "user-1", type: "client" },
+      input: { foo: "bar" },
+    });
+
+    server.send({
+      type: "ADD_TODO",
+      text: "Before restart",
+      caller: { id: "user-1", type: "client" },
+    });
+    await Promise.resolve();
+
+    // Restart
+    const restored = new TodoServer(state, env);
+    await state.idle();
+
+    // Non-owner tries to add a todo — guard should reject
+    restored.send({
+      type: "ADD_TODO",
+      text: "Intruder todo",
+      caller: { id: "hacker", type: "client" },
+    });
+    await Promise.resolve();
+
+    const snap = await restored.getSnapshot({ id: "user-1", type: "client" });
+    expect(snap.snapshot.public.todos).toHaveLength(1);
+    expect(snap.snapshot.public.todos[0].text).toBe("Before restart");
+  });
+
+  it("maintains checksum consistency across restart", async () => {
+    const state = new FakeDurableObjectState();
+    const env = {
+      ACTOR_KIT_SECRET: "super-secret",
+      EMAIL_SERVICE_API_KEY: "key",
+    };
+
+    const server = new TodoServer(state, env);
+    await state.idle();
+
+    await server.spawn({
+      actorType: "todo",
+      actorId: "list-1",
+      caller: { id: "user-1", type: "client" },
+      input: { foo: "bar" },
+    });
+
+    server.send({
+      type: "ADD_TODO",
+      text: "Checksum test",
+      caller: { id: "user-1", type: "client" },
+    });
+    await Promise.resolve();
+
+    const snap1 = await server.getSnapshot({ id: "user-1", type: "client" });
+
+    // Restart
+    const restored = new TodoServer(state, env);
+    await state.idle();
+
+    const snap2 = await restored.getSnapshot({ id: "user-1", type: "client" });
+
+    // Snapshots should be equivalent (same state = same data)
+    expect(snap2.snapshot.public).toEqual(snap1.snapshot.public);
+    expect(snap2.snapshot.value).toEqual(snap1.snapshot.value);
+  });
+
   it("supports wait-for timeouts and websocket cleanup", async () => {
     vi.useFakeTimers();
     const state = new FakeDurableObjectState();
