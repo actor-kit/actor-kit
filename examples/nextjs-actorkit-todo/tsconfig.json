@@ -19,9 +19,8 @@
     ],
     "paths": {
       "@/*": ["./src/*"]
-    },
-    "types": ["@cloudflare/workers-types"]
+    }
   },
-  "include": ["next-env.d.ts", "**/*.ts", "**/*.tsx", ".next/types/**/*.ts", "../remix-actorkit-todo/session.context.tsx", "../remix-actorkit-todo/session.machine.ts", "../remix-actorkit-todo/session.schemas.ts", "../remix-actorkit-todo/session.server.ts", "src/session.ts", "../remix-actorkit-todo/session.types.ts"],
+  "include": ["next-env.d.ts", "**/*.ts", "**/*.tsx", ".next/types/**/*.ts"],
   "exclude": ["node_modules"]
 }

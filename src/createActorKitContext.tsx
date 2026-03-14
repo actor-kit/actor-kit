@@ -99,7 +99,9 @@ export function createActorKitContext<TMachine extends AnyActorKitStateMachine>(
   }
 
   function useMatches(stateValue: StateValueFrom<TMachine>): boolean {
-    return useSelector((state) => matchesState(stateValue, state.value as any));
+    return useSelector((state) =>
+      matchesState(stateValue, state.value as StateValueFrom<TMachine>)
+    );
   }
 
   const Matches: React.FC<MatchesProps<TMachine> & { children: ReactNode }> & {

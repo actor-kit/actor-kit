@@ -1,3 +1,3 @@
-import { EnvWithDurableObjects } from "actor-kit";
+import { ActorKitEnv } from "actor-kit";
 
-export type Env = EnvWithDurableObjects & { EMAIL_SERVICE_API_KEY: string };
+export type Env = ActorKitEnv & { EMAIL_SERVICE_API_KEY: string };

@@ -3,7 +3,7 @@ import { z } from "zod";
 import { AnyActorKitStateMachine, CallerSnapshotFrom, ClientEventFrom } from "./types";
 
 const ResponseSchema = z.object({
-  snapshot: z.record(z.any()),
+  snapshot: z.record(z.unknown()),
   checksum: z.string(),
 });
 

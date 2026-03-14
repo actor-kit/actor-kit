@@ -1,7 +1,8 @@
-import { jwtVerify, SignJWT } from "jose";
-import { PERSISTED_SNAPSHOT_KEY } from "./constants";
+import { jwtVerify } from "jose";
 import { CallerStringSchema } from "./schemas";
 import { Caller } from "./types";
+import { Actor, SnapshotFrom } from "xstate";
+import { BaseActorKitStateMachine } from "./types";
 
 // Define log levels
 export enum LogLevel {
@@ -33,7 +34,7 @@ const getCurrentLogLevel = (): LogLevel => {
 export function debug(
   message: string,
   level: LogLevel = LogLevel.DEBUG,
-  data?: any
+  data?: unknown
 ) {
   const currentLogLevel = getCurrentLogLevel();
   if (level <= currentLogLevel) {
@@ -58,11 +59,11 @@ export function debug(
 }
 
 // Convenience methods for different log levels
-export const logError = (message: string, data?: any) =>
+export const logError = (message: string, data?: unknown) =>
   debug(message, LogLevel.ERROR, data);
-export const logWarn = (message: string, data?: any) =>
+export const logWarn = (message: string, data?: unknown) =>
   debug(message, LogLevel.WARN, data);
-export const logInfo = (message: string, data?: any) =>
+export const logInfo = (message: string, data?: unknown) =>
   debug(message, LogLevel.INFO, data);
 
 export const json = <T>(data: T, status = 200) =>
@@ -149,10 +150,7 @@ export async function parseAccessTokenForCaller({
   id: string;
   secret: string;
 }): Promise<Caller> {
-  const verified = await jwtVerify(
-    accessToken,
-    new TextEncoder().encode(secret)
-  );
+  const verified = await jwtVerify(accessToken, new TextEncoder().encode(secret));
   if (!verified.payload.jti) {
     throw new Error("Expected JTI on accessToken");
   }
@@ -164,8 +162,22 @@ export async function parseAccessTokenForCaller({
       `Expected accessToken audience to match actor type: ${type}`
     );
   }
+  const audience = Array.isArray(verified.payload.aud)
+    ? verified.payload.aud
+    : [verified.payload.aud];
+  if (!audience.includes(type)) {
+    throw new Error(
+      `Expected accessToken audience to match actor type: ${type}`
+    );
+  }
   if (!verified.payload.sub) {
     throw new Error("Expected accessToken to have subject");
   }
   return CallerStringSchema.parse(verified.payload.sub);
+}
+
+export function getSnapshot<TMachine extends BaseActorKitStateMachine>(
+  actor: Actor<TMachine>
+): SnapshotFrom<TMachine> | undefined {
+  return actor.getSnapshot();
 }

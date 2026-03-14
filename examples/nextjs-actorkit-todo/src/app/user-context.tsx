@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext } from "react";
+import { createContext, type ReactNode } from "react";
 
 export const UserContext = createContext<string>("");
 
@@ -8,7 +8,7 @@ export const UserProvider = ({
   children,
   userId,
 }: {
-  children: React.ReactNode;
+  children: ReactNode;
   userId: string;
 }) => {
   return <UserContext.Provider value={userId}>{children}</UserContext.Provider>;

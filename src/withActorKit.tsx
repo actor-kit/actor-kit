@@ -2,7 +2,7 @@ import type { StoryContext, StoryFn } from "@storybook/react";
 import React from "react";
 import { createActorKitContext } from "./createActorKitContext";
 import { createActorKitMockClient } from "./createActorKitMockClient";
-import type { AnyActorKitStateMachine, CallerSnapshotFrom } from "./types";
+import type { AnyActorKitStateMachine } from "./types";
 import { ActorKitParameters } from "./storybook";
 
 /**

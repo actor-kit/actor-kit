@@ -16,6 +16,9 @@ export { Todo };
 
 export default class Worker extends WorkerEntrypoint<Env> {
   fetch(request: Request): Promise<Response> | Response {
+    if (new URL(request.url).pathname === "/health") {
+      return new Response("ok");
+    }
     if (request.url.includes("/api/")) {
       return router(request, this.env, this.ctx);
     }
