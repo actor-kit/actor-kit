@@ -1,8 +1,8 @@
 # 008: Collision-Resistant Checksums
 
 **Priority**: P2
-**Status**: Proposal
-**Affects**: `createMachineServer.ts` (hashString function)
+**Status**: Completed — [PR #12](https://github.com/actor-kit/actor-kit/pull/12) (2026-03-14)
+**Affects**: `createMachineServer.ts`
 
 ## Problem
 

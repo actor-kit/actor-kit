@@ -1,7 +1,7 @@
 # 002: Event Queuing Before Connection
 
 **Priority**: P0
-**Status**: Proposal
+**Status**: Completed — [PR #11](https://github.com/actor-kit/actor-kit/pull/11) (2026-03-14)
 **Affects**: `createActorKitClient.ts`
 
 ## Problem
