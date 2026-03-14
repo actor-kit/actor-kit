@@ -5,6 +5,7 @@ const useLocalServer = process.env.PLAYWRIGHT_BASE_URL === undefined;
 
 export default defineConfig({
   testDir: "./e2e",
+  workers: 1,
   retries: process.env.CI ? 2 : 0,
   timeout: 30_000,
   use: {
