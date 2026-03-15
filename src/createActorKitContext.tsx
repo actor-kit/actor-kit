@@ -38,6 +38,8 @@ export function createActorKitContext<TMachine extends AnyActorKitStateMachine>(
     );
   };
 
+  const InitialSnapshotContext = createContext<CallerSnapshotFrom<TMachine> | null>(null);
+
   const Provider: React.FC<
     {
       children: ReactNode;
@@ -63,9 +65,11 @@ export function createActorKitContext<TMachine extends AnyActorKitStateMachine>(
     }, [initializedRef]);
 
     return (
-      <ActorKitContext.Provider value={clientRef.current}>
-        {props.children}
-      </ActorKitContext.Provider>
+      <InitialSnapshotContext.Provider value={props.initialSnapshot}>
+        <ActorKitContext.Provider value={clientRef.current}>
+          {props.children}
+        </ActorKitContext.Provider>
+      </InitialSnapshotContext.Provider>
     );
   });
 
@@ -83,11 +87,20 @@ export function createActorKitContext<TMachine extends AnyActorKitStateMachine>(
     selector: (snapshot: CallerSnapshotFrom<TMachine>) => T
   ) => {
     const client = useClient();
+    const initialSnapshot = useContext(InitialSnapshotContext);
+
+    // Use the initial snapshot for SSR to ensure hydration stability.
+    // The server render uses initialSnapshot, and the client's first render
+    // must return the same value to avoid hydration mismatches.
+    const getServerSnapshot = useMemo(() => {
+      if (!initialSnapshot) return undefined;
+      return () => initialSnapshot;
+    }, [initialSnapshot]);
 
     return useSyncExternalStoreWithSelector(
       client.subscribe,
       client.getState,
-      client.getState,
+      getServerSnapshot,
       selector,
       defaultCompare
     );
