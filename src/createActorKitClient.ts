@@ -162,7 +162,13 @@ export function createActorKitClient<TMachine extends AnyActorKitStateMachine>(
 
     // Queue the event for delivery when connection is (re)established
     if (pendingEvents.length >= maxQueueSize) {
-      pendingEvents.shift(); // Drop oldest
+      const dropped = pendingEvents.shift();
+      props.onError?.(
+        new Error(
+          `Event queue overflow: dropped event "${dropped?.type ?? "unknown"}". ` +
+          `Queue is full at ${maxQueueSize} events while disconnected.`
+        )
+      );
     }
     pendingEvents.push(event);
   };
