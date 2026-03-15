@@ -139,6 +139,7 @@ export const createMachineServer = <
     storage: DurableObjectStorage;
     attachments = new Map<WebSocket, WebSocketAttachment>();
     subscriptions = new Map<WebSocket, Subscription>();
+    #sendQueues = new Map<WebSocket, Promise<void>>();
     env: EnvFromMachine<TMachine>;
     currentChecksum: string | null = null;
 
@@ -230,10 +231,10 @@ export const createMachineServer = <
           socket.deserializeAttachment()
         );
         this.attachments.set(socket, attachment);
-        this.#sendStateUpdate(socket);
+        this.#enqueueSendStateUpdate(socket);
 
         const subscription = this.actor?.subscribe(() => {
-          this.#sendStateUpdate(socket);
+          this.#enqueueSendStateUpdate(socket);
         });
 
         if (subscription) {
@@ -242,6 +243,14 @@ export const createMachineServer = <
       } catch {
         // Ignore malformed socket state.
       }
+    }
+
+    #enqueueSendStateUpdate(ws: ActorKitWebSocket) {
+      const prev = this.#sendQueues.get(ws) ?? Promise.resolve();
+      const next = prev.then(() => this.#sendStateUpdate(ws)).catch(() => {
+        // Errors in send are non-fatal; the next update will retry.
+      });
+      this.#sendQueues.set(ws, next);
     }
 
     async #sendStateUpdate(ws: ActorKitWebSocket) {
@@ -481,6 +490,7 @@ export const createMachineServer = <
         this.subscriptions.delete(ws);
       }
       this.attachments.delete(ws);
+      this.#sendQueues.delete(ws);
     }
 
     send(event: ClientEventFrom<TMachine> | ServiceEventFrom<TMachine>) {
