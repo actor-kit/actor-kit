@@ -45,6 +45,7 @@
     "lint": "eslint src tests vitest.config.ts eslint.config.js && pnpm --filter nextjs-actorkit-todo lint && pnpm --filter tanstack-start-actorkit-todo lint",
     "test": "pnpm run test:unit",
     "test:unit": "vitest run",
+    "test:integration": "vitest run --config vitest.integration.config.ts",
     "test:build-fixtures": "cd tests/integration/fixtures && npx wrangler deploy --dry-run --outdir=dist",
     "test:coverage": "vitest run --coverage",
     "test:mutate": "NODE_OPTIONS=--max-old-space-size=8192 stryker run",
@@ -105,7 +106,7 @@
     "typescript-eslint": "^8.57.0",
     "vitest": "^4.1.0",
     "xstate": "^5.28.0",
-    "xstate-migrate": "^0.0.5",
+    "xstate-migrate": "^0.0.7",
     "zod": "^3.25.76"
   },
   "pnpm": {
