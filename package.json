@@ -106,7 +106,7 @@
     "typescript-eslint": "^8.57.0",
     "vitest": "^4.1.0",
     "xstate": "^5.28.0",
-    "xstate-migrate": "^0.0.5",
+    "xstate-migrate": "^0.0.7",
     "zod": "^3.25.76"
   },
   "pnpm": {

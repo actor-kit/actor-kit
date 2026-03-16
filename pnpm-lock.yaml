@@ -100,8 +100,8 @@ importers:
         specifier: ^5.28.0
         version: 5.28.0
       xstate-migrate:
-        specifier: ^0.0.5
-        version: 0.0.5(xstate@5.28.0)
+        specifier: ^0.0.7
+        version: 0.0.7(xstate@5.28.0)
       zod:
         specifier: ^3.25.76
         version: 3.25.76
@@ -5580,10 +5580,10 @@ packages:
   xmlchars@2.2.0:
     resolution: {integrity: sha512-JZnDKK8B0RCDw84FNdDAIpZK+JuJw+s7Lz8nksI7SIuU3UXJJslUthsi+uWBUYOwPFwW7W7PRLRfUKpxjtjFCw==}
 
-  xstate-migrate@0.0.5:
-    resolution: {integrity: sha512-9cbdBh7gNLQHYabqAbl7m9iggfzRtu2eHpysVs67Rp1qsa7Weaca1v8az1Rhhz5ILgNzOM6esgpuCuAIT5xhkQ==}
+  xstate-migrate@0.0.7:
+    resolution: {integrity: sha512-hTNqwYlS+b4Kk0CGu3CgUZVFrupU2Bwczt0mFlEbACNv7lBRVOGdTOv0mMf7Xk7LlYU9ynRXBhzzECRQU7T9Gg==}
     peerDependencies:
-      xstate: ^5.15.0
+      xstate: ^5.28.0
 
   xstate@5.28.0:
     resolution: {integrity: sha512-Iaqq6ZrUzqeUtA3hC5LQKZfR8ZLzEFTImMHJM3jWEdVvXWdKvvVLXZEiNQWm3SCA9ZbEou/n5rcsna1wb9t28A==}
@@ -11068,7 +11068,7 @@ snapshots:
 
   xmlchars@2.2.0: {}
 
-  xstate-migrate@0.0.5(xstate@5.28.0):
+  xstate-migrate@0.0.7(xstate@5.28.0):
     dependencies:
       fast-json-patch: 3.1.1
       xstate: 5.28.0
