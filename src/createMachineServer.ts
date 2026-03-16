@@ -246,8 +246,11 @@ export const createMachineServer = <
     }
 
     #enqueueSendStateUpdate(ws: ActorKitWebSocket) {
-      const prev = this.#sendQueues.get(ws) ?? Promise.resolve();
-      const next = prev.then(() => this.#sendStateUpdate(ws)).catch(() => {
+      const prev = this.#sendQueues.get(ws);
+      const sendTask = prev
+        ? prev.then(() => this.#sendStateUpdate(ws))
+        : this.#sendStateUpdate(ws);
+      const next = sendTask.catch(() => {
         // Errors in send are non-fatal; the next update will retry.
       });
       this.#sendQueues.set(ws, next);
