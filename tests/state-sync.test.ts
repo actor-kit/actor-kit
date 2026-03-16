@@ -215,7 +215,7 @@ async function connectSocket(
 
 // Helper: wait for async operations (checksum computation etc)
 async function settle() {
-  await new Promise((r) => setTimeout(r, 50));
+  await new Promise((r) => setTimeout(r, 200));
 }
 
 // Helper: parse all messages sent to a socket
