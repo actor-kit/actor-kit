@@ -19,6 +19,7 @@ export default tseslint.config(
       "examples/**/node_modules/**",
       "examples/**/routeTree.gen.ts",
       "examples/**/*.js",
+      "tests/**/fixtures/dist/**",
     ],
   },
   js.configs.recommended,
