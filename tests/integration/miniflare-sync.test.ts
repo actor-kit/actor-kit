@@ -31,7 +31,7 @@ function parseMessage(data: string): StateUpdateMessage {
   return JSON.parse(data) as StateUpdateMessage;
 }
 
-describe("Miniflare integration: createMachineServer", { timeout: 15000 }, () => {
+describe("Miniflare integration: createMachineServer", () => {
   let mf: Miniflare;
   // Use unique actor IDs per test to avoid state leakage between tests
   let testCounter = 0;

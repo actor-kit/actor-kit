@@ -42,10 +42,11 @@
   "scripts": {
     "build": "tsdown",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "lint": "eslint src tests vitest.config.ts eslint.config.js && pnpm --filter nextjs-actorkit-todo lint && pnpm --filter tanstack-start-actorkit-todo lint",
+    "lint": "eslint src tests vitest.config.ts vitest.integration.config.ts eslint.config.js && pnpm --filter nextjs-actorkit-todo lint && pnpm --filter tanstack-start-actorkit-todo lint",
     "test": "pnpm run test:unit",
     "test:unit": "vitest run",
-    "test:build-fixtures": "cd tests/integration/fixtures && npx wrangler deploy --dry-run --outdir=dist",
+    "test:integration": "vitest run --config vitest.integration.config.ts",
+    "test:build-fixtures": "npx wrangler deploy --dry-run --outdir=dist --config tests/integration/fixtures/wrangler.toml",
     "test:coverage": "vitest run --coverage",
     "test:mutate": "NODE_OPTIONS=--max-old-space-size=8192 stryker run",
     "test:mutate:incremental": "NODE_OPTIONS=--max-old-space-size=8192 stryker run --incremental",
