@@ -42,7 +42,7 @@
   "scripts": {
     "build": "tsdown",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "lint": "eslint src tests vitest.config.ts vitest.integration.config.ts eslint.config.js && pnpm --filter nextjs-actorkit-todo lint && pnpm --filter tanstack-start-actorkit-todo lint",
+    "lint": "eslint src tests vitest.config.ts vitest.integration.config.ts vitest.stryker.config.ts eslint.config.js && pnpm --filter nextjs-actorkit-todo lint && pnpm --filter tanstack-start-actorkit-todo lint",
     "test": "pnpm run test:unit",
     "test:unit": "vitest run",
     "test:integration": "vitest run --config vitest.integration.config.ts",

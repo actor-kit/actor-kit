@@ -11,6 +11,9 @@ const config = {
     "src/createActorKitClient.ts",
   ],
   testRunner: "vitest",
+  vitest: {
+    configFile: "vitest.stryker.config.ts",
+  },
   checkers: [],
   coverageAnalysis: "off",
   reporters: ["clear-text", "progress", "json", "html"],
@@ -28,7 +31,7 @@ const config = {
     break: 80,
   },
   concurrency: 1,
-  timeoutMS: 10_000,
+  timeoutMS: 30_000,
   timeoutFactor: 1.5,
 };
 

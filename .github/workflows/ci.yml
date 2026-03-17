@@ -92,5 +92,8 @@ jobs:
       - name: Install Playwright browsers
         run: pnpm --filter tanstack-start-actorkit-todo exec playwright install --with-deps chromium
 
+      - name: Build TanStack Start app
+        run: pnpm --filter tanstack-start-actorkit-todo run dev:e2e:build
+
       - name: Run TanStack Start E2E
         run: pnpm --filter tanstack-start-actorkit-todo test:e2e
