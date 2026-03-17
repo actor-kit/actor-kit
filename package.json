@@ -1,6 +1,6 @@
 {
   "name": "actor-kit",
-  "version": "0.52.3",
+  "version": "0.52.4",
   "main": "./dist/index.mjs",
   "module": "./dist/index.mjs",
   "types": "./dist/index.d.mts",
