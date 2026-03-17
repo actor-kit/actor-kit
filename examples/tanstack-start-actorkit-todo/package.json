@@ -7,7 +7,8 @@
   },
   "scripts": {
     "dev": "pnpm build && wrangler dev -c .output/server/wrangler.json --port 3000 --inspector-port 0",
-    "dev:e2e": "pnpm build && wrangler dev -c .output/server/wrangler.json --port 3002 --inspector-port 0",
+    "dev:e2e": "wrangler dev -c .output/server/wrangler.json --port 3002 --inspector-port 9230",
+    "dev:e2e:build": "pnpm build",
     "build": "vite build",
     "preview": "pnpm build && wrangler dev -c .output/server/wrangler.json --port 3000 --inspector-port 0",
     "deploy": "pnpm build && wrangler deploy -c .output/server/wrangler.json",
