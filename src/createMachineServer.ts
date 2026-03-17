@@ -16,19 +16,15 @@ import { z } from "zod";
 import { PERSISTED_SNAPSHOT_KEY } from "./constants";
 import { CallerSchema } from "./schemas";
 import type {
-  ActorKitEnv,
   ActorKitInputProps,
-  ActorKitStateMachine,
-  ActorKitStorage,
-  ActorKitSystemEvent,
   ActorServer,
+  AnyActorKitStateMachine,
   Caller,
   CallerSnapshotFrom,
   ClientEventFrom,
+  EnvFromMachine,
   MachineServerOptions,
   ServiceEventFrom,
-  WithActorKitContext,
-  WithActorKitEvent,
 } from "./types";
 import { assert, getCallerFromRequest } from "./utils";
 
@@ -55,7 +51,7 @@ type WebSocketResponseInit = ResponseInit & {
   webSocket: WebSocket;
 };
 
-type ActorKitSnapshotView<TMachine extends ActorKitStateMachine<any, any, any>> = {
+type ActorKitSnapshotView<TMachine extends AnyActorKitStateMachine> = {
   value: CallerSnapshotFrom<TMachine>["value"];
   context: {
     public: CallerSnapshotFrom<TMachine>["public"];
@@ -92,23 +88,7 @@ export const createMachineServer = <
   TClientEvent extends AnyEventObject,
   TServiceEvent extends AnyEventObject,
   TInputSchema extends z.ZodObject<z.ZodRawShape>,
-  TEnv extends ActorKitEnv,
-  TMachine extends ActorKitStateMachine<
-    (
-      | WithActorKitEvent<TClientEvent, "client">
-      | WithActorKitEvent<TServiceEvent, "service">
-      | ActorKitSystemEvent
-    ) & {
-      storage: ActorKitStorage;
-      env: TEnv;
-    },
-    z.infer<TInputSchema> & {
-      id: string;
-      caller: Caller;
-      storage: ActorKitStorage;
-    },
-    WithActorKitContext<Record<string, unknown>, Record<string, unknown>, Record<string, unknown>>
-  >
+  TMachine extends AnyActorKitStateMachine
 >({
   machine,
   schemas,
@@ -123,7 +103,7 @@ export const createMachineServer = <
   options?: MachineServerOptions;
 }): new (
   state: DurableObjectState,
-  env: TEnv
+  env: EnvFromMachine<TMachine>
 ) => ActorServer<TMachine> =>
   class MachineServerImpl extends DurableObject implements ActorServer<TMachine> {
     actor: Actor<TMachine> | undefined;
@@ -141,10 +121,10 @@ export const createMachineServer = <
     attachments = new Map<WebSocket, WebSocketAttachment>();
     subscriptions = new Map<WebSocket, Subscription>();
     #sendQueues = new Map<WebSocket, Promise<void>>();
-    env: TEnv;
+    env: EnvFromMachine<TMachine>;
     currentChecksum: string | null = null;
 
-    constructor(state: DurableObjectState, env: TEnv) {
+    constructor(state: DurableObjectState, env: EnvFromMachine<TMachine>) {
       super(state, env);
       this.state = state;
       this.storage = state.storage;
