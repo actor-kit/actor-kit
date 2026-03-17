@@ -16,6 +16,7 @@ import { z } from "zod";
 import { PERSISTED_SNAPSHOT_KEY } from "./constants";
 import { CallerSchema } from "./schemas";
 import type {
+  ActorKitEnv,
   ActorKitInputProps,
   ActorKitStateMachine,
   ActorKitStorage,
@@ -24,7 +25,6 @@ import type {
   Caller,
   CallerSnapshotFrom,
   ClientEventFrom,
-  EnvFromMachine,
   MachineServerOptions,
   ServiceEventFrom,
   WithActorKitContext,
@@ -92,6 +92,7 @@ export const createMachineServer = <
   TClientEvent extends AnyEventObject,
   TServiceEvent extends AnyEventObject,
   TInputSchema extends z.ZodObject<z.ZodRawShape>,
+  TEnv extends ActorKitEnv,
   TMachine extends ActorKitStateMachine<
     (
       | WithActorKitEvent<TClientEvent, "client">
@@ -99,7 +100,7 @@ export const createMachineServer = <
       | ActorKitSystemEvent
     ) & {
       storage: ActorKitStorage;
-      env: EnvFromMachine<TMachine>;
+      env: TEnv;
     },
     z.infer<TInputSchema> & {
       id: string;
@@ -122,7 +123,7 @@ export const createMachineServer = <
   options?: MachineServerOptions;
 }): new (
   state: DurableObjectState,
-  env: EnvFromMachine<TMachine>
+  env: TEnv
 ) => ActorServer<TMachine> =>
   class MachineServerImpl extends DurableObject implements ActorServer<TMachine> {
     actor: Actor<TMachine> | undefined;
@@ -140,10 +141,10 @@ export const createMachineServer = <
     attachments = new Map<WebSocket, WebSocketAttachment>();
     subscriptions = new Map<WebSocket, Subscription>();
     #sendQueues = new Map<WebSocket, Promise<void>>();
-    env: EnvFromMachine<TMachine>;
+    env: TEnv;
     currentChecksum: string | null = null;
 
-    constructor(state: DurableObjectState, env: EnvFromMachine<TMachine>) {
+    constructor(state: DurableObjectState, env: TEnv) {
       super(state, env);
       this.state = state;
       this.storage = state.storage;
