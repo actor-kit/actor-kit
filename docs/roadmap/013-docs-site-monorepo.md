@@ -1,7 +1,7 @@
 # 013: Docs Site + Monorepo + tsdown
 
 **Priority**: P1
-**Status**: Proposal
+**Status**: Accepted (Phase 2 implemented 2026-03-19)
 **Affects**: repo structure, build system, CI/CD, `actor-kit/website` repo
 
 ## Problem

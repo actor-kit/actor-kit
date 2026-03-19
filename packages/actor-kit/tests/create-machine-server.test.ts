@@ -143,7 +143,7 @@ class FakeResponse {
 }
 
 beforeAll(async () => {
-  const module = await import("../examples/nextjs-actorkit-todo/src/todo.server");
+  const module = await import("../../../examples/nextjs-actorkit-todo/src/todo.server");
   TodoServer = module.Todo as unknown as TodoServerClass;
 });
 
