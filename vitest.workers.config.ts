@@ -7,15 +7,6 @@ export default defineConfig({
       wrangler: { configPath: "./tests/workers/wrangler.toml" },
     }),
   ],
-  // xstate-migrate ships CJS with `export` — need to optimize it for Workers
-  optimizeDeps: {
-    include: ["xstate-migrate"],
-  },
-  ssr: {
-    optimizeDeps: {
-      include: ["xstate-migrate"],
-    },
-  },
   test: {
     include: ["tests/workers/**/*.test.ts"],
     testTimeout: 15000,

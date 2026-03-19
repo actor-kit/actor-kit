@@ -17,7 +17,7 @@ import {
   createMachineServer,
   fromActorKit,
 } from "actor-kit/worker";
-import { DurableObject } from "cloudflare:workers";
+// DurableObject import available via cloudflare:workers in the Workers runtime
 import { assign, sendTo, setup } from "xstate";
 import { z } from "zod";
 
