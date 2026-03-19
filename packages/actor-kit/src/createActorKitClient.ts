@@ -2,8 +2,10 @@ import { applyPatch } from "fast-json-patch";
 import { produce } from "immer";
 
 import { EmittedEventSchema } from "./schemas";
+import { createSelector } from "./selector";
 import type {
   ActorKitClient,
+  ActorKitSelector,
   AnyActorKitStateMachine,
   CallerSnapshotFrom,
   ClientEventFrom,
@@ -218,6 +220,12 @@ export function createActorKitClient<TMachine extends AnyActorKitStateMachine>(
     });
   };
 
+  const select = <TSelected>(
+    selectorFn: (state: CallerSnapshotFrom<TMachine>) => TSelected,
+    equalityFn?: (a: TSelected, b: TSelected) => boolean
+  ): ActorKitSelector<TSelected> =>
+    createSelector(getState, subscribe, selectorFn, equalityFn);
+
   return {
     connect,
     disconnect,
@@ -225,6 +233,7 @@ export function createActorKitClient<TMachine extends AnyActorKitStateMachine>(
     getState,
     subscribe,
     waitFor,
+    select,
   };
 }
 

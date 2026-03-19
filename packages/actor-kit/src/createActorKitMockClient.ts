@@ -1,6 +1,8 @@
 import { Draft, produce } from "immer";
+import { createSelector } from "./selector";
 import {
   ActorKitClient,
+  ActorKitSelector,
   AnyActorKitStateMachine,
   CallerSnapshotFrom,
   ClientEventFrom,
@@ -126,6 +128,12 @@ export function createActorKitMockClient<TMachine extends AnyActorKitStateMachin
     });
   };
 
+  const select = <TSelected>(
+    selectorFn: (state: CallerSnapshotFrom<TMachine>) => TSelected,
+    equalityFn?: (a: TSelected, b: TSelected) => boolean
+  ): ActorKitSelector<TSelected> =>
+    createSelector(getState, subscribe, selectorFn, equalityFn);
+
   return {
     connect,
     disconnect,
@@ -134,5 +142,6 @@ export function createActorKitMockClient<TMachine extends AnyActorKitStateMachin
     subscribe,
     produce: produceFn,
     waitFor,
+    select,
   };
 }

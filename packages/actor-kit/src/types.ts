@@ -282,6 +282,11 @@ export type ActorKitEmittedEvent = {
   checksum: string;
 };
 
+export type ActorKitSelector<T> = {
+  get(): T;
+  subscribe(listener: (value: T) => void): () => void;
+};
+
 export type ActorKitClient<TMachine extends AnyActorKitStateMachine> = {
   connect: () => Promise<void>;
   disconnect: () => void;
@@ -294,6 +299,10 @@ export type ActorKitClient<TMachine extends AnyActorKitStateMachine> = {
     predicateFn: (state: CallerSnapshotFrom<TMachine>) => boolean,
     timeoutMs?: number
   ) => Promise<void>;
+  select: <TSelected>(
+    selector: (state: CallerSnapshotFrom<TMachine>) => TSelected,
+    equalityFn?: (a: TSelected, b: TSelected) => boolean
+  ) => ActorKitSelector<TSelected>;
 };
 
 // First define a helper to extract the event type from a machine
