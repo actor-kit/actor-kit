@@ -287,6 +287,17 @@ export type ActorKitSelector<T> = {
   subscribe(listener: (value: T) => void): () => void;
 };
 
+/**
+ * Maps a union of event objects into a trigger API:
+ *   { type: "FOO"; x: number } | { type: "BAR" }
+ *   →  { FOO(payload: { x: number }): void; BAR(): void }
+ */
+export type TriggerAPI<TEvent extends { type: string }> = {
+  [K in TEvent["type"]]: Omit<Extract<TEvent, { type: K }>, "type"> extends Record<string, never>
+    ? () => void
+    : (payload: Omit<Extract<TEvent, { type: K }>, "type">) => void;
+};
+
 export type ActorKitClient<TMachine extends AnyActorKitStateMachine> = {
   connect: () => Promise<void>;
   disconnect: () => void;
@@ -303,6 +314,7 @@ export type ActorKitClient<TMachine extends AnyActorKitStateMachine> = {
     selector: (state: CallerSnapshotFrom<TMachine>) => TSelected,
     equalityFn?: (a: TSelected, b: TSelected) => boolean
   ) => ActorKitSelector<TSelected>;
+  trigger: TriggerAPI<ClientEventFrom<TMachine>>;
 };
 
 // First define a helper to extract the event type from a machine
