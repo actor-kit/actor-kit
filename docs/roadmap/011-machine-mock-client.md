@@ -1,8 +1,17 @@
 # 011: Machine-Running Mock Client
 
 **Priority**: P3
-**Status**: Accepted (implemented 2026-03-19)
+**Status**: Rejected (reverted 2026-03-19)
 **Affects**: `createActorKitMockClient.ts`
+
+> **Decision**: Not implementing. Machine files in actor-kit apps import
+> `actor-kit/worker` which depends on `cloudflare:workers` — pulling that into
+> Storybook or browser tests breaks. The existing `createActorKitMockClient`
+> with `produce()` covers the real use cases (visual QA, state simulation)
+> without server dependencies. The planned package split (`@actor-kit/worker`,
+> `@actor-kit/react`, etc.) would partially address this, but even then forcing
+> users to separate machine definitions from server setup is an unnecessary
+> architectural constraint.
 
 ## Problem
 

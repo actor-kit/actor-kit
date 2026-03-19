@@ -11,7 +11,6 @@ const config = {
     "src/createActorKitClient.ts",
     "src/selector.ts",
     "src/transition.ts",
-    "src/createActorKitMachineClient.ts",
   ],
   testRunner: "vitest",
   vitest: {
