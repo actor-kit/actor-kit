@@ -1,7 +1,7 @@
 # 015: Pure Transition API for Testing
 
 **Priority**: P1
-**Status**: Proposal
+**Status**: Accepted (implemented 2026-03-19)
 **Inspired by**: `@xstate/store` v3 `store.transition(state, event)` API
 
 ## Problem

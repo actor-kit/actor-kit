@@ -35,7 +35,7 @@ Run these in order before committing:
 
 1. `pnpm lint` — ESLint across src, tests, and examples
 2. `pnpm typecheck` — strict TypeScript compilation
-3. `pnpm test:unit` — Vitest unit tests (62 tests across 10 files)
+3. `pnpm test:unit` — Vitest unit tests (73 tests across 11 files)
 4. `pnpm test:coverage` — coverage report (thresholds: 10% lines, 5% branches)
 5. `pnpm test:mutate` — Stryker mutation testing (break threshold: 80%)
 
