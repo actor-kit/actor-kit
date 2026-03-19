@@ -1,5 +1,5 @@
 import type { DurableObject } from "cloudflare:workers";
-import { Operation } from "fast-json-patch";
+import type { Operation } from "fast-json-patch";
 import type {
   AnyEventObject,
   AnyStateMachine,
