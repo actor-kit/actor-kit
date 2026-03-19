@@ -1,117 +1,32 @@
 {
-  "name": "actor-kit",
-  "version": "0.52.6",
-  "main": "./dist/index.mjs",
-  "module": "./dist/index.mjs",
-  "types": "./dist/index.d.mts",
-  "exports": {
-    ".": {
-      "types": "./dist/index.d.mts",
-      "import": "./dist/index.mjs"
-    },
-    "./browser": {
-      "types": "./dist/browser.d.mts",
-      "import": "./dist/browser.mjs"
-    },
-    "./server": {
-      "types": "./dist/server.d.mts",
-      "import": "./dist/server.mjs"
-    },
-    "./react": {
-      "types": "./dist/react.d.mts",
-      "import": "./dist/react.mjs"
-    },
-    "./storybook": {
-      "types": "./dist/storybook.d.mts",
-      "import": "./dist/storybook.mjs"
-    },
-    "./test": {
-      "types": "./dist/test.d.mts",
-      "import": "./dist/test.mjs"
-    },
-    "./worker": {
-      "types": "./dist/worker.d.mts",
-      "import": "./dist/worker.mjs"
-    }
-  },
-  "files": [
-    "src",
-    "dist"
-  ],
+  "private": true,
   "packageManager": "pnpm@10.28.2",
   "scripts": {
-    "build": "tsdown",
-    "typecheck": "tsc -p tsconfig.json --noEmit",
-    "types:generate": "wrangler types cloudflare-runtime.d.ts --include-env=false --config tests/workers/wrangler.toml && wrangler types tests/workers/worker-configuration.d.ts --config tests/workers/wrangler.toml",
-    "lint": "eslint src tests vitest.config.ts vitest.integration.config.ts vitest.stryker.config.ts eslint.config.js && pnpm --filter nextjs-actorkit-todo lint && pnpm --filter tanstack-start-actorkit-todo lint",
-    "test": "pnpm run test:unit",
-    "test:unit": "vitest run",
-    "test:integration": "vitest run --config vitest.integration.config.ts",
-    "test:workers": "vitest run --config vitest.workers.config.ts",
-    "test:build-fixtures": "npx wrangler deploy --dry-run --outdir=dist --config tests/integration/fixtures/wrangler.toml",
-    "test:coverage": "vitest run --coverage",
-    "test:mutate": "NODE_OPTIONS=--max-old-space-size=8192 stryker run",
-    "test:mutate:incremental": "NODE_OPTIONS=--max-old-space-size=8192 stryker run --incremental",
-    "test:mutate:full": "STRYKER_INCREMENTAL=false NODE_OPTIONS=--max-old-space-size=8192 stryker run",
-    "analyze:crap": "node scripts/report-crap.mjs",
-    "test:e2e": "pnpm run test:e2e:nextjs && pnpm run test:e2e:tanstack-start",
-    "test:e2e:nextjs": "pnpm --filter nextjs-actorkit-todo test:e2e",
-    "test:e2e:tanstack-start": "pnpm --filter tanstack-start-actorkit-todo test:e2e",
-    "check": "pnpm run build && pnpm run typecheck && pnpm run lint && pnpm run test:coverage",
-    "prepare": "husky",
-    "prepublishOnly": "pnpm run check"
-  },
-  "keywords": [
-    "xstate",
-    "partykit",
-    "actor",
-    "state-machine"
-  ],
-  "author": "jonmumm",
-  "license": "ISC",
-  "peerDependencies": {
-    "react": "^17.0.0 || ^18.0.0 || ^19.0.0",
-    "xstate": "^5.18.0",
-    "zod": "^3.23.0"
-  },
-  "dependencies": {
-    "cloudflare": "^5.2.0",
-    "fast-json-patch": "^3.1.1",
-    "immer": "^11.1.4",
-    "jose": "^6.2.1"
+    "build": "pnpm --filter actor-kit build",
+    "typecheck": "pnpm --filter actor-kit typecheck",
+    "lint": "pnpm --filter actor-kit lint",
+    "test": "pnpm --filter actor-kit test",
+    "test:unit": "pnpm --filter actor-kit test:unit",
+    "test:integration": "pnpm --filter actor-kit test:integration",
+    "test:workers": "pnpm --filter actor-kit test:workers",
+    "test:build-fixtures": "pnpm --filter actor-kit test:build-fixtures",
+    "test:coverage": "pnpm --filter actor-kit test:coverage",
+    "test:mutate": "pnpm --filter actor-kit test:mutate",
+    "test:mutate:incremental": "pnpm --filter actor-kit test:mutate:incremental",
+    "test:mutate:full": "pnpm --filter actor-kit test:mutate:full",
+    "test:e2e": "pnpm --filter actor-kit test:e2e",
+    "test:e2e:nextjs": "pnpm --filter actor-kit test:e2e:nextjs",
+    "test:e2e:tanstack-start": "pnpm --filter actor-kit test:e2e:tanstack-start",
+    "analyze:crap": "pnpm --filter actor-kit analyze:crap",
+    "check": "pnpm --filter actor-kit check",
+    "prepare": "husky"
   },
   "devDependencies": {
-    "@cloudflare/vitest-pool-workers": "^0.13.2",
-    "@eslint/js": "^9.39.4",
-    "@storybook/react": "^8.6.18",
-    "@stryker-mutator/core": "^9.6.0",
-    "@stryker-mutator/typescript-checker": "^9.6.0",
-    "@stryker-mutator/vitest-runner": "^9.6.0",
-    "@types/node": "^22.19.15",
-    "@types/react": "^19.2.2",
-    "@types/use-sync-external-store": "^0.0.6",
-    "@typescript-eslint/eslint-plugin": "^8.57.0",
-    "@typescript-eslint/parser": "^8.57.0",
-    "@vitest/coverage-v8": "^4.1.0",
-    "complexity-report": "^2.0.0-alpha",
-    "eslint": "^9.39.1",
-    "eslint-plugin-react-hooks": "^7.0.1",
-    "eslint-plugin-react-refresh": "^0.5.2",
-    "fast-json-patch": "^3.1.1",
     "husky": "^9.1.7",
-    "immer": "^11.1.4",
-    "jsondiffpatch": "^0.7.3",
-    "lint-staged": "^16.3.3",
-    "miniflare": "^4.20260312.0",
-    "react": "^19.2.0",
-    "tsdown": "^0.21.2",
-    "typescript": "^5.9.3",
-    "typescript-eslint": "^8.57.0",
-    "vitest": "^4.1.0",
-    "wrangler": "^4.75.0",
-    "xstate": "^5.28.0",
-    "xstate-migrate": "^0.0.8",
-    "zod": "^3.25.76"
+    "lint-staged": "^16.3.3"
+  },
+  "lint-staged": {
+    "packages/actor-kit/**/*.{js,mjs,cjs,ts,tsx}": "eslint --fix --config packages/actor-kit/eslint.config.js"
   },
   "pnpm": {
     "onlyBuiltDependencies": [
@@ -122,11 +37,7 @@
       "workerd"
     ],
     "patchedDependencies": {
-      "fast-json-patch": "patches/fast-json-patch.patch"
+      "fast-json-patch": "packages/actor-kit/patches/fast-json-patch.patch"
     }
-  },
-  "lint-staged": {
-    "*.{js,mjs,cjs,ts,tsx}": "eslint --fix"
-  },
-  "type": "module"
+  }
 }

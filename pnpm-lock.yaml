@@ -7,124 +7,30 @@ settings:
 patchedDependencies:
   fast-json-patch:
     hash: 19ff0b5d47c887c22c5f96a82f8bdfca364a743a1a9fbb5347c807f10f6e5f7d
-    path: patches/fast-json-patch.patch
+    path: packages/actor-kit/patches/fast-json-patch.patch
 
 importers:
 
   .:
-    dependencies:
-      cloudflare:
-        specifier: ^5.2.0
-        version: 5.2.0
-      fast-json-patch:
-        specifier: ^3.1.1
-        version: 3.1.1(patch_hash=19ff0b5d47c887c22c5f96a82f8bdfca364a743a1a9fbb5347c807f10f6e5f7d)
-      immer:
-        specifier: ^11.1.4
-        version: 11.1.4
-      jose:
-        specifier: ^6.2.1
-        version: 6.2.1
     devDependencies:
-      '@cloudflare/vitest-pool-workers':
-        specifier: ^0.13.2
-        version: 0.13.2(@vitest/runner@4.1.0)(@vitest/snapshot@4.1.0)(vitest@4.1.0(@types/node@22.19.15)(jsdom@28.1.0)(vite@7.3.1(@types/node@22.19.15)(jiti@2.6.1)(lightningcss@1.31.1)(terser@5.46.0)(tsx@4.21.0)(yaml@2.8.2)))
-      '@eslint/js':
-        specifier: ^9.39.4
-        version: 9.39.4
-      '@storybook/react':
-        specifier: ^8.6.18
-        version: 8.6.18(react-dom@19.2.4(react@19.2.4))(react@19.2.4)(storybook@8.6.18(prettier@3.8.1))(typescript@5.9.3)
-      '@stryker-mutator/core':
-        specifier: ^9.6.0
-        version: 9.6.0(@types/node@22.19.15)
-      '@stryker-mutator/typescript-checker':
-        specifier: ^9.6.0
-        version: 9.6.0(@stryker-mutator/core@9.6.0(@types/node@22.19.15))(typescript@5.9.3)
-      '@stryker-mutator/vitest-runner':
-        specifier: ^9.6.0
-        version: 9.6.0(@stryker-mutator/core@9.6.0(@types/node@22.19.15))(vitest@4.1.0(@types/node@22.19.15)(jsdom@28.1.0)(vite@7.3.1(@types/node@22.19.15)(jiti@2.6.1)(lightningcss@1.31.1)(terser@5.46.0)(tsx@4.21.0)(yaml@2.8.2)))
-      '@types/node':
-        specifier: ^22.19.15
-        version: 22.19.15
-      '@types/react':
-        specifier: ^19.2.2
-        version: 19.2.14
-      '@types/use-sync-external-store':
-        specifier: ^0.0.6
-        version: 0.0.6
-      '@typescript-eslint/eslint-plugin':
-        specifier: ^8.57.0
-        version: 8.57.0(@typescript-eslint/parser@8.57.0(eslint@9.39.4(jiti@2.6.1))(typescript@5.9.3))(eslint@9.39.4(jiti@2.6.1))(typescript@5.9.3)
-      '@typescript-eslint/parser':
-        specifier: ^8.57.0
-        version: 8.57.0(eslint@9.39.4(jiti@2.6.1))(typescript@5.9.3)
-      '@vitest/coverage-v8':
-        specifier: ^4.1.0
-        version: 4.1.0(vitest@4.1.0(@types/node@22.19.15)(jsdom@28.1.0)(vite@7.3.1(@types/node@22.19.15)(jiti@2.6.1)(lightningcss@1.31.1)(terser@5.46.0)(tsx@4.21.0)(yaml@2.8.2)))
-      complexity-report:
-        specifier: ^2.0.0-alpha
-        version: 2.0.0-alpha
-      eslint:
-        specifier: ^9.39.1
-        version: 9.39.4(jiti@2.6.1)
-      eslint-plugin-react-hooks:
-        specifier: ^7.0.1
-        version: 7.0.1(eslint@9.39.4(jiti@2.6.1))
-      eslint-plugin-react-refresh:
-        specifier: ^0.5.2
-        version: 0.5.2(eslint@9.39.4(jiti@2.6.1))
       husky:
         specifier: ^9.1.7
         version: 9.1.7
-      jsondiffpatch:
-        specifier: ^0.7.3
-        version: 0.7.3
       lint-staged:
         specifier: ^16.3.3
         version: 16.3.3
-      miniflare:
-        specifier: ^4.20260312.0
-        version: 4.20260312.0
-      react:
-        specifier: ^19.2.0
-        version: 19.2.4
-      tsdown:
-        specifier: ^0.21.2
-        version: 0.21.2(typescript@5.9.3)
-      typescript:
-        specifier: ^5.9.3
-        version: 5.9.3
-      typescript-eslint:
-        specifier: ^8.57.0
-        version: 8.57.0(eslint@9.39.4(jiti@2.6.1))(typescript@5.9.3)
-      vitest:
-        specifier: ^4.1.0
-        version: 4.1.0(@types/node@22.19.15)(jsdom@28.1.0)(vite@7.3.1(@types/node@22.19.15)(jiti@2.6.1)(lightningcss@1.31.1)(terser@5.46.0)(tsx@4.21.0)(yaml@2.8.2))
-      wrangler:
-        specifier: ^4.75.0
-        version: 4.75.0
-      xstate:
-        specifier: ^5.28.0
-        version: 5.28.0
-      xstate-migrate:
-        specifier: ^0.0.8
-        version: 0.0.8(xstate@5.28.0)
-      zod:
-        specifier: ^3.25.76
-        version: 3.25.76
 
   examples/nextjs-actorkit-todo:
     dependencies:
       actor-kit:
         specifier: workspace:*
-        version: link:../..
+        version: link:../../packages/actor-kit
       cookie:
         specifier: ^0.6.0
         version: 0.6.0
       next:
         specifier: 14.2.13
-        version: 14.2.13(@babel/core@7.29.0)(@playwright/test@1.58.2)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
+        version: 14.2.13(@playwright/test@1.58.2)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
       react:
         specifier: ^18
         version: 18.3.1
@@ -197,7 +103,7 @@ importers:
         version: 1.166.7(@tanstack/react-router@1.166.7(react-dom@19.2.4(react@19.2.4))(react@19.2.4))(vite@7.3.1(@types/node@22.19.15)(jiti@2.6.1)(lightningcss@1.31.1)(terser@5.46.0)(tsx@4.21.0)(yaml@2.8.2))
       actor-kit:
         specifier: workspace:*
-        version: link:../..
+        version: link:../../packages/actor-kit
       h3:
         specifier: ^2.0.1-rc.16
         version: 2.0.1-rc.16(crossws@0.4.4(srvx@0.11.9))
@@ -277,6 +183,103 @@ importers:
       wrangler:
         specifier: ^4.72.0
         version: 4.72.0(@cloudflare/workers-types@4.20260312.1)
+
+  packages/actor-kit:
+    dependencies:
+      cloudflare:
+        specifier: ^5.2.0
+        version: 5.2.0
+      fast-json-patch:
+        specifier: ^3.1.1
+        version: 3.1.1(patch_hash=19ff0b5d47c887c22c5f96a82f8bdfca364a743a1a9fbb5347c807f10f6e5f7d)
+      immer:
+        specifier: ^11.1.4
+        version: 11.1.4
+      jose:
+        specifier: ^6.2.1
+        version: 6.2.1
+    devDependencies:
+      '@cloudflare/vitest-pool-workers':
+        specifier: ^0.13.2
+        version: 0.13.2(@vitest/runner@4.1.0)(@vitest/snapshot@4.1.0)(vitest@4.1.0(@types/node@22.19.15)(jsdom@28.1.0)(vite@7.3.1(@types/node@22.19.15)(jiti@2.6.1)(lightningcss@1.31.1)(terser@5.46.0)(tsx@4.21.0)(yaml@2.8.2)))
+      '@eslint/js':
+        specifier: ^9.39.4
+        version: 9.39.4
+      '@storybook/react':
+        specifier: ^8.6.18
+        version: 8.6.18(react-dom@19.2.4(react@19.2.4))(react@19.2.4)(storybook@8.6.18(prettier@3.8.1))(typescript@5.9.3)
+      '@stryker-mutator/core':
+        specifier: ^9.6.0
+        version: 9.6.0(@types/node@22.19.15)
+      '@stryker-mutator/typescript-checker':
+        specifier: ^9.6.0
+        version: 9.6.0(@stryker-mutator/core@9.6.0(@types/node@22.19.15))(typescript@5.9.3)
+      '@stryker-mutator/vitest-runner':
+        specifier: ^9.6.0
+        version: 9.6.0(@stryker-mutator/core@9.6.0(@types/node@22.19.15))(vitest@4.1.0(@types/node@22.19.15)(jsdom@28.1.0)(vite@7.3.1(@types/node@22.19.15)(jiti@2.6.1)(lightningcss@1.31.1)(terser@5.46.0)(tsx@4.21.0)(yaml@2.8.2)))
+      '@types/node':
+        specifier: ^22.19.15
+        version: 22.19.15
+      '@types/react':
+        specifier: ^19.2.2
+        version: 19.2.14
+      '@types/use-sync-external-store':
+        specifier: ^0.0.6
+        version: 0.0.6
+      '@typescript-eslint/eslint-plugin':
+        specifier: ^8.57.0
+        version: 8.57.0(@typescript-eslint/parser@8.57.0(eslint@9.39.4(jiti@2.6.1))(typescript@5.9.3))(eslint@9.39.4(jiti@2.6.1))(typescript@5.9.3)
+      '@typescript-eslint/parser':
+        specifier: ^8.57.0
+        version: 8.57.0(eslint@9.39.4(jiti@2.6.1))(typescript@5.9.3)
+      '@vitest/coverage-v8':
+        specifier: ^4.1.0
+        version: 4.1.0(vitest@4.1.0(@types/node@22.19.15)(jsdom@28.1.0)(vite@7.3.1(@types/node@22.19.15)(jiti@2.6.1)(lightningcss@1.31.1)(terser@5.46.0)(tsx@4.21.0)(yaml@2.8.2)))
+      complexity-report:
+        specifier: ^2.0.0-alpha
+        version: 2.0.0-alpha
+      eslint:
+        specifier: ^9.39.1
+        version: 9.39.4(jiti@2.6.1)
+      eslint-plugin-react-hooks:
+        specifier: ^7.0.1
+        version: 7.0.1(eslint@9.39.4(jiti@2.6.1))
+      eslint-plugin-react-refresh:
+        specifier: ^0.5.2
+        version: 0.5.2(eslint@9.39.4(jiti@2.6.1))
+      jsondiffpatch:
+        specifier: ^0.7.3
+        version: 0.7.3
+      miniflare:
+        specifier: ^4.20260312.0
+        version: 4.20260317.0
+      react:
+        specifier: ^19.2.0
+        version: 19.2.4
+      tsdown:
+        specifier: ^0.21.2
+        version: 0.21.2(typescript@5.9.3)
+      typescript:
+        specifier: ^5.9.3
+        version: 5.9.3
+      typescript-eslint:
+        specifier: ^8.57.0
+        version: 8.57.0(eslint@9.39.4(jiti@2.6.1))(typescript@5.9.3)
+      vitest:
+        specifier: ^4.1.0
+        version: 4.1.0(@types/node@22.19.15)(jsdom@28.1.0)(vite@7.3.1(@types/node@22.19.15)(jiti@2.6.1)(lightningcss@1.31.1)(terser@5.46.0)(tsx@4.21.0)(yaml@2.8.2))
+      wrangler:
+        specifier: ^4.75.0
+        version: 4.75.0
+      xstate:
+        specifier: ^5.28.0
+        version: 5.28.0
+      xstate-migrate:
+        specifier: ^0.0.8
+        version: 0.0.8(xstate@5.28.0)
+      zod:
+        specifier: ^3.25.76
+        version: 3.25.76
 
 packages:
 
@@ -525,12 +528,6 @@ packages:
     cpu: [x64]
     os: [darwin]
 
-  '@cloudflare/workerd-darwin-64@1.20260312.1':
-    resolution: {integrity: sha512-HUAtDWaqUduS6yasV6+NgsK7qBpP1qGU49ow/Wb117IHjYp+PZPUGReDYocpB4GOMRoQlvdd4L487iFxzdARpw==}
-    engines: {node: '>=16'}
-    cpu: [x64]
-    os: [darwin]
-
   '@cloudflare/workerd-darwin-64@1.20260317.1':
     resolution: {integrity: sha512-8hjh3sPMwY8M/zedq3/sXoA2Q4BedlGufn3KOOleIG+5a4ReQKLlUah140D7J6zlKmYZAFMJ4tWC7hCuI/s79g==}
     engines: {node: '>=16'}
@@ -539,12 +536,6 @@ packages:
 
   '@cloudflare/workerd-darwin-arm64@1.20260310.1':
     resolution: {integrity: sha512-h/Vl3XrYYPI6yFDE27XO1QPq/1G1lKIM8tzZGIWYpntK3IN5XtH3Ee/sLaegpJ49aIJoqhF2mVAZ6Yw+Vk2gJw==}
-    engines: {node: '>=16'}
-    cpu: [arm64]
-    os: [darwin]
-
-  '@cloudflare/workerd-darwin-arm64@1.20260312.1':
-    resolution: {integrity: sha512-DOn7TPTHSxJYfi4m4NYga/j32wOTqvJf/pY4Txz5SDKWIZHSTXFyGz2K4B+thoPWLop/KZxGoyTv7db0mk/qyw==}
     engines: {node: '>=16'}
     cpu: [arm64]
     os: [darwin]
@@ -561,12 +552,6 @@ packages:
     cpu: [x64]
     os: [linux]
 
-  '@cloudflare/workerd-linux-64@1.20260312.1':
-    resolution: {integrity: sha512-TdkIh3WzPXYHuvz7phAtFEEvAxvFd30tHrm4gsgpw0R0F5b8PtoM3hfL2uY7EcBBWVYUBtkY2ahDYFfufnXw/g==}
-    engines: {node: '>=16'}
-    cpu: [x64]
-    os: [linux]
-
   '@cloudflare/workerd-linux-64@1.20260317.1':
     resolution: {integrity: sha512-1ltuEjkRcS3fsVF7CxsKlWiRmzq2ZqMfqDN0qUOgbUwkpXsLVJsXmoblaLf5OP00ELlcgF0QsN0p2xPEua4Uug==}
     engines: {node: '>=16'}
@@ -579,12 +564,6 @@ packages:
     cpu: [arm64]
     os: [linux]
 
-  '@cloudflare/workerd-linux-arm64@1.20260312.1':
-    resolution: {integrity: sha512-kNauZhL569Iy94t844OMwa1zP6zKFiL3xiJ4tGLS+TFTEfZ3pZsRH6lWWOtkXkjTyCmBEOog0HSEKjIV4oAffw==}
-    engines: {node: '>=16'}
-    cpu: [arm64]
-    os: [linux]
-
   '@cloudflare/workerd-linux-arm64@1.20260317.1':
     resolution: {integrity: sha512-3QrNnPF1xlaNwkHpasvRvAMidOvQs2NhXQmALJrEfpIJ/IDL2la8g499yXp3eqhG3hVMCB07XVY149GTs42Xtw==}
     engines: {node: '>=16'}
@@ -593,12 +572,6 @@ packages:
 
   '@cloudflare/workerd-windows-64@1.20260310.1':
     resolution: {integrity: sha512-+1ZTViWKJypLfgH/luAHCqkent0DEBjAjvO40iAhOMHRLYP/SPphLvr4Jpi6lb+sIocS8Q1QZL4uM5Etg1Wskg==}
-    engines: {node: '>=16'}
-    cpu: [x64]
-    os: [win32]
-
-  '@cloudflare/workerd-windows-64@1.20260312.1':
-    resolution: {integrity: sha512-5dBrlSK+nMsZy5bYQpj8t9iiQNvCRlkm9GGvswJa9vVU/1BNO4BhJMlqOLWT24EmFyApZ+kaBiPJMV8847NDTg==}
     engines: {node: '>=16'}
     cpu: [x64]
     os: [win32]
@@ -4291,11 +4264,6 @@ packages:
     engines: {node: '>=18.0.0'}
     hasBin: true
 
-  miniflare@4.20260312.0:
-    resolution: {integrity: sha512-pieP2rfXynPT6VRINYaiHe/tfMJ4c5OIhqRlIdLF6iZ9g5xgpEmvimvIgMpgAdDJuFlrLcwDUi8MfAo2R6dt/w==}
-    engines: {node: '>=18.0.0'}
-    hasBin: true
-
   miniflare@4.20260317.0:
     resolution: {integrity: sha512-xuwk5Kjv+shi5iUBAdCrRl9IaWSGnTU8WuTQzsUS2GlSDIMCJuu8DiF/d9ExjMXYiQG5ml+k9SVKnMj8cRkq0w==}
     engines: {node: '>=18.0.0'}
@@ -5572,11 +5540,6 @@ packages:
     engines: {node: '>=16'}
     hasBin: true
 
-  workerd@1.20260312.1:
-    resolution: {integrity: sha512-nNpPkw9jaqo79B+iBCOiksx+N62xC+ETIfyzofUEdY3cSOHJg6oNnVSHm7vHevzVblfV76c8Gr0cXHEapYMBEg==}
-    engines: {node: '>=16'}
-    hasBin: true
-
   workerd@1.20260317.1:
     resolution: {integrity: sha512-ZuEq1OdrJBS+NV+L5HMYPCzVn49a2O60slQiiLpG44jqtlOo+S167fWC76kEXteXLLLydeuRrluRel7WdOUa4g==}
     engines: {node: '>=16'}
@@ -6012,16 +5975,10 @@ snapshots:
   '@cloudflare/workerd-darwin-64@1.20260310.1':
     optional: true
 
-  '@cloudflare/workerd-darwin-64@1.20260312.1':
-    optional: true
-
   '@cloudflare/workerd-darwin-64@1.20260317.1':
     optional: true
 
   '@cloudflare/workerd-darwin-arm64@1.20260310.1':
-    optional: true
-
-  '@cloudflare/workerd-darwin-arm64@1.20260312.1':
     optional: true
 
   '@cloudflare/workerd-darwin-arm64@1.20260317.1':
@@ -6030,25 +5987,16 @@ snapshots:
   '@cloudflare/workerd-linux-64@1.20260310.1':
     optional: true
 
-  '@cloudflare/workerd-linux-64@1.20260312.1':
-    optional: true
-
   '@cloudflare/workerd-linux-64@1.20260317.1':
     optional: true
 
   '@cloudflare/workerd-linux-arm64@1.20260310.1':
     optional: true
 
-  '@cloudflare/workerd-linux-arm64@1.20260312.1':
-    optional: true
-
   '@cloudflare/workerd-linux-arm64@1.20260317.1':
     optional: true
 
   '@cloudflare/workerd-windows-64@1.20260310.1':
-    optional: true
-
-  '@cloudflare/workerd-windows-64@1.20260312.1':
     optional: true
 
   '@cloudflare/workerd-windows-64@1.20260317.1':
@@ -9772,18 +9720,6 @@ snapshots:
       - bufferutil
       - utf-8-validate
 
-  miniflare@4.20260312.0:
-    dependencies:
-      '@cspotcode/source-map-support': 0.8.1
-      sharp: 0.34.5
-      undici: 7.18.2
-      workerd: 1.20260312.1
-      ws: 8.18.0
-      youch: 4.1.0-beta.10
-    transitivePeerDependencies:
-      - bufferutil
-      - utf-8-validate
-
   miniflare@4.20260317.0:
     dependencies:
       '@cspotcode/source-map-support': 0.8.1
@@ -9842,7 +9778,7 @@ snapshots:
 
   natural-compare@1.4.0: {}
 
-  next@14.2.13(@babel/core@7.29.0)(@playwright/test@1.58.2)(react-dom@18.3.1(react@18.3.1))(react@18.3.1):
+  next@14.2.13(@playwright/test@1.58.2)(react-dom@18.3.1(react@18.3.1))(react@18.3.1):
     dependencies:
       '@next/env': 14.2.13
       '@swc/helpers': 0.5.5
@@ -9852,7 +9788,7 @@ snapshots:
       postcss: 8.4.31
       react: 18.3.1
       react-dom: 18.3.1(react@18.3.1)
-      styled-jsx: 5.1.1(@babel/core@7.29.0)(react@18.3.1)
+      styled-jsx: 5.1.1(react@18.3.1)
     optionalDependencies:
       '@next/swc-darwin-arm64': 14.2.13
       '@next/swc-darwin-x64': 14.2.13
@@ -10633,12 +10569,10 @@ snapshots:
 
   strip-json-comments@3.1.1: {}
 
-  styled-jsx@5.1.1(@babel/core@7.29.0)(react@18.3.1):
+  styled-jsx@5.1.1(react@18.3.1):
     dependencies:
       client-only: 0.0.1
       react: 18.3.1
-    optionalDependencies:
-      '@babel/core': 7.29.0
 
   sucrase@3.35.1:
     dependencies:
@@ -11131,14 +11065,6 @@ snapshots:
       '@cloudflare/workerd-linux-64': 1.20260310.1
       '@cloudflare/workerd-linux-arm64': 1.20260310.1
       '@cloudflare/workerd-windows-64': 1.20260310.1
-
-  workerd@1.20260312.1:
-    optionalDependencies:
-      '@cloudflare/workerd-darwin-64': 1.20260312.1
-      '@cloudflare/workerd-darwin-arm64': 1.20260312.1
-      '@cloudflare/workerd-linux-64': 1.20260312.1
-      '@cloudflare/workerd-linux-arm64': 1.20260312.1
-      '@cloudflare/workerd-windows-64': 1.20260312.1
 
   workerd@1.20260317.1:
     optionalDependencies:

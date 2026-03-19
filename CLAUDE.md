@@ -9,9 +9,25 @@ Library for running XState state machines in Cloudflare Durable Objects with rea
 - **Validation**: Zod
 - **Runtime**: Cloudflare Workers + Durable Objects
 - **Client**: React (primary), framework-agnostic core
-- **Build**: Rollup
+- **Build**: tsdown (esbuild-based)
 - **Test**: Vitest, Stryker (mutation testing)
 - **Package manager**: pnpm
+
+## Repo structure
+
+Monorepo with pnpm workspaces:
+
+```
+actor-kit/
+├── packages/actor-kit/    ← library (src/, tests/, configs)
+├── examples/              ← example apps (nextjs-todo, tanstack-start-todo)
+├── docs/                  ← documentation, roadmap, ADRs
+├── pnpm-workspace.yaml
+├── package.json           ← root (delegates to packages/actor-kit)
+└── CLAUDE.md
+```
+
+All `pnpm` commands run from root and delegate via `--filter actor-kit`.
 
 ## Feedback commands
 
@@ -19,7 +35,7 @@ Run these in order before committing:
 
 1. `pnpm lint` — ESLint across src, tests, and examples
 2. `pnpm typecheck` — strict TypeScript compilation
-3. `pnpm test:unit` — Vitest unit tests (42 tests across 8 files)
+3. `pnpm test:unit` — Vitest unit tests (62 tests across 10 files)
 4. `pnpm test:coverage` — coverage report (thresholds: 10% lines, 5% branches)
 5. `pnpm test:mutate` — Stryker mutation testing (break threshold: 80%)
 
@@ -58,8 +74,8 @@ Do NOT load all docs upfront. Load only when relevant to the current task.
 
 | If you change... | Then update... |
 |-----------------|----------------|
-| Core types (`src/types.ts`) | [docs/architecture.md](docs/architecture.md) § Type System |
-| Snapshot sync logic (`src/createMachineServer.ts`) | [docs/architecture.md](docs/architecture.md) § Sync Protocol |
+| Core types (`packages/actor-kit/src/types.ts`) | [docs/architecture.md](docs/architecture.md) § Type System |
+| Snapshot sync logic (`packages/actor-kit/src/createMachineServer.ts`) | [docs/architecture.md](docs/architecture.md) § Sync Protocol |
 | Test infrastructure (fakes, helpers) | [docs/testing-strategy.md](docs/testing-strategy.md) |
 | Add/remove an entry point | This file § Key conventions (entry points) |
 | Make an architectural decision | Create new ADR in [docs/adrs/](docs/adrs/) |
@@ -68,8 +84,8 @@ Do NOT load all docs upfront. Load only when relevant to the current task.
 
 ## Off-limits
 
-- **`src/types.ts` generics** — complex type-level machinery. Do not refactor without understanding the full inference chain. Read the file end-to-end first.
-- **`xstate-migrate` integration** — migration logic in `createMachineServer.ts` is delicate. Changes here can break snapshot restoration for all persisted actors.
+- **`packages/actor-kit/src/types.ts` generics** — complex type-level machinery. Do not refactor without understanding the full inference chain. Read the file end-to-end first.
+- **`xstate-migrate` integration** — migration logic in `packages/actor-kit/src/createMachineServer.ts` is delicate. Changes here can break snapshot restoration for all persisted actors.
 - **JWT signing keys** — never log, never include in test output, never commit to examples.
 - **Pre-commit hooks** — never bypass with `--no-verify`.
 
@@ -78,4 +94,4 @@ Do NOT load all docs upfront. Load only when relevant to the current task.
 - **Branch**: `main`
 - **Remote**: `origin` → `github.com:actor-kit/actor-kit.git` (canonical, formerly `jonmumm/actor-kit`)
 - **Hooks**: Pre-commit runs lint + typecheck + test:unit
-- **Versioning**: Manual version bumps in `package.json`
+- **Versioning**: Manual version bumps in `packages/actor-kit/package.json`
