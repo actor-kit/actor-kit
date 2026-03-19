@@ -88,7 +88,7 @@ const counterMachine = setup({
   },
 });
 
-type CounterMachine = typeof counterMachine;
+export type CounterMachine = typeof counterMachine;
 
 export const Counter = createMachineServer({
   machine: counterMachine,
@@ -195,6 +195,8 @@ const aggregatorMachine = setup({
     },
   },
 });
+
+export type AggregatorMachine = typeof aggregatorMachine;
 
 export const Aggregator = createMachineServer({
   machine: aggregatorMachine,
