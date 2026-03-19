@@ -106,6 +106,7 @@
     "typescript": "^5.9.3",
     "typescript-eslint": "^8.57.0",
     "vitest": "^4.1.0",
+    "wrangler": "^4.75.0",
     "xstate": "^5.28.0",
     "xstate-migrate": "^0.0.8",
     "zod": "^3.25.76"
