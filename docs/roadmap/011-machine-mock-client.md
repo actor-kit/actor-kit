@@ -1,7 +1,7 @@
 # 011: Machine-Running Mock Client
 
 **Priority**: P3
-**Status**: Proposal
+**Status**: Accepted (implemented 2026-03-19)
 **Affects**: `createActorKitMockClient.ts`
 
 ## Problem
