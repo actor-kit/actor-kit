@@ -255,4 +255,79 @@ describe("transition()", () => {
     // SET action doesn't write to private context, so user-1 has no entry
     expect(result.callerSnapshot.private).toEqual({});
   });
+
+  it("provides mock env with ACTOR_KIT_SECRET to the machine", () => {
+    // Build a machine that reads env.ACTOR_KIT_SECRET in an action
+    const envReadingMachine = setup({
+      types: {
+        context: {} as {
+          public: { secret: string };
+          private: Record<string, never>;
+        },
+        events: {} as CounterEvent,
+        input: {} as CounterInput,
+      },
+      actions: {
+        readSecret: assign({
+          public: ({ event }) => ({
+            secret: (event as unknown as { env: { ACTOR_KIT_SECRET: string } }).env.ACTOR_KIT_SECRET,
+          }),
+        }),
+      },
+    }).createMachine({
+      id: "env-reader",
+      initial: "idle",
+      context: () => ({ public: { secret: "" }, private: {} }),
+      states: {
+        idle: {
+          on: { INCREMENT: { actions: "readSecret" } },
+        },
+      },
+    });
+
+    const result = transition(envReadingMachine, {
+      event: { type: "INCREMENT" },
+      caller: { type: "client", id: "user-1" },
+    });
+
+    // The mock env provides "test-secret" as ACTOR_KIT_SECRET
+    expect(result.context.public.secret).toBe("test-secret");
+  });
+
+  it("provides undefined for unknown env properties", () => {
+    // Build a machine that reads an undefined env property
+    const envReadingMachine = setup({
+      types: {
+        context: {} as {
+          public: { envValue: unknown };
+          private: Record<string, never>;
+        },
+        events: {} as CounterEvent,
+        input: {} as CounterInput,
+      },
+      actions: {
+        readUnknown: assign({
+          public: ({ event }) => ({
+            envValue: (event as unknown as { env: Record<string, unknown> }).env.NONEXISTENT,
+          }),
+        }),
+      },
+    }).createMachine({
+      id: "env-unknown",
+      initial: "idle",
+      context: () => ({ public: { envValue: "initial" }, private: {} }),
+      states: {
+        idle: {
+          on: { INCREMENT: { actions: "readUnknown" } },
+        },
+      },
+    });
+
+    const result = transition(envReadingMachine, {
+      event: { type: "INCREMENT" },
+      caller: { type: "client", id: "user-1" },
+    });
+
+    expect(result.context.public.envValue).toBeUndefined();
+  });
 });

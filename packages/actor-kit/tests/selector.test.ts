@@ -304,4 +304,79 @@ describe("client.select()", () => {
     const name = client.select((s) => s.public.name);
     expect(name.get()).toBe("Alice");
   });
+
+  it("cleans up internal client subscription when all selector listeners unsubscribe", async () => {
+    const client = createTestClient();
+    const count = client.select((s) => s.public.count);
+
+    // Subscribe two listeners
+    const listener1 = vi.fn();
+    const listener2 = vi.fn();
+    const unsub1 = count.subscribe(listener1);
+    const unsub2 = count.subscribe(listener2);
+
+    const connectPromise = client.connect();
+    const ws = getLatestMockWs();
+    ws.open();
+    await connectPromise;
+
+    // Both receive updates
+    ws.emitMessage(
+      patchMessage(
+        [{ op: "replace", path: "/public/count", value: 1 }],
+        "check2"
+      )
+    );
+    expect(listener1).toHaveBeenCalledTimes(1);
+    expect(listener2).toHaveBeenCalledTimes(1);
+
+    // Unsub first — second still works
+    unsub1();
+    ws.emitMessage(
+      patchMessage(
+        [{ op: "replace", path: "/public/count", value: 2 }],
+        "check3"
+      )
+    );
+    expect(listener1).toHaveBeenCalledTimes(1); // no change
+    expect(listener2).toHaveBeenCalledTimes(2);
+
+    // Unsub second — internal client subscription should be cleaned up
+    unsub2();
+
+    // Re-subscribing should work fresh
+    const listener3 = vi.fn();
+    count.subscribe(listener3);
+    ws.emitMessage(
+      patchMessage(
+        [{ op: "replace", path: "/public/count", value: 3 }],
+        "check4"
+      )
+    );
+    expect(listener3).toHaveBeenCalledTimes(1);
+    expect(listener3).toHaveBeenCalledWith(3);
+
+    client.disconnect();
+  });
+
+  it("selector .get() returns latest value even without subscribers", async () => {
+    const client = createTestClient();
+    const count = client.select((s) => s.public.count);
+
+    const connectPromise = client.connect();
+    const ws = getLatestMockWs();
+    ws.open();
+    await connectPromise;
+
+    // No subscribers, but .get() should recompute from current state
+    ws.emitMessage(
+      patchMessage(
+        [{ op: "replace", path: "/public/count", value: 42 }],
+        "check2"
+      )
+    );
+    expect(count.get()).toBe(42);
+
+    client.disconnect();
+  });
 });

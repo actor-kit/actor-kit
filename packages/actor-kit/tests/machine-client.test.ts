@@ -253,4 +253,65 @@ describe("createActorKitMachineClient", () => {
     client.trigger.INCREMENT();
     expect(client.getState().public.count).toBe(1);
   });
+
+  it("waitFor resolves when condition becomes true after send", async () => {
+    const client = createActorKitMachineClient({
+      machine: counterMachine,
+      caller: { type: "client", id: "user-1" },
+    });
+
+    // Start waiting, then send event that satisfies condition
+    const waitPromise = client.waitFor((s) => s.public.count === 1, 2000);
+    client.send({ type: "INCREMENT" });
+
+    await expect(waitPromise).resolves.toBeUndefined();
+    expect(client.getState().public.count).toBe(1);
+  });
+
+  it("waitFor rejects on timeout when condition never met", async () => {
+    const client = createActorKitMachineClient({
+      machine: counterMachine,
+      caller: { type: "client", id: "user-1" },
+    });
+
+    await expect(
+      client.waitFor((s) => s.public.count === 999, 50)
+    ).rejects.toThrow("Timeout waiting for condition after 50ms");
+  });
+
+  it("subscribe receives caller-scoped snapshots on each transition", () => {
+    const client = createActorKitMachineClient({
+      machine: counterMachine,
+      caller: { type: "client", id: "user-1" },
+    });
+
+    const snapshots: Array<{ public: { count: number } }> = [];
+    client.subscribe((s) => snapshots.push(s));
+
+    client.send({ type: "INCREMENT" });
+    client.send({ type: "INCREMENT" });
+    client.send({ type: "SET", value: 10 });
+
+    expect(snapshots).toHaveLength(3);
+    expect(snapshots[0].public.count).toBe(1);
+    expect(snapshots[1].public.count).toBe(2);
+    expect(snapshots[2].public.count).toBe(10);
+  });
+
+  it("getState returns caller-scoped private context for the specified caller", () => {
+    const client = createActorKitMachineClient({
+      machine: counterMachine,
+      caller: { type: "client", id: "user-1" },
+    });
+
+    // INCREMENT updates both public and private[caller.id]
+    client.send({ type: "INCREMENT" });
+    client.send({ type: "INCREMENT" });
+
+    const state = client.getState();
+    expect(state.private.accessCount).toBe(2);
+    // Verify the public context is consistent
+    expect(state.public.count).toBe(2);
+    expect(state.public.lastUpdatedBy).toBe("user-1");
+  });
 });

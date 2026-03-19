@@ -9,6 +9,9 @@ const config = {
     "src/createAccessToken.ts",
     "src/createActorFetch.ts",
     "src/createActorKitClient.ts",
+    "src/selector.ts",
+    "src/transition.ts",
+    "src/createActorKitMachineClient.ts",
   ],
   testRunner: "vitest",
   vitest: {
