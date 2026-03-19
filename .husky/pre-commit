@@ -1,3 +1,2 @@
-pnpm run lint
-pnpm run typecheck
-pnpm run test:unit
+pnpm typecheck
+pnpm test:unit

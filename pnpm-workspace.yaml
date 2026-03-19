@@ -1,3 +1,9 @@
 packages:
-  - packages/*
+  - packages/types
+  - packages/browser
+  - packages/worker
+  - packages/react
+  - packages/server
+  - packages/test
+  - packages/storybook
   - examples/*

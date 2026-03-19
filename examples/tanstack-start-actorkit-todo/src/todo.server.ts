@@ -1,5 +1,5 @@
 import type { DurableObjectNamespace } from "@cloudflare/workers-types";
-import { createActorKitRouter, createMachineServer } from "actor-kit/worker";
+import { createActorKitRouter, createMachineServer } from "@actor-kit/worker";
 import { todoMachine } from "./todo.machine";
 import {
   TodoClientEventSchema,

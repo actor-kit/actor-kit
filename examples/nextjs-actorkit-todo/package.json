@@ -14,7 +14,10 @@
     "cf-typegen": "wrangler types"
   },
   "dependencies": {
-    "actor-kit": "workspace:*",
+    "@actor-kit/types": "workspace:*",
+    "@actor-kit/worker": "workspace:*",
+    "@actor-kit/react": "workspace:*",
+    "@actor-kit/server": "workspace:*",
     "cookie": "^0.6.0",
     "next": "14.2.13",
     "react": "^18",

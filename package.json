@@ -2,31 +2,19 @@
   "private": true,
   "packageManager": "pnpm@10.28.2",
   "scripts": {
-    "build": "pnpm --filter actor-kit build",
-    "typecheck": "pnpm --filter actor-kit typecheck",
-    "lint": "pnpm --filter actor-kit lint",
-    "test": "pnpm --filter actor-kit test",
-    "test:unit": "pnpm --filter actor-kit test:unit",
-    "test:integration": "pnpm --filter actor-kit test:integration",
-    "test:workers": "pnpm --filter actor-kit test:workers",
-    "test:build-fixtures": "pnpm --filter actor-kit test:build-fixtures",
-    "test:coverage": "pnpm --filter actor-kit test:coverage",
-    "test:mutate": "pnpm --filter actor-kit test:mutate",
-    "test:mutate:incremental": "pnpm --filter actor-kit test:mutate:incremental",
-    "test:mutate:full": "pnpm --filter actor-kit test:mutate:full",
-    "test:e2e": "pnpm --filter actor-kit test:e2e",
-    "test:e2e:nextjs": "pnpm --filter actor-kit test:e2e:nextjs",
-    "test:e2e:tanstack-start": "pnpm --filter actor-kit test:e2e:tanstack-start",
-    "analyze:crap": "pnpm --filter actor-kit analyze:crap",
-    "check": "pnpm --filter actor-kit check",
-    "prepare": "husky"
+    "build": "pnpm --filter @actor-kit/types build && pnpm --filter '@actor-kit/*' --filter '!@actor-kit/types' build",
+    "typecheck": "pnpm -r typecheck",
+    "test": "pnpm --filter '@actor-kit/*' test",
+    "test:unit": "pnpm --filter '@actor-kit/*' test",
+    "prepare": "husky",
+    "changeset": "changeset",
+    "version": "changeset version",
+    "release": "pnpm build && changeset publish"
   },
   "devDependencies": {
-    "husky": "^9.1.7",
-    "lint-staged": "^16.3.3"
-  },
-  "lint-staged": {
-    "packages/actor-kit/**/*.{js,mjs,cjs,ts,tsx}": "eslint --fix --config packages/actor-kit/eslint.config.js"
+    "@changesets/changelog-github": "^0.6.0",
+    "@changesets/cli": "^2.30.0",
+    "husky": "^9.1.7"
   },
   "pnpm": {
     "onlyBuiltDependencies": [
@@ -37,7 +25,7 @@
       "workerd"
     ],
     "patchedDependencies": {
-      "fast-json-patch": "packages/actor-kit/patches/fast-json-patch.patch"
+      "fast-json-patch": "patches/fast-json-patch.patch"
     }
   }
 }

@@ -1,6 +1,6 @@
 import { DurableObjectNamespace } from "@cloudflare/workers-types";
-import { AnyActorServer } from "actor-kit";
-import { createActorKitRouter } from "actor-kit/worker";
+import { AnyActorServer } from "@actor-kit/types";
+import { createActorKitRouter } from "@actor-kit/worker";
 import { WorkerEntrypoint } from "cloudflare:workers";
 import { Todo, TodoServer } from "./todo.server";
 
