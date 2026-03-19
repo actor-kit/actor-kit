@@ -1,7 +1,7 @@
 # 016: Framework-Agnostic Client Selectors
 
 **Priority**: P2
-**Status**: Proposal
+**Status**: Accepted (implemented 2026-03-19)
 **Inspired by**: `@xstate/store` v3 `store.select()` API
 
 ## Problem
