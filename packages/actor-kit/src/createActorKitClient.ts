@@ -220,6 +220,14 @@ export function createActorKitClient<TMachine extends AnyActorKitStateMachine>(
     });
   };
 
+  const trigger = new Proxy({} as ActorKitClient<TMachine>["trigger"], {
+    get(_target, eventType: string) {
+      return (payload?: Record<string, unknown>) => {
+        send({ type: eventType, ...payload } as ClientEventFrom<TMachine>);
+      };
+    },
+  });
+
   const select = <TSelected>(
     selectorFn: (state: CallerSnapshotFrom<TMachine>) => TSelected,
     equalityFn?: (a: TSelected, b: TSelected) => boolean
@@ -234,6 +242,7 @@ export function createActorKitClient<TMachine extends AnyActorKitStateMachine>(
     subscribe,
     waitFor,
     select,
+    trigger,
   };
 }
 

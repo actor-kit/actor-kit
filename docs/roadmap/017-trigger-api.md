@@ -1,7 +1,7 @@
 # 017: Typed Trigger API for Client Events
 
 **Priority**: P3
-**Status**: Proposal
+**Status**: Accepted (implemented 2026-03-19)
 **Inspired by**: `@xstate/store` v3 `store.trigger.eventName()` API
 
 ## Problem
