@@ -42,10 +42,12 @@
   "scripts": {
     "build": "tsdown",
     "typecheck": "tsc -p tsconfig.json --noEmit",
+    "types:generate": "wrangler types cloudflare-runtime.d.ts --include-env=false --config tests/workers/wrangler.toml && wrangler types tests/workers/worker-configuration.d.ts --config tests/workers/wrangler.toml",
     "lint": "eslint src tests vitest.config.ts vitest.integration.config.ts vitest.stryker.config.ts eslint.config.js && pnpm --filter nextjs-actorkit-todo lint && pnpm --filter tanstack-start-actorkit-todo lint",
     "test": "pnpm run test:unit",
     "test:unit": "vitest run",
     "test:integration": "vitest run --config vitest.integration.config.ts",
+    "test:workers": "vitest run --config vitest.workers.config.ts",
     "test:build-fixtures": "npx wrangler deploy --dry-run --outdir=dist --config tests/integration/fixtures/wrangler.toml",
     "test:coverage": "vitest run --coverage",
     "test:mutate": "NODE_OPTIONS=--max-old-space-size=8192 stryker run",
@@ -68,7 +70,6 @@
   "author": "jonmumm",
   "license": "ISC",
   "peerDependencies": {
-    "@cloudflare/workers-types": "^4.20240925.0",
     "react": "^17.0.0 || ^18.0.0 || ^19.0.0",
     "xstate": "^5.18.0",
     "zod": "^3.23.0"
@@ -80,7 +81,7 @@
     "jose": "^6.2.1"
   },
   "devDependencies": {
-    "@cloudflare/workers-types": "^4.20240925.0",
+    "@cloudflare/vitest-pool-workers": "^0.13.2",
     "@eslint/js": "^9.39.4",
     "@storybook/react": "^8.6.18",
     "@stryker-mutator/core": "^9.6.0",
@@ -96,7 +97,9 @@
     "eslint": "^9.39.1",
     "eslint-plugin-react-hooks": "^7.0.1",
     "eslint-plugin-react-refresh": "^0.5.2",
+    "fast-json-patch": "^3.1.1",
     "husky": "^9.1.7",
+    "immer": "^11.1.4",
     "jsondiffpatch": "^0.7.3",
     "lint-staged": "^16.3.3",
     "miniflare": "^4.20260312.0",
@@ -105,8 +108,9 @@
     "typescript": "^5.9.3",
     "typescript-eslint": "^8.57.0",
     "vitest": "^4.1.0",
+    "wrangler": "^4.75.0",
     "xstate": "^5.28.0",
-    "xstate-migrate": "^0.0.7",
+    "xstate-migrate": "^0.0.8",
     "zod": "^3.25.76"
   },
   "pnpm": {
@@ -116,7 +120,10 @@
       "sharp",
       "unrs-resolver",
       "workerd"
-    ]
+    ],
+    "patchedDependencies": {
+      "fast-json-patch": "patches/fast-json-patch.patch"
+    }
   },
   "lint-staged": {
     "*.{js,mjs,cjs,ts,tsx}": "eslint --fix"

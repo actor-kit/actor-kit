@@ -281,9 +281,10 @@ packages/
 9. Create `pnpm-workspace.yaml`
 10. Move library to `packages/actor-kit/`
 11. Move examples to `examples/` (already there)
-12. Update CI workflows for monorepo paths
-13. Update import paths in tests and examples
-14. Verify all feedback commands still work
+12. Consolidate integration tests: migrate old Miniflare tests (`tests/integration/`) to `@cloudflare/vitest-pool-workers` and merge with `tests/workers/`. Single `test:integration` command runs all DO integration tests via the Workers pool.
+13. Update CI workflows for monorepo paths
+14. Update import paths in tests and examples
+15. Verify all feedback commands still work
 
 ### Phase 3: Starlight docs (1 PR)
 

@@ -43,6 +43,9 @@ jobs:
       - name: Integration tests
         run: pnpm run test:integration
 
+      - name: Worker pool tests
+        run: pnpm run test:workers
+
   nextjs-e2e:
     runs-on: ubuntu-latest
     steps:

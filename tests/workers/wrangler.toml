@@ -1,0 +1,19 @@
+name = "actor-kit-worker-tests"
+main = "src/index.ts"
+compatibility_date = "2024-09-25"
+compatibility_flags = ["nodejs_compat"]
+
+[vars]
+ACTOR_KIT_SECRET = "test-secret"
+
+[[durable_objects.bindings]]
+name = "COUNTER"
+class_name = "Counter"
+
+[[durable_objects.bindings]]
+name = "AGGREGATOR"
+class_name = "Aggregator"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["Counter", "Aggregator"]
