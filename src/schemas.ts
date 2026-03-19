@@ -1,3 +1,4 @@
+import type { Operation } from "fast-json-patch";
 import { z } from "zod";
 
 export const BotManagementSchema = z.object({
@@ -66,6 +67,37 @@ export const SystemEventSchema = z.discriminatedUnion("type", [
     operations: z.array(z.any()),
   }),
 ]);
+
+/**
+ * Validates an emitted event from the actor-kit WebSocket protocol.
+ *
+ * The Zod schema validates `op` is a valid JSON Patch operation string,
+ * then transforms the output to `Operation[]` from fast-json-patch.
+ * This is safe because Zod has validated the `op` values match the
+ * discriminated union variants — the transform bridges Zod's flat
+ * object output to fast-json-patch's discriminated union type.
+ */
+export const EmittedEventSchema = z.object({
+  operations: z
+    .array(
+      z.object({
+        op: z.enum([
+          "add",
+          "remove",
+          "replace",
+          "move",
+          "copy",
+          "test",
+          "_get",
+        ]),
+        path: z.string(),
+        value: z.unknown().optional(),
+        from: z.string().optional(),
+      })
+    )
+    .transform((ops): Operation[] => ops as unknown as Operation[]),
+  checksum: z.string(),
+});
 
 export const CallerIdTypeSchema = z.enum(["client", "service", "system"]);
 

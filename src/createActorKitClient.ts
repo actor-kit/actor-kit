@@ -1,26 +1,13 @@
 import { applyPatch } from "fast-json-patch";
 import { produce } from "immer";
-import { z } from "zod";
 
-import {
+import { EmittedEventSchema } from "./schemas";
+import type {
   ActorKitClient,
-  ActorKitEmittedEvent,
   AnyActorKitStateMachine,
   CallerSnapshotFrom,
   ClientEventFrom,
 } from "./types";
-
-const EmittedEventSchema = z.object({
-  operations: z.array(
-    z.object({
-      op: z.string(),
-      path: z.string(),
-      value: z.unknown().optional(),
-      from: z.string().optional(),
-    })
-  ),
-  checksum: z.string(),
-});
 
 export type ActorKitClientProps<TMachine extends AnyActorKitStateMachine> = {
   host: string;
@@ -84,7 +71,7 @@ export function createActorKitClient<TMachine extends AnyActorKitStateMachine>(
           typeof event.data === "string"
             ? event.data
             : new TextDecoder().decode(event.data)
-        )) as ActorKitEmittedEvent;
+        ));
 
         currentSnapshot = produce(currentSnapshot, (draft) => {
           applyPatch(draft, data.operations);

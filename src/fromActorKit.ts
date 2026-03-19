@@ -44,8 +44,8 @@ import type { CallbackLogicFunction } from "xstate";
 import { fromCallback } from "xstate";
 import type { z } from "zod";
 import { createAccessToken } from "./createAccessToken";
+import { EmittedEventSchema } from "./schemas";
 import type {
-  ActorKitEmittedEvent,
   AnyActorKitStateMachine,
   Caller,
   CallerSnapshotFrom,
@@ -143,6 +143,34 @@ export function fromActorKit<
 
   const TYPE = toScreamingSnake(actorType);
 
+  function emitUpdated(
+    emitActorType: TActorType,
+    actorId: string,
+    snapshot: CallerSnapshotFrom<TMachine>,
+    operations: Operation[],
+  ): TEmitted {
+    return {
+      type: `${TYPE}_UPDATED`,
+      actorType: emitActorType,
+      actorId,
+      snapshot,
+      operations,
+    } as TEmitted;
+  }
+
+  function emitError(
+    emitActorType: TActorType,
+    actorId: string,
+    error: Error,
+  ): TEmitted {
+    return {
+      type: `${TYPE}_ERROR`,
+      actorType: emitActorType,
+      actorId,
+      error,
+    } as TEmitted;
+  }
+
   const callback: CallbackLogicFunction<
     Record<string, unknown> & { type: string }, // events parent can send
     TEmitted, // events sent back to parent
@@ -186,8 +214,7 @@ export function fromActorKit<
           )
         );
 
-        const webSocket = (response as unknown as { webSocket?: WebSocket })
-          .webSocket;
+        const webSocket = response.webSocket;
         if (!webSocket) {
           throw new Error(
             `WebSocket upgrade failed for ${actorType}/${input.actorId}`
@@ -198,29 +225,24 @@ export function fromActorKit<
         ws = webSocket;
 
         // 4. Track snapshot via patches
-        let currentSnapshot = {} as CallerSnapshotFrom<TMachine>;
+        let currentSnapshot: CallerSnapshotFrom<TMachine> | undefined;
 
         ws.addEventListener("message", (event: MessageEvent) => {
           try {
             const raw =
               typeof event.data === "string"
                 ? event.data
-                : new TextDecoder().decode(
-                    event.data as ArrayBuffer | Uint8Array
-                  );
-            const data = JSON.parse(raw) as ActorKitEmittedEvent;
+                : new TextDecoder().decode(event.data);
+            const data = EmittedEventSchema.parse(JSON.parse(raw));
 
-            currentSnapshot = produce(currentSnapshot, (draft) => {
-              applyPatch(draft, data.operations);
-            });
+            currentSnapshot = produce(
+              currentSnapshot ?? ({} as CallerSnapshotFrom<TMachine>),
+              (draft) => {
+                applyPatch(draft, data.operations);
+              }
+            );
 
-            sendBack({
-              type: `${TYPE}_UPDATED`,
-              actorType,
-              actorId: input.actorId,
-              snapshot: currentSnapshot,
-              operations: data.operations,
-            } as TEmitted);
+            sendBack(emitUpdated(actorType, input.actorId, currentSnapshot, data.operations));
           } catch (err) {
             console.error(
               `[fromActorKit:${actorType}] message error:`,
@@ -230,25 +252,17 @@ export function fromActorKit<
         });
 
         ws.addEventListener("error", () => {
-          sendBack({
-            type: `${TYPE}_ERROR`,
-            actorType,
-            actorId: input.actorId,
-            error: new Error(`WebSocket error for ${actorType}/${input.actorId}`),
-          } as TEmitted);
+          sendBack(emitError(actorType, input.actorId, new Error(`WebSocket error for ${actorType}/${input.actorId}`)));
         });
 
         // Handle normal close (e.g., child DO eviction/restart)
         ws.addEventListener("close", (event: CloseEvent) => {
           ws = null;
-          sendBack({
-            type: `${TYPE}_ERROR`,
+          sendBack(emitError(
             actorType,
-            actorId: input.actorId,
-            error: new Error(
-              `WebSocket closed for ${actorType}/${input.actorId}: code=${event.code} reason=${event.reason}`
-            ),
-          } as TEmitted);
+            input.actorId,
+            new Error(`WebSocket closed for ${actorType}/${input.actorId}: code=${event.code} reason=${event.reason}`)
+          ));
         });
 
         // 5. Flush queued events
@@ -257,15 +271,13 @@ export function fromActorKit<
         }
       } catch (err) {
         console.error(`[fromActorKit:${actorType}] setup error:`, err);
-        sendBack({
-          type: `${TYPE}_ERROR`,
+        sendBack(emitError(
           actorType,
-          actorId: input.actorId,
-          error:
-            err instanceof Error
-              ? err
-              : new Error(`Setup failed for ${actorType}/${input.actorId}`),
-        } as TEmitted);
+          input.actorId,
+          err instanceof Error
+            ? err
+            : new Error(`Setup failed for ${actorType}/${input.actorId}`)
+        ));
       }
     })();
 

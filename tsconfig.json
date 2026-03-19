@@ -13,12 +13,12 @@
     "forceConsistentCasingInFileNames": true,
     "jsx": "react",
     "lib": ["dom", "dom.iterable", "esnext"],
-    "types": ["@cloudflare/workers-types"],
+    "types": [],
     "resolveJsonModule": true,
     "importHelpers": true,
     "removeComments": true,
     "preserveSymlinks": true
   },
-  "include": ["src/**/*"],
+  "include": ["src/**/*", "cloudflare-runtime.d.ts"],
   "exclude": ["node_modules", "dist", "**/*.test.ts"]
 }
