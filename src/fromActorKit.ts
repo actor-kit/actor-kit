@@ -238,6 +238,19 @@ export function fromActorKit<
           } as TEmitted);
         });
 
+        // Handle normal close (e.g., child DO eviction/restart)
+        ws.addEventListener("close", (event: CloseEvent) => {
+          ws = null;
+          sendBack({
+            type: `${TYPE}_ERROR`,
+            actorType,
+            actorId: input.actorId,
+            error: new Error(
+              `WebSocket closed for ${actorType}/${input.actorId}: code=${event.code} reason=${event.reason}`
+            ),
+          } as TEmitted);
+        });
+
         // 5. Flush queued events
         while (pendingEvents.length > 0) {
           ws.send(pendingEvents.shift()!);
