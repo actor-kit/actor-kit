@@ -108,14 +108,14 @@ Client detects WebSocket close
 
 | Module | Entry point | Responsibility | Dependencies |
 |--------|-------------|----------------|-------------|
-| Types & schemas | `actor-kit` | Type definitions, Zod schemas, shared constants | zod, xstate (types only) |
-| Machine server | `actor-kit/worker` | DO class factory, XState lifecycle, persistence, WebSocket management | xstate, fast-json-patch, xstate-migrate, jose |
-| Router | `actor-kit/worker` | HTTP/WebSocket request routing, JWT validation, DO spawning | jose, zod |
-| Browser client | `actor-kit/browser` | WebSocket connection, reconnection, state patching, event queuing | fast-json-patch, immer |
-| React bindings | `actor-kit/react` | Context, Provider, hooks (useSelector, useSend, useMatches) | react |
-| Server utilities | `actor-kit/server` | JWT creation, HTTP state fetching | jose |
-| Test utilities | `actor-kit/test` | Mock client with Immer-based state control | immer |
-| Storybook | `actor-kit/storybook` | `withActorKit` decorator, parameter-based snapshots | react |
+| Types & schemas | `@actor-kit/types` | Type definitions, Zod schemas, shared constants | zod, xstate (types only) |
+| Machine server | `@actor-kit/worker` | DO class factory, XState lifecycle, persistence, WebSocket management | xstate, fast-json-patch, xstate-migrate, jose |
+| Router | `@actor-kit/worker` | HTTP/WebSocket request routing, JWT validation, DO spawning | jose, zod |
+| Browser client | `@actor-kit/browser` | WebSocket connection, reconnection, state patching, event queuing | fast-json-patch, immer |
+| React bindings | `@actor-kit/react` | Context, Provider, hooks (useSelector, useSend, useMatches) | react |
+| Server utilities | `@actor-kit/server` | JWT creation, HTTP state fetching | jose |
+| Test utilities | `@actor-kit/test` | Mock client with Immer-based state control | immer |
+| Storybook | `@actor-kit/storybook` | `withActorKit` decorator, parameter-based snapshots | react |
 
 ## Type System
 

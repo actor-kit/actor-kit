@@ -5,10 +5,10 @@
 **Affects**: `createActorKitMockClient.ts`
 
 > **Decision**: Not implementing. Machine files in actor-kit apps import
-> `actor-kit/worker` which depends on `cloudflare:workers` — pulling that into
+> `@actor-kit/worker` which depends on `cloudflare:workers` — pulling that into
 > Storybook or browser tests breaks. The existing `createActorKitMockClient`
 > with `produce()` covers the real use cases (visual QA, state simulation)
-> without server dependencies. The planned package split (`@actor-kit/worker`,
+> without server dependencies. The package split (`@actor-kit/worker`,
 > `@actor-kit/react`, etc.) would partially address this, but even then forcing
 > users to separate machine definitions from server setup is an unnecessary
 > architectural constraint.
@@ -27,7 +27,7 @@ The current mock client stores state as a plain object. `produce()` lets tests m
 ### `createActorKitMachineClient` — mock client that runs the real machine
 
 ```typescript
-import { createActorKitMachineClient } from "actor-kit/test"
+import { createActorKitMachineClient } from "@actor-kit/test"
 import { todoMachine } from "./todo.machine"
 
 const client = createActorKitMachineClient({

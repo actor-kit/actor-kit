@@ -22,7 +22,7 @@ This is caught at runtime by Zod validation, but a type error at compile time wo
 If using `fromRemoteActor` (003), event forwarding is already typed by the `forward` array. For manual `sendTo`, provide a typed helper:
 
 ```typescript
-import { createTypedSendTo } from "actor-kit"
+import { createTypedSendTo } from "@actor-kit/types"
 
 // Creates a type-safe sendTo that only accepts events from ProfileMachine
 const sendToProfile = createTypedSendTo<ProfileMachine>("profile")

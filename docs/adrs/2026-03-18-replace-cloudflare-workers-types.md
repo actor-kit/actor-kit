@@ -13,7 +13,7 @@ Three problems forced a change:
 2. **Resolution failures**: The package doesn't resolve properly in pnpm, causing build issues.
 3. **DOM conflicts**: The library's tsconfig includes `"lib": ["dom"]` for React entry points, but `@cloudflare/workers-types` overrides globals like `WebSocket` and `Response` with Workers-specific versions, creating type conflicts.
 
-The library has a split audience: `actor-kit/react` and `actor-kit/browser` consumers use DOM types, while `actor-kit/worker` consumers run in the Workers runtime. A single global type overlay doesn't serve both.
+The library has a split audience: `@actor-kit/react` and `@actor-kit/browser` consumers use DOM types, while `@actor-kit/worker` consumers run in the Workers runtime. A single global type overlay doesn't serve both.
 
 ## Decision
 

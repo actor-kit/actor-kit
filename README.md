@@ -22,12 +22,12 @@ Actor Kit is a library for running state machines in Cloudflare Workers, leverag
   - [⚛️ Next.js](/examples/nextjs-actorkit-todo/README.md)
 - [📄 Documentation](#-documentation)
 - [📖 API Reference](#-api-reference)
-  - [🔧 actor-kit/worker](#-actor-kitworker)
-  - [🖥️ actor-kit/server](#%EF%B8%8F-actor-kitserver)
-  - [🌐 actor-kit/browser](#-actor-kitbrowser)
-  - [⚛️ actor-kit/react](#%EF%B8%8F-actor-kitreact)
-  - [🧪 actor-kit/test](#-actor-kittest)
-  - [📚 actor-kit/storybook](#-actor-kitstorybook)
+  - [🔧 @actor-kit/worker](#-actor-kitworker)
+  - [🖥️ @actor-kit/server](#%EF%B8%8F-actor-kitserver)
+  - [🌐 @actor-kit/browser](#-actor-kitbrowser)
+  - [⚛️ @actor-kit/react](#%EF%B8%8F-actor-kitreact)
+  - [🧪 @actor-kit/test](#-actor-kittest)
+  - [📚 @actor-kit/storybook](#-actor-kitstorybook)
 - [🔑 TypeScript Types](#-typescript-types)
 - [👥 Caller Types](#-caller-types)
 - [🔐 Public and Private Data](#-public-and-private-data)
@@ -41,12 +41,12 @@ Actor Kit is a library for running state machines in Cloudflare Workers, leverag
 To install Actor Kit, use your preferred package manager:
 
 ```bash
-npm install actor-kit xstate zod react
+npm install @actor-kit/types @actor-kit/worker @actor-kit/browser @actor-kit/react @actor-kit/server xstate zod react
 # or
-pnpm add actor-kit xstate zod react
+pnpm add @actor-kit/types @actor-kit/worker @actor-kit/browser @actor-kit/react @actor-kit/server xstate zod react
 ```
 
-> **Note:** `react` is only required if using `actor-kit/react`. The core library (`actor-kit/worker`, `actor-kit/browser`, `actor-kit/server`) works without React.
+> **Note:** `react` is only required if using `@actor-kit/react`. The core packages (`@actor-kit/worker`, `@actor-kit/browser`, `@actor-kit/server`) work without React.
 
 ## 🌟 Key Concepts
 
@@ -156,7 +156,7 @@ import type {
   ActorKitSystemEvent,
   WithActorKitEvent,
   WithActorKitInput,
-} from "actor-kit";
+} from "@actor-kit/types";
 import { z } from "zod";
 import {
   TodoClientEventSchema,
@@ -196,7 +196,7 @@ Now that we have our event types defined, we can create our state machine:
 
 ```typescript
 // src/todo.machine.ts
-import { ActorKitStateMachine } from "actor-kit";
+import { ActorKitStateMachine } from "@actor-kit/types";
 import { assign, setup } from "xstate";
 import type {
   TodoEvent,
@@ -267,7 +267,7 @@ Create the Actor Server using the `createMachineServer` function:
 
 ```typescript
 // src/todo.server.ts
-import { createMachineServer } from "actor-kit/worker";
+import { createMachineServer } from "@actor-kit/worker";
 import { todoMachine } from "./todo.machine";
 import {
   TodoClientEventSchema,
@@ -319,8 +319,8 @@ Create a new file, e.g., `src/server.ts`, to set up your Cloudflare Worker:
 ```typescript
 // src/server.ts
 import { DurableObjectNamespace } from "@cloudflare/workers-types";
-import { AnyActorServer } from "actor-kit";
-import { createActorKitRouter } from "actor-kit/worker";
+import { AnyActorServer } from "@actor-kit/types";
+import { createActorKitRouter } from "@actor-kit/worker";
 import { WorkerEntrypoint } from "cloudflare:workers";
 import { Todo, TodoServer } from "./todo.server";
 
@@ -352,7 +352,7 @@ export default class Worker extends WorkerEntrypoint<Env> {
 "use client";
 
 import type { TodoMachine } from "./todo.machine";
-import { createActorKitContext } from "actor-kit/react";
+import { createActorKitContext } from "@actor-kit/react";
 
 export const TodoActorKitContext = createActorKitContext<TodoMachine>("todo");
 export const TodoActorKitProvider = TodoActorKitContext.Provider;
@@ -366,8 +366,8 @@ Using TanStack Start's `createServerFn` for server-side data loading:
 // src/routes/lists.$listId.tsx
 import { createFileRoute } from "@tanstack/react-router";
 import { createServerFn } from "@tanstack/react-start";
-import { createAccessToken, createActorFetch } from "actor-kit/server";
-import type { Caller } from "actor-kit";
+import { createAccessToken, createActorFetch } from "@actor-kit/server";
+import type { Caller } from "@actor-kit/types";
 import { z } from "zod";
 import { TodoActorKitProvider } from "../todo.context";
 import type { TodoMachine } from "../todo.machine";
@@ -501,7 +501,7 @@ This example demonstrates how to set up and use Actor Kit in a Next.js applicati
 1. Install dependencies:
 
    ```bash
-   npm install actor-kit xstate zod
+   npm install @actor-kit/types @actor-kit/worker @actor-kit/server xstate zod
    npm install -D wrangler
    ```
 
@@ -552,7 +552,7 @@ This example demonstrates how to set up and use Actor Kit in a Next.js applicati
 4. Create your Worker script (e.g., `src/server.ts`):
 
    ```typescript
-   import { createActorKitRouter } from "actor-kit/worker";
+   import { createActorKitRouter } from "@actor-kit/worker";
    import { YourActor } from "./your-actor.server";
 
    // Routes: /api/your-actor/{actorId}
@@ -610,9 +610,9 @@ These examples showcase how to integrate Actor Kit with different frameworks, de
 
 ## 📖 API Reference
 
-### 🔧 actor-kit/worker
+### 🔧 @actor-kit/worker
 
-The `actor-kit/worker` package provides the core functionality for running state machines in Cloudflare Workers. It includes utilities for creating machine servers and routing requests.
+The `@actor-kit/worker` package provides the core functionality for running state machines in Cloudflare Workers. It includes utilities for creating machine servers and routing requests.
 
 #### `createMachineServer<TClientEvent, TServiceEvent, TInputSchema, TMachine, Env>(props)`
 
@@ -631,7 +631,7 @@ Example usage:
 
 ```typescript
 // src/todo.server.ts
-import { createMachineServer } from "actor-kit/worker";
+import { createMachineServer } from "@actor-kit/worker";
 import { todoMachine } from "./todo.machine";
 import {
   TodoClientEventSchema,
@@ -660,8 +660,8 @@ Then set up your Cloudflare Worker to use the server:
 ```typescript
 // src/server.ts
 import { DurableObjectNamespace } from "@cloudflare/workers-types";
-import { AnyActorServer } from "actor-kit";
-import { createActorKitRouter } from "actor-kit/worker";
+import { AnyActorServer } from "@actor-kit/types";
+import { createActorKitRouter } from "@actor-kit/worker";
 import { WorkerEntrypoint } from "cloudflare:workers";
 import { Todo, TodoServer } from "./todo.server";
 
@@ -748,7 +748,7 @@ The router handles:
 - Access token validation
 - WebSocket connections for real-time updates 
 
-### 🖥️ `actor-kit/server`
+### 🖥️ `@actor-kit/server`
 
 #### `createActorFetch<TMachine>({ actorType, host })`
 
@@ -795,7 +795,7 @@ State matching works as follows:
 Example usage:
 
 ```typescript
-import { createActorFetch } from "actor-kit/server";
+import { createActorFetch } from "@actor-kit/server";
 import type { TodoMachine } from "./todo.machine";
 
 const fetchTodoActor = createActorFetch<TodoMachine>({
@@ -876,7 +876,7 @@ Returns a Promise that resolves to a JWT token string.
 Example usage:
 
 ```typescript
-import { createAccessToken } from "actor-kit/server";
+import { createAccessToken } from "@actor-kit/server";
 
 const accessToken = await createAccessToken({
   signingKey: process.env.ACTOR_KIT_SECRET!,
@@ -887,7 +887,7 @@ const accessToken = await createAccessToken({
 });
 ```
 
-### 🌐 `actor-kit/browser`
+### 🌐 `@actor-kit/browser`
 
 #### `createActorKitClient<TMachine>(props: ActorKitClientProps<TMachine>)`
 
@@ -909,7 +909,7 @@ Returns an `ActorKitClient<TMachine>` object with methods to interact with the a
 Example usage:
 
 ```typescript
-import { createActorKitClient } from "actor-kit/browser";
+import { createActorKitClient } from "@actor-kit/browser";
 import type { TodoMachine } from "./todo.machine";
 
 const client = createActorKitClient<TodoMachine>({
@@ -943,7 +943,7 @@ client.send({ type: "ADD_TODO", text: "Buy milk" });
 The `waitFor` method allows you to wait for specific state conditions:
 
 ```typescript
-import { createActorKitClient } from 'actor-kit/browser';
+import { createActorKitClient } from '@actor-kit/browser';
 
 const client = createActorKitClient<TodoMachine>({
   // ... client config
@@ -964,7 +964,7 @@ await client.waitFor(state =>
 );
 ```
 
-### ⚛️ `actor-kit/react`
+### ⚛️ `@actor-kit/react`
 
 #### `createActorKitContext<TMachine>(actorType: string)`
 
@@ -985,7 +985,7 @@ Returns an object with:
 Example usage:
 
 ```tsx
-import { createActorKitContext } from "actor-kit/react";
+import { createActorKitContext } from "@actor-kit/react";
 import type { TodoMachine } from "./todo.machine";
 
 const TodoActorKitContext = createActorKitContext<TodoMachine>("todo");
@@ -1193,7 +1193,7 @@ function TodoList() {
 }
 ````
 
-### 🧪 actor-kit/test
+### 🧪 @actor-kit/test
 
 #### `createActorKitMockClient<TMachine>(props: ActorKitMockClientProps<TMachine>)`
 
@@ -1210,7 +1210,7 @@ Returns a mock client that implements the standard `ActorKitClient` interface pl
 Example usage:
 
 ````typescript
-import { createActorKitMockClient } from 'actor-kit/test';
+import { createActorKitMockClient } from '@actor-kit/test';
 import type { TodoMachine } from './todo.machine';
 
 describe('Todo State Management', () => {
@@ -1254,7 +1254,7 @@ describe('Todo State Management', () => {
 });
 ````
 
-### 📚 actor-kit/storybook
+### 📚 @actor-kit/storybook
 
 #### `withActorKit<TMachine>({ actorType, context })`
 
@@ -1269,7 +1269,7 @@ Returns a Storybook decorator function.
 Example usage:
 
 ````typescript
-import { withActorKit } from 'actor-kit/storybook';
+import { withActorKit } from '@actor-kit/storybook';
 import { GameContext } from './game.context';
 import type { GameMachine } from './game.machine';
 
@@ -1292,7 +1292,7 @@ A utility type for stories that use Actor Kit state machines. It combines the st
 Example usage:
 
 ````typescript
-import type { StoryWithActorKit } from 'actor-kit/storybook';
+import type { StoryWithActorKit } from '@actor-kit/storybook';
 import type { GameMachine } from './game.machine';
 
 export const GameStory: StoryWithActorKit<GameMachine> = {
@@ -1384,7 +1384,7 @@ An `ActorKitMockClient<TMachine>` with all standard client methods plus:
 **Basic Example:**
 
 ```typescript
-import { createActorKitMockClient } from 'actor-kit/test';
+import { createActorKitMockClient } from '@actor-kit/test';
 import type { TodoMachine } from './todo.machine';
 
 describe('Todo State Management', () => {
@@ -1487,7 +1487,7 @@ describe('Todo Event Handling', () => {
 ```typescript
 import { render, screen } from '@testing-library/react';
 import { TodoActorKitContext } from './todo.context';
-import { createActorKitMockClient } from 'actor-kit/test';
+import { createActorKitMockClient } from '@actor-kit/test';
 
 describe('TodoList', () => {
   it('renders todos correctly', () => {
@@ -1541,7 +1541,7 @@ Actor Kit supports different types of callers, each with its own level of trust 
 
 ## 🔑 TypeScript Types
 
-The following key types are exported from the main `actor-kit` package:
+The following key types are exported from the `@actor-kit/types` package:
 
 ### `WithActorKitEvent<TEvent, TCallerType>`
 
@@ -1550,7 +1550,7 @@ Utility type that wraps an event type with Actor Kit-specific properties. This i
 Example usage:
 
 ```typescript
-import { WithActorKitEvent } from "actor-kit";
+import { WithActorKitEvent } from "@actor-kit/types";
 
 type MyClientEvent =
   | { type: "ADD_TODO"; text: string }
@@ -1609,7 +1609,7 @@ Utility type to extract the caller-specific snapshot from a machine type. This i
 Example usage:
 
 ```typescript
-import { CallerSnapshotFrom } from "actor-kit";
+import { CallerSnapshotFrom } from "@actor-kit/types";
 import { TodoMachine } from "./todo.machine";
 
 type TodoSnapshot = CallerSnapshotFrom<TodoMachine>;
@@ -1641,7 +1641,7 @@ type ActorKitStateMachine<
 Example usage:
 
 ```typescript
-import { ActorKitStateMachine } from "actor-kit";
+import { ActorKitStateMachine } from "@actor-kit/types";
 import { setup } from "xstate";
 import type {
   TodoEvent,
@@ -1680,7 +1680,7 @@ Actor Kit provides seamless integration with Storybook through the `withActorKit
 ### Basic Usage
 
 ```typescript
-import { withActorKit } from 'actor-kit/storybook';
+import { withActorKit } from '@actor-kit/storybook';
 import { GameContext } from './game.context';
 import type { GameMachine } from './game.machine';
 
@@ -1821,7 +1821,7 @@ export const MultipleActors: Story = {
 ```typescript
 import type { Meta, StoryObj } from "@storybook/react";
 import { expect, fn } from "@storybook/test";
-import { createActorKitMockClient } from "actor-kit/test";
+import { createActorKitMockClient } from "@actor-kit/test";
 import { GameContext } from "./game.context";
 import type { GameMachine } from "./game.machine";
 

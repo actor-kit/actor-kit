@@ -24,7 +24,7 @@ expect(snapshot.public.todos).toHaveLength(1);
 A pure `transition()` function that takes a snapshot + event and returns `[nextSnapshot, effects]`:
 
 ```typescript
-import { transition } from 'actor-kit/test';
+import { transition } from '@actor-kit/test';
 
 // Pure — no DO, no WebSocket, no storage
 const [next, effects] = transition(machine, {

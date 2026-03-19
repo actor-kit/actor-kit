@@ -26,7 +26,7 @@ The website (`actor-kit/website`) and library (`actor-kit/actor-kit`) are separa
 
 ### 5. No package split path
 
-If we ever want to split `actor-kit` into scoped packages (`@actor-kit/worker`, `@actor-kit/react`, etc.), the current single-package structure makes that difficult. A monorepo with workspace tooling makes it trivial.
+The scoped packages (`@actor-kit/worker`, `@actor-kit/react`, etc.) benefit from a monorepo with workspace tooling that makes cross-package coordination trivial.
 
 ## Proposed Solution
 
