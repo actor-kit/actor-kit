@@ -166,7 +166,7 @@ const ENV = { ACTOR_KIT_SECRET: SECRET, EMAIL_SERVICE_API_KEY: "key" };
 
 beforeAll(async () => {
   const module = await import(
-    "../../../examples/nextjs-actorkit-todo/src/todo.server"
+    "../../examples/nextjs-actorkit-todo/src/todo.server"
   );
   TodoServer = module.Todo as unknown as TodoServerClass;
 });
@@ -390,7 +390,7 @@ describe("State sync: event queue overflow (P3)", () => {
     // P3 bug: When WebSocket is disconnected, events queue to maxQueueSize.
     // On overflow, oldest event is silently dropped via pendingEvents.shift().
     const { createActorKitClient } = await import(
-      "../src/createActorKitClient"
+      "@actor-kit/browser"
     );
 
     const errors: Error[] = [];

@@ -11,12 +11,12 @@ import type {
   CallerSnapshotFrom,
   WithActorKitEvent,
   WithActorKitInput,
-} from "actor-kit";
+} from "@actor-kit/types";
 import {
   createActorKitRouter,
   createMachineServer,
   fromActorKit,
-} from "actor-kit/worker";
+} from "@actor-kit/worker";
 // DurableObject import available via cloudflare:workers in the Workers runtime
 import { assign, sendTo, setup } from "xstate";
 import { z } from "zod";

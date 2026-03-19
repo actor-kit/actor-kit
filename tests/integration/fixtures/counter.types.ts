@@ -8,7 +8,7 @@ import type {
   BaseActorKitEvent,
   WithActorKitEvent,
   WithActorKitInput,
-} from "actor-kit";
+} from "@actor-kit/types";
 
 // --- Client events (what createActorKitClient.send() accepts) ---
 

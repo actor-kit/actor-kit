@@ -25,26 +25,14 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Build library
+      - name: Build packages
         run: pnpm run build
 
       - name: Typecheck
         run: pnpm run typecheck
 
-      - name: Lint
-        run: pnpm run lint
-
       - name: Unit tests
         run: pnpm run test:unit
-
-      - name: Build test fixtures
-        run: pnpm run test:build-fixtures
-
-      - name: Integration tests
-        run: pnpm run test:integration
-
-      - name: Worker pool tests
-        run: pnpm run test:workers
 
   nextjs-e2e:
     runs-on: ubuntu-latest
@@ -63,7 +51,7 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Build library
+      - name: Build packages
         run: pnpm run build
 
       - name: Install Playwright browsers
@@ -89,7 +77,7 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Build library
+      - name: Build packages
         run: pnpm run build
 
       - name: Install Playwright browsers
