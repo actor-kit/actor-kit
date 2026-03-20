@@ -16,9 +16,17 @@ The test package provides a mock implementation of `ActorKitClient` for unit and
 
 ### Returns
 
-A mock client implementing `ActorKitClient<TMachine>` plus:
+A mock client implementing `ActorKitClient<TMachine>` with all standard methods plus testing utilities:
 
-- `produce(recipe)` — Immer-based state mutation
+| Method | Description |
+|--------|-------------|
+| `send(event)` | Send a client event (triggers `onSend` callback) |
+| `getState()` | Returns current snapshot |
+| `subscribe(listener)` | Register a state change listener |
+| `produce(recipe)` | Immer-based direct state mutation |
+| `waitFor(predicate, timeoutMs?)` | Wait for a state condition (default 5s timeout) |
+| `trigger` | Typed proxy for `send` — e.g., `trigger.ADD_TODO({ text: "..." })` |
+| `select(selector)` | Select derived state |
 
 ### Basic usage
 
@@ -72,6 +80,27 @@ const mockClient = createActorKitMockClient<TodoMachine>({
     }
   },
 });
+```
+
+### Wait for state conditions
+
+```typescript
+// Wait for todos to be loaded
+await mockClient.waitFor((s) => s.public.todos.length > 0);
+
+// With custom timeout
+await mockClient.waitFor(
+  (s) => s.value === "ready",
+  10000 // 10 seconds
+);
+```
+
+### Typed event dispatch with trigger
+
+```typescript
+// Instead of: mockClient.send({ type: "ADD_TODO", text: "Test" })
+mockClient.trigger.ADD_TODO({ text: "Test" });
+mockClient.trigger.TOGGLE_TODO({ id: "1" });
 ```
 
 ### With React testing

@@ -366,5 +366,5 @@ Every client gets `public` context plus their own `private` slice. State changes
 
 - [How It Works](/concepts/how-it-works/) — understand the data flow in detail
 - [Public/Private Context](/concepts/public-private-context/) — learn about data isolation
-- [Next.js Guide](/guides/nextjs/) — framework-specific integration guide
+- [TanStack Start Guide](/guides/tanstack-start/) — framework-specific integration guide
 - [Testing Guide](/guides/testing/) — test your actors without a live server

@@ -655,7 +655,7 @@ const tabs = [
 
     .flow-step {
       display: flex; align-items: flex-start; gap: 0.75rem;
-      padding: 0.75rem 0;
+      padding: 0.5rem 0;
     }
 
     .flow-num {
@@ -672,16 +672,16 @@ const tabs = [
     .flow-detail { font-size: 0.72rem; color: var(--sl-color-gray-3); }
 
     .flow-arrow {
-      color: var(--sl-color-gray-5); font-size: 0.9rem;
+      color: var(--sl-color-gray-5); font-size: 0.75rem;
       text-align: center; line-height: 1;
-      padding-left: 0.4rem;
+      padding-left: 0.45rem;
     }
 
     /* ── Use Cases ── */
     .use-cases { padding: 4rem 0; border-top: 1px solid var(--sl-color-hairline); text-align: center; }
     .use-cases h2 { font-size: 1.75rem; font-weight: 700; letter-spacing: -0.02em; margin: 0 0 2rem; color: var(--sl-color-white); }
 
-    .uc-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1.25rem; text-align: left; }
+    .uc-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1.25rem; text-align: left; justify-content: center; }
 
     .uc {
       padding: 1.25rem;
@@ -700,7 +700,7 @@ const tabs = [
     .packages { padding: 4rem 0; border-top: 1px solid var(--sl-color-hairline); text-align: center; }
     .packages h2 { font-size: 1.75rem; font-weight: 700; letter-spacing: -0.02em; margin: 0 0 0.5rem; color: var(--sl-color-white); }
     .packages-sub { color: var(--sl-color-gray-2); margin: 0 0 2rem; font-size: 0.95rem; }
-    .pkg-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(14rem, 1fr)); gap: 0.75rem; text-align: left; }
+    .pkg-grid { display: flex; flex-wrap: wrap; gap: 0.75rem; justify-content: center; }
 
     .pkg {
       display: flex; flex-direction: column; gap: 0.2rem;
@@ -708,6 +708,9 @@ const tabs = [
       border: 1px solid var(--sl-color-gray-5);
       text-decoration: none; color: var(--sl-color-text);
       transition: all 0.15s ease;
+      width: calc(25% - 0.75rem);
+      min-width: 14rem;
+      text-align: left;
     }
     .pkg:hover { border-color: var(--sl-color-gray-3); background: rgba(255,255,255,0.02); }
     .pkg strong { font-size: 0.85rem; font-family: var(--sl-font-mono); color: var(--sl-color-white); }
