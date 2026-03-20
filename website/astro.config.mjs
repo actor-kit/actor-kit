@@ -43,7 +43,8 @@ export default defineConfig({
         {
           label: "Guides",
           items: [
-            { slug: "guides/nextjs" },
+            { slug: "guides/tanstack-start" },
+            { slug: "guides/actor-to-actor-sync" },
             { slug: "guides/testing" },
             { slug: "guides/storybook" },
           ],
@@ -61,13 +62,26 @@ export default defineConfig({
           ],
         },
         {
-          label: "Architecture",
+          label: "More",
           items: [
             { slug: "architecture/system-design" },
-            { slug: "architecture/decisions" },
+            { slug: "roadmap" },
+          ],
+        },
+        {
+          label: "LLM Resources",
+          items: [
+            {
+              label: "llms.txt",
+              link: "/llms-full.txt",
+              attrs: { target: "_blank" },
+            },
           ],
         },
       ],
+      components: {
+        PageTitle: "./src/overrides/PageTitle.astro",
+      },
       customCss: ["./src/styles/custom.css"],
     }),
   ],
