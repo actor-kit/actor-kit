@@ -87,34 +87,32 @@ const tabs = [
   {
     id: "client",
     label: "React",
-    file: "components/TodoList.tsx",
-    code: `<span class="cs">"use client"</span>;
-<span class="ck">import</span> { useState } <span class="ck">from</span> <span class="cs">"react"</span>;
+    file: "todo.context.tsx + components/TodoItem.tsx",
+    code: `<span class="cm">// todo.context.tsx</span>
+<span class="ck">import</span> { <span class="cf">createActorKitContext</span> } <span class="ck">from</span> <span class="cs">"@actor-kit/react"</span>;
+<span class="ck">import type</span> { TodoMachine } <span class="ck">from</span> <span class="cs">"./todo.machine"</span>;
+
+<span class="ck">export const</span> TodoContext = <span class="cf">createActorKitContext</span>&lt;<span class="ct">TodoMachine</span>&gt;(<span class="cs">"todo"</span>);
+
+<span class="cm">// components/TodoItem.tsx — subscribes to one todo only</span>
 <span class="ck">import</span> { TodoContext } <span class="ck">from</span> <span class="cs">"../todo.context"</span>;
 
-<span class="ck">export function</span> <span class="cf">TodoList</span>() {
-  <span class="ck">const</span> todos = TodoContext.<span class="cf">useSelector</span>((s) =&gt; s.public.todos);
+<span class="ck">export function</span> <span class="cf">TodoItem</span>({ <span class="cp">id</span> }: { id: <span class="ct">string</span> }) {
+  <span class="cm">// Granular selector — re-renders only when THIS todo changes</span>
+  <span class="ck">const</span> todo = TodoContext.<span class="cf">useSelector</span>(
+    (s) =&gt; s.public.todos.<span class="cf">find</span>((t) =&gt; t.id === id)!
+  );
   <span class="ck">const</span> send = TodoContext.<span class="cf">useSend</span>();
-  <span class="ck">const</span> [text, setText] = <span class="cf">useState</span>(<span class="cs">""</span>);
 
   <span class="ck">return</span> (
-    &lt;<span class="ct">div</span>&gt;
-      &lt;<span class="ct">form</span> <span class="cp">onSubmit</span>={(e) =&gt; {
-        e.<span class="cf">preventDefault</span>();
-        <span class="cf">send</span>({ <span class="cp">type</span>: <span class="cs">"ADD_TODO"</span>, text });
-        <span class="cf">setText</span>(<span class="cs">""</span>);
-      }}&gt;
-        &lt;<span class="ct">input</span> <span class="cp">value</span>={text} <span class="cp">onChange</span>={(e) =&gt; <span class="cf">setText</span>(e.target.value)} /&gt;
-      &lt;/<span class="ct">form</span>&gt;
-      {todos.<span class="cf">map</span>((todo) =&gt; (
-        &lt;<span class="ct">li</span> <span class="cp">key</span>={todo.id}&gt;
-          {todo.text}
-          &lt;<span class="ct">button</span> <span class="cp">onClick</span>={() =&gt; <span class="cf">send</span>({ <span class="cp">type</span>: <span class="cs">"TOGGLE_TODO"</span>, <span class="cp">id</span>: todo.id })}&gt;
-            {todo.completed ? <span class="cs">"Undo"</span> : <span class="cs">"Done"</span>}
-          &lt;/<span class="ct">button</span>&gt;
-        &lt;/<span class="ct">li</span>&gt;
-      ))}
-    &lt;/<span class="ct">div</span>&gt;
+    &lt;<span class="ct">li</span>&gt;
+      {todo.text}
+      &lt;<span class="ct">button</span> <span class="cp">onClick</span>={() =&gt;
+        <span class="cf">send</span>({ <span class="cp">type</span>: <span class="cs">"TOGGLE_TODO"</span>, <span class="cp">id</span> })
+      }&gt;
+        {todo.completed ? <span class="cs">"Undo"</span> : <span class="cs">"Done"</span>}
+      &lt;/<span class="ct">button</span>&gt;
+    &lt;/<span class="ct">li</span>&gt;
   );
 }`,
   },
@@ -351,7 +349,7 @@ const tabs = [
 
     <!-- Packages -->
     <section class="packages">
-      <h2>7 focused packages</h2>
+      <h2>Focused packages</h2>
       <p class="packages-sub">Import only what you need.</p>
       <div class="pkg-grid">
         <a href="/api/worker/" class="pkg">
@@ -400,10 +398,36 @@ const tabs = [
   </div>
 
   <style>
+    /* Hide Starlight's default page title on landing */
+    :global(.page-title-row) { display: none !important; }
+    :global([data-has-hero] .content-panel:first-child) { display: none !important; }
+
     .landing { max-width: 68rem; margin: 0 auto; padding: 0 1.5rem; }
 
+    /* ── Animations ── */
+    @keyframes fadeUp {
+      from { opacity: 0; transform: translateY(1.5rem); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    @keyframes fadeIn {
+      from { opacity: 0; }
+      to { opacity: 1; }
+    }
+
+    @keyframes shimmer {
+      0% { background-position: -200% center; }
+      100% { background-position: 200% center; }
+    }
+
     /* ── Hero ── */
-    .landing-hero { text-align: center; padding: 5rem 0 3rem; max-width: 50rem; margin: 0 auto; }
+    .landing-hero {
+      text-align: center;
+      padding: 4rem 0 3.5rem;
+      max-width: 50rem;
+      margin: 0 auto;
+      animation: fadeUp 0.6s ease-out both;
+    }
 
     .landing-hero-title {
       font-size: clamp(2.5rem, 5.5vw, 4rem);
@@ -415,21 +439,33 @@ const tabs = [
     }
 
     .landing-hero-gradient {
-      background: linear-gradient(135deg, #f6821f 0%, #faad3f 60%, #f6821f 100%);
+      background: linear-gradient(
+        135deg,
+        #f6821f 0%, #faad3f 40%, #f6821f 70%, #faad3f 100%
+      );
+      background-size: 200% auto;
       -webkit-background-clip: text;
       -webkit-text-fill-color: transparent;
       background-clip: text;
+      animation: shimmer 6s linear infinite;
     }
 
     .landing-hero-sub {
-      font-size: 1.2rem;
+      font-size: 1.15rem;
       line-height: 1.6;
       color: var(--sl-color-gray-2);
       margin: 0 auto 2.5rem;
       max-width: 36rem;
+      animation: fadeUp 0.6s 0.15s ease-out both;
     }
 
-    .landing-hero-actions { display: flex; gap: 1rem; justify-content: center; flex-wrap: wrap; }
+    .landing-hero-actions {
+      display: flex;
+      gap: 1rem;
+      justify-content: center;
+      flex-wrap: wrap;
+      animation: fadeUp 0.6s 0.25s ease-out both;
+    }
 
     .landing-hero-badges {
       display: flex;
@@ -437,6 +473,7 @@ const tabs = [
       justify-content: center;
       flex-wrap: wrap;
       margin-top: 2.5rem;
+      animation: fadeIn 0.8s 0.5s ease-out both;
     }
 
     .badge {
@@ -446,6 +483,12 @@ const tabs = [
       font-size: 0.75rem;
       color: var(--sl-color-gray-3);
       letter-spacing: 0.02em;
+      transition: all 0.2s ease;
+    }
+
+    .badge:hover {
+      border-color: var(--sl-color-gray-3);
+      color: var(--sl-color-gray-1);
     }
 
     /* ── Buttons ── */
@@ -498,6 +541,24 @@ const tabs = [
     .icon-ctx { background: rgba(159, 122, 234, 0.1); color: #9f7aea; }
     .icon-xs  { background: rgba(237, 137, 54, 0.1); color: #ed8936; }
     .icon-fw  { background: rgba(66, 153, 225, 0.1); color: #4299e1; }
+
+    .feature {
+      padding: 1.25rem;
+      border-radius: 0.625rem;
+      border: 1px solid transparent;
+      transition: all 0.2s ease;
+    }
+
+    .feature:hover {
+      border-color: var(--sl-color-gray-5);
+      background: rgba(255, 255, 255, 0.02);
+    }
+
+    .feature:hover .feature-icon {
+      transform: scale(1.05);
+    }
+
+    .feature-icon { transition: transform 0.2s ease; }
 
     .feature h3 { font-size: 1rem; font-weight: 600; margin: 0 0 0.35rem; color: var(--sl-color-white); }
     .feature p { font-size: 0.85rem; line-height: 1.55; color: var(--sl-color-gray-2); margin: 0; }
@@ -656,7 +717,7 @@ const tabs = [
     .packages { padding: 4rem 0; border-top: 1px solid var(--sl-color-hairline); text-align: center; }
     .packages h2 { font-size: 1.75rem; font-weight: 700; letter-spacing: -0.02em; margin: 0 0 0.5rem; color: var(--sl-color-white); }
     .packages-sub { color: var(--sl-color-gray-2); margin: 0 0 2rem; font-size: 0.95rem; }
-    .pkg-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.75rem; text-align: left; }
+    .pkg-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(14rem, 1fr)); gap: 0.75rem; text-align: left; }
 
     .pkg {
       display: flex; flex-direction: column; gap: 0.2rem;
