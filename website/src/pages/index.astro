@@ -509,6 +509,7 @@ const tabs = [
       display: grid;
       grid-template-columns: repeat(3, 1fr);
       gap: 1.5rem;
+      align-items: start;
     }
 
     .feature-icon {
@@ -530,6 +531,7 @@ const tabs = [
       border-radius: 0.625rem;
       border: 1px solid transparent;
       transition: all 0.2s ease;
+      margin-top: 0 !important;
     }
 
     .feature:hover {
@@ -656,6 +658,7 @@ const tabs = [
     .flow-step {
       display: flex; align-items: center; gap: 0.75rem;
       padding: 0.35rem 0;
+      margin-top: 0 !important;
     }
 
     .flow-num {
@@ -677,6 +680,7 @@ const tabs = [
       width: 1.5rem;
       text-align: center;
       padding: 0.15rem 0;
+      margin-top: 0 !important;
     }
 
     /* ── Use Cases ── */
@@ -692,6 +696,7 @@ const tabs = [
       display: flex; flex-direction: column; gap: 0.4rem;
       transition: border-color 0.15s ease;
       height: 100%;
+      margin-top: 0 !important;
     }
     .uc:hover { border-color: var(--sl-color-gray-3); }
 
@@ -714,6 +719,7 @@ const tabs = [
       width: calc(25% - 0.75rem);
       min-width: 14rem;
       text-align: left;
+      margin-top: 0 !important;
     }
     .pkg:hover { border-color: var(--sl-color-gray-3); background: rgba(255,255,255,0.02); }
     .pkg strong { font-size: 0.85rem; font-family: var(--sl-font-mono); color: var(--sl-color-white); }
