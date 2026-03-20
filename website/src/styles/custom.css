@@ -1,0 +1,39 @@
+/* Copy page button */
+.copy-page-button {
+  position: fixed;
+  bottom: 1.5rem;
+  right: 1.5rem;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 1rem;
+  border-radius: 2rem;
+  border: 1px solid var(--sl-color-gray-5);
+  background: var(--sl-color-bg);
+  color: var(--sl-color-text);
+  font-size: var(--sl-text-sm);
+  cursor: pointer;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  transition: all 0.15s ease;
+}
+
+.copy-page-button:hover {
+  border-color: var(--sl-color-accent);
+  color: var(--sl-color-accent);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+
+.copy-page-button[data-copied="true"] {
+  border-color: var(--sl-color-green);
+  color: var(--sl-color-green);
+}
+
+@media (max-width: 50rem) {
+  .copy-page-button {
+    bottom: 1rem;
+    right: 1rem;
+    padding: 0.4rem 0.75rem;
+    font-size: var(--sl-text-xs);
+  }
+}

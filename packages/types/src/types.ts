@@ -215,12 +215,33 @@ export type WithActorKitContext<
   private: Record<string, TPrivateProps>;
 };
 
+// Extract the context type directly from StateMachine's first generic parameter.
+// Going through SnapshotFrom collapses to unknown when other generic slots are any.
+type ContextFromMachine<T> = T extends StateMachine<
+  infer TContext,
+  any,
+  any,
+  any,
+  any,
+  any,
+  any,
+  any,
+  any,
+  any,
+  any,
+  any,
+  any,
+  any
+>
+  ? TContext
+  : never;
+
 export type CallerSnapshotFrom<TMachine extends AnyStateMachine> = {
-  public: SnapshotFrom<TMachine> extends { context: { public: infer P } }
+  public: ContextFromMachine<TMachine> extends { public: infer P }
     ? P
     : unknown;
-  private: SnapshotFrom<TMachine> extends {
-    context: { private: Partial<Record<string, infer PR>> };
+  private: ContextFromMachine<TMachine> extends {
+    private: Partial<Record<string, infer PR>>;
   }
     ? PR
     : unknown;

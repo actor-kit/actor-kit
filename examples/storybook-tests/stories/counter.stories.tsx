@@ -88,15 +88,15 @@ export const Interactive: Story = {
         // Simulate machine behavior in response to events
         if (event.type === "INCREMENT") {
           client.produce((draft) => {
-            (draft.public as { count: number }).count += 1;
+            draft.public.count += 1;
           });
         } else if (event.type === "DECREMENT") {
           client.produce((draft) => {
-            (draft.public as { count: number }).count -= 1;
+            draft.public.count -= 1;
           });
         } else if (event.type === "RESET") {
           client.produce((draft) => {
-            (draft.public as { count: number }).count = 0;
+            draft.public.count = 0;
           });
         }
       },

@@ -1,0 +1,318 @@
+---
+/**
+ * Custom landing page for actorkit.dev
+ */
+---
+
+<div class="landing">
+  <section class="hero">
+    <div class="hero-content">
+      <p class="hero-badge">Built for Cloudflare Workers</p>
+      <h1>State machines at the edge, synced in real time</h1>
+      <p class="hero-subtitle">
+        Actor Kit runs XState state machines inside Cloudflare Durable Objects
+        with automatic real-time sync to every connected client. Type-safe from
+        machine definition to React hook.
+      </p>
+      <div class="hero-actions">
+        <a href="/getting-started/overview/" class="hero-btn primary">Get Started</a>
+        <a href="https://github.com/actor-kit/actor-kit" class="hero-btn secondary">GitHub</a>
+      </div>
+    </div>
+    <div class="hero-code">
+      <pre><code class="language-typescript">// Define your machine — XState v5 + Immer
+const todoMachine = setup({
+  types: {
+    context: {} as {
+      public: { todos: Todo[]; lastSync: number };
+      private: Record&lt;string, { odFilter: Filter }>;
+    },
+    events: {} as
+      | WithActorKitEvent&lt;{ type: "ADD_TODO"; text: string }, "client">
+      | WithActorKitEvent&lt;{ type: "TOGGLE_TODO"; id: string }, "client">,
+  },
+  actions: {
+    addTodo: assign(({ context, event }) =>
+      produce(context, (draft) => {
+        draft.public.todos.push({
+          id: crypto.randomUUID(),
+          text: event.text,
+          completed: false,
+        });
+      })
+    ),
+  },
+});</code></pre>
+    </div>
+  </section>
+
+  <section class="features">
+    <div class="features-grid">
+      <div class="feature">
+        <h3>Durable Object Runtime</h3>
+        <p>
+          Each actor is a Cloudflare Durable Object — single-threaded,
+          globally addressable, with built-in storage. No servers to manage.
+        </p>
+      </div>
+      <div class="feature">
+        <h3>Real-time Sync</h3>
+        <p>
+          WebSocket connections with JSON Patch diffs and checksum deduplication.
+          Clients stay in sync with minimal bytes over the wire.
+        </p>
+      </div>
+      <div class="feature">
+        <h3>Type Safety</h3>
+        <p>
+          Generics enforce event/context alignment at compile time.
+          Zod validates at runtime boundaries. No <code>any</code>, no <code>as</code> casting.
+        </p>
+      </div>
+      <div class="feature">
+        <h3>Public / Private Context</h3>
+        <p>
+          Every actor has public state shared with all clients and private
+          state scoped per caller. Built-in data isolation.
+        </p>
+      </div>
+      <div class="feature">
+        <h3>XState v5</h3>
+        <p>
+          Full state machine power — parallel states, guards, delayed transitions,
+          spawned actors. Visualize and debug with Stately Studio.
+        </p>
+      </div>
+      <div class="feature">
+        <h3>Framework Integrations</h3>
+        <p>
+          First-class React hooks with <code>useSelector</code> and <code>useSend</code>.
+          SSR support for Next.js and TanStack Start. Framework-agnostic core.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <section class="packages">
+    <h2>7 focused packages</h2>
+    <div class="package-grid">
+      <a href="/api/types/" class="package">
+        <strong>@actor-kit/types</strong>
+        <span>Shared types, schemas, constants</span>
+      </a>
+      <a href="/api/worker/" class="package">
+        <strong>@actor-kit/worker</strong>
+        <span>createMachineServer, router, fromActorKit</span>
+      </a>
+      <a href="/api/browser/" class="package">
+        <strong>@actor-kit/browser</strong>
+        <span>Client connection and state sync</span>
+      </a>
+      <a href="/api/react/" class="package">
+        <strong>@actor-kit/react</strong>
+        <span>React hooks and context provider</span>
+      </a>
+      <a href="/api/server/" class="package">
+        <strong>@actor-kit/server</strong>
+        <span>Token creation and server-side fetch</span>
+      </a>
+      <a href="/api/test/" class="package">
+        <strong>@actor-kit/test</strong>
+        <span>Mock client for testing and Storybook</span>
+      </a>
+      <a href="/api/storybook/" class="package">
+        <strong>@actor-kit/storybook</strong>
+        <span>Storybook decorator and integration</span>
+      </a>
+    </div>
+  </section>
+</div>
+
+<style>
+  .landing {
+    max-width: 72rem;
+    margin: 0 auto;
+    padding: 0 1.5rem;
+  }
+
+  /* Hero */
+  .hero {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 3rem;
+    align-items: center;
+    padding: 4rem 0 5rem;
+  }
+
+  .hero-badge {
+    display: inline-block;
+    padding: 0.25rem 0.75rem;
+    border-radius: 2rem;
+    border: 1px solid var(--sl-color-gray-5);
+    font-size: var(--sl-text-xs);
+    color: var(--sl-color-gray-2);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    margin-bottom: 1rem;
+  }
+
+  .hero h1 {
+    font-size: clamp(2rem, 4vw, 3rem);
+    line-height: 1.1;
+    letter-spacing: -0.02em;
+    margin: 0 0 1.25rem;
+  }
+
+  .hero-subtitle {
+    font-size: var(--sl-text-lg);
+    color: var(--sl-color-gray-2);
+    line-height: 1.6;
+    margin: 0 0 2rem;
+  }
+
+  .hero-actions {
+    display: flex;
+    gap: 1rem;
+  }
+
+  .hero-btn {
+    display: inline-flex;
+    align-items: center;
+    padding: 0.6rem 1.5rem;
+    border-radius: 0.5rem;
+    font-size: var(--sl-text-sm);
+    font-weight: 600;
+    text-decoration: none;
+    transition: all 0.15s ease;
+  }
+
+  .hero-btn.primary {
+    background: var(--sl-color-accent);
+    color: var(--sl-color-black);
+  }
+
+  .hero-btn.primary:hover {
+    opacity: 0.9;
+  }
+
+  .hero-btn.secondary {
+    border: 1px solid var(--sl-color-gray-5);
+    color: var(--sl-color-text);
+  }
+
+  .hero-btn.secondary:hover {
+    border-color: var(--sl-color-gray-3);
+  }
+
+  .hero-code {
+    border-radius: 0.75rem;
+    overflow: hidden;
+    border: 1px solid var(--sl-color-gray-5);
+    background: var(--sl-color-gray-6);
+  }
+
+  .hero-code pre {
+    margin: 0;
+    padding: 1.5rem;
+    overflow-x: auto;
+    font-size: var(--sl-text-xs);
+    line-height: 1.7;
+  }
+
+  .hero-code code {
+    font-family: var(--sl-font-mono);
+  }
+
+  /* Features */
+  .features {
+    padding: 4rem 0;
+    border-top: 1px solid var(--sl-color-gray-6);
+  }
+
+  .features-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 2rem;
+  }
+
+  .feature h3 {
+    font-size: var(--sl-text-base);
+    margin: 0 0 0.5rem;
+  }
+
+  .feature p {
+    font-size: var(--sl-text-sm);
+    color: var(--sl-color-gray-2);
+    line-height: 1.6;
+    margin: 0;
+  }
+
+  .feature code {
+    font-size: 0.85em;
+    padding: 0.1em 0.3em;
+    border-radius: 0.25rem;
+    background: var(--sl-color-gray-6);
+  }
+
+  /* Packages */
+  .packages {
+    padding: 4rem 0;
+    border-top: 1px solid var(--sl-color-gray-6);
+  }
+
+  .packages h2 {
+    font-size: var(--sl-text-xl);
+    margin: 0 0 2rem;
+    text-align: center;
+  }
+
+  .package-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr));
+    gap: 1rem;
+  }
+
+  .package {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    padding: 1rem 1.25rem;
+    border-radius: 0.5rem;
+    border: 1px solid var(--sl-color-gray-5);
+    text-decoration: none;
+    color: var(--sl-color-text);
+    transition: border-color 0.15s ease;
+  }
+
+  .package:hover {
+    border-color: var(--sl-color-accent);
+  }
+
+  .package strong {
+    font-size: var(--sl-text-sm);
+    font-family: var(--sl-font-mono);
+  }
+
+  .package span {
+    font-size: var(--sl-text-xs);
+    color: var(--sl-color-gray-2);
+  }
+
+  /* Responsive */
+  @media (max-width: 60rem) {
+    .hero {
+      grid-template-columns: 1fr;
+      padding: 2rem 0 3rem;
+    }
+
+    .features-grid {
+      grid-template-columns: 1fr;
+    }
+  }
+
+  @media (min-width: 60rem) and (max-width: 72rem) {
+    .features-grid {
+      grid-template-columns: repeat(2, 1fr);
+    }
+  }
+</style>

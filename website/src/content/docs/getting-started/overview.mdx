@@ -1,0 +1,75 @@
+---
+title: What is Actor Kit?
+description: A library for running XState state machines in Cloudflare Durable Objects with real-time client sync.
+---
+
+Actor Kit runs [XState v5](https://stately.ai/docs/xstate) state machines inside [Cloudflare Durable Objects](https://developers.cloudflare.com/durable-objects/) and synchronizes state to browser clients via WebSocket using JSON Patch diffs.
+
+## Why Actor Kit?
+
+Building real-time, stateful applications on the edge is hard. You need to coordinate state across multiple clients, handle disconnections and reconnections, manage persistence, enforce access control, and keep everything type-safe.
+
+Actor Kit handles all of this so you can focus on your state machine logic:
+
+- **Each actor is a Durable Object** — single-threaded, globally addressable, with built-in storage. No servers to manage.
+- **Real-time sync via WebSocket** — JSON Patch diffs with checksum deduplication. Clients stay current with minimal bytes over the wire.
+- **Type safety at every layer** — generics enforce event/context alignment at compile time. Zod validates at runtime boundaries.
+- **Public/private context separation** — every actor has shared state visible to all clients and private state scoped per caller.
+- **Framework integrations** — first-class React hooks with `useSelector` and `useSend`. SSR support for Next.js and TanStack Start.
+
+## Architecture at a Glance
+
+```
+Browser                           Cloudflare Worker
+┌─────────────────────┐           ┌──────────────────────────────┐
+│                     │           │                              │
+│  createActorKitClient ──WSS───▶  createActorKitRouter          │
+│  (WebSocket client) │           │  (request routing)           │
+│       │             │           │       │                      │
+│       ▼             │           │       ▼                      │
+│  createActorKitContext          │  createMachineServer          │
+│  (React hooks)      │           │  (Durable Object class)      │
+│   • useSelector     │           │       │                      │
+│   • useSend         │           │       ▼                      │
+│   • useMatches      │           │  XState Actor Instance       │
+│                     │           │       │                      │
+│                     │           │       ▼                      │
+│                     │           │  DurableObject Storage       │
+│                     │           │  (snapshot persistence)      │
+└─────────────────────┘           └──────────────────────────────┘
+
+Server (SSR)
+┌─────────────────────┐
+│  createAccessToken   │  ← JWT signing (jose)
+│  createActorFetch    │  ← HTTP GET for initial snapshot
+└─────────────────────┘
+```
+
+## Packages
+
+Actor Kit is split into 7 focused packages:
+
+| Package | Purpose |
+|---------|---------|
+| [`@actor-kit/types`](/api/types/) | Shared types, schemas, and constants |
+| [`@actor-kit/worker`](/api/worker/) | `createMachineServer`, router, Durable Object class |
+| [`@actor-kit/browser`](/api/browser/) | WebSocket client, reconnection, state patching |
+| [`@actor-kit/react`](/api/react/) | React context, hooks (`useSelector`, `useSend`, `useMatches`) |
+| [`@actor-kit/server`](/api/server/) | JWT creation, server-side data fetching |
+| [`@actor-kit/test`](/api/test/) | Mock client for testing |
+| [`@actor-kit/storybook`](/api/storybook/) | Storybook decorator |
+
+## Use Cases
+
+- **Multiplayer games** — shared game state with per-player private data
+- **Collaborative tools** — real-time editing, whiteboards, shared documents
+- **AI agents** — orchestration and persistence of agent state
+- **IoT applications** — device state management at the edge
+- **Chat and messaging** — room state with presence tracking
+
+## Next Steps
+
+import { LinkCard } from '@astrojs/starlight/components';
+
+<LinkCard title="Installation" description="Install Actor Kit packages and set up your project." href="/getting-started/installation/" />
+<LinkCard title="Quick Start" description="Build a todo list app from scratch in 8 steps." href="/getting-started/quick-start/" />

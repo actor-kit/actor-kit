@@ -1,0 +1,104 @@
+---
+/**
+ * A floating button that copies the current page's content as markdown.
+ * Extracts text from the main content area, preserving code blocks.
+ */
+---
+
+<button class="copy-page-button" id="copy-page-btn" title="Copy page as markdown for LLM context">
+  <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <rect width="14" height="14" x="8" y="8" rx="2" ry="2"></rect>
+    <path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"></path>
+  </svg>
+  <span class="copy-page-label">Copy page</span>
+</button>
+
+<script>
+  function setupCopyButton() {
+    const btn = document.getElementById("copy-page-btn");
+    if (!btn) return;
+
+    btn.addEventListener("click", async () => {
+      const content = document.querySelector("[data-pagefind-body]")
+        ?? document.querySelector(".sl-markdown-content")
+        ?? document.querySelector("main");
+
+      if (!content) return;
+
+      // Extract markdown-ish text from the page
+      const text = extractMarkdown(content as HTMLElement);
+
+      try {
+        await navigator.clipboard.writeText(text);
+        btn.setAttribute("data-copied", "true");
+        const label = btn.querySelector(".copy-page-label");
+        if (label) label.textContent = "Copied!";
+
+        setTimeout(() => {
+          btn.removeAttribute("data-copied");
+          if (label) label.textContent = "Copy page";
+        }, 2000);
+      } catch {
+        // Fallback for older browsers
+        const textarea = document.createElement("textarea");
+        textarea.value = text;
+        textarea.style.position = "fixed";
+        textarea.style.opacity = "0";
+        document.body.appendChild(textarea);
+        textarea.select();
+        document.execCommand("copy");
+        document.body.removeChild(textarea);
+      }
+    });
+  }
+
+  function extractMarkdown(el: HTMLElement): string {
+    const lines: string[] = [];
+    const title = document.querySelector("h1")?.textContent?.trim();
+    if (title) lines.push(`# ${title}\n`);
+
+    const content = el.querySelector(".sl-markdown-content") ?? el;
+
+    for (const node of content.children) {
+      const tag = node.tagName.toLowerCase();
+
+      if (tag === "h1") continue; // already added
+      if (tag === "h2") lines.push(`\n## ${node.textContent?.trim()}\n`);
+      else if (tag === "h3") lines.push(`\n### ${node.textContent?.trim()}\n`);
+      else if (tag === "h4") lines.push(`\n#### ${node.textContent?.trim()}\n`);
+      else if (tag === "p") lines.push(`${node.textContent?.trim()}\n`);
+      else if (tag === "ul" || tag === "ol") {
+        for (const li of node.querySelectorAll(":scope > li")) {
+          const prefix = tag === "ol"
+            ? `${Array.from(node.children).indexOf(li) + 1}. `
+            : "- ";
+          lines.push(`${prefix}${li.textContent?.trim()}`);
+        }
+        lines.push("");
+      } else if (tag === "pre" || node.querySelector("pre")) {
+        const code = node.querySelector("code");
+        const lang = code?.className?.match(/language-(\w+)/)?.[1] ?? "";
+        const text = code?.textContent?.trim() ?? node.textContent?.trim() ?? "";
+        lines.push(`\n\`\`\`${lang}\n${text}\n\`\`\`\n`);
+      } else if (node.classList.contains("expressive-code")) {
+        const code = node.querySelector("code");
+        const lang = code?.className?.match(/language-(\w+)/)?.[1] ?? "";
+        const text = code?.textContent?.trim() ?? "";
+        lines.push(`\n\`\`\`${lang}\n${text}\n\`\`\`\n`);
+      } else if (tag === "table") {
+        lines.push(`\n${node.textContent?.trim()}\n`);
+      } else if (tag === "blockquote") {
+        lines.push(`> ${node.textContent?.trim()}\n`);
+      } else {
+        const text = node.textContent?.trim();
+        if (text) lines.push(`${text}\n`);
+      }
+    }
+
+    return lines.join("\n").replace(/\n{3,}/g, "\n\n").trim();
+  }
+
+  // Run on initial load and on Astro page transitions
+  setupCopyButton();
+  document.addEventListener("astro:after-swap", setupCopyButton);
+</script>

@@ -1,0 +1,68 @@
+---
+title: Actor Kit
+description: Type-safe state machines on Cloudflare Durable Objects with real-time client sync.
+template: splash
+hero:
+  tagline: Run XState state machines inside Cloudflare Durable Objects with automatic real-time sync to every connected client. Type-safe from machine definition to React hook.
+  actions:
+    - text: Get Started
+      link: /getting-started/overview/
+      icon: right-arrow
+      variant: primary
+    - text: View on GitHub
+      link: https://github.com/actor-kit/actor-kit
+      icon: external
+      variant: minimal
+---
+
+import { Card, CardGrid } from '@astrojs/starlight/components';
+
+<CardGrid>
+  <Card title="Durable Object Runtime" icon="cloud">
+    Each actor is a Cloudflare Durable Object — single-threaded, globally addressable, with built-in storage. No servers to manage.
+  </Card>
+  <Card title="Real-time Sync" icon="rocket">
+    WebSocket connections with JSON Patch diffs and checksum deduplication. Clients stay in sync with minimal bytes over the wire.
+  </Card>
+  <Card title="Type Safety" icon="approve-check">
+    Generics enforce event/context alignment at compile time. Zod validates at runtime boundaries. No `any`, no `as` casting.
+  </Card>
+  <Card title="Public / Private Context" icon="setting">
+    Every actor has public state shared with all clients and private state scoped per caller. Built-in data isolation.
+  </Card>
+  <Card title="XState v5" icon="puzzle">
+    Full state machine power — parallel states, guards, delayed transitions, spawned actors. Visualize with Stately Studio.
+  </Card>
+  <Card title="Framework Integrations" icon="laptop">
+    First-class React hooks. SSR support for Next.js and TanStack Start. Framework-agnostic core.
+  </Card>
+</CardGrid>
+
+## 7 Focused Packages
+
+<CardGrid>
+  <Card title="@actor-kit/types" icon="document">
+    Shared types, schemas, and constants.
+    [API Reference →](/api/types/)
+  </Card>
+  <Card title="@actor-kit/worker" icon="seti:config">
+    createMachineServer, router, fromActorKit.
+    [API Reference →](/api/worker/)
+  </Card>
+  <Card title="@actor-kit/browser" icon="seti:html">
+    Client connection and real-time state sync.
+    [API Reference →](/api/browser/)
+  </Card>
+  <Card title="@actor-kit/react" icon="seti:react">
+    React hooks and context provider.
+    [API Reference →](/api/react/)
+  </Card>
+  <Card title="@actor-kit/server" icon="seti:lock">
+    Token creation and server-side data fetch.
+    [API Reference →](/api/server/)
+  </Card>
+  <Card title="@actor-kit/test" icon="seti:test">
+    Mock client for testing and Storybook.
+    [API Reference →](/api/test/)
+  </Card>
+</CardGrid>
