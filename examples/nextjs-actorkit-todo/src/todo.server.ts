@@ -1,4 +1,4 @@
-import { createMachineServer } from "actor-kit/worker";
+import { createMachineServer } from "@actor-kit/worker";
 import { todoMachine } from "./todo.machine";
 import {
   TodoClientEventSchema,

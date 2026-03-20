@@ -575,7 +575,7 @@ async #pruneOldEvents() {
 ### Configuration
 
 ```typescript
-import { createAnalyticsEngineSink, createConsoleSink } from "actor-kit/sinks";
+import { createAnalyticsEngineSink, createConsoleSink } from "@actor-kit/sinks";
 
 export const Todo = createMachineServer({
   machine: todoMachine,
@@ -624,7 +624,7 @@ XState Machine
 ### The `ActorEventSink` interface
 
 ```typescript
-// In actor-kit/types
+// In @actor-kit/types
 interface ActorEvent {
   actorType: string;
   actorId: string;
@@ -652,7 +652,7 @@ Sinks receive batches of `ActorEvent` objects. They can be sync or async — the
 Free, built into Workers, queryable via SQL API. Designed for high-volume event data with no external service required.
 
 ```typescript
-// actor-kit/sinks
+// @actor-kit/sinks
 export function createAnalyticsEngineSink(
   dataset: AnalyticsEngineDataset
 ): ActorEventSink {

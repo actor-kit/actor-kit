@@ -3,7 +3,7 @@ import type {
   BaseActorKitEvent,
   WithActorKitEvent,
   WithActorKitInput,
-} from "actor-kit";
+} from "@actor-kit/types";
 import type { z } from "zod";
 import type { ActorEnv } from "./actor-env";
 import type {

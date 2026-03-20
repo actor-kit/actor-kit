@@ -84,14 +84,14 @@
 
 | File | Lines | Seam | Focus |
 |------|-------|------|-------|
-| `create-machine-server.test.ts` | 432 | 3 | Snapshot caching, WebSocket messaging, persistence |
-| `create-actor-kit-client.test.ts` | 414 | 1 | Connection, reconnection, state patching, event queueing |
-| `create-actor-kit-router.test.ts` | 262 | 2 | Routing, spawning, auth, GET/POST/WebSocket |
-| `create-actor-fetch.test.ts` | 236 | 2 | Server-side fetching, waitFor conditions |
-| `utils.test.ts` | 172 | — | Token parsing, JWT verification, logging |
-| `create-actor-kit-mock-client.test.ts` | 112 | — | Mock client produce(), subscriptions |
-| `auth.test.ts` | 46 | 2 | Token validation edge cases |
-| `schemas.test.ts` | 27 | — | CallerStringSchema parsing |
+| `packages/worker/tests/create-machine-server.test.ts` | 432 | 3 | Snapshot caching, WebSocket messaging, persistence |
+| `packages/browser/tests/create-actor-kit-client.test.ts` | 414 | 1 | Connection, reconnection, state patching, event queueing |
+| `packages/worker/tests/create-actor-kit-router.test.ts` | 262 | 2 | Routing, spawning, auth, GET/POST/WebSocket |
+| `packages/server/tests/create-actor-fetch.test.ts` | 236 | 2 | Server-side fetching, waitFor conditions |
+| `packages/worker/tests/utils.test.ts` | 172 | — | Token parsing, JWT verification, logging |
+| `packages/test/tests/create-actor-kit-mock-client.test.ts` | 112 | — | Mock client produce(), subscriptions |
+| `packages/worker/tests/auth.test.ts` | 46 | 2 | Token validation edge cases |
+| `packages/types/tests/schemas.test.ts` | 27 | — | CallerStringSchema parsing |
 
 ## Fake Implementations
 
@@ -159,7 +159,7 @@ thresholds: {
 
 Actor-kit provides mock infrastructure for Storybook:
 
-### Mock client (`actor-kit/test`)
+### Mock client (`@actor-kit/test`)
 
 `createActorKitMockClient<TMachine>` — same interface as real client, no network I/O:
 - `send(event)` → triggers `onSend` callback
@@ -167,7 +167,7 @@ Actor-kit provides mock infrastructure for Storybook:
 - `getState()` → current snapshot
 - `subscribe(listener)` → state change notifications
 
-### Storybook decorator (`actor-kit/storybook`)
+### Storybook decorator (`@actor-kit/storybook`)
 
 `withActorKit<TMachine>({ actorType, context })` — reads snapshot from `parameters.actorKit.{actorType}` and provides it via context.
 

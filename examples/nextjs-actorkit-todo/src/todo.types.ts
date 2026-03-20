@@ -3,7 +3,7 @@ import type {
   BaseActorKitEvent,
   WithActorKitEvent,
   WithActorKitInput,
-} from "actor-kit";
+} from "@actor-kit/types";
 import { z } from "zod";
 import {
   TodoClientEventSchema,

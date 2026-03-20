@@ -49,7 +49,7 @@ examples/nextjs-actorkit-todo/
 The `src/todo.server.ts` file creates the Todo server using Actor Kit:
 
 ```typescript
-import { createMachineServer } from "actor-kit/worker";
+import { createMachineServer } from "@actor-kit/worker";
 import { todoMachine } from "./todo.machine";
 import {
   TodoClientEventSchema,
@@ -85,8 +85,8 @@ The `src/server.ts` file sets up the Cloudflare Worker with Actor Kit:
 
 ```typescript
 import { DurableObjectNamespace } from "@cloudflare/workers-types";
-import { AnyActorServer } from "actor-kit";
-import { createActorKitRouter } from "actor-kit/worker";
+import { AnyActorServer } from "@actor-kit/types";
+import { createActorKitRouter } from "@actor-kit/worker";
 import { WorkerEntrypoint } from "cloudflare:workers";
 import { Todo, TodoServer } from "./todo.server";
 
@@ -117,7 +117,7 @@ The todo list page (`src/app/lists/[id]/page.tsx`) fetches initial state and set
 
 ```typescript
 import { getUserId } from "@/session";
-import { createAccessToken, createActorFetch } from "actor-kit/server";
+import { createAccessToken, createActorFetch } from "@actor-kit/server";
 import { TodoActorKitProvider } from "../../../todo.context";
 import type { TodoMachine } from "../../../todo.machine";
 import { TodoList } from "./components";

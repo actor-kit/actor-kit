@@ -64,7 +64,7 @@ always: {
 ### `fromRemoteActor` — XState actor logic for remote actors
 
 ```typescript
-import { fromRemoteActor } from "actor-kit/worker"
+import { fromRemoteActor } from "@actor-kit/worker"
 
 const playerMachine = setup({
   actors: {

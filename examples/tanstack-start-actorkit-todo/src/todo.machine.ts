@@ -1,4 +1,4 @@
-import type { ActorKitStateMachine } from "actor-kit";
+import type { ActorKitStateMachine } from "@actor-kit/types";
 import { assign, setup } from "xstate";
 import type {
   TodoEvent,

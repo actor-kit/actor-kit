@@ -1,0 +1,45 @@
+{
+  "name": "@actor-kit/worker",
+  "version": "0.0.1",
+  "type": "module",
+  "main": "./dist/index.mjs",
+  "module": "./dist/index.mjs",
+  "types": "./dist/index.d.mts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.mts",
+      "import": "./dist/index.mjs"
+    }
+  },
+  "files": [
+    "src",
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsdown",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@actor-kit/server": "workspace:*",
+    "@actor-kit/types": "workspace:*",
+    "fast-json-patch": "^3.1.1",
+    "immer": "^11.1.4",
+    "jose": "^6.2.1",
+    "xstate-migrate": "^0.0.8"
+  },
+  "peerDependencies": {
+    "xstate": "^5.18.0",
+    "zod": "^3.23.0"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20260312.1",
+    "tsdown": "^0.21.2",
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.0",
+    "xstate": "^5.28.0",
+    "zod": "^3.25.76"
+  },
+  "author": "jonmumm",
+  "license": "ISC"
+}
