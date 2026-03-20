@@ -1,0 +1,17 @@
+{
+  "compilerOptions": {
+    "target": "esnext",
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "paths": {
+      "@actor-kit/types": ["../../../packages/types/src/index.ts"],
+      "@actor-kit/worker": ["../../../packages/worker/src/index.ts"],
+      "@actor-kit/server": ["../../../packages/server/src/index.ts"],
+      "@actor-kit/browser": ["../../../packages/browser/src/index.ts"]
+    }
+  },
+  "include": ["*.ts"]
+}

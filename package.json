@@ -1,11 +1,15 @@
 {
   "private": true,
+  "type": "module",
   "packageManager": "pnpm@10.28.2",
   "scripts": {
     "build": "pnpm --filter @actor-kit/types build && pnpm --filter '@actor-kit/*' --filter '!@actor-kit/types' build",
     "typecheck": "pnpm -r typecheck",
     "test": "pnpm --filter '@actor-kit/*' test",
     "test:unit": "pnpm --filter '@actor-kit/*' test",
+    "test:integration": "vitest run --config vitest.integration.config.ts",
+    "test:workers": "vitest run --config vitest.workers.config.ts",
+    "test:build-fixtures": "npx wrangler deploy --dry-run --outdir=tests/integration/fixtures/dist --config tests/integration/fixtures/wrangler.toml",
     "prepare": "husky",
     "changeset": "changeset",
     "version": "changeset version",
@@ -14,12 +18,14 @@
   "devDependencies": {
     "@changesets/changelog-github": "^0.6.0",
     "@changesets/cli": "^2.30.0",
+    "@cloudflare/vitest-pool-workers": "^0.13.2",
     "fast-json-patch": "^3.1.1",
     "husky": "^9.1.7",
     "immer": "^11.1.4",
     "jose": "^6.2.1",
     "miniflare": "^4.20260317.0",
     "vitest": "^4.1.0",
+    "wrangler": "^4.72.0",
     "xstate": "^5.28.0",
     "zod": "^3.25.76"
   },

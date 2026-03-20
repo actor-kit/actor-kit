@@ -3,8 +3,8 @@
  * Self-contained: no dependency on example apps.
  */
 import { DurableObjectNamespace } from "@cloudflare/workers-types";
-import type { AnyActorServer } from "@actor-kit/types";
-import { createActorKitRouter, createMachineServer } from "@actor-kit/worker";
+import type { AnyActorServer } from "../../../packages/types/src/types";
+import { createActorKitRouter, createMachineServer } from "../../../packages/worker/src/index";
 import { WorkerEntrypoint } from "cloudflare:workers";
 import { assign, setup } from "xstate";
 import { z } from "zod";
@@ -13,7 +13,7 @@ import type {
   BaseActorKitEvent,
   WithActorKitEvent,
   WithActorKitInput,
-} from "@actor-kit/types";
+} from "../../../packages/types/src/types";
 
 // --- Schemas ---
 
