@@ -11,3 +11,4 @@ reports
 .ralph/
 docs/specs/states/
 docs/specs/tla2tools.jar
+storybook-static
