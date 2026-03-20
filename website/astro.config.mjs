@@ -7,6 +7,11 @@ export default defineConfig({
   integrations: [
     starlight({
       title: "Actor Kit",
+      logo: {
+        dark: "./src/assets/logo.svg",
+        light: "./src/assets/logo-light.svg",
+        replacesTitle: false,
+      },
       description:
         "Type-safe state machines on Cloudflare Durable Objects with real-time client sync.",
       social: [
@@ -81,6 +86,7 @@ export default defineConfig({
       ],
       components: {
         PageTitle: "./src/overrides/PageTitle.astro",
+        Header: "./src/overrides/Header.astro",
       },
       customCss: ["./src/styles/custom.css"],
     }),

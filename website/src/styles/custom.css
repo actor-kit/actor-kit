@@ -1,3 +1,26 @@
+/* Import Inter for clean, modern typography */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+
+/* Override Starlight's default fonts */
+:root {
+  --sl-font: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  --sl-font-mono: 'JetBrains Mono', ui-monospace, monospace;
+}
+
+/* Nav wordmark — clean, not the accent color */
+a.site-title {
+  color: var(--sl-color-white) !important;
+  font-size: 0.95rem !important;
+  font-weight: 600 !important;
+  letter-spacing: -0.02em !important;
+  gap: 0.5rem !important;
+}
+
+/* Constrain header to match body content width */
+:root {
+  --sl-nav-pad-x: max(1rem, calc((100vw - 68rem) / 2));
+}
+
 /* Splash page: give the tabbed code example some breathing room */
 [data-has-hero] .starlight-tabs {
   margin-top: 1rem;
