@@ -97,3 +97,35 @@ jobs:
 
       - name: Run TanStack Start E2E
         run: pnpm --filter tanstack-start-actorkit-todo test:e2e
+
+  storybook-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.28.2
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build packages
+        run: pnpm run build
+
+      - name: Install Playwright browsers
+        run: pnpm --filter actor-kit-storybook-tests exec playwright install --with-deps chromium
+
+      - name: Build Storybook
+        run: pnpm --filter actor-kit-storybook-tests build-storybook
+
+      - name: Run Storybook play function tests
+        run: |
+          npx concurrently -k -s first -n "SB,TEST" -c "magenta,blue" \
+            "npx http-server examples/storybook-tests/storybook-static --port 6006 --silent" \
+            "npx wait-on tcp:127.0.0.1:6006 --timeout 30000 && pnpm --filter actor-kit-storybook-tests test-storybook -- --maxWorkers=2 --testTimeout=60000"
