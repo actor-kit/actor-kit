@@ -119,7 +119,7 @@ jobs:
         run: pnpm run build
 
       - name: Install Playwright browsers
-        run: npx playwright install --with-deps chromium
+        run: pnpm --filter actor-kit-storybook-tests exec playwright install --with-deps chromium
 
       - name: Build Storybook
         run: pnpm --filter actor-kit-storybook-tests build-storybook

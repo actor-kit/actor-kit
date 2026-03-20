@@ -25,6 +25,7 @@
     "@storybook/react": "^8.6.18",
     "@storybook/react-vite": "^8.6.18",
     "@storybook/test": "^8.6.18",
+    "@playwright/test": "^1.52.0",
     "@storybook/test-runner": "^0.22.0",
     "@types/react": "^19.2.2",
     "storybook": "^8.6.18",
