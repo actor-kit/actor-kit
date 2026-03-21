@@ -1,0 +1,1 @@
+export { fromRedux } from "./fromRedux";

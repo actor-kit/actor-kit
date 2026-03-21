@@ -8,6 +8,7 @@ packages:
   - packages/test
   - packages/xstate
   - packages/xstate-store
+  - packages/redux
   - packages/storybook
   - examples/*
   - website
