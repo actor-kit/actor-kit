@@ -1,47 +1,49 @@
 # Actor-Kit
 
-Library for running XState state machines in Cloudflare Durable Objects with real-time client synchronization via WebSocket.
+Library for running event-driven state in Cloudflare Durable Objects with real-time client sync via WebSocket. State management is pluggable — use plain reducers, XState, @xstate/store, Redux, or any event-driven library.
 
 ## Stack
 
 - **Language**: TypeScript (strict)
-- **State machines**: XState 5
+- **State management**: Pluggable (plain reducers, XState 5, @xstate/store, Redux)
 - **Validation**: Zod
 - **Runtime**: Cloudflare Workers + Durable Objects
 - **Client**: React (primary), framework-agnostic core
 - **Build**: tsdown (esbuild-based)
-- **Test**: Vitest, Stryker (mutation testing)
+- **Test**: Vitest, @cloudflare/vitest-pool-workers
 - **Package manager**: pnpm
 - **Versioning**: Changesets
 
 ## Repo structure
 
-Monorepo with 7 scoped packages:
+Monorepo with scoped packages:
 
 ```
 actor-kit/
 ├── packages/
-│   ├── types/       → @actor-kit/types (shared types, schemas, constants)
+│   ├── core/        → @actor-kit/core (ActorLogic, defineLogic, createDurableActor, auth)
 │   ├── browser/     → @actor-kit/browser (createActorKitClient, selector)
-│   ├── worker/      → @actor-kit/worker (createMachineServer, router, fromActorKit)
 │   ├── react/       → @actor-kit/react (createActorKitContext)
-│   ├── server/      → @actor-kit/server (createAccessToken, createActorFetch)
+│   ├── server/      → @actor-kit/server (createActorFetch)
 │   ├── test/        → @actor-kit/test (createActorKitMockClient, transition)
-│   └── storybook/   → @actor-kit/storybook (withActorKit)
+│   ├── storybook/   → @actor-kit/storybook (withActorKit)
+│   ├── xstate/      → @actor-kit/xstate (fromXStateMachine adapter)
+│   ├── xstate-store/→ @actor-kit/xstate-store (fromXStateStore adapter)
+│   └── redux/       → @actor-kit/redux (fromRedux adapter)
 ├── tests/integration/  ← cross-package integration tests
 ├── examples/           ← example apps
 ├── docs/               ← documentation, roadmap, ADRs
 └── .changeset/         ← changesets config
 ```
 
-**Dependency graph**: types ← browser ← react, types ← worker (← server), types ← test (← browser), storybook ← react + test.
+**Dependency graph**: core ← browser ← react, core ← xstate/xstate-store/redux (adapters), core ← test (← browser), storybook ← react + test.
 
 ## Feedback commands
 
 Run before committing (pre-commit hook runs typecheck + test:unit):
 
 1. `pnpm typecheck` — strict TypeScript across all packages
-2. `pnpm test:unit` — Vitest unit tests (81 tests across 5 packages)
+2. `pnpm test:unit` — Vitest unit tests (110+ tests across packages)
 
 ## Knowledge base
 
@@ -57,15 +59,15 @@ Do NOT load all docs upfront. Load only when relevant to the current task.
 ## Core principles
 
 1. **Type safety at every layer** — generics enforce event/context alignment at compile time; Zod validates at runtime boundaries. No `any`, no `as` casting.
-2. **Public/private context separation** — every actor has `public` (shared with all callers) and `private` (per-caller) context. This is the core data model; respect it in all changes.
-3. **Caller-scoped snapshots** — clients only see `public` + their own `private` slice. Never leak another caller's private data.
+2. **Caller-scoped views** — `getView(state, caller)` produces what each caller sees. Different callers can see different projections of the same state.
+3. **Library-agnostic** — the `ActorLogic` interface is the contract. Any event-driven state library works via adapters. XState, @xstate/store, Redux, or plain reducers.
 4. **Efficient sync** — JSON Patch diffs + checksum deduplication. Minimize bytes over the wire. Full state only on first connect or checksum mismatch.
 5. **Framework-agnostic core** — React integration lives in `@actor-kit/react`. Core client and server modules must not import React.
 
 ## Key conventions
 
-- **Packages**: `@actor-kit/types`, `@actor-kit/browser`, `@actor-kit/worker`, `@actor-kit/react`, `@actor-kit/server`, `@actor-kit/test`, `@actor-kit/storybook`
-- **Event types**: Three caller types — `client` (browser user), `system` (framework-generated), `service` (backend). Events are augmented with `caller`, `storage`, `env` before reaching the machine.
+- **Packages**: `@actor-kit/core` (ActorLogic, createDurableActor), `@actor-kit/browser`, `@actor-kit/react`, `@actor-kit/server`, `@actor-kit/test`, `@actor-kit/storybook`, plus adapters (`@actor-kit/xstate`, `@actor-kit/xstate-store`, `@actor-kit/redux`)
+- **Event types**: Two caller types — `client` (browser user) and `service` (backend). Events are augmented with `caller` and `env` before reaching the transition function. System events are lifecycle hooks (`onConnect`, `onDisconnect`, `onResume`).
 - **System events**: `INITIALIZE`, `CONNECT`, `DISCONNECT`, `RESUME`, `MIGRATE` — generated by the framework, never by user code.
 - **Schemas**: Every actor defines `ClientEventSchema`, `ServiceEventSchema`, `InputPropsSchema` using Zod discriminated unions.
 - **Context mutations**: Always use Immer `produce()` inside XState `assign()` actions. Never mutate context directly.
