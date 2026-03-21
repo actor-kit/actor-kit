@@ -1,8 +1,6 @@
 packages:
   - packages/core
-  - packages/types      # deprecated — being merged into core
   - packages/browser
-  - packages/worker     # deprecated — being split into core + xstate
   - packages/react
   - packages/server
   - packages/test

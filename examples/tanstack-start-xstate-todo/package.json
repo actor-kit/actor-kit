@@ -28,8 +28,6 @@
     "@tanstack/router-plugin": "1.166.7",
     "@actor-kit/core": "workspace:*",
     "@actor-kit/xstate": "workspace:*",
-    "@actor-kit/types": "workspace:*",
-    "@actor-kit/worker": "workspace:*",
     "@actor-kit/react": "workspace:*",
     "@actor-kit/server": "workspace:*",
     "h3": "^2.0.1-rc.16",

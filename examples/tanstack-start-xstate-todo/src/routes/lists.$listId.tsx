@@ -1,7 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { createServerFn } from "@tanstack/react-start";
 import { createAccessToken, createActorFetch } from "@actor-kit/server";
-import type { Caller } from "@actor-kit/types";
+import type { Caller } from "@actor-kit/core";
 import { z } from "zod";
 import { TodoActorKitProvider } from "../todo.context";
 import type { TodoMachine } from "../todo.machine";

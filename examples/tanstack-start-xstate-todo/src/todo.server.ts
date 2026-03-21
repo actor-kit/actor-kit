@@ -1,19 +1,13 @@
-import type { DurableObjectNamespace } from "@cloudflare/workers-types";
 import { createDurableActor } from "@actor-kit/core";
 import { fromXStateMachine } from "@actor-kit/xstate";
-import { createActorKitRouter } from "@actor-kit/worker";
-import type { CallerSnapshotFrom } from "@actor-kit/types";
-import { todoMachine, type TodoMachine } from "./todo.machine";
+import { todoMachine } from "./todo.machine";
 import {
   TodoClientEventSchema,
   TodoInputPropsSchema,
   TodoServiceEventSchema,
 } from "./todo.schemas";
-import type { ActorEnv } from "./actor-env";
 
-type TodoView = CallerSnapshotFrom<TodoMachine>;
-
-const logic = fromXStateMachine<typeof todoMachine, TodoView>(todoMachine, {
+const logic = fromXStateMachine(todoMachine, {
   getView: (snapshot, caller) => ({
     public: snapshot.context.public,
     private: snapshot.context.private[caller.id] ?? {},
@@ -32,9 +26,4 @@ export const Todo = createDurableActor({
 });
 
 export type TodoServer = InstanceType<typeof Todo>;
-
-interface WorkerEnv extends ActorEnv {
-  TODO: DurableObjectNamespace<TodoServer>;
-}
-
-export const todoActorRouter = createActorKitRouter<WorkerEnv>(["todo"]);
+export default Todo;

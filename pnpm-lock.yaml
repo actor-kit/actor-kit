@@ -148,12 +148,6 @@ importers:
       '@actor-kit/server':
         specifier: workspace:*
         version: link:../../packages/server
-      '@actor-kit/types':
-        specifier: workspace:*
-        version: link:../../packages/types
-      '@actor-kit/worker':
-        specifier: workspace:*
-        version: link:../../packages/worker
       '@actor-kit/xstate':
         specifier: workspace:*
         version: link:../../packages/xstate
@@ -276,12 +270,6 @@ importers:
       '@actor-kit/server':
         specifier: workspace:*
         version: link:../../packages/server
-      '@actor-kit/types':
-        specifier: workspace:*
-        version: link:../../packages/types
-      '@actor-kit/worker':
-        specifier: workspace:*
-        version: link:../../packages/worker
       '@actor-kit/xstate':
         specifier: workspace:*
         version: link:../../packages/xstate
@@ -545,67 +533,6 @@ importers:
       vitest:
         specifier: ^4.1.0
         version: 4.1.0(@types/node@24.12.0)(jsdom@28.1.0)(vite@7.3.1(@types/node@24.12.0)(jiti@2.6.1)(lightningcss@1.31.1)(terser@5.46.0)(tsx@4.21.0)(yaml@2.8.2))
-
-  packages/types:
-    devDependencies:
-      fast-json-patch:
-        specifier: ^3.1.1
-        version: 3.1.1(patch_hash=19ff0b5d47c887c22c5f96a82f8bdfca364a743a1a9fbb5347c807f10f6e5f7d)
-      tsdown:
-        specifier: ^0.21.2
-        version: 0.21.2(typescript@5.9.3)
-      typescript:
-        specifier: ^5.9.3
-        version: 5.9.3
-      vitest:
-        specifier: ^4.1.0
-        version: 4.1.0(@types/node@24.12.0)(jsdom@28.1.0)(vite@7.3.1(@types/node@24.12.0)(jiti@2.6.1)(lightningcss@1.31.1)(terser@5.46.0)(tsx@4.21.0)(yaml@2.8.2))
-      xstate:
-        specifier: ^5.28.0
-        version: 5.28.0
-      zod:
-        specifier: ^3.25.76
-        version: 3.25.76
-
-  packages/worker:
-    dependencies:
-      '@actor-kit/server':
-        specifier: workspace:*
-        version: link:../server
-      '@actor-kit/types':
-        specifier: workspace:*
-        version: link:../types
-      fast-json-patch:
-        specifier: ^3.1.1
-        version: 3.1.1(patch_hash=19ff0b5d47c887c22c5f96a82f8bdfca364a743a1a9fbb5347c807f10f6e5f7d)
-      immer:
-        specifier: ^11.1.4
-        version: 11.1.4
-      jose:
-        specifier: ^6.2.1
-        version: 6.2.1
-      xstate-migrate:
-        specifier: ^0.0.8
-        version: 0.0.8(xstate@5.28.0)
-    devDependencies:
-      '@cloudflare/workers-types':
-        specifier: ^4.20260312.1
-        version: 4.20260312.1
-      tsdown:
-        specifier: ^0.21.2
-        version: 0.21.2(typescript@5.9.3)
-      typescript:
-        specifier: ^5.9.3
-        version: 5.9.3
-      vitest:
-        specifier: ^4.1.0
-        version: 4.1.0(@types/node@24.12.0)(jsdom@28.1.0)(vite@7.3.1(@types/node@24.12.0)(jiti@2.6.1)(lightningcss@1.31.1)(terser@5.46.0)(tsx@4.21.0)(yaml@2.8.2))
-      xstate:
-        specifier: ^5.28.0
-        version: 5.28.0
-      zod:
-        specifier: ^3.25.76
-        version: 3.25.76
 
   packages/xstate:
     dependencies:

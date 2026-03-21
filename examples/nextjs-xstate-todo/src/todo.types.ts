@@ -1,9 +1,3 @@
-import type {
-  ActorKitSystemEvent,
-  BaseActorKitEvent,
-  WithActorKitEvent,
-  WithActorKitInput,
-} from "@actor-kit/types";
 import { z } from "zod";
 import {
   TodoClientEventSchema,
@@ -11,6 +5,32 @@ import {
   TodoServiceEventSchema,
 } from "./todo.schemas";
 import { Env } from "./types";
+
+// Inline types for XState event augmentation
+type Caller = { type: "client" | "service" | "system"; id: string };
+
+type BaseActorKitEvent<TEnv> = {
+  caller: Caller;
+  env: TEnv;
+};
+
+type WithActorKitEvent<
+  T extends { type: string },
+  C extends string,
+> = T &
+  BaseActorKitEvent<Env> & { caller: { type: C } };
+
+type ActorKitSystemEvent =
+  | { type: "INITIALIZE"; caller: { type: "system"; id: string } }
+  | { type: "CONNECT"; caller: { type: "system"; id: string } }
+  | { type: "DISCONNECT"; caller: { type: "system"; id: string } }
+  | { type: "RESUME"; caller: { type: "system"; id: string } };
+
+type WithActorKitInput<TProps, TEnv> = TProps & {
+  id: string;
+  caller: Caller;
+  env: TEnv;
+};
 
 export type TodoClientEvent = z.infer<typeof TodoClientEventSchema>;
 export type TodoServiceEvent = z.infer<typeof TodoServiceEventSchema>;
