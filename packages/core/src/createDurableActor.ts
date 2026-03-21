@@ -315,12 +315,10 @@ export function createDurableActor<
       assert(this.#initialCaller, "initialCaller is not set");
       assert(this.#input, "input is not set");
 
-      const currentVersion = logic.version ?? 0;
-
-      if (
-        persisted.version !== currentVersion &&
-        logic.migrate
-      ) {
+      // Always try migrate first if provided — adapters like XState
+      // use structural comparison (not version numbers) for migration.
+      // Version-based migration is a secondary check for non-XState users.
+      if (logic.migrate) {
         this.#currentState = logic.migrate(
           persisted.serialized,
           persisted.version
