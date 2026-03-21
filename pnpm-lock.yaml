@@ -196,21 +196,12 @@ importers:
       '@actor-kit/test':
         specifier: workspace:*
         version: link:../../packages/test
-      '@actor-kit/types':
-        specifier: workspace:*
-        version: link:../../packages/types
       react:
         specifier: ^19.2.0
         version: 19.2.4
       react-dom:
         specifier: ^19.2.0
         version: 19.2.4(react@19.2.4)
-      xstate:
-        specifier: ^5.28.0
-        version: 5.28.0
-      zod:
-        specifier: ^3.25.76
-        version: 3.25.76
     devDependencies:
       '@playwright/test':
         specifier: ^1.52.0
@@ -516,15 +507,15 @@ importers:
 
   packages/storybook:
     dependencies:
+      '@actor-kit/browser':
+        specifier: workspace:*
+        version: link:../browser
       '@actor-kit/react':
         specifier: workspace:*
         version: link:../react
       '@actor-kit/test':
         specifier: workspace:*
         version: link:../test
-      '@actor-kit/types':
-        specifier: workspace:*
-        version: link:../types
     devDependencies:
       '@storybook/react':
         specifier: ^8.6.18

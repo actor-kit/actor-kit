@@ -1,5 +1,5 @@
 {
-  "name": "tanstack-start-actorkit-todo",
+  "name": "tanstack-start-xstate-todo",
   "private": true,
   "type": "module",
   "imports": {

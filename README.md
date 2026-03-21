@@ -343,7 +343,7 @@ export default Todo;
 Create a `wrangler.toml` file in your project root:
 
 ```toml
-name = "nextjs-actorkit-todo"
+name = "nextjs-xstate-todo"
 main = "src/server.ts"
 compatibility_date = "2024-09-25"
 
@@ -640,18 +640,18 @@ This example demonstrates how to set up and use Actor Kit in a Next.js applicati
 
 7. If you're using Next.js or another external server, set up your `ACTOR_KIT_HOST` environment variable to point to your deployed Worker's URL.
 
-By following these steps, you'll have a basic Actor Kit setup running on Cloudflare Workers. For more detailed, framework-specific instructions, please refer to our example projects for [Next.js](/examples/nextjs-actorkit-todo/README.md) and [TanStack Start](/examples/tanstack-start-actorkit-todo/README.md).
+By following these steps, you'll have a basic Actor Kit setup running on Cloudflare Workers. For more detailed, framework-specific instructions, please refer to our example projects for [Next.js](/examples/nextjs-xstate-todo/README.md) and [TanStack Start](/examples/tanstack-start-xstate-todo/README.md).
 
 ## 🗂️ Framework Examples
 
 Actor Kit includes example todo list applications demonstrating integration with popular web frameworks.
 
-- [TanStack Start example](/examples/tanstack-start-actorkit-todo/README.md) in `/examples/tanstack-start-actorkit-todo`
+- [TanStack Start example](/examples/tanstack-start-xstate-todo/README.md) in `/examples/tanstack-start-xstate-todo`
   - Full Cloudflare Workers deployment with Durable Objects
   - E2E tests with Playwright (15 tests covering CRUD, persistence, multi-client sync)
   - Preview deploys on every PR
 
-- [Next.js example](/examples/nextjs-actorkit-todo/README.md) in `/examples/nextjs-actorkit-todo`
+- [Next.js example](/examples/nextjs-xstate-todo/README.md) in `/examples/nextjs-xstate-todo`
 
 These examples showcase how to integrate Actor Kit with different frameworks, demonstrating real-time, event-driven todo lists with owner-based access control. Visit the live demos to see Actor Kit in action!
 

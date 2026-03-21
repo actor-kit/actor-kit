@@ -1,5 +1,5 @@
 {
-  "name": "redux-counter-example",
+  "name": "hono-redux-counter",
   "private": true,
   "type": "module",
   "scripts": {

@@ -202,8 +202,8 @@ export function TodoList({ userId }: { userId: string }) {
 
 ## E2E testing
 
-The TanStack Start example includes Playwright E2E tests covering CRUD, persistence, and multi-client sync. See the [test file](https://github.com/actor-kit/actor-kit/blob/main/examples/tanstack-start-actorkit-todo/e2e/todo.spec.ts) for patterns.
+The TanStack Start example includes Playwright E2E tests covering CRUD, persistence, and multi-client sync. See the [test file](https://github.com/actor-kit/actor-kit/blob/main/examples/tanstack-start-xstate-todo/e2e/todo.spec.ts) for patterns.
 
 ## Full example
 
-See the complete [TanStack Start example app](https://github.com/actor-kit/actor-kit/tree/main/examples/tanstack-start-actorkit-todo) in the repo.
+See the complete [TanStack Start example app](https://github.com/actor-kit/actor-kit/tree/main/examples/tanstack-start-xstate-todo) in the repo.

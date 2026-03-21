@@ -1,5 +1,5 @@
 {
-  "name": "xstate-store-counter-example",
+  "name": "hono-plain-counter",
   "private": true,
   "type": "module",
   "scripts": {
@@ -9,7 +9,6 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@xstate/store": "^3.0.0",
     "hono": "^4.7.0",
     "zod": "^3.25.76"
   },

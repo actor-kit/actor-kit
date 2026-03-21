@@ -8,7 +8,7 @@
   "baseBranch": "main",
   "updateInternalDependencies": "patch",
   "ignore": [
-    "nextjs-actorkit-todo",
-    "tanstack-start-actorkit-todo"
+    "nextjs-xstate-todo",
+    "tanstack-start-xstate-todo"
   ]
 }
