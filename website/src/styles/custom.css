@@ -21,10 +21,22 @@ a.site-title {
   --sl-nav-pad-x: max(1rem, calc((100vw - 68rem) / 2));
 }
 
-/* Center the sidebar + content, aligned with the header content */
+/* Center the sidebar + content, aligned with the header content.
+   The sidebar-pane is position:fixed so we must set its left explicitly. */
 .page {
   max-width: 68rem;
   margin: 0 auto;
+}
+
+@media (min-width: 72rem) {
+  .sidebar-pane {
+    left: calc((100vw - 68rem) / 2) !important;
+  }
+
+  .right-sidebar {
+    right: calc((100vw - 68rem) / 2) !important;
+    left: auto !important;
+  }
 }
 
 /* Kill Starlight's lobotomized owl selector inside the landing page.
