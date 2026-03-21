@@ -1,63 +1,110 @@
-# 🎭 Actor Kit
+# Actor Kit
 
-Actor Kit is a library for running state machines in Cloudflare Workers, leveraging XState for robust state management. It provides a framework for managing the logic, lifecycle, persistence, synchronization, and access control of actors in a distributed environment.
+Actor Kit runs event-driven state on the edge. Define your state transitions, and Actor Kit handles persistence, real-time sync, access control, and WebSocket communication — all inside Cloudflare Durable Objects.
 
-## 📚 Table of Contents
+**Bring your own state management.** Use plain reducers, XState, @xstate/store, Redux, or any library that does `state + event → next state`.
 
-- [💾 Installation](#-installation)
-- [🏗️ Architecture](#️-architecture)
-- [🌟 Key Concepts](#-key-concepts)
-- [🛠️ Usage](#️-usage)
-  - [1️⃣ Define your event schemas and types](#1️⃣-define-your-event-schemas-and-types)
-  - [2️⃣ Define your state machine](#2️⃣-define-your-state-machine)
-  - [3️⃣ Set up the Actor Server](#3️⃣-set-up-the-actor-server)
-  - [4️⃣ Configure Wrangler](#4️⃣-configure-wrangler)
-  - [5️⃣ Create a Cloudflare Worker with Actor Kit Router](#5️⃣-create-a-cloudflare-worker-with-actor-kit-router)
-  - [6️⃣ Create the Actor Kit Context](#6️⃣-create-the-actor-kit-context)
-  - [7️⃣ Fetch data server-side](#7️⃣-fetch-data-server-side)
-  - [8️⃣ Create a client-side component](#8️⃣-create-a-client-side-component)
-- [🚀 Getting Started](#-getting-started)
-- [🗂️ Framework Examples](#️-framework-examples)
-  - [⛰️ TanStack Start](/examples/tanstack-start-actorkit-todo/README.md)
-  - [⚛️ Next.js](/examples/nextjs-actorkit-todo/README.md)
-- [📄 Documentation](#-documentation)
-- [📖 API Reference](#-api-reference)
-  - [🔧 @actor-kit/worker](#-actor-kitworker)
-  - [🖥️ @actor-kit/server](#%EF%B8%8F-actor-kitserver)
-  - [🌐 @actor-kit/browser](#-actor-kitbrowser)
-  - [⚛️ @actor-kit/react](#%EF%B8%8F-actor-kitreact)
-  - [🧪 @actor-kit/test](#-actor-kittest)
-  - [📚 @actor-kit/storybook](#-actor-kitstorybook)
-- [🔑 TypeScript Types](#-typescript-types)
-- [👥 Caller Types](#-caller-types)
-- [🔐 Public and Private Data](#-public-and-private-data)
-- [📚 Storybook Integration](#-storybook-integration)
-- [📜 License](#-license)
-- [🔗 Related Technologies and Inspiration](#-related-technologies-and-inspiration)
-- [🚧 Development Status](#-development-status)
-
-## 💾 Installation
-
-To install Actor Kit, use your preferred package manager:
+## Installation
 
 ```bash
-npm install @actor-kit/types @actor-kit/worker @actor-kit/browser @actor-kit/react @actor-kit/server xstate zod react
-# or
-pnpm add @actor-kit/types @actor-kit/worker @actor-kit/browser @actor-kit/react @actor-kit/server xstate zod react
+# Core — no state library required
+pnpm add @actor-kit/core @actor-kit/browser @actor-kit/react @actor-kit/server zod
+
+# With XState (optional)
+pnpm add @actor-kit/xstate xstate
+
+# With @xstate/store (optional)
+pnpm add @actor-kit/xstate-store @xstate/store
+
+# With Redux (optional)
+pnpm add @actor-kit/redux
 ```
 
-> **Note:** `react` is only required if using `@actor-kit/react`. The core packages (`@actor-kit/worker`, `@actor-kit/browser`, `@actor-kit/server`) work without React.
+## Quick Example
 
-## 🌟 Key Concepts
+```typescript
+import { defineLogic, createDurableActor } from "@actor-kit/core";
+import { z } from "zod";
 
-- 🖥️ **Server-Side Rendering**: Fetch initial state server-side for optimal performance and SEO.
-- ⚡ **Real-time Updates**: Changes are immediately reflected across all connected clients, ensuring a responsive user experience.
-- 🛡️ **Type Safety**: Leverage TypeScript and Zod for robust type checking and runtime validation.
-- 🎭 **Event-Driven Architecture**: All state changes are driven by events, providing a clear and predictable data flow.
-- 🧠 **State Machine Logic**: Powered by XState, making complex state management more manageable and visualizable.
-- 🔄 **Seamless Synchronization**: Actor Kit handles state synchronization between server and clients automatically.
-- 🔐 **Public and Private Data**: Manage shared data across all clients and caller-specific information securely.
-- 🌐 **Distributed Systems**: Built for scalable, distributed applications running on edge computing platforms.
+// Define your actor's behavior — just a reducer + a view function
+const counter = defineLogic({
+  create: () => ({ count: 0 }),
+
+  transition: (state, event) => {
+    switch (event.type) {
+      case "INCREMENT":
+        return { ...state, count: state.count + 1 };
+      default:
+        return state;
+    }
+  },
+
+  // What each caller sees over the wire (caller-scoped projection)
+  getView: (state, caller) => ({ count: state.count }),
+});
+
+// Wire it into a Cloudflare Durable Object
+export const Counter = createDurableActor({
+  logic: counter,
+  events: {
+    client: z.discriminatedUnion("type", [
+      z.object({ type: z.literal("INCREMENT") }),
+    ]),
+    service: z.discriminatedUnion("type", [
+      z.object({ type: z.literal("NOOP") }),
+    ]),
+  },
+  input: z.object({}),
+  persisted: true,
+});
+```
+
+## Key Concepts
+
+- **Event-driven state** — All state changes are driven by events. `state + event → next state`. No mutations, no side effects in transitions.
+- **Caller-scoped views** — Each caller sees a different projection of the state. A game player sees their hand; a spectator sees the board. Defined by `getView(state, caller)`.
+- **Real-time sync** — JSON Patch diffs over WebSocket. Clients stay current with minimal bytes. Reconnection with exponential backoff.
+- **Persistence** — Opt-in snapshot persistence to Durable Object storage. Version-based migration support.
+- **Type safety** — TypeScript generics at every layer. Zod validates events at runtime boundaries.
+- **Framework integrations** — React hooks (`useSelector`, `useSend`). SSR support for Next.js and TanStack Start.
+
+## Packages
+
+| Package | Purpose |
+|---------|---------|
+| [`@actor-kit/core`](https://www.npmjs.com/package/@actor-kit/core) | `defineLogic`, `createDurableActor`, auth utilities |
+| [`@actor-kit/browser`](https://www.npmjs.com/package/@actor-kit/browser) | WebSocket client, reconnection, state patching |
+| [`@actor-kit/react`](https://www.npmjs.com/package/@actor-kit/react) | React context, hooks (`useSelector`, `useSend`) |
+| [`@actor-kit/server`](https://www.npmjs.com/package/@actor-kit/server) | JWT creation, server-side data fetching |
+| [`@actor-kit/xstate`](https://www.npmjs.com/package/@actor-kit/xstate) | XState v5 adapter |
+| [`@actor-kit/xstate-store`](https://www.npmjs.com/package/@actor-kit/xstate-store) | @xstate/store adapter |
+| [`@actor-kit/redux`](https://www.npmjs.com/package/@actor-kit/redux) | Redux reducer adapter |
+| [`@actor-kit/test`](https://www.npmjs.com/package/@actor-kit/test) | Mock client, transition testing |
+| [`@actor-kit/storybook`](https://www.npmjs.com/package/@actor-kit/storybook) | Storybook decorator |
+
+## State Library Adapters
+
+Use any event-driven state management library:
+
+```typescript
+// Plain reducer (no library)
+import { defineLogic } from "@actor-kit/core";
+const logic = defineLogic({ create, transition, getView });
+
+// XState v5
+import { fromXStateMachine } from "@actor-kit/xstate";
+const logic = fromXStateMachine(myMachine, { getView });
+
+// @xstate/store
+import { fromXStateStore } from "@actor-kit/xstate-store";
+const logic = fromXStateStore({ context, on }, { getView });
+
+// Redux
+import { fromRedux } from "@actor-kit/redux";
+const logic = fromRedux(myReducer, { create, getView });
+
+// All produce the same ActorLogic interface → createDurableActor({ logic })
+```
 
 ## 🏗️ Architecture
 
