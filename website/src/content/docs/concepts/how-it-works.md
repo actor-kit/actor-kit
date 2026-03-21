@@ -7,56 +7,54 @@ Actor Kit manages four phases of the actor lifecycle: initial load, client hydra
 
 ## Overview
 
-```mermaid
-sequenceDiagram
-    participant SSR as SSR Server
-    participant W as Worker / DO
-    participant B as Browser
-
-    SSR->>W: HTTP GET /api/todo/123 (JWT)
-    W-->>SSR: { snapshot, checksum }
-    SSR->>B: HTML + snapshot + token
-    B->>W: WebSocket connect (token + checksum)
-    W-->>B: (checksum match → no payload)
-
-    B->>W: send({ type: "ADD_TODO" })
-    W->>W: XState transition
-    W-->>B: JSON Patch diff
-    B->>B: applyPatch → React re-render
+```
+SSR Server              Worker / DO              Browser
+    │                       │                       │
+    │── GET /api/todo/123 ─>│                       │
+    │   (JWT auth)          │                       │
+    │<── { snapshot,        │                       │
+    │     checksum }  ──────│                       │
+    │                       │                       │
+    │── HTML + snapshot + token ──────────────────> │
+    │                       │                       │
+    │                       │<── WebSocket connect ─│
+    │                       │    (token + checksum) │
+    │                       │── (match → no data) ─>│
+    │                       │                       │
+    │                       │<── send(ADD_TODO) ────│
+    │                       │    transition()       │
+    │                       │── JSON Patch diff ──> │
+    │                       │                       │ re-render
 ```
 
 ## 1. Initial page load (SSR)
 
 Your server-side loader creates a JWT access token and fetches the initial snapshot from the Durable Object.
 
-```mermaid
-flowchart LR
-    A[createAccessToken] -->|JWT| B[createActorFetch]
-    B -->|HTTP GET| C[Router]
-    C -->|validate JWT| D[Durable Object]
-    D -->|caller-scoped| E["{ snapshot, checksum }"]
+```
+createAccessToken ──> JWT ──> fetch(/api/todo/123) ──> DO ──> getView(state, caller) ──> { snapshot, checksum }
 ```
 
 1. **`createAccessToken`** — signs a JWT with `jti`=actorId, `aud`=actorType, `sub`=callerType-callerId
-2. **`createActorFetch`** — sends HTTP GET to `/api/{actorType}/{actorId}?accessToken=...`
-3. **Router validates JWT** — spawns or retrieves the Durable Object
-4. **DO returns** `{ checksum, snapshot }` — caller-scoped (public + this caller's private data)
+2. **HTTP GET** to `/api/{actorType}/{actorId}` with JWT in Authorization header
+3. **DO validates JWT** — spawns or retrieves the actor
+4. **DO returns** `{ checksum, snapshot }` — the snapshot is the caller-scoped view from `getView(state, caller)`
 5. **Loader returns** `{ accessToken, checksum, snapshot }` to the component
 
-The snapshot is **caller-scoped**: it includes `public` context (shared with everyone) and `private` context (only for this caller).
+The snapshot is **caller-scoped** via `getView()`: each caller sees a different projection of the same internal state.
 
 ## 2. Client hydration
 
 Once the React app hydrates, the provider establishes a WebSocket connection.
 
-```mermaid
-flowchart LR
-    A["Provider"] -->|creates| B[ActorKitClient]
-    B -->|WSS + checksum| C[Durable Object]
-    C -->|checksum match?| D{Same?}
-    D -->|yes| E[no payload]
-    D -->|no| F[full snapshot]
-    C -->|ongoing| G["JSON Patch ops"]
+```
+<Provider> ──> createActorKitClient() ──> WebSocket connect ──> DO
+                                              │
+                                    checksum match? ─── yes ──> no payload (already current)
+                                              │
+                                              no ──> full snapshot
+                                              │
+                                         ongoing ──> JSON Patch diffs
 ```
 
 1. **`<Provider>`** receives `host`, `actorId`, `accessToken`, `checksum`, `initialSnapshot`
@@ -70,39 +68,44 @@ flowchart LR
 
 ## 3. Event processing
 
-When a client sends an event, the Durable Object processes it through the XState machine and broadcasts diffs.
+When a client sends an event, the Durable Object runs the transition and broadcasts caller-scoped diffs.
 
-```mermaid
-flowchart TD
-    A["client.send()"] -->|WebSocket| B[Parse event - Zod]
-    B --> C[Validate caller - JWT]
-    C --> D["Augment: { ...event, caller, env }"]
-    D --> E[XState transition]
-    E --> F[Calculate checksum]
-    F --> G{Changed for caller?}
-    G -->|yes| H[Compute JSON Patch diff]
-    G -->|no| I[Skip]
-    H --> J[Send to WebSocket]
-    E --> K["Persist snapshot"]
+```
+client.send({ type: "ADD_TODO", text: "..." })
+    │
+    ▼
+Parse event (Zod schema)
+    │
+    ▼
+Validate caller (JWT)
+    │
+    ▼
+Augment: { ...event, caller, env }
+    │
+    ▼
+logic.transition(state, augmentedEvent) ──> new state
+    │
+    ├──> logic.serialize(state) ──> persist to DO storage
+    │
+    └──> for each connected WebSocket:
+            getView(state, caller) ──> compute JSON Patch diff ──> send
 ```
 
-1. **Parse** event against Zod schema
+1. **Parse** event against Zod schema (client or service)
 2. **Validate** caller identity from JWT claims
-3. **Augment** event: `{ ...event, caller, storage, env }`
-4. **Send** augmented event to XState actor: `actor.send(augmentedEvent)`
-5. **XState transitions**: guards → actions → new state
-6. **Checksum**: `getSnapshot()` → `calculateChecksum()`
-7. **Broadcast** to each connected WebSocket:
-   - Create caller-scoped snapshot
+3. **Augment** event with `caller` and `env`
+4. **Transition**: `logic.transition(state, augmentedEvent)` → new state
+5. **Broadcast** to each connected WebSocket:
+   - Compute caller-scoped view via `getView(state, caller)`
    - Compare with last sent checksum
-   - If different: compute JSON Patch diff → send patch operations
+   - If different: compute JSON Patch diff → send
    - If same: skip (no change for this caller)
-8. **Persist** (if enabled): `storage.put(snapshot)`
+6. **Persist** (if enabled): serialize and store
 
 **Client receives** JSON Patch → `applyPatch(state, ops)` → `useSyncExternalStore` → React re-render.
 
 Key details:
-- Events are **augmented** with `caller`, `storage`, and `env` before reaching the machine. Your guards and actions can use these to enforce access control.
+- Events are **augmented** with `caller` and `env` before reaching the transition function. Your logic can use `event.caller` for access control.
 - Each WebSocket gets a **caller-scoped diff**. Different callers may receive different patches for the same transition.
 - Persistence happens **after** broadcast, so clients get updates as fast as possible.
 
@@ -110,13 +113,14 @@ Key details:
 
 If the WebSocket disconnects, the client reconnects with exponential backoff.
 
-```mermaid
-flowchart TD
-    A[WebSocket closes] --> B[Exponential backoff]
-    B --> C["Reconnect with last checksum"]
-    C --> D{Cached?}
-    D -->|"yes (< 5min)"| E[Send diff from cache]
-    D -->|"no (expired)"| F[Send full snapshot]
+```
+WebSocket closes ──> exponential backoff ──> reconnect with last checksum
+                                                   │
+                                          cached? (< 5min)
+                                           │           │
+                                          yes          no
+                                           │           │
+                                      send diff   send full snapshot
 ```
 
 1. Client detects WebSocket close
