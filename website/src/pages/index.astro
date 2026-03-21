@@ -132,13 +132,13 @@ const tabs = [
     <!-- Hero -->
     <section class="landing-hero">
       <h1 class="landing-hero-title">
-        <span class="landing-hero-gradient">State Machines</span> on the Edge.<br/>
+        <span class="landing-hero-gradient">Event-Driven State</span> on the Edge.<br/>
         <span class="landing-hero-muted">Synced in Real Time.</span>
       </h1>
       <p class="landing-hero-sub">
-        Actor Kit runs XState v5 inside Cloudflare Durable Objects with
-        automatic real-time sync. Type-safe from machine definition to
-        React hook.
+        Actor Kit runs event-driven state inside Cloudflare Durable Objects with
+        automatic real-time sync. Bring your own state library &mdash; plain reducers,
+        XState, @xstate/store, or Redux.
       </p>
       <div class="landing-hero-actions">
         <a href="/getting-started/overview/" class="btn btn-primary">
@@ -180,15 +180,15 @@ const tabs = [
           <div class="feature-icon icon-ctx">
             <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 12h18"/></svg>
           </div>
-          <h3>Public / Private Context</h3>
-          <p>Shared state for everyone. Private state per caller. Built-in data isolation &mdash; no leaks.</p>
+          <h3>Caller-Scoped Views</h3>
+          <p>Each caller sees a different projection of state. Game players see their hand; spectators see the board.</p>
         </div>
         <div class="feature">
           <div class="feature-icon icon-xs">
             <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="10"/><path d="m8 12 3 3 5-5"/></svg>
           </div>
-          <h3>XState v5</h3>
-          <p>Parallel states, guards, delayed transitions, spawned actors. Visualize with Stately Studio.</p>
+          <h3>Pluggable State Management</h3>
+          <p>Plain reducers, XState, @xstate/store, or Redux. Any library that does state + event &rarr; state.</p>
         </div>
         <div class="feature">
           <div class="feature-icon icon-fw">
@@ -203,8 +203,8 @@ const tabs = [
     <!-- Tabbed Code Examples -->
     <section class="code-section">
       <div class="code-section-header">
-        <h2>From machine to UI in four files</h2>
-        <p>Define your state machine, wrap it as a Durable Object, route requests, and connect React.</p>
+        <h2>From logic to UI in four files</h2>
+        <p>Define your state transitions, wrap as a Durable Object, add routes, and connect React.</p>
       </div>
       <div class="code-tabs">
         <div class="tab-bar">
@@ -289,7 +289,7 @@ const tabs = [
                 <div class="flow-num">3</div>
                 <div class="flow-content">
                   <span class="flow-label">Durable Object</span>
-                  <span class="flow-detail">XState machine processes events, persists state</span>
+                  <span class="flow-detail">Actor logic processes events, persists state</span>
                 </div>
               </div>
               <div class="flow-arrow">&darr;</div>
@@ -346,33 +346,37 @@ const tabs = [
       <h2>Focused packages</h2>
       <p class="packages-sub">Import only what you need.</p>
       <div class="pkg-grid">
-        <a href="/api/worker/" class="pkg">
-          <strong>@actor-kit/worker</strong>
-          <span>Durable Object class &amp; request router</span>
-        </a>
-        <a href="/api/react/" class="pkg">
-          <strong>@actor-kit/react</strong>
-          <span>useSelector, useSend, useMatches</span>
+        <a href="/api/core/" class="pkg">
+          <strong>@actor-kit/core</strong>
+          <span>defineLogic, createDurableActor, auth</span>
         </a>
         <a href="/api/browser/" class="pkg">
           <strong>@actor-kit/browser</strong>
           <span>WebSocket client &amp; JSON Patch sync</span>
         </a>
+        <a href="/api/react/" class="pkg">
+          <strong>@actor-kit/react</strong>
+          <span>useSelector, useSend hooks</span>
+        </a>
         <a href="/api/server/" class="pkg">
           <strong>@actor-kit/server</strong>
-          <span>JWT signing &amp; server-side fetch</span>
+          <span>Server-side data fetching</span>
+        </a>
+        <a href="/api/core/" class="pkg">
+          <strong>@actor-kit/xstate</strong>
+          <span>XState v5 adapter</span>
+        </a>
+        <a href="/api/core/" class="pkg">
+          <strong>@actor-kit/xstate-store</strong>
+          <span>@xstate/store adapter</span>
+        </a>
+        <a href="/api/core/" class="pkg">
+          <strong>@actor-kit/redux</strong>
+          <span>Redux reducer adapter</span>
         </a>
         <a href="/api/test/" class="pkg">
           <strong>@actor-kit/test</strong>
-          <span>Mock client for tests &amp; Storybook</span>
-        </a>
-        <a href="/api/types/" class="pkg">
-          <strong>@actor-kit/types</strong>
-          <span>Shared types, schemas, constants</span>
-        </a>
-        <a href="/api/storybook/" class="pkg">
-          <strong>@actor-kit/storybook</strong>
-          <span>Storybook decorator &amp; story types</span>
+          <span>Mock client &amp; transition testing</span>
         </a>
       </div>
     </section>

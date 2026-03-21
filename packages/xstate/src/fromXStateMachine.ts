@@ -10,6 +10,7 @@ import {
   type AnyEventObject,
   type SnapshotFrom,
   type InputFrom,
+  type EventFromLogic,
   createActor,
 } from "xstate";
 import { xstateMigrate } from "xstate-migrate";
@@ -26,19 +27,9 @@ type FromXStateMachineOptions<
 /**
  * Creates an ActorLogic from an XState machine definition.
  *
- * The machine's events are augmented with `caller` and `env` before
- * being sent — this matches the existing actor-kit convention where
- * machine event types include `BaseActorKitEvent`.
- *
- * @example
- * ```ts
- * const logic = fromXStateMachine(todoMachine, {
- *   getView: (snapshot, caller) => ({
- *     todos: snapshot.context.todos,
- *     isOwner: snapshot.context.ownerId === caller.id,
- *   }),
- * });
- * ```
+ * Uses AnyStateMachine internally to avoid XState's strict generic
+ * constraints. The machine's events must include caller/env fields
+ * (the standard actor-kit event augmentation pattern).
  */
 export function fromXStateMachine<
   TMachine extends AnyStateMachine,
@@ -54,13 +45,16 @@ export function fromXStateMachine<
   TEnv,
   Record<string, unknown>
 > {
+  // Use the machine typed as AnyStateMachine to avoid generic constraint issues.
+  // XState's createActor(AnyStateMachine) accepts any snapshot/event without
+  // strict generic matching — this is the intended escape hatch.
+  const anyMachine: AnyStateMachine = machine;
+
   return {
     create(input: Record<string, unknown>): SnapshotFrom<TMachine> {
-      const actor = createActor(machine, {
-        input: input as InputFrom<TMachine>,
-      });
+      const actor = createActor(anyMachine, { input });
       actor.start();
-      const snapshot = actor.getSnapshot();
+      const snapshot = actor.getSnapshot() as SnapshotFrom<TMachine>;
       actor.stop();
       return snapshot;
     },
@@ -69,15 +63,10 @@ export function fromXStateMachine<
       state: SnapshotFrom<TMachine>,
       event: AnyEventObject & { caller: Caller; env: TEnv }
     ): SnapshotFrom<TMachine> {
-      // Restore actor from snapshot, send event, get next snapshot
-      // XState's generic constraints are very strict — these casts are safe
-      // because the snapshot and event shapes match the machine's types.
-      const actor = createActor(machine, {
-        snapshot: state,
-      } as unknown as Parameters<typeof createActor<TMachine>>[1]);
+      const actor = createActor(anyMachine, { snapshot: state });
       actor.start();
-      actor.send(event as unknown as Parameters<typeof actor.send>[0]);
-      const nextSnapshot = actor.getSnapshot();
+      actor.send(event);
+      const nextSnapshot = actor.getSnapshot() as SnapshotFrom<TMachine>;
       actor.stop();
       return nextSnapshot;
     },
@@ -91,6 +80,8 @@ export function fromXStateMachine<
     },
 
     restore(serialized: unknown): SnapshotFrom<TMachine> {
+      // Persistence boundary — serialized data is untyped by nature.
+      // The snapshot shape is validated by XState when used with createActor.
       return serialized as SnapshotFrom<TMachine>;
     },
 
@@ -98,25 +89,22 @@ export function fromXStateMachine<
       serialized: unknown,
       _version?: number
     ): SnapshotFrom<TMachine> {
+      // xstate-migrate handles snapshot schema evolution automatically
       const persistedSnapshot = serialized as SnapshotFrom<TMachine>;
-      // Use xstate-migrate for automatic migration
       const migrations = xstateMigrate.generateMigrations(
         machine,
         persistedSnapshot,
         {} as InputFrom<TMachine>
       );
-      return xstateMigrate.applyMigrations(
-        persistedSnapshot,
-        migrations
-      ) as SnapshotFrom<TMachine>;
+      const migrated = xstateMigrate.applyMigrations(persistedSnapshot, migrations);
+      return migrated as SnapshotFrom<TMachine>;
     },
 
-    onConnect(state: SnapshotFrom<TMachine>, _caller: Caller): SnapshotFrom<TMachine> {
-      // XState machines can handle CONNECT as a regular event if they want
+    onConnect(state: SnapshotFrom<TMachine>): SnapshotFrom<TMachine> {
       return state;
     },
 
-    onDisconnect(state: SnapshotFrom<TMachine>, _caller: Caller): SnapshotFrom<TMachine> {
+    onDisconnect(state: SnapshotFrom<TMachine>): SnapshotFrom<TMachine> {
       return state;
     },
 
