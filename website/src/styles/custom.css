@@ -21,21 +21,17 @@ a.site-title {
   --sl-nav-pad-x: max(1rem, calc((100vw - 68rem) / 2));
 }
 
-/* Center the sidebar + content, aligned with the header content.
-   The sidebar-pane is position:fixed so we must set its left explicitly. */
+/* Center the full page layout (sidebar + content + TOC).
+   Use a wider max-width than the header to fit the 3-column layout,
+   then inset the fixed-position sidebars to match. */
 .page {
-  max-width: 68rem;
+  max-width: 80rem;
   margin: 0 auto;
 }
 
-@media (min-width: 72rem) {
+@media (min-width: 82rem) {
   .sidebar-pane {
-    left: calc((100vw - 68rem) / 2) !important;
-  }
-
-  .right-sidebar {
-    right: calc((100vw - 68rem) / 2) !important;
-    left: auto !important;
+    left: calc((100vw - 80rem) / 2) !important;
   }
 }
 
