@@ -78,8 +78,10 @@ export default defineConfig({
         {
           label: "Guides",
           items: [
-            { slug: "guides/tanstack-start" },
-            { slug: "guides/actor-to-actor-sync" },
+            { slug: "guides/hono-plain-counter" },
+            { slug: "guides/xstate" },
+            { slug: "guides/xstate-store" },
+            { slug: "guides/redux" },
             { slug: "guides/testing" },
             { slug: "guides/storybook" },
           ],
