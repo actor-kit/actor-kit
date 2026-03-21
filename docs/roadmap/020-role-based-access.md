@@ -240,13 +240,19 @@ function defineLogic<
 >;
 ```
 
-## Open Questions
+## Resolved Design Decisions
 
-1. **Role evaluation order** — first match wins (top-to-bottom). Is this clear enough? Should it be explicit (priority numbers)?
-2. **Role changes during a session** — if a caller's role changes mid-connection (e.g., they get promoted to member), do they get the new view immediately? The role is re-evaluated on every event and view computation, so yes — but the WebSocket connection stays open.
-3. **Empty event schemas** — guests with no events are read-only. Should we require an explicit `z.never()` or allow empty arrays?
-4. **Adapter compatibility** — how does this work with `fromXStateMachine`? XState machines define their own event types. The adapter would need to map roles to XState's event union.
-5. **Default role** — should there be a required fallback role (last one wins), or can a caller have no role (rejected)?
+1. **Role evaluation order** — First match wins, top-to-bottom. Same pattern as route matching. Most specific roles first, catch-all last. Document clearly, trust the user.
+
+2. **No role match = rejection** — If no role matches a caller, the connection is rejected (403). No required catch-all — if you want public access, add an `anonymous: () => true` role as the last entry.
+
+3. **Role changes during a session** — Roles re-evaluate on every event and view computation. If a caller gets promoted mid-session (e.g., `ADD_MEMBER` event changes state), their next event validates against the new role's schema and they receive the new role's view. WebSocket stays open.
+
+4. **Empty event schemas** — `z.discriminatedUnion("type", [])` works and rejects all events. Read-only roles use this pattern. No need for `z.never()`.
+
+5. **Adapter compatibility** — XState adapter wraps the machine in the role system. The adapter's `events` config maps roles to subsets of the machine's event union. The machine itself doesn't know about roles — it receives all valid events. Role-based validation happens in the DO layer before events reach the adapter.
+
+6. **Caller is a plain string** — `caller: string` (just the identity from JWT `sub` claim). No `type` field. Role handles all authorization.
 
 ## Test Plan
 
