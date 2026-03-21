@@ -9,11 +9,16 @@ Actor Kit uses JSON Patch diffs with checksum-based deduplication to synchronize
 
 Every snapshot is hashed (32-bit string hash). The server tracks the last checksum sent to each WebSocket. If the new checksum matches, no patch is sent.
 
-```
-Transition occurs
-  → Full snapshot checksum: "a3f2b1"
-  → WebSocket A last sent: "a3f2b1" → skip (no change for this caller)
-  → WebSocket B last sent: "7d8e1c" → compute diff, send patch
+```mermaid
+flowchart TD
+    A[XState transition] --> B[Calculate snapshot checksum]
+    B --> C{WebSocket A: checksum match?}
+    C -->|same| D[Skip - no change]
+    C -->|different| E[Compute JSON Patch diff]
+    E --> F[Send patch to client A]
+    B --> G{WebSocket B: checksum match?}
+    G -->|same| H[Skip]
+    G -->|different| I[Compute diff + send]
 ```
 
 This is especially efficient when a transition only affects one caller's private context — other callers' checksums won't change, so they receive nothing.

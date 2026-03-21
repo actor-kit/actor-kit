@@ -175,22 +175,18 @@ You don't need to implement any of this yourself:
 
 ## Data flow
 
-```
-Browser Client
-  │ send({ type: "PLAYER_MOVED", position })
-  ▼
-Session DO (parent)
-  │ XState transition → "forwardMovement" action
-  │ sendTo("zoneConnection", { type: "ENTITY_STATE_CHANGED", ... })
-  ▼
-fromActorKit WebSocket → Zone DO (remote)
-  │ XState transition → updates zone state
-  │ Persists snapshot → broadcasts JSON Patch diffs
-  ▼
-fromActorKit receives patch → emits ZONE_UPDATED
-  │
-Session DO updates context with zone snapshot
-  │ Broadcasts caller-scoped diff to browser
-  ▼
-Browser re-renders via useSelector
+```mermaid
+sequenceDiagram
+    participant B as Browser
+    participant S as Session DO
+    participant Z as Zone DO
+
+    B->>S: send({ type: "PLAYER_MOVED" })
+    S->>S: XState transition
+    S->>Z: sendTo("zoneConnection") via WebSocket
+    Z->>Z: XState transition + persist
+    Z-->>S: JSON Patch diff
+    S->>S: ZONE_UPDATED → update context
+    S-->>B: Caller-scoped diff
+    B->>B: useSelector → re-render
 ```

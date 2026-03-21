@@ -19,12 +19,16 @@ Actor Kit is organized into 7 packages with strict dependency boundaries. This p
 
 ## Dependency graph
 
-```
-@actor-kit/types
-  ├── @actor-kit/browser → @actor-kit/react
-  ├── @actor-kit/worker  → @actor-kit/server
-  ├── @actor-kit/test    → @actor-kit/browser
-  └── @actor-kit/storybook → @actor-kit/react + @actor-kit/test
+```mermaid
+graph TD
+    T["@actor-kit/types"] --> B["@actor-kit/browser"]
+    T --> W["@actor-kit/worker"]
+    T --> TE["@actor-kit/test"]
+    B --> R["@actor-kit/react"]
+    W --> S["@actor-kit/server"]
+    TE --> B
+    R --> SB["@actor-kit/storybook"]
+    TE --> SB
 ```
 
 `@actor-kit/types` is the root — every package depends on it. The browser/react path and the worker/server path are independent, so server code never ships to the browser bundle.
