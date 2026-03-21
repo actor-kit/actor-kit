@@ -26,6 +26,8 @@
     "@tanstack/react-router-ssr-query": "1.166.7",
     "@tanstack/react-start": "1.166.7",
     "@tanstack/router-plugin": "1.166.7",
+    "@actor-kit/core": "workspace:*",
+    "@actor-kit/xstate": "workspace:*",
     "@actor-kit/types": "workspace:*",
     "@actor-kit/worker": "workspace:*",
     "@actor-kit/react": "workspace:*",

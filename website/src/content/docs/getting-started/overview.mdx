@@ -1,22 +1,23 @@
 ---
 title: What is Actor Kit?
-description: A library for running XState state machines in Cloudflare Durable Objects with real-time client sync.
+description: A library-agnostic framework for running event-driven actors in Cloudflare Durable Objects with real-time client sync.
 ---
 
 import { Card, CardGrid, LinkCard, Steps, Aside } from '@astrojs/starlight/components';
 
-Actor Kit runs [XState v5](https://stately.ai/docs/xstate) state machines inside [Cloudflare Durable Objects](https://developers.cloudflare.com/durable-objects/) and synchronizes state to browser clients via WebSocket using JSON Patch diffs.
+Actor Kit runs event-driven actors inside [Cloudflare Durable Objects](https://developers.cloudflare.com/durable-objects/) and synchronizes state to browser clients via WebSocket using JSON Patch diffs. It is **library-agnostic** — use [XState](https://stately.ai/docs/xstate), [@xstate/store](https://stately.ai/docs/xstate-store), [Redux](https://redux.js.org/), or plain reducers to define your actor logic.
 
 ## Why Actor Kit?
 
 Building real-time, stateful applications on the edge is hard. You need to coordinate state across multiple clients, handle disconnections and reconnections, manage persistence, enforce access control, and keep everything type-safe.
 
-Actor Kit handles all of this so you can focus on your state machine logic:
+Actor Kit handles all of this so you can focus on your actor logic:
 
 - **Each actor is a Durable Object** — single-threaded, globally addressable, with built-in storage. No servers to manage.
 - **Real-time sync via WebSocket** — JSON Patch diffs with checksum deduplication. Clients stay current with minimal bytes over the wire.
-- **Type safety at every layer** — generics enforce event/context alignment at compile time. Zod validates at runtime boundaries.
-- **Public/private context separation** — every actor has shared state visible to all clients and private state scoped per caller.
+- **Type safety at every layer** — generics enforce event/state/view alignment at compile time. Zod validates at runtime boundaries.
+- **Pluggable state management** — bring your own event-driven library or use plain reducers via the `ActorLogic` interface.
+- **Caller-scoped views** — `getView(state, caller)` controls exactly what each connected client sees.
 - **Framework integrations** — first-class React hooks with `useSelector` and `useSend`. SSR support for Next.js and TanStack Start.
 
 ## How It Fits Together
@@ -27,14 +28,14 @@ Actor Kit handles all of this so you can focus on your state machine logic:
 
     **`@actor-kit/react`** — React hooks: `useSelector`, `useSend`, `useMatches`
 
-    Connects to the Durable Object via WSS, receives caller-scoped state patches, re-renders via `useSyncExternalStore`.
+    Connects to the Durable Object via WSS, receives caller-scoped view patches, re-renders via `useSyncExternalStore`.
   </Card>
   <Card title="Cloudflare Worker" icon="cloud">
-    **`@actor-kit/worker`** — `createActorKitRouter` routes requests to Durable Objects
+    **`@actor-kit/core`** — `createDurableActor` wraps your actor logic as a DO class with WebSocket support, persistence, and access control.
 
-    **`createMachineServer`** wraps your XState machine as a DO class with WebSocket support, persistence, and access control.
+    Use framework-native routing (e.g., Hono) to route requests to your Durable Objects.
 
-    Each transition computes per-caller JSON Patch diffs and broadcasts them.
+    Each transition computes per-caller JSON Patch diffs via `getView()` and broadcasts them.
   </Card>
 </CardGrid>
 
@@ -45,17 +46,19 @@ Actor Kit handles all of this so you can focus on your state machine logic:
 </Card>
 
 <Aside type="tip">
-  The data flow is: **SSR loader → HTTP fetch → render → WebSocket connect → real-time patches**. See [How It Works](/concepts/how-it-works/) for the full sequence.
+  The data flow is: **SSR loader -> HTTP fetch -> render -> WebSocket connect -> real-time patches**. See [How It Works](/concepts/how-it-works/) for the full sequence.
 </Aside>
 
 ## Packages
 
-Actor Kit is split into 7 focused packages:
+Actor Kit is split into focused packages. Install only what you need:
 
 | Package | Purpose |
 |---------|---------|
-| [`@actor-kit/types`](/api/types/) | Shared types, schemas, and constants |
-| [`@actor-kit/worker`](/api/worker/) | `createMachineServer`, router, Durable Object class |
+| [`@actor-kit/core`](/api/core/) | `ActorLogic` interface, `defineLogic()`, `createDurableActor()` |
+| [`@actor-kit/xstate`](/api/core/#xstate-adapter) | `fromXStateMachine()` adapter for XState v5 |
+| [`@actor-kit/xstate-store`](/api/core/#xstate-store-adapter) | `fromXStateStore()` adapter for @xstate/store |
+| [`@actor-kit/redux`](/api/core/#redux-adapter) | `fromRedux()` adapter for Redux reducers |
 | [`@actor-kit/browser`](/api/browser/) | WebSocket client, reconnection, state patching |
 | [`@actor-kit/react`](/api/react/) | React context, hooks (`useSelector`, `useSend`, `useMatches`) |
 | [`@actor-kit/server`](/api/server/) | JWT creation, server-side data fetching |

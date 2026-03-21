@@ -1,10 +1,10 @@
-name = "plain-counter-example"
+name = "redux-counter-example"
 main = "src/index.ts"
 compatibility_date = "2024-09-25"
 compatibility_flags = ["nodejs_compat"]
 
 [vars]
-ACTOR_KIT_SECRET = "test-secret-for-plain-counter"
+ACTOR_KIT_SECRET = "test-secret-for-redux-counter"
 
 [[durable_objects.bindings]]
 name = "COUNTER"

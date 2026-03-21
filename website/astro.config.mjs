@@ -43,7 +43,7 @@ export default defineConfig({
         replacesTitle: false,
       },
       description:
-        "Type-safe state machines on Cloudflare Durable Objects with real-time client sync.",
+        "Library-agnostic actors on Cloudflare Durable Objects with real-time client sync.",
       social: [
         {
           icon: "github",
@@ -87,8 +87,8 @@ export default defineConfig({
         {
           label: "API Reference",
           items: [
+            { slug: "api/core" },
             { slug: "api/types" },
-            { slug: "api/worker" },
             { slug: "api/browser" },
             { slug: "api/react" },
             { slug: "api/server" },
