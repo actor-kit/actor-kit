@@ -80,8 +80,8 @@ Do NOT load all docs upfront. Load only when relevant to the current task.
 
 | If you change... | Then update... |
 |-----------------|----------------|
-| Core types (`packages/types/src/types.ts`) | [docs/architecture.md](docs/architecture.md) § Type System |
-| Snapshot sync logic (`packages/worker/src/createMachineServer.ts`) | [docs/architecture.md](docs/architecture.md) § Sync Protocol |
+| Core types (`packages/core/src/types.ts`) | [docs/architecture.md](docs/architecture.md) § Type System |
+| DO runtime (`packages/core/src/createDurableActor.ts`) | [docs/architecture.md](docs/architecture.md) § Sync Protocol |
 | Test infrastructure (fakes, helpers) | [docs/testing-strategy.md](docs/testing-strategy.md) |
 | Add/remove a package | This file § Repo structure and § Key conventions |
 | Make an architectural decision | Create new ADR in [docs/adrs/](docs/adrs/) |
@@ -90,8 +90,8 @@ Do NOT load all docs upfront. Load only when relevant to the current task.
 
 ## Off-limits
 
-- **`packages/types/src/types.ts` generics** — complex type-level machinery. Do not refactor without understanding the full inference chain. Read the file end-to-end first.
-- **`xstate-migrate` integration** — migration logic in `packages/worker/src/createMachineServer.ts` is delicate. Changes here can break snapshot restoration for all persisted actors.
+- **`packages/core/src/createDurableActor.ts`** — the DO runtime. Handles WebSocket lifecycle, JSON Patch sync, persistence, and caller-scoped views. Changes here affect all actors.
+- **`packages/core/src/types.ts` ActorLogic interface** — the contract all adapters implement. Changing the signature cascades to every adapter and example.
 - **JWT signing keys** — never log, never include in test output, never commit to examples.
 - **Pre-commit hooks** — never bypass with `--no-verify`.
 
