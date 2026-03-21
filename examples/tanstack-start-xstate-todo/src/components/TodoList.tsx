@@ -5,8 +5,8 @@ import { useState, useSyncExternalStore } from "react";
 import { TodoActorKitContext } from "../todo.context";
 
 export function TodoList({ userId }: { userId: string }) {
-  const todos = TodoActorKitContext.useSelector((state) => state.public.todos);
-  const ownerId = TodoActorKitContext.useSelector((state) => state.public.ownerId);
+  const todos = TodoActorKitContext.useSelector((state) => state.todos);
+  const ownerId = TodoActorKitContext.useSelector((state) => state.ownerId);
   const send = TodoActorKitContext.useSend();
   const [text, setText] = useState("");
   const isHydrated = useHydrated();

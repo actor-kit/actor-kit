@@ -1,7 +1,7 @@
 "use client";
 
 import { createActorKitContext } from "@actor-kit/react";
-import type { TodoMachine } from "./todo.machine";
+import type { TodoView, TodoClientEvent } from "./todo.types";
 
-export const TodoActorKitContext = createActorKitContext<TodoMachine>("todo");
+export const TodoActorKitContext = createActorKitContext<TodoView, TodoClientEvent>("todo");
 export const TodoActorKitProvider = TodoActorKitContext.Provider;

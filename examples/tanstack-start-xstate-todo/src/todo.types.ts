@@ -57,3 +57,10 @@ export type TodoServerContext = {
   public: TodoPublicContext;
   private: Record<string, TodoPrivateContext>;
 };
+
+/** Flat view type sent to clients via getView */
+export type TodoView = {
+  todos: Array<{ id: string; text: string; completed: boolean }>;
+  ownerId: string;
+  lastSync: number | null;
+};

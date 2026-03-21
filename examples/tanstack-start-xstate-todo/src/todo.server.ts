@@ -6,12 +6,13 @@ import {
   TodoInputPropsSchema,
   TodoServiceEventSchema,
 } from "./todo.schemas";
+import type { TodoView } from "./todo.types";
 
-const logic = fromXStateMachine(todoMachine, {
-  getView: (snapshot, caller) => ({
-    public: snapshot.context.public,
-    private: snapshot.context.private[caller.id] ?? {},
-    value: snapshot.value,
+const logic = fromXStateMachine<typeof todoMachine, TodoView>(todoMachine, {
+  getView: (snapshot, _caller) => ({
+    todos: snapshot.context.public.todos,
+    ownerId: snapshot.context.public.ownerId,
+    lastSync: snapshot.context.public.lastSync,
   }),
 });
 

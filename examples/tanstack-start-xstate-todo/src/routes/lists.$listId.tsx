@@ -4,7 +4,7 @@ import { createAccessToken, createActorFetch } from "@actor-kit/server";
 import type { Caller } from "@actor-kit/core";
 import { z } from "zod";
 import { TodoActorKitProvider } from "../todo.context";
-import type { TodoMachine } from "../todo.machine";
+import type { TodoView } from "../todo.types";
 import { TodoList } from "../components/TodoList";
 import { getServerEnv, tryGetActorRuntimeEnv } from "../server-env";
 
@@ -47,7 +47,7 @@ async function getTodoSnapshotFromHost(
   listId: string,
   accessToken: string
 ) {
-  const fetchTodoActor = createActorFetch<TodoMachine>({
+  const fetchTodoActor = createActorFetch<TodoView>({
     actorType: "todo",
     host,
   });
@@ -73,7 +73,7 @@ async function getTodoSnapshotFromRuntimeEnv(
     }) => Promise<void>;
     getSnapshot: (caller: Caller) => Promise<{
       snapshot: Awaited<
-        ReturnType<ReturnType<typeof createActorFetch<TodoMachine>>>
+        ReturnType<ReturnType<typeof createActorFetch<TodoView>>>
       >["snapshot"];
       checksum: string;
     }>;
