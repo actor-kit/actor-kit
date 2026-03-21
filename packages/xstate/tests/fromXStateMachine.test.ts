@@ -99,23 +99,24 @@ const counterLogic = fromXStateMachine(counterMachine, {
 
 const clientCaller: Caller = { type: "client", id: "user-1" };
 const mockEnv: BaseEnv = { ACTOR_KIT_SECRET: "test" };
+const mockCtx = { id: "test-actor", caller: clientCaller, env: mockEnv };
 
 describe("fromXStateMachine", () => {
   it("creates initial state from input", () => {
-    const state = counterLogic.create({ initialCount: 10 });
+    const state = counterLogic.create({ initialCount: 10 }, mockCtx);
     const view = counterLogic.getView(state, clientCaller);
     expect(view.count).toBe(10);
     expect(view.lastUpdatedBy).toBeNull();
   });
 
   it("creates default state with empty input", () => {
-    const state = counterLogic.create({});
+    const state = counterLogic.create({}, mockCtx);
     const view = counterLogic.getView(state, clientCaller);
     expect(view.count).toBe(0);
   });
 
   it("transitions state with events", () => {
-    const initial = counterLogic.create({});
+    const initial = counterLogic.create({}, mockCtx);
     const next = counterLogic.transition(initial, {
       type: "INCREMENT",
       caller: clientCaller,
@@ -127,7 +128,7 @@ describe("fromXStateMachine", () => {
   });
 
   it("chains multiple transitions", () => {
-    let state = counterLogic.create({});
+    let state = counterLogic.create({}, mockCtx);
     state = counterLogic.transition(state, { type: "INCREMENT", caller: clientCaller, env: mockEnv });
     state = counterLogic.transition(state, { type: "INCREMENT", caller: clientCaller, env: mockEnv });
     state = counterLogic.transition(state, { type: "INCREMENT", caller: clientCaller, env: mockEnv });
@@ -139,7 +140,7 @@ describe("fromXStateMachine", () => {
 
   it("provides caller-scoped views", () => {
     const user2: Caller = { type: "client", id: "user-2" };
-    let state = counterLogic.create({});
+    let state = counterLogic.create({}, mockCtx);
 
     state = counterLogic.transition(state, { type: "INCREMENT", caller: clientCaller, env: mockEnv });
     state = counterLogic.transition(state, { type: "INCREMENT", caller: clientCaller, env: mockEnv });
@@ -158,7 +159,7 @@ describe("fromXStateMachine", () => {
   });
 
   it("serializes and restores state", () => {
-    let state = counterLogic.create({});
+    let state = counterLogic.create({}, mockCtx);
     state = counterLogic.transition(state, { type: "INCREMENT", caller: clientCaller, env: mockEnv });
 
     const serialized = counterLogic.serialize(state);

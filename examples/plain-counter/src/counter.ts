@@ -34,7 +34,7 @@ export type CounterView = {
 // --- Logic ---
 
 const counterLogic = defineLogic<CounterState, CounterEvent, CounterView, Env>({
-  create: () => ({
+  create: (_input, _ctx) => ({
     count: 0,
     accessCounts: {},
   }),

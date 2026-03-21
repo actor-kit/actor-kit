@@ -160,7 +160,11 @@ export function createDurableActor<
 
       if (!this.#currentState) {
         const inputProps = config.input.parse(this.#input);
-        this.#currentState = logic.create(inputProps);
+        this.#currentState = logic.create(inputProps, {
+          id: this.#actorId,
+          caller: this.#initialCaller,
+          env: this.#env,
+        });
 
         if (persisted) {
           this.#persistSnapshot().catch(() => {
@@ -450,7 +454,10 @@ export function createDurableActor<
         lastSentChecksum: clientChecksum ?? undefined,
       });
 
-      // Fire onConnect lifecycle hook
+      // Subscribe the new socket first so it receives updates
+      this.#subscribeSocketToActor(server);
+
+      // Fire onConnect lifecycle hook — may change shared state
       if (logic.onConnect && this.#currentState) {
         this.#currentState = logic.onConnect(this.#currentState, caller);
         if (persisted) {
@@ -458,9 +465,12 @@ export function createDurableActor<
             // Ignore persistence errors.
           });
         }
+        // Broadcast to ALL connected sockets (including the new one)
+        // so existing clients see the state change from onConnect
+        for (const ws of this.#doState.getWebSockets()) {
+          this.#enqueueSendStateUpdate(ws as ActorKitWebSocket);
+        }
       }
-
-      this.#subscribeSocketToActor(server);
 
       return new Response(null, {
         status: 101,
@@ -567,6 +577,10 @@ export function createDurableActor<
       if (this.#actorType || this.#actorId || this.#initialCaller) {
         return;
       }
+
+      // Validate input BEFORE persisting — prevents storing invalid state
+      // that can't be recovered from on subsequent requests.
+      config.input.parse(props.input);
 
       await this.#storeActorData(
         props.actorType,

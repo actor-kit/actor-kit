@@ -45,7 +45,7 @@ function counterReducer(
 type CounterView = { count: number; myAccessCount: number };
 
 const counterLogic = fromRedux(counterReducer, {
-  create: (input: { initialCount?: number }) => ({
+  create: (input: { initialCount?: number }, _ctx) => ({
     count: input.initialCount ?? 0,
     accessCounts: {},
   }),
@@ -57,17 +57,18 @@ const counterLogic = fromRedux(counterReducer, {
 
 const clientCaller: Caller = { type: "client", id: "user-1" };
 const mockEnv: BaseEnv = { ACTOR_KIT_SECRET: "test" };
+const mockCtx = { id: "test-actor", caller: clientCaller, env: mockEnv };
 
 // --- Tests ---
 
 describe("fromRedux", () => {
   it("creates initial state", () => {
-    const state = counterLogic.create({ initialCount: 5 });
+    const state = counterLogic.create({ initialCount: 5 }, mockCtx);
     expect(state.count).toBe(5);
   });
 
   it("transitions with reducer", () => {
-    let state = counterLogic.create({});
+    let state = counterLogic.create({}, mockCtx);
     state = counterLogic.transition(state, {
       type: "INCREMENT",
       caller: clientCaller,
@@ -77,7 +78,7 @@ describe("fromRedux", () => {
   });
 
   it("chains transitions", () => {
-    let state = counterLogic.create({});
+    let state = counterLogic.create({}, mockCtx);
     state = counterLogic.transition(state, { type: "INCREMENT", caller: clientCaller, env: mockEnv });
     state = counterLogic.transition(state, { type: "INCREMENT", caller: clientCaller, env: mockEnv });
     state = counterLogic.transition(state, { type: "DECREMENT", caller: clientCaller, env: mockEnv });
@@ -87,7 +88,7 @@ describe("fromRedux", () => {
 
   it("caller-scoped views", () => {
     const user2: Caller = { type: "client", id: "user-2" };
-    let state = counterLogic.create({});
+    let state = counterLogic.create({}, mockCtx);
 
     state = counterLogic.transition(state, { type: "INCREMENT", caller: clientCaller, env: mockEnv });
     state = counterLogic.transition(state, { type: "INCREMENT", caller: clientCaller, env: mockEnv });
@@ -99,7 +100,7 @@ describe("fromRedux", () => {
   });
 
   it("authorization via caller type", () => {
-    let state = counterLogic.create({ initialCount: 10 });
+    let state = counterLogic.create({ initialCount: 10 }, mockCtx);
 
     // Client can't reset
     state = counterLogic.transition(state, { type: "RESET", caller: clientCaller, env: mockEnv });
@@ -115,7 +116,7 @@ describe("fromRedux", () => {
   });
 
   it("serialize/restore round-trip", () => {
-    let state = counterLogic.create({});
+    let state = counterLogic.create({}, mockCtx);
     state = counterLogic.transition(state, { type: "INCREMENT", caller: clientCaller, env: mockEnv });
 
     const serialized = counterLogic.serialize(state);

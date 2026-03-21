@@ -9,6 +9,7 @@ type CounterView = {
 
 const clientCaller: Caller = { type: "client", id: "user-1" };
 const mockEnv: BaseEnv = { ACTOR_KIT_SECRET: "test" };
+const mockCtx = { id: "test-actor", caller: clientCaller, env: mockEnv };
 
 const counterLogic = fromXStateStore({
   context: { count: 0, accessCounts: {} as Record<string, number> },
@@ -35,7 +36,7 @@ const counterLogic = fromXStateStore({
 
 describe("fromXStateStore", () => {
   it("creates initial state", () => {
-    const state = counterLogic.create({});
+    const state = counterLogic.create({}, mockCtx);
     expect(state.count).toBe(0);
   });
 
@@ -51,12 +52,12 @@ describe("fromXStateStore", () => {
       getView: (state) => ({ count: state.count }),
     });
 
-    const state = logic.create({ initialCount: 42 });
+    const state = logic.create({ initialCount: 42 }, mockCtx);
     expect(state.count).toBe(42);
   });
 
   it("transitions with caller on event", () => {
-    let state = counterLogic.create({});
+    let state = counterLogic.create({}, mockCtx);
     state = counterLogic.transition(state, {
       type: "inc",
       caller: clientCaller,
@@ -69,7 +70,7 @@ describe("fromXStateStore", () => {
   });
 
   it("chains transitions", () => {
-    let state = counterLogic.create({});
+    let state = counterLogic.create({}, mockCtx);
     state = counterLogic.transition(state, { type: "inc", caller: clientCaller, env: mockEnv });
     state = counterLogic.transition(state, { type: "inc", caller: clientCaller, env: mockEnv });
     state = counterLogic.transition(state, { type: "inc", caller: clientCaller, env: mockEnv });
@@ -81,7 +82,7 @@ describe("fromXStateStore", () => {
 
   it("caller-scoped views work", () => {
     const user2: Caller = { type: "client", id: "user-2" };
-    let state = counterLogic.create({});
+    let state = counterLogic.create({}, mockCtx);
 
     state = counterLogic.transition(state, { type: "inc", caller: clientCaller, env: mockEnv });
     state = counterLogic.transition(state, { type: "inc", caller: user2, env: mockEnv });
@@ -92,7 +93,7 @@ describe("fromXStateStore", () => {
   });
 
   it("authorization via caller type", () => {
-    let state = counterLogic.create({});
+    let state = counterLogic.create({}, mockCtx);
     state = counterLogic.transition(state, { type: "inc", caller: clientCaller, env: mockEnv });
 
     // Client can't reset
@@ -109,13 +110,13 @@ describe("fromXStateStore", () => {
   });
 
   it("ignores unknown event types", () => {
-    let state = counterLogic.create({});
+    let state = counterLogic.create({}, mockCtx);
     state = counterLogic.transition(state, { type: "unknown", caller: clientCaller, env: mockEnv });
     expect(state.count).toBe(0);
   });
 
   it("serialize and restore round-trip", () => {
-    let state = counterLogic.create({});
+    let state = counterLogic.create({}, mockCtx);
     state = counterLogic.transition(state, { type: "inc", caller: clientCaller, env: mockEnv });
 
     const serialized = counterLogic.serialize(state);

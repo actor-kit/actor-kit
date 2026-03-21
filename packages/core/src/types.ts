@@ -22,7 +22,7 @@ export interface ActorLogic<
   TEnv extends BaseEnv,
   TInput,
 > {
-  create(input: TInput): TState;
+  create(input: TInput, ctx: { id: string; caller: Caller; env: TEnv }): TState;
   transition(
     state: TState,
     event: TEvent & { caller: Caller; env: TEnv }

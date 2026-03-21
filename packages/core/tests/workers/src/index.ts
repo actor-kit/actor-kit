@@ -38,7 +38,7 @@ type CounterView = {
 // --- Logic ---
 
 const counterLogic = defineLogic<CounterState, CounterEvent, CounterView, Env, { initialCount?: number }>({
-  create: (input) => ({
+  create: (input, _ctx) => ({
     count: input.initialCount ?? 0,
     lastUpdatedBy: null,
     accessCounts: {},

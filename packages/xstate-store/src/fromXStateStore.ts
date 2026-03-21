@@ -47,7 +47,7 @@ export function fromXStateStore<
   options: FromXStateStoreOptions<TContext, TView>
 ): ActorLogic<TContext, { type: string; [key: string]: unknown }, TView, TEnv, Record<string, unknown>> {
   return {
-    create(input: Record<string, unknown>): TContext {
+    create(input: Record<string, unknown>, _ctx: { id: string; caller: import("@actor-kit/core").Caller; env: TEnv }): TContext {
       if (typeof definition.context === "function") {
         return definition.context(input);
       }

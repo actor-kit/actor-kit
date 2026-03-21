@@ -51,8 +51,14 @@ export function fromXStateMachine<
   const anyMachine: AnyStateMachine = machine;
 
   return {
-    create(input: Record<string, unknown>): SnapshotFrom<TMachine> {
-      const actor = createActor(anyMachine, { input });
+    create(
+      input: Record<string, unknown>,
+      ctx: { id: string; caller: Caller; env: TEnv }
+    ): SnapshotFrom<TMachine> {
+      // Pass the full actor context to XState — machines commonly
+      // read input.caller, input.id, input.env in their context factory.
+      const fullInput = { ...input, id: ctx.id, caller: ctx.caller, env: ctx.env };
+      const actor = createActor(anyMachine, { input: fullInput });
       actor.start();
       const snapshot = actor.getSnapshot() as SnapshotFrom<TMachine>;
       actor.stop();

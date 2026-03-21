@@ -40,7 +40,7 @@ type Caller = { type: "client" | "service"; id: string };
  * (which pulls in cloudflare:workers). The object satisfies ActorLogic.
  */
 const counterLogic = {
-  create: (input: CounterInput) => ({
+  create: (input: CounterInput, _ctx: { id: string; caller: Caller; env: Record<string, unknown> }) => ({
     count: input?.initialCount ?? 0,
     lastUpdatedBy: null,
     accessCounts: {} as Record<string, number>,
@@ -240,7 +240,7 @@ describe("transition()", () => {
   it("provides mock env with ACTOR_KIT_SECRET to the logic", () => {
     // Build a logic that reads env.ACTOR_KIT_SECRET in transition
     const envReadingLogic = {
-      create: () => ({ secret: "" }),
+      create: (_input: unknown, _ctx: { id: string; caller: Caller; env: Record<string, unknown> }) => ({ secret: "" }),
       transition: (
         state: { secret: string },
         event: { type: "READ_SECRET" } & {
@@ -271,7 +271,7 @@ describe("transition()", () => {
   it("provides undefined for unknown env properties", () => {
     // Build a logic that reads an undefined env property
     const envReadingLogic = {
-      create: () => ({ envValue: "initial" as unknown }),
+      create: (_input: unknown, _ctx: { id: string; caller: Caller; env: Record<string, unknown> }) => ({ envValue: "initial" as unknown }),
       transition: (
         state: { envValue: unknown },
         event: { type: "READ_UNKNOWN" } & {

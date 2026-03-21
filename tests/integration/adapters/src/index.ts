@@ -60,7 +60,7 @@ type CounterView = {
 // Shared helpers
 // ============================================================================
 
-function createInitialState(input: InputProps): CounterState {
+function createInitialState(input: InputProps, _ctx: { id: string; caller: Caller; env: BaseEnv }): CounterState {
   return {
     count: input.initialCount ?? 0,
     accessCounts: {},
@@ -206,7 +206,7 @@ const storeCounterLogicWithConnect = {
   ...storeCounterLogic,
   onConnect: handleConnect,
   // Override create to support initialCount input
-  create: (input: Record<string, unknown>) => ({
+  create: (input: Record<string, unknown>, _ctx: { id: string; caller: Caller; env: BaseEnv }) => ({
     count: typeof input.initialCount === "number" ? input.initialCount : 0,
     accessCounts: {} as Record<string, number>,
   }),

@@ -61,7 +61,11 @@ export function transition<
   const resolvedEnv = (env ?? mockEnv) as TEnv;
 
   // Get or create initial state
-  const currentState = existingState ?? logic.create(input as TInput);
+  const currentState = existingState ?? logic.create(input as TInput, {
+    id: "test-actor",
+    caller,
+    env: resolvedEnv,
+  });
 
   // Apply transition with augmented event
   const augmentedEvent = {

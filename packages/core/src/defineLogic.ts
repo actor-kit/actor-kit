@@ -7,7 +7,7 @@ export function defineLogic<
   TEnv extends BaseEnv = BaseEnv,
   TInput = Record<string, unknown>,
 >(config: {
-  create: (input: TInput) => TState;
+  create: (input: TInput, ctx: { id: string; caller: Caller; env: TEnv }) => TState;
   transition: (
     state: TState,
     event: TEvent & { caller: Caller; env: TEnv }

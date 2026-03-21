@@ -13,7 +13,7 @@ type ReduxReducer<TState, TAction extends { type: string }> = (
 
 type FromReduxOptions<TState, TView, TInput> = {
   /** Create initial state from input. */
-  create: (input: TInput) => TState;
+  create: (input: TInput, ctx: { id: string; caller: Caller; env: BaseEnv }) => TState;
   /** Map state to a caller-scoped view. */
   getView: (state: TState, caller: Caller) => TView;
   /** Serialize state for persistence. Defaults to identity. */
@@ -51,7 +51,7 @@ export function fromRedux<
   options: FromReduxOptions<TState, TView, TInput>
 ): ActorLogic<TState, TAction, TView, TEnv, TInput> {
   return {
-    create: options.create,
+    create: (input: TInput, ctx: { id: string; caller: Caller; env: TEnv }) => options.create(input, ctx),
 
     transition(
       state: TState,

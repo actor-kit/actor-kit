@@ -75,7 +75,7 @@ function counterReducer(
 const counterLogic = fromRedux<CounterState, CounterAction, CounterView, Env>(
   counterReducer,
   {
-    create: () => ({ count: 0, accessCounts: {} }),
+    create: (_input, _ctx) => ({ count: 0, accessCounts: {} }),
     getView: (state, caller) => ({
       count: state.count,
       myAccessCount: state.accessCounts[caller.id] ?? 0,
