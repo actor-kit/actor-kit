@@ -25,6 +25,7 @@ Actor Kit's core abstraction is `ActorLogic` — an interface with three functio
 ```typescript
 // src/counter.ts
 import { defineLogic, createDurableActor } from "@actor-kit/core";
+import { produce } from "immer";
 import { z } from "zod";
 
 type CounterState = {
@@ -51,28 +52,26 @@ const counterLogic = defineLogic({
     accessCounts: {},
   }),
 
-  transition: (state, event) => {
-    const { caller } = event;
-    switch (event.type) {
-      case "INCREMENT":
-        return {
-          ...state,
-          count: state.count + 1,
-          lastUpdatedBy: caller.id,
-          accessCounts: {
-            ...state.accessCounts,
-            [caller.id]: (state.accessCounts[caller.id] ?? 0) + 1,
-          },
-        };
-      case "DECREMENT":
-        return { ...state, count: state.count - 1, lastUpdatedBy: caller.id };
-      case "RESET":
-        if (caller.type !== "service") return state; // auth in logic
-        return { ...state, count: 0, lastUpdatedBy: null };
-      default:
-        return state;
-    }
-  },
+  transition: (state, event) =>
+    produce(state, (draft) => {
+      const { caller } = event;
+      switch (event.type) {
+        case "INCREMENT":
+          draft.count += 1;
+          draft.lastUpdatedBy = caller.id;
+          draft.accessCounts[caller.id] = (draft.accessCounts[caller.id] ?? 0) + 1;
+          break;
+        case "DECREMENT":
+          draft.count -= 1;
+          draft.lastUpdatedBy = caller.id;
+          break;
+        case "RESET":
+          if (caller.type !== "service") break;
+          draft.count = 0;
+          draft.lastUpdatedBy = null;
+          break;
+      }
+    }),
 
   getView: (state, caller) => ({
     count: state.count,
@@ -83,6 +82,7 @@ const counterLogic = defineLogic({
 ```
 
 Key points:
+- **Immer `produce`** — mutate a draft instead of spreading. Cleaner, especially for nested state.
 - **`event.caller`** is always available — Actor Kit augments every event with the caller identity and env bindings.
 - **`getView`** controls what each caller sees. User A and User B both see the same `count`, but each sees their own `myAccessCount`.
 - **Authorization is in the transition** — `RESET` checks `caller.type !== "service"` and returns state unchanged if unauthorized.
