@@ -7,6 +7,7 @@ packages:
   - packages/server
   - packages/test
   - packages/xstate
+  - packages/xstate-store
   - packages/storybook
   - examples/*
   - website

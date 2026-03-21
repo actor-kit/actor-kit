@@ -550,6 +550,25 @@ importers:
         specifier: ^3.25.76
         version: 3.25.76
 
+  packages/xstate-store:
+    dependencies:
+      '@actor-kit/core':
+        specifier: workspace:*
+        version: link:../core
+    devDependencies:
+      '@xstate/store':
+        specifier: ^3.0.0
+        version: 3.17.0(react@19.2.4)(solid-js@1.9.11)
+      tsdown:
+        specifier: ^0.21.2
+        version: 0.21.2(typescript@5.9.3)
+      typescript:
+        specifier: ^5.9.3
+        version: 5.9.3
+      vitest:
+        specifier: ^4.1.0
+        version: 4.1.0(@types/node@24.12.0)(jsdom@28.1.0)(vite@7.3.1(@types/node@24.12.0)(jiti@2.6.1)(lightningcss@1.31.1)(terser@5.46.0)(tsx@4.21.0)(yaml@2.8.2))
+
   website:
     dependencies:
       '@astrojs/starlight':
@@ -3636,6 +3655,17 @@ packages:
 
   '@vitest/utils@4.1.0':
     resolution: {integrity: sha512-XfPXT6a8TZY3dcGY8EdwsBulFCIw+BeeX0RZn2x/BtiY/75YGh8FeWGG8QISN/WhaqSrE2OrlDgtF8q5uhOTmw==}
+
+  '@xstate/store@3.17.0':
+    resolution: {integrity: sha512-IITUYhK1e8cqs9NyzmS3Y8cuZq7lz5gWnX9TMHnVNvMVRAGLzNN8vUqnv/v/6jgdo2e9pzmMRSM8rkHPUPg81g==}
+    peerDependencies:
+      react: ^18.2.0 || ^19.0.0
+      solid-js: ^1.7.6
+    peerDependenciesMeta:
+      react:
+        optional: true
+      solid-js:
+        optional: true
 
   acorn-jsx@5.3.2:
     resolution: {integrity: sha512-rq9s+JNhf0IChjtDXxllJ7g41oZk5SlXtp0LHwyA5cejwn7vKmKp4pPri6YEePv2PU65sAsegbXtIinmDFDXgQ==}
@@ -11888,6 +11918,11 @@ snapshots:
       '@vitest/pretty-format': 4.1.0
       convert-source-map: 2.0.0
       tinyrainbow: 3.1.0
+
+  '@xstate/store@3.17.0(react@19.2.4)(solid-js@1.9.11)':
+    optionalDependencies:
+      react: 19.2.4
+      solid-js: 1.9.11
 
   acorn-jsx@5.3.2(acorn@8.16.0):
     dependencies:
