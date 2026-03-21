@@ -6,6 +6,7 @@ packages:
   - packages/react
   - packages/server
   - packages/test
+  - packages/xstate
   - packages/storybook
   - examples/*
   - website
