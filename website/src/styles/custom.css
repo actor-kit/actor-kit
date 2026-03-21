@@ -21,7 +21,7 @@ a.site-title {
   --sl-nav-pad-x: max(1rem, calc((100vw - 68rem) / 2));
 }
 
-/* Center the sidebar + content within the same max-width as the header */
+/* Center the sidebar + content, aligned with the header content */
 .page {
   max-width: 68rem;
   margin: 0 auto;
