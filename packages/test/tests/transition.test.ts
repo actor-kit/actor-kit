@@ -5,23 +5,17 @@
  * no storage infrastructure required.
  */
 import { describe, expect, it } from "vitest";
-import { assign, setup } from "xstate";
 import { transition } from "@actor-kit/test";
-import type {
-  ActorKitSystemEvent,
-  BaseActorKitEvent,
-  WithActorKitEvent,
-  WithActorKitInput,
-} from "@actor-kit/types";
 
 // ---------------------------------------------------------------------------
-// Test machine: a simple counter with public/private context
+// Test logic: a simple counter with caller-scoped access counts
 // ---------------------------------------------------------------------------
 
-interface CounterEnv {
-  ACTOR_KIT_SECRET: string;
-  [key: string]: unknown;
-}
+type CounterState = {
+  count: number;
+  lastUpdatedBy: string | null;
+  accessCounts: Record<string, number>;
+};
 
 type CounterClientEvent =
   | { type: "INCREMENT" }
@@ -29,305 +23,282 @@ type CounterClientEvent =
 
 type CounterServiceEvent = { type: "RESET" };
 
-type CounterEvent = (
-  | WithActorKitEvent<CounterClientEvent, "client">
-  | WithActorKitEvent<CounterServiceEvent, "service">
-  | ActorKitSystemEvent
-) &
-  BaseActorKitEvent<CounterEnv>;
+type CounterEvent = CounterClientEvent | CounterServiceEvent;
 
-type CounterInput = WithActorKitInput<
-  { initialCount?: number },
-  CounterEnv
->;
-
-type CounterContext = {
-  public: { count: number; lastUpdatedBy: string | null };
-  private: Record<string, { accessCount: number }>;
+type CounterView = {
+  count: number;
+  lastUpdatedBy: string | null;
+  accessCount: number;
 };
 
-const counterMachine = setup({
-  types: {
-    context: {} as CounterContext,
-    events: {} as CounterEvent,
-    input: {} as CounterInput,
-  },
-  actions: {
-    increment: assign({
-      public: ({ context, event }) => ({
-        ...context.public,
-        count: context.public.count + 1,
-        lastUpdatedBy: event.caller.id,
-      }),
-      private: ({ context, event }) => ({
-        ...context.private,
-        [event.caller.id]: {
-          accessCount:
-            (context.private[event.caller.id]?.accessCount ?? 0) + 1,
-        },
-      }),
-    }),
-    setValue: assign({
-      public: ({ context, event }) => {
-        if (event.type !== "SET") return context.public;
+type CounterInput = { initialCount?: number };
+
+type Caller = { type: "client" | "service"; id: string };
+
+/**
+ * Define the logic inline to avoid importing @actor-kit/core at runtime
+ * (which pulls in cloudflare:workers). The object satisfies ActorLogic.
+ */
+const counterLogic = {
+  create: (input: CounterInput) => ({
+    count: input?.initialCount ?? 0,
+    lastUpdatedBy: null,
+    accessCounts: {} as Record<string, number>,
+  }),
+  transition: (
+    state: CounterState,
+    event: CounterEvent & { caller: Caller; env: Record<string, unknown> }
+  ): CounterState => {
+    switch (event.type) {
+      case "INCREMENT":
         return {
-          ...context.public,
+          ...state,
+          count: state.count + 1,
+          lastUpdatedBy: event.caller.id,
+          accessCounts: {
+            ...state.accessCounts,
+            [event.caller.id]:
+              (state.accessCounts[event.caller.id] ?? 0) + 1,
+          },
+        };
+      case "SET":
+        return {
+          ...state,
           count: event.value,
           lastUpdatedBy: event.caller.id,
         };
-      },
-    }),
-    resetCounter: assign({
-      public: ({ context }) => ({
-        ...context.public,
-        count: 0,
-        lastUpdatedBy: null,
-      }),
-    }),
+      case "RESET":
+        return {
+          ...state,
+          count: 0,
+          lastUpdatedBy: null,
+        };
+      default:
+        return state;
+    }
   },
-}).createMachine({
-  id: "counter",
-  type: "parallel",
-  context: ({ input }: { input: CounterInput }) => ({
-    public: {
-      count: input.initialCount ?? 0,
-      lastUpdatedBy: null,
-    },
-    private: {},
+  getView: (state: CounterState, caller: Caller): CounterView => ({
+    count: state.count,
+    lastUpdatedBy: state.lastUpdatedBy,
+    accessCount: state.accessCounts[caller.id] ?? 0,
   }),
-  states: {
-    Operations: {
-      on: {
-        INCREMENT: { actions: ["increment"] },
-        SET: { actions: ["setValue"] },
-        RESET: { actions: ["resetCounter"] },
-      },
-    },
-  },
-});
+  serialize: (state: CounterState) => JSON.parse(JSON.stringify(state)),
+  restore: (serialized: unknown) => serialized as CounterState,
+};
 
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
 describe("transition()", () => {
-  it("applies a client event and returns the next snapshot", () => {
-    const result = transition(counterMachine, {
+  it("applies a client event and returns the next state", () => {
+    const result = transition(counterLogic, {
       event: { type: "INCREMENT" },
       caller: { type: "client", id: "user-1" },
     });
 
-    expect(result.context.public.count).toBe(1);
-    expect(result.context.public.lastUpdatedBy).toBe("user-1");
+    expect(result.view.count).toBe(1);
+    expect(result.view.lastUpdatedBy).toBe("user-1");
   });
 
-  it("provides a caller-scoped snapshot", () => {
-    const result = transition(counterMachine, {
+  it("provides a caller-scoped view", () => {
+    const result = transition(counterLogic, {
       event: { type: "INCREMENT" },
       caller: { type: "client", id: "user-1" },
     });
 
-    expect(result.callerSnapshot.public.count).toBe(1);
-    expect(result.callerSnapshot.private.accessCount).toBe(1);
-    expect(result.callerSnapshot.value).toBeDefined();
+    expect(result.view.count).toBe(1);
+    expect(result.view.accessCount).toBe(1);
   });
 
-  it("returns only the caller's private context, not other callers", () => {
+  it("returns only the caller's data in the view, not other callers", () => {
     // First: user-1 increments
-    const after1 = transition(counterMachine, {
+    const after1 = transition(counterLogic, {
       event: { type: "INCREMENT" },
       caller: { type: "client", id: "user-1" },
     });
 
-    // Second: user-2 increments, starting from after1's snapshot
-    const after2 = transition(counterMachine, {
-      snapshot: after1.snapshot,
+    // Second: user-2 increments, starting from after1's state
+    const after2 = transition(counterLogic, {
+      state: after1.state,
       event: { type: "INCREMENT" },
       caller: { type: "client", id: "user-2" },
     });
 
-    // user-2's caller snapshot should show user-2's private context
-    expect(after2.callerSnapshot.private.accessCount).toBe(1);
-    // Full context should show both callers
-    expect(after2.context.private["user-1"]?.accessCount).toBe(1);
-    expect(after2.context.private["user-2"]?.accessCount).toBe(1);
-    expect(after2.context.public.count).toBe(2);
+    // user-2's view should show user-2's access count
+    expect(after2.view.accessCount).toBe(1);
+    // Full state should show both callers
+    expect(after2.state.accessCounts["user-1"]).toBe(1);
+    expect(after2.state.accessCounts["user-2"]).toBe(1);
+    expect(after2.state.count).toBe(2);
   });
 
   it("accepts a service event", () => {
     // Start with count=5
-    const initial = transition(counterMachine, {
+    const initial = transition(counterLogic, {
       event: { type: "SET", value: 5 },
       caller: { type: "client", id: "user-1" },
     });
 
     // Reset via service event
-    const result = transition(counterMachine, {
-      snapshot: initial.snapshot,
+    const result = transition(counterLogic, {
+      state: initial.state,
       event: { type: "RESET" },
       caller: { type: "service", id: "admin" },
     });
 
-    expect(result.context.public.count).toBe(0);
-    expect(result.context.public.lastUpdatedBy).toBeNull();
+    expect(result.state.count).toBe(0);
+    expect(result.state.lastUpdatedBy).toBeNull();
   });
 
-  it("starts from default context when no snapshot is provided", () => {
-    const result = transition(counterMachine, {
+  it("starts from default state when no state is provided", () => {
+    const result = transition(counterLogic, {
       event: { type: "INCREMENT" },
       caller: { type: "client", id: "user-1" },
     });
 
     // Started from 0, incremented to 1
-    expect(result.context.public.count).toBe(1);
+    expect(result.view.count).toBe(1);
   });
 
-  it("starts from a provided snapshot", () => {
-    // Build a snapshot with count=10
-    const base = transition(counterMachine, {
+  it("starts from a provided state", () => {
+    // Build a state with count=10
+    const base = transition(counterLogic, {
       event: { type: "SET", value: 10 },
       caller: { type: "client", id: "user-1" },
     });
 
-    // Increment from that snapshot
-    const result = transition(counterMachine, {
-      snapshot: base.snapshot,
+    // Increment from that state
+    const result = transition(counterLogic, {
+      state: base.state,
       event: { type: "INCREMENT" },
       caller: { type: "client", id: "user-1" },
     });
 
-    expect(result.context.public.count).toBe(11);
+    expect(result.view.count).toBe(11);
   });
 
   it("provides mock env with ACTOR_KIT_SECRET", () => {
-    // The machine receives env via event augmentation.
-    // transition() should provide a mock env that satisfies ActorKitEnv.
-    // If the machine didn't throw, it means env was provided correctly.
-    const result = transition(counterMachine, {
+    // The logic receives env via event augmentation.
+    // transition() should provide a mock env that satisfies BaseEnv.
+    // If the logic didn't throw, it means env was provided correctly.
+    const result = transition(counterLogic, {
       event: { type: "INCREMENT" },
       caller: { type: "client", id: "user-1" },
     });
 
-    expect(result.context.public.count).toBe(1);
+    expect(result.view.count).toBe(1);
   });
 
   it("accepts custom input props", () => {
-    const result = transition(counterMachine, {
+    const result = transition(counterLogic, {
       event: { type: "INCREMENT" },
       caller: { type: "client", id: "user-1" },
       input: { initialCount: 100 },
     });
 
-    expect(result.context.public.count).toBe(101);
+    expect(result.view.count).toBe(101);
   });
 
-  it("returns the XState state value", () => {
-    const result = transition(counterMachine, {
+  it("returns the view for the caller", () => {
+    const result = transition(counterLogic, {
       event: { type: "INCREMENT" },
       caller: { type: "client", id: "user-1" },
     });
 
-    expect(result.callerSnapshot.value).toEqual({ Operations: {} });
+    expect(result.view.count).toBe(1);
+    expect(result.view.accessCount).toBe(1);
+    expect(result.view.lastUpdatedBy).toBe("user-1");
   });
 
-  it("returns the raw XState snapshot for chaining", () => {
-    const first = transition(counterMachine, {
+  it("returns the full state for chaining", () => {
+    const first = transition(counterLogic, {
       event: { type: "INCREMENT" },
       caller: { type: "client", id: "user-1" },
     });
 
-    const second = transition(counterMachine, {
-      snapshot: first.snapshot,
+    const second = transition(counterLogic, {
+      state: first.state,
       event: { type: "INCREMENT" },
       caller: { type: "client", id: "user-1" },
     });
 
-    expect(second.context.public.count).toBe(2);
-    expect(second.context.private["user-1"]?.accessCount).toBe(2);
+    expect(second.view.count).toBe(2);
+    expect(second.state.accessCounts["user-1"]).toBe(2);
   });
 
-  it("provides empty private context for callers with no private data", () => {
-    const result = transition(counterMachine, {
+  it("provides zero access count for callers with no prior events", () => {
+    const result = transition(counterLogic, {
       event: { type: "SET", value: 42 },
       caller: { type: "client", id: "user-1" },
     });
 
-    // SET action doesn't write to private context, so user-1 has no entry
-    expect(result.callerSnapshot.private).toEqual({});
+    // SET action doesn't increment access count, so user-1 has 0
+    expect(result.view.accessCount).toBe(0);
   });
 
-  it("provides mock env with ACTOR_KIT_SECRET to the machine", () => {
-    // Build a machine that reads env.ACTOR_KIT_SECRET in an action
-    const envReadingMachine = setup({
-      types: {
-        context: {} as {
-          public: { secret: string };
-          private: Record<string, never>;
-        },
-        events: {} as CounterEvent,
-        input: {} as CounterInput,
+  it("provides mock env with ACTOR_KIT_SECRET to the logic", () => {
+    // Build a logic that reads env.ACTOR_KIT_SECRET in transition
+    const envReadingLogic = {
+      create: () => ({ secret: "" }),
+      transition: (
+        state: { secret: string },
+        event: { type: "READ_SECRET" } & {
+          caller: Caller;
+          env: { ACTOR_KIT_SECRET: string; [key: string]: unknown };
+        }
+      ) => {
+        if (event.type === "READ_SECRET") {
+          return { secret: event.env.ACTOR_KIT_SECRET };
+        }
+        return state;
       },
-      actions: {
-        readSecret: assign({
-          public: ({ event }) => ({
-            secret: (event as unknown as { env: { ACTOR_KIT_SECRET: string } }).env.ACTOR_KIT_SECRET,
-          }),
-        }),
-      },
-    }).createMachine({
-      id: "env-reader",
-      initial: "idle",
-      context: () => ({ public: { secret: "" }, private: {} }),
-      states: {
-        idle: {
-          on: { INCREMENT: { actions: "readSecret" } },
-        },
-      },
-    });
+      getView: (state: { secret: string }) => ({ secret: state.secret }),
+      serialize: (state: { secret: string }) =>
+        JSON.parse(JSON.stringify(state)),
+      restore: (serialized: unknown) => serialized as { secret: string },
+    };
 
-    const result = transition(envReadingMachine, {
-      event: { type: "INCREMENT" },
+    const result = transition(envReadingLogic, {
+      event: { type: "READ_SECRET" as const },
       caller: { type: "client", id: "user-1" },
     });
 
     // The mock env provides "test-secret" as ACTOR_KIT_SECRET
-    expect(result.context.public.secret).toBe("test-secret");
+    expect(result.view.secret).toBe("test-secret");
   });
 
   it("provides undefined for unknown env properties", () => {
-    // Build a machine that reads an undefined env property
-    const envReadingMachine = setup({
-      types: {
-        context: {} as {
-          public: { envValue: unknown };
-          private: Record<string, never>;
-        },
-        events: {} as CounterEvent,
-        input: {} as CounterInput,
+    // Build a logic that reads an undefined env property
+    const envReadingLogic = {
+      create: () => ({ envValue: "initial" as unknown }),
+      transition: (
+        state: { envValue: unknown },
+        event: { type: "READ_UNKNOWN" } & {
+          caller: Caller;
+          env: { ACTOR_KIT_SECRET: string; [key: string]: unknown };
+        }
+      ) => {
+        if (event.type === "READ_UNKNOWN") {
+          return {
+            envValue: (event.env as Record<string, unknown>).NONEXISTENT,
+          };
+        }
+        return state;
       },
-      actions: {
-        readUnknown: assign({
-          public: ({ event }) => ({
-            envValue: (event as unknown as { env: Record<string, unknown> }).env.NONEXISTENT,
-          }),
-        }),
-      },
-    }).createMachine({
-      id: "env-unknown",
-      initial: "idle",
-      context: () => ({ public: { envValue: "initial" }, private: {} }),
-      states: {
-        idle: {
-          on: { INCREMENT: { actions: "readUnknown" } },
-        },
-      },
-    });
+      getView: (state: { envValue: unknown }) => ({
+        envValue: state.envValue,
+      }),
+      serialize: (state: { envValue: unknown }) =>
+        JSON.parse(JSON.stringify(state)),
+      restore: (serialized: unknown) => serialized as { envValue: unknown },
+    };
 
-    const result = transition(envReadingMachine, {
-      event: { type: "INCREMENT" },
+    const result = transition(envReadingLogic, {
+      event: { type: "READ_UNKNOWN" as const },
       caller: { type: "client", id: "user-1" },
     });
 
-    expect(result.context.public.envValue).toBeUndefined();
+    expect(result.view.envValue).toBeUndefined();
   });
 });

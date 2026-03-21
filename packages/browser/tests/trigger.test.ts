@@ -9,7 +9,7 @@ import { createActorKitClient } from "@actor-kit/browser";
 import { createActorKitMockClient } from "@actor-kit/test";
 
 // ---------------------------------------------------------------------------
-// Minimal machine type with multiple event types
+// Minimal types for trigger tests
 // ---------------------------------------------------------------------------
 
 type TodoClientEvent =
@@ -23,16 +23,6 @@ type TodoSnapshot = {
     todos: Array<{ id: string; text: string; done: boolean }>;
   };
   private: Record<string, never>;
-};
-
-type TodoMachine = {
-  input: unknown;
-  context: unknown;
-  events: TodoClientEvent;
-  value: "ready";
-  output: unknown;
-  transition: unknown;
-  config: unknown;
 };
 
 // ---------------------------------------------------------------------------
@@ -112,7 +102,7 @@ afterEach(() => {
 
 describe("client.trigger", () => {
   it("sends correct event with payload", async () => {
-    const client = createActorKitClient<TodoMachine>({
+    const client = createActorKitClient<TodoSnapshot, TodoClientEvent>({
       host: "localhost:8788",
       actorType: "todo",
       actorId: "todo-1",
@@ -138,7 +128,7 @@ describe("client.trigger", () => {
   });
 
   it("sends event with no payload", async () => {
-    const client = createActorKitClient<TodoMachine>({
+    const client = createActorKitClient<TodoSnapshot, TodoClientEvent>({
       host: "localhost:8788",
       actorType: "todo",
       actorId: "todo-1",
@@ -161,7 +151,7 @@ describe("client.trigger", () => {
   });
 
   it("queues triggers before connection (like send)", () => {
-    const client = createActorKitClient<TodoMachine>({
+    const client = createActorKitClient<TodoSnapshot, TodoClientEvent>({
       host: "localhost:8788",
       actorType: "todo",
       actorId: "todo-1",
@@ -179,7 +169,7 @@ describe("client.trigger", () => {
 
   it("works on mock client", () => {
     const onSend = vi.fn();
-    const mockClient = createActorKitMockClient<TodoMachine>({
+    const mockClient = createActorKitMockClient<TodoSnapshot, TodoClientEvent>({
       initialSnapshot,
       onSend,
     });
@@ -190,7 +180,7 @@ describe("client.trigger", () => {
   });
 
   it("is equivalent to send()", async () => {
-    const client = createActorKitClient<TodoMachine>({
+    const client = createActorKitClient<TodoSnapshot, TodoClientEvent>({
       host: "localhost:8788",
       actorType: "todo",
       actorId: "todo-1",

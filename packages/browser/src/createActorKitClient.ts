@@ -1,24 +1,81 @@
+import type { Operation } from "fast-json-patch";
 import { applyPatch } from "fast-json-patch";
 import { produce } from "immer";
+import { z } from "zod";
 
-import { EmittedEventSchema } from "@actor-kit/types";
-import type {
-  ActorKitClient,
-  ActorKitSelector,
-  AnyActorKitStateMachine,
-  CallerSnapshotFrom,
-  ClientEventFrom,
-} from "@actor-kit/types";
+import type { ActorKitSelector } from "./selector";
 import { createSelector } from "./selector";
 
-export type ActorKitClientProps<TMachine extends AnyActorKitStateMachine> = {
+/**
+ * Validates an emitted event from the actor-kit WebSocket protocol.
+ *
+ * The Zod schema validates `op` is a valid JSON Patch operation string,
+ * then transforms the output to `Operation[]` from fast-json-patch.
+ * This is safe because Zod has validated the `op` values match the
+ * discriminated union variants — the transform bridges Zod's flat
+ * object output to fast-json-patch's discriminated union type.
+ */
+const EmittedEventSchema = z.object({
+  operations: z
+    .array(
+      z.object({
+        op: z.enum([
+          "add",
+          "remove",
+          "replace",
+          "move",
+          "copy",
+          "test",
+          "_get",
+        ]),
+        path: z.string(),
+        value: z.unknown().optional(),
+        from: z.string().optional(),
+      })
+    )
+    .transform((ops): Operation[] => ops as unknown as Operation[]),
+  checksum: z.string(),
+});
+
+/**
+ * Maps a union of event objects into a trigger API:
+ *   { type: "FOO"; x: number } | { type: "BAR" }
+ *   →  { FOO(payload: { x: number }): void; BAR(): void }
+ */
+export type TriggerAPI<TEvent extends { type: string }> = {
+  [K in TEvent["type"]]: Omit<
+    Extract<TEvent, { type: K }>,
+    "type"
+  > extends Record<string, never>
+    ? () => void
+    : (payload: Omit<Extract<TEvent, { type: K }>, "type">) => void;
+};
+
+export type ActorKitClient<TView, TEvent extends { type: string }> = {
+  connect: () => Promise<void>;
+  disconnect: () => void;
+  send: (event: TEvent) => void;
+  getState: () => TView;
+  subscribe: (listener: (state: TView) => void) => () => void;
+  waitFor: (
+    predicateFn: (state: TView) => boolean,
+    timeoutMs?: number
+  ) => Promise<void>;
+  select: <TSelected>(
+    selector: (state: TView) => TSelected,
+    equalityFn?: (a: TSelected, b: TSelected) => boolean
+  ) => ActorKitSelector<TSelected>;
+  trigger: TriggerAPI<TEvent>;
+};
+
+export type ActorKitClientProps<TView, TEvent extends { type: string }> = {
   host: string;
   actorType: string;
   actorId: string;
   checksum: string;
   accessToken: string;
-  initialSnapshot: CallerSnapshotFrom<TMachine>;
-  onStateChange?: (newState: CallerSnapshotFrom<TMachine>) => void;
+  initialSnapshot: TView;
+  onStateChange?: (newState: TView) => void;
   onError?: (error: Error) => void;
 };
 
@@ -27,19 +84,20 @@ type Listener<T> = (state: T) => void;
 /**
  * Creates an Actor Kit client for managing state and communication with the server.
  *
- * @template TMachine - The type of the state machine.
- * @param {ActorKitClientProps<TMachine>} props - Configuration options for the client.
- * @returns {ActorKitClient<TMachine>} An object with methods to interact with the actor.
+ * @template TView - The type of the client view/snapshot.
+ * @template TEvent - The type of client events.
+ * @param {ActorKitClientProps<TView, TEvent>} props - Configuration options for the client.
+ * @returns {ActorKitClient<TView, TEvent>} An object with methods to interact with the actor.
  */
-export function createActorKitClient<TMachine extends AnyActorKitStateMachine>(
-  props: ActorKitClientProps<TMachine>
-): ActorKitClient<TMachine> {
+export function createActorKitClient<TView, TEvent extends { type: string }>(
+  props: ActorKitClientProps<TView, TEvent>
+): ActorKitClient<TView, TEvent> {
   let currentSnapshot = props.initialSnapshot;
   let socket: WebSocket | null = null;
 
   let shouldReconnect = true;
-  const listeners: Set<Listener<CallerSnapshotFrom<TMachine>>> = new Set();
-  const pendingEvents: ClientEventFrom<TMachine>[] = [];
+  const listeners: Set<Listener<TView>> = new Set();
+  const pendingEvents: TEvent[] = [];
   let reconnectAttempts = 0;
   const maxReconnectAttempts = 5;
   const maxQueueSize = 100;
@@ -100,7 +158,7 @@ export function createActorKitClient<TMachine extends AnyActorKitStateMachine>(
     // later after it's disconnected
 
     socket.addEventListener("close", (_event) => {
-  
+
 
       // Implement reconnection logic
       if (shouldReconnect && reconnectAttempts < maxReconnectAttempts) {
@@ -141,9 +199,9 @@ export function createActorKitClient<TMachine extends AnyActorKitStateMachine>(
 
   /**
    * Sends an event to the Actor Kit server.
-   * @param {ClientEventFrom<TMachine>} event - The event to send.
+   * @param {TEvent} event - The event to send.
    */
-  const send = (event: ClientEventFrom<TMachine>) => {
+  const send = (event: TEvent) => {
     if (socket && socket.readyState === WebSocket.OPEN) {
       socket.send(JSON.stringify(event));
       return;
@@ -154,7 +212,7 @@ export function createActorKitClient<TMachine extends AnyActorKitStateMachine>(
       const dropped = pendingEvents.shift();
       props.onError?.(
         new Error(
-          `Event queue overflow: dropped event "${dropped?.type ?? "unknown"}". ` +
+          `Event queue overflow: dropped event "${(dropped as { type?: string })?.type ?? "unknown"}". ` +
           `Queue is full at ${maxQueueSize} events while disconnected.`
         )
       );
@@ -164,16 +222,16 @@ export function createActorKitClient<TMachine extends AnyActorKitStateMachine>(
 
   /**
    * Retrieves the current state of the actor.
-   * @returns {CallerSnapshotFrom<TMachine>} The current state.
+   * @returns {TView} The current state.
    */
   const getState = () => currentSnapshot;
 
   /**
    * Subscribes a listener to state changes.
-   * @param {Listener<CallerSnapshotFrom<TMachine>>} listener - The listener function to be called on state changes.
+   * @param {Listener<TView>} listener - The listener function to be called on state changes.
    * @returns {() => void} A function to unsubscribe the listener.
    */
-  const subscribe = (listener: Listener<CallerSnapshotFrom<TMachine>>) => {
+  const subscribe = (listener: Listener<TView>) => {
     listeners.add(listener);
     return () => {
       listeners.delete(listener);
@@ -182,12 +240,12 @@ export function createActorKitClient<TMachine extends AnyActorKitStateMachine>(
 
   /**
    * Waits for a state condition to be met.
-   * @param {(state: CallerSnapshotFrom<TMachine>) => boolean} predicateFn - Function that returns true when condition is met
+   * @param {(state: TView) => boolean} predicateFn - Function that returns true when condition is met
    * @param {number} [timeoutMs=5000] - Maximum time to wait in milliseconds
    * @returns {Promise<void>} Resolves when condition is met, rejects on timeout
    */
   const waitFor = async (
-    predicateFn: (state: CallerSnapshotFrom<TMachine>) => boolean,
+    predicateFn: (state: TView) => boolean,
     timeoutMs: number = 5000
   ): Promise<void> => {
     // Check if condition is already met
@@ -220,16 +278,16 @@ export function createActorKitClient<TMachine extends AnyActorKitStateMachine>(
     });
   };
 
-  const trigger = new Proxy({} as ActorKitClient<TMachine>["trigger"], {
+  const trigger = new Proxy({} as ActorKitClient<TView, TEvent>["trigger"], {
     get(_target, eventType: string) {
       return (payload?: Record<string, unknown>) => {
-        send({ type: eventType, ...payload } as ClientEventFrom<TMachine>);
+        send({ type: eventType, ...payload } as TEvent);
       };
     },
   });
 
   const select = <TSelected>(
-    selectorFn: (state: CallerSnapshotFrom<TMachine>) => TSelected,
+    selectorFn: (state: TView) => TSelected,
     equalityFn?: (a: TSelected, b: TSelected) => boolean
   ): ActorKitSelector<TSelected> =>
     createSelector(getState, subscribe, selectorFn, equalityFn);
@@ -246,8 +304,8 @@ export function createActorKitClient<TMachine extends AnyActorKitStateMachine>(
   };
 }
 
-function getWebSocketUrl(
-  props: ActorKitClientProps<AnyActorKitStateMachine>
+function getWebSocketUrl<TView, TEvent extends { type: string }>(
+  props: ActorKitClientProps<TView, TEvent>
 ): string {
   const { host, actorId, actorType, accessToken, checksum } = props;
 
