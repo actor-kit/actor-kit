@@ -456,9 +456,6 @@ importers:
       '@actor-kit/browser':
         specifier: workspace:*
         version: link:../browser
-      '@actor-kit/types':
-        specifier: workspace:*
-        version: link:../types
     devDependencies:
       '@types/react':
         specifier: ^19.2.2
@@ -472,9 +469,6 @@ importers:
       typescript:
         specifier: ^5.9.3
         version: 5.9.3
-      xstate:
-        specifier: ^5.28.0
-        version: 5.28.0
 
   packages/redux:
     dependencies:
