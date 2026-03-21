@@ -21,6 +21,12 @@ a.site-title {
   --sl-nav-pad-x: max(1rem, calc((100vw - 68rem) / 2));
 }
 
+/* Kill Starlight's lobotomized owl selector inside the landing page.
+   The * + * { margin-top: 1.5rem } rule breaks every flex/grid layout. */
+.landing * + * {
+  margin-top: 0 !important;
+}
+
 /* Splash page: give the tabbed code example some breathing room */
 [data-has-hero] .starlight-tabs {
   margin-top: 1rem;
