@@ -5,9 +5,37 @@ description: Understand the data flow from initial page load through real-time s
 
 Actor Kit manages four phases of the actor lifecycle: initial load, client hydration, event processing, and reconnection.
 
+## Overview
+
+```mermaid
+sequenceDiagram
+    participant SSR as SSR Server
+    participant W as Worker / DO
+    participant B as Browser
+
+    SSR->>W: HTTP GET /api/todo/123 (JWT)
+    W-->>SSR: { snapshot, checksum }
+    SSR->>B: HTML + snapshot + token
+    B->>W: WebSocket connect (token + checksum)
+    W-->>B: (checksum match → no payload)
+
+    B->>W: send({ type: "ADD_TODO" })
+    W->>W: XState transition
+    W-->>B: JSON Patch diff
+    B->>B: applyPatch → React re-render
+```
+
 ## 1. Initial page load (SSR)
 
-Your server-side loader creates a JWT access token and fetches the initial snapshot from the Durable Object:
+Your server-side loader creates a JWT access token and fetches the initial snapshot from the Durable Object.
+
+```mermaid
+flowchart LR
+    A[createAccessToken] -->|JWT| B[createActorFetch]
+    B -->|HTTP GET| C[Router]
+    C -->|validate JWT| D[Durable Object]
+    D -->|caller-scoped| E["{ snapshot, checksum }"]
+```
 
 1. **`createAccessToken`** — signs a JWT with `jti`=actorId, `aud`=actorType, `sub`=callerType-callerId
 2. **`createActorFetch`** — sends HTTP GET to `/api/{actorType}/{actorId}?accessToken=...`
@@ -19,7 +47,17 @@ The snapshot is **caller-scoped**: it includes `public` context (shared with eve
 
 ## 2. Client hydration
 
-Once the React app hydrates, the provider establishes a WebSocket connection:
+Once the React app hydrates, the provider establishes a WebSocket connection.
+
+```mermaid
+flowchart LR
+    A["Provider"] -->|creates| B[ActorKitClient]
+    B -->|WSS + checksum| C[Durable Object]
+    C -->|checksum match?| D{Same?}
+    D -->|yes| E[no payload]
+    D -->|no| F[full snapshot]
+    C -->|ongoing| G["JSON Patch ops"]
+```
 
 1. **`<Provider>`** receives `host`, `actorId`, `accessToken`, `checksum`, `initialSnapshot`
 2. Internally calls **`createActorKitClient({ initialSnapshot, ... })`**
@@ -32,11 +70,21 @@ Once the React app hydrates, the provider establishes a WebSocket connection:
 
 ## 3. Event processing
 
-When a client sends an event, the Durable Object processes it through the XState machine and broadcasts diffs:
+When a client sends an event, the Durable Object processes it through the XState machine and broadcasts diffs.
 
-**Client sends** `send({ type: "ADD_TODO" })` over WebSocket.
-
-**Durable Object receives and processes:**
+```mermaid
+flowchart TD
+    A["client.send()"] -->|WebSocket| B[Parse event - Zod]
+    B --> C[Validate caller - JWT]
+    C --> D["Augment: { ...event, caller, env }"]
+    D --> E[XState transition]
+    E --> F[Calculate checksum]
+    F --> G{Changed for caller?}
+    G -->|yes| H[Compute JSON Patch diff]
+    G -->|no| I[Skip]
+    H --> J[Send to WebSocket]
+    E --> K["Persist snapshot"]
+```
 
 1. **Parse** event against Zod schema
 2. **Validate** caller identity from JWT claims
@@ -60,7 +108,16 @@ Key details:
 
 ## 4. Reconnection
 
-If the WebSocket disconnects, the client reconnects with exponential backoff:
+If the WebSocket disconnects, the client reconnects with exponential backoff.
+
+```mermaid
+flowchart TD
+    A[WebSocket closes] --> B[Exponential backoff]
+    B --> C["Reconnect with last checksum"]
+    C --> D{Cached?}
+    D -->|"yes (< 5min)"| E[Send diff from cache]
+    D -->|"no (expired)"| F[Send full snapshot]
+```
 
 1. Client detects WebSocket close
 2. **Exponential backoff** — up to 5 retry attempts

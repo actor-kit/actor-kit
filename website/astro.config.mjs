@@ -1,9 +1,13 @@
 import { defineConfig } from "astro/config";
 import starlight from "@astrojs/starlight";
 import starlightLlmsTxt from "starlight-llms-txt";
+import remarkMermaid from "remark-mermaidjs";
 
 export default defineConfig({
   site: "https://actorkit.dev",
+  markdown: {
+    remarkPlugins: [remarkMermaid],
+  },
   integrations: [
     starlight({
       title: "Actor Kit",
