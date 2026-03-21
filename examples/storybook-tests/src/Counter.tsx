@@ -2,7 +2,7 @@ import React from "react";
 import { CounterContext } from "./counter.context";
 
 export function Counter() {
-  const count = CounterContext.useSelector((s) => s.public.count);
+  const count = CounterContext.useSelector((s) => s.count);
   const send = CounterContext.useSend();
 
   return (

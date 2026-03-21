@@ -8,7 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createActorKitClient } from "@actor-kit/browser";
 
 // ---------------------------------------------------------------------------
-// Minimal machine type for selector tests
+// Minimal types for selector tests
 // ---------------------------------------------------------------------------
 
 type TestSnapshot = {
@@ -17,15 +17,7 @@ type TestSnapshot = {
   private: Record<string, never>;
 };
 
-type TestMachine = {
-  input: unknown;
-  context: unknown;
-  events: { type: "INCREMENT" } | { type: "SET_NAME"; name: string };
-  value: "active";
-  output: unknown;
-  transition: unknown;
-  config: unknown;
-};
+type TestEvent = { type: "INCREMENT" } | { type: "SET_NAME"; name: string };
 
 // ---------------------------------------------------------------------------
 // MockWebSocket (same pattern as create-actor-kit-client.test.ts)
@@ -98,7 +90,7 @@ function patchMessage(
 }
 
 function createTestClient() {
-  const client = createActorKitClient<TestMachine>({
+  const client = createActorKitClient<TestSnapshot, TestEvent>({
     host: "localhost:8788",
     actorType: "test",
     actorId: "test-1",

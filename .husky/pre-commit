@@ -1,2 +1,2 @@
-pnpm typecheck
-pnpm test:unit
+pnpm -w run typecheck
+pnpm -w run test:unit

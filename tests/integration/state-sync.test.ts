@@ -166,7 +166,7 @@ const ENV = { ACTOR_KIT_SECRET: SECRET, EMAIL_SERVICE_API_KEY: "key" };
 
 beforeAll(async () => {
   const module = await import(
-    "../../examples/nextjs-actorkit-todo/src/todo.server"
+    "../../examples/nextjs-xstate-todo/src/todo.server"
   );
   TodoServer = module.Todo as unknown as TodoServerClass;
 });

@@ -20,19 +20,16 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@actor-kit/types": "workspace:*",
     "@actor-kit/browser": "workspace:*"
   },
   "peerDependencies": {
-    "react": "^17.0.0 || ^18.0.0 || ^19.0.0",
-    "xstate": "^5.18.0"
+    "react": "^17.0.0 || ^18.0.0 || ^19.0.0"
   },
   "devDependencies": {
     "@types/react": "^19.2.2",
     "react": "^19.2.0",
     "tsdown": "^0.21.2",
-    "typescript": "^5.9.3",
-    "xstate": "^5.28.0"
+    "typescript": "^5.9.3"
   },
   "author": "jonmumm",
   "license": "ISC"

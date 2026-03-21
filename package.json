@@ -4,9 +4,9 @@
   "packageManager": "pnpm@10.28.2",
   "scripts": {
     "build": "pnpm --filter @actor-kit/types build && pnpm --filter '@actor-kit/*' --filter '!@actor-kit/types' build",
-    "typecheck": "pnpm -r typecheck",
-    "test": "pnpm --filter '@actor-kit/*' test",
-    "test:unit": "pnpm --filter '@actor-kit/*' test",
+    "typecheck": "pnpm --filter @actor-kit/core --filter @actor-kit/browser --filter @actor-kit/react --filter @actor-kit/server --filter @actor-kit/test --filter @actor-kit/xstate --filter @actor-kit/xstate-store --filter @actor-kit/redux run typecheck",
+    "test": "pnpm --filter @actor-kit/core --filter @actor-kit/browser --filter @actor-kit/test --filter @actor-kit/xstate --filter @actor-kit/xstate-store --filter @actor-kit/redux --filter @actor-kit/server run test",
+    "test:unit": "pnpm --filter @actor-kit/core --filter @actor-kit/browser --filter @actor-kit/test --filter @actor-kit/xstate --filter @actor-kit/xstate-store --filter @actor-kit/redux --filter @actor-kit/server run test",
     "test:integration": "vitest run --config vitest.integration.config.ts",
     "test:workers": "vitest run --config vitest.workers.config.ts",
     "test:build-fixtures": "cd tests/integration/fixtures && npx wrangler deploy --dry-run --outdir=dist",

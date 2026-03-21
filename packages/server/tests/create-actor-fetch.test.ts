@@ -1,26 +1,22 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { createActorFetch } from "@actor-kit/server";
+import { createActorFetch } from "../src/createActorFetch";
 
 describe("createActorFetch", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
   });
 
-  it("sends actor fetch requests with parsed response data", async () => {
+  it("sends fetch with correct URL, input, and auth header", async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
       json: async () => ({
         checksum: "checksum-1",
-        snapshot: {
-          public: { todos: [] },
-          private: {},
-          value: "ready",
-        },
+        snapshot: { todos: [], isOwner: true },
       }),
     });
     vi.stubGlobal("fetch", fetchMock);
 
-    const fetchActor = createActorFetch({
+    const fetchActor = createActorFetch<{ todos: unknown[]; isOwner: boolean }>({
       actorType: "todo",
       host: "127.0.0.1:8788",
     });
@@ -29,19 +25,11 @@ describe("createActorFetch", () => {
       actorId: "list-1",
       accessToken: "token-123",
       input: { ownerId: "user-1" },
-      waitForEvent: { type: "ADD_TODO", text: "Buy milk" } as never,
-      waitForState: "ready" as never,
-      timeout: 2500,
-      errorOnWaitTimeout: false,
     });
 
     expect(result).toEqual({
       checksum: "checksum-1",
-      snapshot: {
-        public: { todos: [] },
-        private: {},
-        value: "ready",
-      },
+      snapshot: { todos: [], isOwner: true },
     });
 
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
@@ -52,14 +40,6 @@ describe("createActorFetch", () => {
     expect(requestUrl.searchParams.get("input")).toBe(
       JSON.stringify({ ownerId: "user-1" })
     );
-    expect(requestUrl.searchParams.get("waitForEvent")).toBe(
-      JSON.stringify({ type: "ADD_TODO", text: "Buy milk" })
-    );
-    expect(requestUrl.searchParams.get("waitForState")).toBe(
-      JSON.stringify("ready")
-    );
-    expect(requestUrl.searchParams.get("timeout")).toBe("2500");
-    expect(requestUrl.searchParams.get("errorOnWaitTimeout")).toBe("false");
     expect(init.headers).toEqual({
       Authorization: "Bearer token-123",
     });
@@ -70,37 +50,23 @@ describe("createActorFetch", () => {
       ok: true,
       json: async () => ({
         checksum: "checksum-2",
-        snapshot: {
-          public: { todos: [] },
-          private: {},
-          value: "ready",
-        },
+        snapshot: { count: 0 },
       }),
     });
     vi.stubGlobal("fetch", fetchMock);
 
-    const fetchActor = createActorFetch({
-      actorType: "todo",
+    const fetchActor = createActorFetch<{ count: number }>({
+      actorType: "counter",
       host: "actors.example.com",
     });
 
     await fetchActor(
-      {
-        actorId: "list-2",
-        accessToken: "token-456",
-      },
-      {
-        headers: {
-          "X-Trace-Id": "trace-1",
-        },
-        method: "POST",
-      }
+      { actorId: "c-1", accessToken: "token-456" },
+      { headers: { "X-Trace-Id": "trace-1" }, method: "POST" }
     );
 
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
-    const requestUrl = new URL(url);
-
-    expect(requestUrl.origin).toBe("https://actors.example.com");
+    expect(new URL(url).origin).toBe("https://actors.example.com");
     expect(init.method).toBe("POST");
     expect(init.headers).toEqual({
       "X-Trace-Id": "trace-1",
@@ -108,129 +74,51 @@ describe("createActorFetch", () => {
     });
   });
 
-  it("always includes an input payload and omits optional wait params when absent", async () => {
+  it("defaults input to empty object", async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
-      json: async () => ({
-        checksum: "checksum-3",
-        snapshot: {
-          public: { todos: [] },
-          private: {},
-          value: "ready",
-        },
-      }),
+      json: async () => ({ checksum: "c", snapshot: {} }),
     });
     vi.stubGlobal("fetch", fetchMock);
 
-    const fetchActor = createActorFetch({
-      actorType: "todo",
-      host: "localhost:8788",
-    });
-
-    await fetchActor({
-      actorId: "list-3",
-      accessToken: "token-789",
-    });
+    const fetchActor = createActorFetch({ actorType: "todo", host: "localhost:8788" });
+    await fetchActor({ actorId: "list-3", accessToken: "token" });
 
     const [url] = fetchMock.mock.calls[0] as [string, RequestInit];
-    const requestUrl = new URL(url);
-
-    expect(requestUrl.origin).toBe("http://localhost:8788");
-    expect(requestUrl.searchParams.get("input")).toBe("{}");
-    expect(requestUrl.searchParams.has("waitForEvent")).toBe(false);
-    expect(requestUrl.searchParams.has("waitForState")).toBe(false);
-    expect(requestUrl.searchParams.has("timeout")).toBe(false);
-    expect(requestUrl.searchParams.has("errorOnWaitTimeout")).toBe(false);
+    expect(new URL(url).searchParams.get("input")).toBe("{}");
   });
 
-  it("treats 0.0.0.0 as a local host", async () => {
+  it("treats 0.0.0.0 as local host", async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
-      json: async () => ({
-        checksum: "checksum-4",
-        snapshot: {
-          public: { todos: [] },
-          private: {},
-          value: "ready",
-        },
-      }),
+      json: async () => ({ checksum: "c", snapshot: {} }),
     });
     vi.stubGlobal("fetch", fetchMock);
 
-    const fetchActor = createActorFetch({
-      actorType: "todo",
-      host: "0.0.0.0:8788",
-    });
-
-    await fetchActor({
-      actorId: "list-4",
-      accessToken: "token-local",
-    });
+    const fetchActor = createActorFetch({ actorType: "todo", host: "0.0.0.0:8788" });
+    await fetchActor({ actorId: "list-4", accessToken: "token" });
 
     const [url] = fetchMock.mock.calls[0] as [string, RequestInit];
     expect(new URL(url).origin).toBe("http://0.0.0.0:8788");
   });
 
-  it("throws a descriptive error when the host is missing", async () => {
-    const fetchActor = createActorFetch({
-      actorType: "todo",
-      host: "",
-    });
-
+  it("throws when host is empty", async () => {
+    const fetchActor = createActorFetch({ actorType: "todo", host: "" });
     await expect(
-      fetchActor({
-        actorId: "list-1",
-        accessToken: "token-123",
-      })
+      fetchActor({ actorId: "list-1", accessToken: "token" })
     ).rejects.toThrow("Actor Kit host is not defined");
   });
 
-  it("throws a timeout error for 408 responses unless timeout errors are disabled", async () => {
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValueOnce({
-        ok: false,
-        status: 408,
-        statusText: "Request Timeout",
-      })
-      .mockResolvedValueOnce({
-        ok: false,
-        status: 408,
-        statusText: "Request Timeout",
-      })
-      .mockResolvedValueOnce({
-        ok: false,
-        status: 500,
-        statusText: "Server Error",
-      });
-    vi.stubGlobal("fetch", fetchMock);
+  it("throws on non-ok response", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
+      ok: false,
+      status: 500,
+      statusText: "Server Error",
+    }));
 
-    const fetchActor = createActorFetch({
-      actorType: "todo",
-      host: "0.0.0.0:8788",
-    });
-
+    const fetchActor = createActorFetch({ actorType: "todo", host: "0.0.0.0:8788" });
     await expect(
-      fetchActor({
-        actorId: "list-1",
-        accessToken: "token-123",
-        timeout: 500,
-      })
-    ).rejects.toThrow("Timeout waiting for actor response: Request Timeout");
-
-    await expect(
-      fetchActor({
-        actorId: "list-1",
-        accessToken: "token-123",
-        errorOnWaitTimeout: false,
-      })
-    ).rejects.toThrow("Failed to fetch actor: Request Timeout");
-
-    await expect(
-      fetchActor({
-        actorId: "list-1",
-        accessToken: "token-123",
-      })
+      fetchActor({ actorId: "list-1", accessToken: "token" })
     ).rejects.toThrow("Failed to fetch actor: Server Error");
   });
 });

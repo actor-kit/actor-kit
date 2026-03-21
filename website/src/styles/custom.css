@@ -1,39 +1,52 @@
-/* Copy page button */
-.copy-page-button {
-  position: fixed;
-  bottom: 1.5rem;
-  right: 1.5rem;
-  z-index: 50;
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  padding: 0.5rem 1rem;
-  border-radius: 2rem;
-  border: 1px solid var(--sl-color-gray-5);
-  background: var(--sl-color-bg);
-  color: var(--sl-color-text);
-  font-size: var(--sl-text-sm);
-  cursor: pointer;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
-  transition: all 0.15s ease;
+/* Import Inter for clean, modern typography */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+
+/* Override Starlight's default fonts */
+:root {
+  --sl-font: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  --sl-font-mono: 'JetBrains Mono', ui-monospace, monospace;
 }
 
-.copy-page-button:hover {
-  border-color: var(--sl-color-accent);
-  color: var(--sl-color-accent);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+/* Nav wordmark — clean, not the accent color */
+a.site-title {
+  color: var(--sl-color-white) !important;
+  font-size: 0.95rem !important;
+  font-weight: 600 !important;
+  letter-spacing: -0.02em !important;
+  gap: 0.5rem !important;
 }
 
-.copy-page-button[data-copied="true"] {
-  border-color: var(--sl-color-green);
-  color: var(--sl-color-green);
+/* Constrain header to match body content width */
+:root {
+  --sl-nav-pad-x: max(1rem, calc((100vw - 68rem) / 2));
 }
 
-@media (max-width: 50rem) {
-  .copy-page-button {
-    bottom: 1rem;
-    right: 1rem;
-    padding: 0.4rem 0.75rem;
-    font-size: var(--sl-text-xs);
+/* Center the full page layout (sidebar + content + TOC).
+   Use a wider max-width than the header to fit the 3-column layout,
+   then inset the fixed-position sidebars to match. */
+.page {
+  max-width: 80rem;
+  margin: 0 auto;
+}
+
+@media (min-width: 82rem) {
+  .sidebar-pane {
+    left: calc((100vw - 80rem) / 2) !important;
   }
+}
+
+/* Kill Starlight's lobotomized owl selector inside the landing page.
+   The * + * { margin-top: 1.5rem } rule breaks every flex/grid layout. */
+.landing * + * {
+  margin-top: 0 !important;
+}
+
+/* Splash page: give the tabbed code example some breathing room */
+[data-has-hero] .starlight-tabs {
+  margin-top: 1rem;
+}
+
+/* Splash page: tighten card descriptions */
+[data-has-hero] .card .card-body p code {
+  font-size: 0.8em;
 }

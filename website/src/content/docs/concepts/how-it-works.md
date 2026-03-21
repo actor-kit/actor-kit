@@ -5,92 +5,127 @@ description: Understand the data flow from initial page load through real-time s
 
 Actor Kit manages four phases of the actor lifecycle: initial load, client hydration, event processing, and reconnection.
 
+## Overview
+
+```
+SSR Server              Worker / DO              Browser
+    │                       │                       │
+    │── GET /api/todo/123 ─>│                       │
+    │   (JWT auth)          │                       │
+    │<── { snapshot,        │                       │
+    │     checksum }  ──────│                       │
+    │                       │                       │
+    │── HTML + snapshot + token ──────────────────> │
+    │                       │                       │
+    │                       │<── WebSocket connect ─│
+    │                       │    (token + checksum) │
+    │                       │── (match → no data) ─>│
+    │                       │                       │
+    │                       │<── send(ADD_TODO) ────│
+    │                       │    transition()       │
+    │                       │── JSON Patch diff ──> │
+    │                       │                       │ re-render
+```
+
 ## 1. Initial page load (SSR)
 
-Your server-side loader creates a JWT access token and fetches the initial snapshot from the Durable Object:
+Your server-side loader creates a JWT access token and fetches the initial snapshot from the Durable Object.
 
 ```
-Server loader
-  │
-  ├─ createAccessToken({ signingKey, actorId, actorType, callerId, callerType })
-  │   → JWT with jti=actorId, aud=actorType, sub=callerType-callerId
-  │
-  ├─ createActorFetch({ actorType, host })
-  │   → HTTP GET /api/{actorType}/{actorId}?accessToken=...
-  │   → Router validates JWT → spawns or retrieves DO
-  │   → DO returns { checksum, snapshot } (caller-scoped)
-  │
-  └─ Returns to component: { accessToken, checksum, snapshot }
+createAccessToken ──> JWT ──> fetch(/api/todo/123) ──> DO ──> getView(state, caller) ──> { snapshot, checksum }
 ```
 
-The snapshot is **caller-scoped**: it includes `public` context (shared with everyone) and `private` context (only for this caller).
+1. **`createAccessToken`** — signs a JWT with `jti`=actorId, `aud`=actorType, `sub`=callerType-callerId
+2. **HTTP GET** to `/api/{actorType}/{actorId}` with JWT in Authorization header
+3. **DO validates JWT** — spawns or retrieves the actor
+4. **DO returns** `{ checksum, snapshot }` — the snapshot is the caller-scoped view from `getView(state, caller)`
+5. **Loader returns** `{ accessToken, checksum, snapshot }` to the component
+
+The snapshot is **caller-scoped** via `getView()`: each caller sees a different projection of the same internal state.
 
 ## 2. Client hydration
 
-Once the React app hydrates, the provider establishes a WebSocket connection:
+Once the React app hydrates, the provider establishes a WebSocket connection.
 
 ```
-React component
-  │
-  ├─ <Provider host, actorId, accessToken, checksum, initialSnapshot>
-  │   → createActorKitClient({ initialSnapshot, ... })
-  │
-  └─ useEffect → client.connect()
-      → WebSocket: wss://host/api/{actorType}/{actorId}?accessToken=...&checksum=...
-      → Server validates JWT
-      → If checksum matches: no initial payload (client is current)
-      → If checksum differs: full snapshot sent
-      → Ongoing: JSON Patch operations for each state change
+<Provider> ──> createActorKitClient() ──> WebSocket connect ──> DO
+                                              │
+                                    checksum match? ─── yes ──> no payload (already current)
+                                              │
+                                              no ──> full snapshot
+                                              │
+                                         ongoing ──> JSON Patch diffs
 ```
 
-The checksum handshake avoids sending redundant data. If the client already has the latest state from SSR, the WebSocket connection starts clean with no initial payload.
+1. **`<Provider>`** receives `host`, `actorId`, `accessToken`, `checksum`, `initialSnapshot`
+2. Internally calls **`createActorKitClient({ initialSnapshot, ... })`**
+3. On mount, calls **`client.connect()`** — opens WebSocket to `wss://host/api/{actorType}/{actorId}?accessToken=...&checksum=...`
+4. Server validates the JWT
+5. **Checksum handshake:**
+   - If checksum matches current state → no initial payload (client is already current from SSR)
+   - If checksum differs → full snapshot sent
+6. **Ongoing:** JSON Patch operations sent for each state change
 
 ## 3. Event processing
 
-When a client sends an event, the Durable Object processes it through the XState machine and broadcasts diffs:
+When a client sends an event, the Durable Object runs the transition and broadcasts caller-scoped diffs.
 
 ```
-Client                          Durable Object
-  │                               │
-  │ send({ type: "ADD_TODO" })    │
-  │ ────────WSS──────────────▶    │
-  │                               │ 1. Parse event (Zod schema)
-  │                               │ 2. Validate caller (JWT claims)
-  │                               │ 3. Augment: { ...event, caller, storage, env }
-  │                               │ 4. actor.send(augmentedEvent)
-  │                               │ 5. XState transitions (guards → actions → state)
-  │                               │ 6. getSnapshot() → calculateChecksum()
-  │                               │ 7. For each connected WebSocket:
-  │                               │    a. Create caller-scoped snapshot
-  │                               │    b. Compare with last sent checksum
-  │                               │    c. If different: compute JSON Patch diff
-  │                               │    d. Send patch operations
-  │                               │ 8. If persisted: storage.put(snapshot)
-  │  ◀──────JSON Patch────────    │
-  │                               │
-  │ applyPatch(state, ops)        │
-  │ → useSyncExternalStore        │
-  │ → React re-render             │
+client.send({ type: "ADD_TODO", text: "..." })
+    │
+    ▼
+Parse event (Zod schema)
+    │
+    ▼
+Validate caller (JWT)
+    │
+    ▼
+Augment: { ...event, caller, env }
+    │
+    ▼
+logic.transition(state, augmentedEvent) ──> new state
+    │
+    ├──> logic.serialize(state) ──> persist to DO storage
+    │
+    └──> for each connected WebSocket:
+            getView(state, caller) ──> compute JSON Patch diff ──> send
 ```
+
+1. **Parse** event against Zod schema (client or service)
+2. **Validate** caller identity from JWT claims
+3. **Augment** event with `caller` and `env`
+4. **Transition**: `logic.transition(state, augmentedEvent)` → new state
+5. **Broadcast** to each connected WebSocket:
+   - Compute caller-scoped view via `getView(state, caller)`
+   - Compare with last sent checksum
+   - If different: compute JSON Patch diff → send
+   - If same: skip (no change for this caller)
+6. **Persist** (if enabled): serialize and store
+
+**Client receives** JSON Patch → `applyPatch(state, ops)` → `useSyncExternalStore` → React re-render.
 
 Key details:
-- Events are **augmented** with `caller`, `storage`, and `env` before reaching the machine. Your guards and actions can use these to enforce access control.
+- Events are **augmented** with `caller` and `env` before reaching the transition function. Your logic can use `event.caller` for access control.
 - Each WebSocket gets a **caller-scoped diff**. Different callers may receive different patches for the same transition.
 - Persistence happens **after** broadcast, so clients get updates as fast as possible.
 
 ## 4. Reconnection
 
-If the WebSocket disconnects, the client reconnects with exponential backoff:
+If the WebSocket disconnects, the client reconnects with exponential backoff.
 
 ```
-Client detects WebSocket close
-  │
-  ├─ Exponential backoff (max 5 attempts)
-  │
-  └─ Reconnect with last-known checksum
-      → Server checks snapshot cache (5-minute window)
-      → If cached: send diff from cached state
-      → If expired: send full snapshot
+WebSocket closes ──> exponential backoff ──> reconnect with last checksum
+                                                   │
+                                          cached? (< 5min)
+                                           │           │
+                                          yes          no
+                                           │           │
+                                      send diff   send full snapshot
 ```
 
-The server maintains a snapshot cache (keyed by checksum, 5-minute TTL). Reconnecting clients that haven't been gone too long receive a small diff rather than the full state.
+1. Client detects WebSocket close
+2. **Exponential backoff** — up to 5 retry attempts
+3. **Reconnect** with the last-known checksum
+4. Server checks the **snapshot cache** (keyed by checksum, 5-minute TTL):
+   - If cached → compute diff from cached state, send only the delta
+   - If expired → send full current snapshot

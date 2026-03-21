@@ -9,15 +9,12 @@
     "test-storybook": "test-storybook"
   },
   "dependencies": {
-    "@actor-kit/types": "workspace:*",
     "@actor-kit/browser": "workspace:*",
     "@actor-kit/react": "workspace:*",
     "@actor-kit/test": "workspace:*",
     "@actor-kit/storybook": "workspace:*",
     "react": "^19.2.0",
-    "react-dom": "^19.2.0",
-    "xstate": "^5.28.0",
-    "zod": "^3.25.76"
+    "react-dom": "^19.2.0"
   },
   "devDependencies": {
     "@storybook/addon-essentials": "^8.6.18",

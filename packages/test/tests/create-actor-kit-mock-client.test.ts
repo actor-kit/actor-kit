@@ -10,16 +10,6 @@ type TestSnapshot = {
   private: {};
 };
 
-type TestMachine = {
-  input: unknown;
-  context: unknown;
-  events: TestEvent;
-  value: "ready";
-  output: unknown;
-  transition: unknown;
-  config: unknown;
-};
-
 function createSnapshot(): TestSnapshot {
   return {
     private: {},
@@ -30,7 +20,7 @@ function createSnapshot(): TestSnapshot {
 
 describe("createActorKitMockClient", () => {
   it("notifies subscribers when produce updates state", () => {
-    const client = createActorKitMockClient<TestMachine>({
+    const client = createActorKitMockClient<TestSnapshot, TestEvent>({
       initialSnapshot: createSnapshot(),
     });
     const listener = vi.fn();
@@ -64,7 +54,7 @@ describe("createActorKitMockClient", () => {
 
   it("forwards sent events and notifies listeners", async () => {
     const onSend = vi.fn();
-    const client = createActorKitMockClient<TestMachine>({
+    const client = createActorKitMockClient<TestSnapshot, TestEvent>({
       initialSnapshot: createSnapshot(),
       onSend,
     });
@@ -84,7 +74,7 @@ describe("createActorKitMockClient", () => {
 
   it("waits for state changes and times out when the predicate never matches", async () => {
     vi.useFakeTimers();
-    const client = createActorKitMockClient<TestMachine>({
+    const client = createActorKitMockClient<TestSnapshot, TestEvent>({
       initialSnapshot: createSnapshot(),
     });
 

@@ -1,0 +1,37 @@
+{
+  "name": "@actor-kit/xstate",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "./dist/index.mjs",
+  "module": "./dist/index.mjs",
+  "types": "./dist/index.d.mts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.mts",
+      "import": "./dist/index.mjs"
+    }
+  },
+  "files": ["src", "dist"],
+  "scripts": {
+    "build": "tsdown",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@actor-kit/core": "workspace:*"
+  },
+  "peerDependencies": {
+    "xstate": "^5.18.0",
+    "xstate-migrate": "^0.0.8"
+  },
+  "devDependencies": {
+    "tsdown": "^0.21.2",
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.0",
+    "xstate": "^5.28.0",
+    "xstate-migrate": "^0.0.8",
+    "zod": "^3.25.76"
+  },
+  "author": "jonmumm",
+  "license": "ISC"
+}

@@ -1,13 +1,17 @@
-import type { StateValueFrom } from "xstate";
 import { z } from "zod";
-import type { AnyActorKitStateMachine, CallerSnapshotFrom, ClientEventFrom } from "@actor-kit/types";
 
 const ResponseSchema = z.object({
   snapshot: z.record(z.unknown()),
   checksum: z.string(),
 });
 
-export function createActorFetch<TMachine extends AnyActorKitStateMachine>({
+/**
+ * Creates a typed HTTP fetcher for an actor's snapshot.
+ *
+ * Used in SSR loaders (Next.js, TanStack Start) to fetch the initial
+ * state before rendering and upgrading to WebSocket.
+ */
+export function createActorFetch<TView>({
   actorType,
   host,
 }: {
@@ -19,53 +23,21 @@ export function createActorFetch<TMachine extends AnyActorKitStateMachine>({
       actorId: string;
       accessToken: string;
       input?: Record<string, unknown>;
-      waitForEvent?: ClientEventFrom<TMachine>;
-      waitForState?: StateValueFrom<TMachine>;
-      timeout?: number;
-      errorOnWaitTimeout?: boolean;
     },
     options?: RequestInit
   ): Promise<{
-    snapshot: CallerSnapshotFrom<TMachine>;
+    snapshot: TView;
     checksum: string;
   }> {
     const input = props.input ?? {};
 
     if (!host) throw new Error("Actor Kit host is not defined");
 
-    const route = getActorRoute(actorType, props.actorId);
-    const protocol = getHttpProtocol(host);
+    const route = `/api/${actorType}/${props.actorId}`;
+    const protocol = isLocal(host) ? "http" : "https";
     const url = new URL(`${protocol}://${host}${route}`);
 
-    // Add input to URL parameters
     url.searchParams.append("input", JSON.stringify(input));
-
-    // Add waitForEvent or waitForState to URL parameters
-    if (props.waitForEvent) {
-      url.searchParams.append(
-        "waitForEvent",
-        JSON.stringify(props.waitForEvent)
-      );
-    }
-    if (props.waitForState) {
-      url.searchParams.append(
-        "waitForState",
-        JSON.stringify(props.waitForState)
-      );
-    }
-
-    // Add timeout to URL parameters if specified
-    if (props.timeout) {
-      url.searchParams.append("timeout", props.timeout.toString());
-    }
-
-    // Add errorOnWaitTimeout to URL parameters if specified
-    if (props.errorOnWaitTimeout !== undefined) {
-      url.searchParams.append(
-        "errorOnWaitTimeout",
-        props.errorOnWaitTimeout.toString()
-      );
-    }
 
     const response = await fetch(url.toString(), {
       ...options,
@@ -76,11 +48,6 @@ export function createActorFetch<TMachine extends AnyActorKitStateMachine>({
     });
 
     if (!response.ok) {
-      if (response.status === 408 && props.errorOnWaitTimeout !== false) {
-        throw new Error(
-          `Timeout waiting for actor response: ${response.statusText}`
-        );
-      }
       throw new Error(`Failed to fetch actor: ${response.statusText}`);
     }
 
@@ -88,18 +55,10 @@ export function createActorFetch<TMachine extends AnyActorKitStateMachine>({
     const { checksum, snapshot } = ResponseSchema.parse(data);
 
     return {
-      snapshot: snapshot as CallerSnapshotFrom<TMachine>,
+      snapshot: snapshot as TView,
       checksum,
     };
   };
-}
-
-function getActorRoute(actorType: string, actorId: string) {
-  return `/api/${actorType}/${actorId}`;
-}
-
-function getHttpProtocol(host: string): "http" | "https" {
-  return isLocal(host) ? "http" : "https";
 }
 
 function isLocal(host: string): boolean {
