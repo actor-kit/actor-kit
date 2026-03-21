@@ -70,11 +70,13 @@ export function fromXStateMachine<
       event: AnyEventObject & { caller: Caller; env: TEnv }
     ): SnapshotFrom<TMachine> {
       // Restore actor from snapshot, send event, get next snapshot
+      // XState's generic constraints are very strict — these casts are safe
+      // because the snapshot and event shapes match the machine's types.
       const actor = createActor(machine, {
         snapshot: state,
-      });
+      } as unknown as Parameters<typeof createActor<TMachine>>[1]);
       actor.start();
-      actor.send(event);
+      actor.send(event as unknown as Parameters<typeof actor.send>[0]);
       const nextSnapshot = actor.getSnapshot();
       actor.stop();
       return nextSnapshot;
