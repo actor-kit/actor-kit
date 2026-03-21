@@ -7,15 +7,14 @@ Actor Kit can persist state to Durable Object storage so actors survive restarts
 
 ## Enabling persistence
 
-Set `persisted: true` when creating your machine server:
+Set `persisted: true` when creating your durable actor:
 
 ```typescript
-export const Todo = createMachineServer({
-  machine: todoMachine,
-  schemas: { /* ... */ },
-  options: {
-    persisted: true,
-  },
+export const Todo = createDurableActor({
+  logic: todoLogic,
+  events: { client: TodoClientSchema, service: TodoServiceSchema },
+  input: TodoInputSchema,
+  persisted: true,
 });
 ```
 

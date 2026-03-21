@@ -3,61 +3,69 @@ title: System Design
 description: Deep dive into Actor Kit's architecture, module boundaries, and type system.
 ---
 
-Actor Kit is organized into 7 packages with strict dependency boundaries. This page covers the system architecture in detail.
+Actor Kit is organized into packages with strict dependency boundaries. The core package is library-agnostic — state management is pluggable via adapters.
 
 ## Module boundaries
 
 | Package | Responsibility | Key deps |
 |---------|---------------|----------|
-| `@actor-kit/types` | Type definitions, Zod schemas, shared constants | zod |
-| `@actor-kit/worker` | DO class factory, router, XState lifecycle, persistence, WebSocket | xstate, jose |
-| `@actor-kit/browser` | WebSocket client, reconnection, state patching, event queuing | fast-json-patch, immer |
-| `@actor-kit/react` | Context, Provider, hooks (`useSelector`, `useSend`, `useMatches`) | react |
+| `@actor-kit/core` | `ActorLogic` interface, `defineLogic`, `createDurableActor`, auth | jose, fast-json-patch |
+| `@actor-kit/browser` | WebSocket client, reconnection, state patching, selectors | fast-json-patch, immer |
+| `@actor-kit/react` | Context, Provider, hooks (`useSelector`, `useSend`) | react |
 | `@actor-kit/server` | JWT creation, HTTP snapshot fetching | jose |
-| `@actor-kit/test` | Mock client with Immer-based state control | immer |
+| `@actor-kit/test` | Mock client, transition helper | immer |
 | `@actor-kit/storybook` | `withActorKit` decorator, parameter-based snapshots | react |
+| `@actor-kit/xstate` | XState v5 adapter (`fromXStateMachine`) | xstate, xstate-migrate |
+| `@actor-kit/xstate-store` | @xstate/store adapter (`fromXStateStore`) | @xstate/store |
+| `@actor-kit/redux` | Redux adapter (`fromRedux`) | — |
 
 ## Dependency graph
 
 ```mermaid
 graph TD
-    T["@actor-kit/types"] --> B["@actor-kit/browser"]
-    T --> W["@actor-kit/worker"]
-    T --> TE["@actor-kit/test"]
+    C["@actor-kit/core"] --> B["@actor-kit/browser"]
+    C --> XS["@actor-kit/xstate"]
+    C --> XST["@actor-kit/xstate-store"]
+    C --> RD["@actor-kit/redux"]
     B --> R["@actor-kit/react"]
-    W --> S["@actor-kit/server"]
-    TE --> B
+    B --> TE["@actor-kit/test"]
     R --> SB["@actor-kit/storybook"]
     TE --> SB
+    S["@actor-kit/server"]
 ```
 
-`@actor-kit/types` is the root — every package depends on it. The browser/react path and the worker/server path are independent, so server code never ships to the browser bundle.
+`@actor-kit/core` is the foundation — it defines the `ActorLogic` interface and the Durable Object runtime. Adapters (xstate, xstate-store, redux) depend on core. Browser/React packages are independent of the server path, so server code never ships to the browser.
+
+`@actor-kit/server` is standalone — it provides `createAccessToken` and `createActorFetch` with no dependency on core's Cloudflare runtime.
 
 ## Type system
 
-The type system enforces that events, context, and snapshots are aligned at compile time:
+The `ActorLogic` interface is the contract between actor-kit and state management libraries:
 
 ```
-ActorKitStateMachine<TEvent, TInput, TContext>
+ActorLogic<TState, TEvent, TView, TEnv, TInput>
   │
-  ├─ TEvent = ClientEvent | ServiceEvent | SystemEvent
-  │   augmented with: caller, storage, env, requestInfo
+  ├─ create(input: TInput, ctx) → TState
+  │   Creates initial state from input + actor context
   │
-  ├─ TInput = WithActorKitInput<TInputProps>
-  │   augmented with: id, caller (initial creator)
+  ├─ transition(state, event & { caller, env }) → TState
+  │   Pure state transition — event includes caller identity and env
   │
-  └─ TContext = { public: {...}, private: Record<string, {...}> }
-      │
-      └─ CallerSnapshotFrom<TMachine>
-          = { public, private[callerId], value }
-          (what each client actually sees)
+  ├─ getView(state, caller) → TView
+  │   Caller-scoped projection — what each client sees
+  │
+  ├─ serialize(state) → unknown / restore(serialized) → TState
+  │   Persistence boundary
+  │
+  └─ onConnect? / onDisconnect? / onResume?
+      Optional lifecycle hooks
 ```
 
-Key derived types:
-- `ClientEventFrom<TMachine>` — events the browser can send
-- `ServiceEventFrom<TMachine>` — events backend services can send
-- `CallerSnapshotFrom<TMachine>` — snapshot shape for a specific caller
-- `EnvFromMachine<TMachine>` — Cloudflare env bindings
+Key types:
+- `Caller` — `{ type: "client"; id: string } | { type: "service"; id: string }`
+- `TView` — user-defined view type (what clients receive over WebSocket)
+- `TEvent` — user-defined event type (what clients send)
+- `BaseEnv` — `{ ACTOR_KIT_SECRET: string; [key: string]: unknown }`
 
 ## Authentication flow
 
@@ -77,10 +85,10 @@ Signing uses HS256 with `ACTOR_KIT_SECRET` from the Worker environment.
 When `persisted: true`:
 
 1. **On spawn**: Actor metadata stored (`actorType`, `actorId`, `initialCaller`, `input`)
-2. **On each transition**: Full snapshot persisted to `PERSISTED_SNAPSHOT_KEY`
-3. **On resume** (DO restart): Snapshot restored, `xstate-migrate` applies schema migrations, `RESUME` system event sent
-4. **Snapshot format**: `{ value, context: { public, private }, version? }`
+2. **On each transition**: Serialized state persisted via `logic.serialize()`
+3. **On resume** (DO restart): State restored via `logic.restore()`, then `logic.migrate()` if provided
+4. **Version tracking**: Stored alongside snapshot for version-based migration
 
 ## Sync protocol
 
-See [Sync Protocol](/concepts/sync-protocol/) for the full description of checksum-based deduplication, JSON Patch diffs, and caller-scoped snapshot delivery.
+See [Sync Protocol](/concepts/sync-protocol/) for the full description of checksum-based deduplication, JSON Patch diffs, and caller-scoped view delivery via `getView()`.

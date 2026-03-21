@@ -1,3 +1,5 @@
-import { ActorKitEnv } from "@actor-kit/types";
-
-export type Env = ActorKitEnv & { EMAIL_SERVICE_API_KEY: string };
+export type Env = {
+  ACTOR_KIT_SECRET: string;
+  EMAIL_SERVICE_API_KEY: string;
+  [key: string]: unknown;
+};
