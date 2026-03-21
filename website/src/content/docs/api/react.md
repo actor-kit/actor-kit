@@ -46,7 +46,7 @@ Wrap your component tree to establish the WebSocket connection:
 
 ## `useSelector(selector)`
 
-Subscribe to a slice of state. Re-renders only when the selected value changes (shallow comparison).
+Subscribe to a slice of state. Re-renders only when the selected value changes (strict reference equality `===`). Return primitives or stable references to avoid unnecessary re-renders — selecting an array or object that's recreated on every snapshot will cause re-renders even if the contents haven't changed.
 
 ```tsx
 // Select a single field

@@ -17,7 +17,7 @@ Use the `withActorKit` decorator and define initial state via `parameters`:
 
 ```typescript
 // stories/TodoList.stories.tsx
-import type { Meta } from "@storybook/react";
+import type { Meta, StoryObj } from "@storybook/react";
 import type { StoryWithActorKit } from "@actor-kit/storybook";
 import { withActorKit } from "@actor-kit/storybook";
 import { TodoActorKitContext } from "../src/todo.context";
@@ -37,7 +37,9 @@ const meta: Meta<typeof TodoList> = {
 
 export default meta;
 
-export const Empty: StoryWithActorKit<TodoMachine> = {
+type Story = StoryObj<typeof meta> & StoryWithActorKit<TodoMachine>;
+
+export const Empty: Story = {
   args: { userId: "user-1" },
   parameters: {
     actorKit: {
@@ -52,7 +54,7 @@ export const Empty: StoryWithActorKit<TodoMachine> = {
   },
 };
 
-export const WithTodos: StoryWithActorKit<TodoMachine> = {
+export const WithTodos: Story = {
   args: { userId: "user-1" },
   parameters: {
     actorKit: {

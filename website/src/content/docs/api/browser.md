@@ -57,14 +57,49 @@ const unsubscribe = client.subscribe((snapshot) => {
 Returns a Promise that resolves when the predicate returns `true` for the current state. Optional timeout in milliseconds.
 
 ```typescript
-// Wait for a specific state
 await client.waitFor((state) => state.value === "ready");
 
-// Wait for a condition with timeout
 await client.waitFor(
   (state) => state.public.todos.length > 0,
   10000
 );
+```
+
+### `client.trigger`
+
+Typed proxy for `send` — provides autocomplete for event types:
+
+```typescript
+client.trigger.ADD_TODO({ text: "Buy milk" });
+client.trigger.TOGGLE_TODO({ id: "todo-1" });
+```
+
+### `client.select(selector)`
+
+Select derived state from the current snapshot:
+
+```typescript
+const count = client.select((s) => s.public.todos.length);
+```
+
+### `client.onStateChange(listener)`
+
+Register a callback for state changes. Similar to `subscribe` but receives the full snapshot:
+
+```typescript
+client.onStateChange((snapshot) => {
+  console.log("State:", snapshot.value);
+});
+```
+
+### `client.onError(listener)`
+
+Register a callback for connection errors:
+
+```typescript
+client.onError((error) => {
+  console.error("Connection error:", error);
+});
 ```
 
 ## Full example

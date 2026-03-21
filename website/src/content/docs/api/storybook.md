@@ -37,12 +37,16 @@ const meta = {
 
 ## `StoryWithActorKit<TMachine>`
 
-Type for stories that use the `withActorKit` decorator. Adds typed `actorKit` parameters:
+Adds typed `actorKit` parameters to your story type. This type only covers the `parameters` shape — compose it with Storybook's `StoryObj` for a full story type:
 
 ```typescript
+import type { Meta, StoryObj } from "@storybook/react";
 import type { StoryWithActorKit } from "@actor-kit/storybook";
+import type { TodoMachine } from "./todo.machine";
 
-export const Default: StoryWithActorKit<TodoMachine> = {
+type Story = StoryObj<typeof meta> & StoryWithActorKit<TodoMachine>;
+
+export const Default: Story = {
   parameters: {
     actorKit: {
       todo: {           // actor type
