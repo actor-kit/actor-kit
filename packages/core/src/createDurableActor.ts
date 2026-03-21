@@ -315,10 +315,15 @@ export function createDurableActor<
       assert(this.#initialCaller, "initialCaller is not set");
       assert(this.#input, "input is not set");
 
-      // Always try migrate first if provided — adapters like XState
-      // use structural comparison (not version numbers) for migration.
-      // Version-based migration is a secondary check for non-XState users.
-      if (logic.migrate) {
+      const currentVersion = logic.version ?? 0;
+      const needsMigration = logic.migrate && (
+        // Version-based: migrate when versions differ (Redux, plain)
+        persisted.version !== currentVersion ||
+        // Structural: always migrate when no version is set (XState adapter)
+        logic.version === undefined
+      );
+
+      if (needsMigration && logic.migrate) {
         this.#currentState = logic.migrate(
           persisted.serialized,
           persisted.version
@@ -576,20 +581,23 @@ export function createDurableActor<
         return;
       }
 
-      // Validate input BEFORE persisting — prevents storing invalid state
-      // that can't be recovered from on subsequent requests.
-      config.input.parse(props.input);
+      // Validate input if possible — but don't reject empty input from
+      // routers that spawn before the real request arrives.
+      const inputResult = config.input.safeParse(props.input);
+      const validatedInput: Record<string, unknown> = inputResult.success
+        ? (inputResult.data as Record<string, unknown>)
+        : props.input;
 
       await this.#storeActorData(
         props.actorType,
         props.actorId,
         props.caller,
-        props.input
+        validatedInput
       );
       this.#actorType = props.actorType;
       this.#actorId = props.actorId;
       this.#initialCaller = props.caller;
-      this.#input = props.input;
+      this.#input = validatedInput;
       this.#ensureActorRunning();
     }
 
