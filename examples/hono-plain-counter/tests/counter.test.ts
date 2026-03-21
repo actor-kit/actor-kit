@@ -33,7 +33,7 @@ describe("plain-counter: routes", () => {
     const res = await SELF.fetch("http://localhost/");
     expect(res.status).toBe(200);
     const body = await res.json<{ name: string }>();
-    expect(body.name).toBe("plain-counter-example");
+    expect(body.name).toBe("hono-plain-counter");
   });
 
   it("POST /token returns a JWT", async () => {
@@ -125,13 +125,12 @@ describe("plain-counter: counter operations", () => {
       headers: { Authorization: `Bearer ${clientToken}` },
     });
 
-    // Client reset — should NOT reset
+    // Client reset — should be rejected (403)
     const clientResetRes = await SELF.fetch("http://localhost/counter/op-4/reset", {
       method: "POST",
       headers: { Authorization: `Bearer ${clientToken}` },
     });
-    const afterClientReset = await clientResetRes.json<{ snapshot: { count: number } }>();
-    expect(afterClientReset.snapshot.count).toBe(1);
+    expect(clientResetRes.status).toBe(403);
 
     // Service reset — should reset
     const serviceResetRes = await SELF.fetch("http://localhost/counter/op-4/reset", {
