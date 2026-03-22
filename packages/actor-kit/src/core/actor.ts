@@ -419,7 +419,18 @@ export function actor(
       if (!caller) return;
 
       try {
-        const event = JSON.parse(data) as { type: string; [key: string]: unknown };
+        const parsed: unknown = JSON.parse(data);
+        // Parse at the boundary: validate the message has at minimum a type field
+        if (
+          typeof parsed !== "object" ||
+          parsed === null ||
+          !("type" in parsed) ||
+          typeof (parsed as Record<string, unknown>)["type"] !== "string"
+        ) {
+          ws.send(JSON.stringify({ type: "__error", detail: "Message must have a string 'type' field" }));
+          return;
+        }
+        const event = parsed as Record<string, unknown> & { type: string };
         await this.send(caller, callerType, event);
       } catch {
         ws.send(JSON.stringify({ type: "__error", detail: "Invalid message" }));
