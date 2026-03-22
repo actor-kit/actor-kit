@@ -13,41 +13,42 @@
 
 import { DurableObject } from "cloudflare:workers";
 import type { z } from "zod";
-import { resolveRole, type RolePredicate } from "../runtime/roles";
+import { resolveRole } from "../runtime/roles";
 import { routeMessage } from "../runtime/message-router";
 import { resolveMessagesForState } from "../runtime/states";
 import { createOutbox, type OutboxEntry } from "../runtime/outbox";
 import { getCallerFromToken } from "../auth/auth";
-import type { MessageContext, Effect, RequestConfig } from "../core/message";
-import type { ViewDef } from "../core/view";
-import type { FieldDescriptor } from "../schema/schema";
+import type { MessageContext, Effect, RequestConfig } from "./message";
 
 // --- Actor definition ---
 
-interface ActorDef<TState, TInput, TEnv> {
-  input: z.ZodType<TInput>;
-  init: (input: TInput) => TState;
+// Runtime actor definition — uses structural types that erase generics.
+// Type safety is enforced at the definition site (message(), view(), etc.),
+// not at the runtime level. The DO class just needs schemas, handlers, and predicates.
+interface ActorDef {
+  input: z.ZodType;
+  init: (input: unknown) => unknown;
   version?: number;
-  roles: Record<string, RolePredicate<TState>>;
+  roles: Record<string, (state: unknown, caller: string, claims: { callerType: "user" | "service" }) => boolean>;
   messages?: Record<string, Record<string, {
     readonly schema: z.ZodType;
     readonly handler: Function;
-    readonly guard: ((state: TState) => boolean) | undefined;
+    readonly guard: ((state: unknown) => boolean) | undefined;
   }>>;
   states?: Record<string, {
     messages: Record<string, Record<string, {
       readonly schema: z.ZodType;
       readonly handler: Function;
-      readonly guard: ((state: TState) => boolean) | undefined;
+      readonly guard: ((state: unknown) => boolean) | undefined;
     }>>;
   }>;
   views: Record<string, {
-    readonly fn: (state: TState, caller: string) => unknown;
+    readonly fn: (state: unknown, caller: string) => unknown;
   }>;
-  on?: Record<string, (state: TState, ...args: unknown[]) => TState | Promise<TState>>;
+  on?: Record<string, (state: unknown, ...args: unknown[]) => unknown | Promise<unknown>>;
   migrate?: (persisted: unknown, fromVersion: number) => unknown;
-  serialize?: (state: TState) => unknown;
-  restore?: (serialized: unknown) => TState;
+  serialize?: (state: unknown) => unknown;
+  restore?: (serialized: unknown) => unknown;
 }
 
 // --- SQL table creation ---
@@ -85,9 +86,9 @@ const CREATE_TABLES_SQL = `
 
 // --- actor() function ---
 
-export function actor<TEnv extends Record<string, unknown> = Record<string, unknown>>(
+export function actor(
   _name: string,
-  def: ActorDef<unknown, unknown, TEnv>,
+  def: ActorDef,
 ) {
   return class ActorInstance extends DurableObject {
     private state: unknown = undefined;
@@ -96,7 +97,7 @@ export function actor<TEnv extends Record<string, unknown> = Record<string, unkn
     private connections = new Map<string, { ws: WebSocket; callerType: "user" | "service" }>();
     private previousViews = new Map<string, unknown>();
 
-    constructor(ctx: DurableObjectState, env: TEnv) {
+    constructor(ctx: DurableObjectState, env: Record<string, unknown>) {
       super(ctx, env);
       this.version = def.version ?? 1;
     }

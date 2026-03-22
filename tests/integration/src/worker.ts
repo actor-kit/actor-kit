@@ -31,11 +31,11 @@ const reset = message(
   (_state: CounterState) => ({ count: 0, lastCaller: null }),
 );
 
-export const Counter = actor<Env>("counter", {
+export const Counter = actor("counter", {
   input: z.object({}),
   init: () => ({ count: 0, lastCaller: null }),
   roles: {
-    admin: (_state, _caller, { callerType }) => callerType === "service",
+    admin: (_state: CounterState, _caller: string, { callerType }: { callerType: "user" | "service" }) => callerType === "service",
     user: () => true,
   },
   messages: {
@@ -56,13 +56,8 @@ export const Counter = actor<Env>("counter", {
 
 // --- Worker entrypoint ---
 
-interface Env {
-  ACTOR_KIT_SECRET: string;
-  COUNTER: DurableObjectNamespace;
-}
-
 export default {
-  async fetch(request: Request, env: Env): Promise<Response> {
+  async fetch(request: Request): Promise<Response> {
     const url = new URL(request.url);
     if (url.pathname === "/health") {
       return new Response("ok");
