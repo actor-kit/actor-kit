@@ -68,7 +68,11 @@ export function resolveMessagesForState<TState>(
 
   // Mode 3: Parallel states
   if (isParallelConfig(statesConfig)) {
-    return resolveParallelMessages(statesConfig, stateTracker as ParallelStateTracker);
+    // Parallel tracker is a Record<string, string> — not { current: string }
+    if (isSequentialTracker(stateTracker)) {
+      return undefined; // Mismatched tracker type
+    }
+    return resolveParallelMessages(statesConfig, stateTracker);
   }
 
   // Mode 2: Sequential states
