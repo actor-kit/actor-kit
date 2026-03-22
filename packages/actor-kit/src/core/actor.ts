@@ -92,6 +92,7 @@ export function actor(
 ) {
   return class ActorInstance extends DurableObject {
     private state: unknown = undefined;
+    private stateTracker: Record<string, string> | { current: string } | undefined = undefined;
     private initialized = false;
     private version: number;
     private connections = new Map<string, { ws: WebSocket; callerType: "user" | "service" }>();
@@ -183,6 +184,28 @@ export function actor(
       this.state = def.init(parsed.data);
       this.initialized = true;
 
+      // Initialize state tracker if using states
+      if (def.states) {
+        // Check if parallel (has "parallel" and "regions" keys)
+        const statesDef = def.states;
+        if ("parallel" in statesDef && "regions" in statesDef) {
+          // Parallel: track each region's initial state
+          const regions = (statesDef as { regions: Record<string, { initial: string }> }).regions;
+          const tracker: Record<string, string> = {};
+          for (const [regionName, regionDef] of Object.entries(regions)) {
+            tracker[regionName] = regionDef.initial;
+          }
+          this.stateTracker = tracker;
+        } else {
+          // Sequential: need an "initial" on the actor def
+          // For now, use the first state key as default
+          const firstState = Object.keys(statesDef)[0];
+          if (firstState !== undefined) {
+            this.stateTracker = { current: firstState };
+          }
+        }
+      }
+
       // Persist
       this.persistState();
     }
@@ -203,7 +226,7 @@ export function actor(
       const messages = resolveMessagesForState(
         def.messages,
         def.states,
-        undefined, // TODO: track current state
+        this.stateTracker,
       );
       if (messages === undefined) {
         return { ok: false, error: "No messages available" };
