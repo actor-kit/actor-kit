@@ -53,7 +53,7 @@ export function array<E extends FieldDescriptor>(element: E): ArrayDescriptor<E>
 // --- Schema (nested) descriptor ---
 
 // A FieldDescriptor is anything that can appear as a field value in schema({})
-type FieldDescriptor =
+export type FieldDescriptor =
   | PrimitiveDescriptor<PrimitiveTypeName, unknown>
   | ArrayDescriptor<FieldDescriptor>
   | SchemaDefinition<Record<string, FieldDescriptor>>;
