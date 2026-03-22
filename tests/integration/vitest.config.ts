@@ -5,7 +5,11 @@ export default defineWorkersConfig({
     poolOptions: {
       workers: {
         wrangler: { configPath: "./wrangler.toml" },
+        isolatedStorage: true,
       },
     },
+    // Exclude websocket tests — they need non-isolated storage
+    // due to vitest-pool-workers SQLite limitation
+    exclude: ["websocket.test.ts"],
   },
 });

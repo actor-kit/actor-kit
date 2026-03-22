@@ -79,6 +79,7 @@ const CREATE_TABLES_SQL = `
     version INTEGER,
     state TEXT,
     state_tracker TEXT,
+    actor_id TEXT,
     checksum TEXT,
     updated_at INTEGER
   );
@@ -109,6 +110,7 @@ export function actor(
 ) {
   return class ActorInstance extends DurableObject {
     private state: unknown = undefined;
+    private actorId: string | undefined = undefined; // Human-readable ID (the name passed to idFromName)
     private stateTracker: Record<string, string> | { current: string } | undefined = undefined;
     private initialized = false;
     private version: number;
@@ -130,11 +132,11 @@ export function actor(
       await this.ensureTables();
 
       const rows = this.ctx.storage.sql
-        .exec("SELECT state, version, state_tracker FROM snapshots WHERE id = 1")
+        .exec("SELECT state, version, state_tracker, actor_id FROM snapshots WHERE id = 1")
         .toArray();
 
       if (rows.length > 0 && rows[0] !== undefined) {
-        const row = rows[0] as { state: string; version: number; state_tracker: string | null };
+        const row = rows[0] as { state: string; version: number; state_tracker: string | null; actor_id: string | null };
         let parsed: unknown = JSON.parse(row.state);
 
         // Run migration if needed
@@ -148,6 +150,11 @@ export function actor(
         // Restore state tracker
         if (row.state_tracker !== null) {
           this.stateTracker = JSON.parse(row.state_tracker);
+        }
+
+        // Restore actor ID
+        if (row.actor_id !== null) {
+          this.actorId = row.actor_id;
         }
 
         this.initialized = true;
@@ -164,10 +171,11 @@ export function actor(
       const stateTrackerJson = this.stateTracker ? JSON.stringify(this.stateTracker) : null;
 
       this.ctx.storage.sql.exec(
-        "INSERT OR REPLACE INTO snapshots (id, version, state, state_tracker, checksum, updated_at) VALUES (1, ?, ?, ?, ?, ?)",
+        "INSERT OR REPLACE INTO snapshots (id, version, state, state_tracker, actor_id, checksum, updated_at) VALUES (1, ?, ?, ?, ?, ?, ?)",
         this.version,
         json,
         stateTrackerJson,
+        this.actorId ?? null,
         checksum,
         Date.now(),
       );
@@ -198,7 +206,7 @@ export function actor(
       return (h >>> 0).toString(16);
     }
 
-    async spawn(input: { caller: string; callerType: "user" | "service"; input: unknown }): Promise<void> {
+    async spawn(input: { actorId?: string; caller: string; callerType: "user" | "service"; input: unknown }): Promise<void> {
       await this.loadState();
       if (this.initialized) return; // Idempotent
 
@@ -207,6 +215,9 @@ export function actor(
       if (!parsed.success) {
         throw new Error(`Invalid input: ${parsed.error.message}`);
       }
+
+      // Store actor ID for JWT validation
+      this.actorId = input.actorId ?? this.ctx.id.toString();
 
       // Create initial state
       this.state = def.init(parsed.data);
@@ -469,9 +480,9 @@ export function actor(
         return new Response("Server misconfigured", { status: 500 });
       }
 
-      // Validate token against the actual DO identity, not the URL path.
-      // actorName comes from the actor() definition. actorId comes from the DO's own ID.
-      const actorId = this.ctx.id.toString();
+      // Validate token against the stored actor identity.
+      // actorId is set on spawn (human-readable name, not DO hash).
+      const actorId = this.actorId ?? this.ctx.id.toString();
 
       let callerInfo: { caller: string; callerType: "user" | "service" };
       try {
