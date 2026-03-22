@@ -14,7 +14,7 @@ import type { z } from "zod";
 // A message definition has at least a schema, handler, and optional guard
 interface AnyMessageDef<TState> {
   readonly schema: z.ZodType;
-  readonly handler: Function;
+  handler(state: TState, payload: unknown, ctx: unknown): unknown;
   readonly guard: ((state: TState) => boolean) | undefined;
 }
 

@@ -33,13 +33,13 @@ interface ActorDef {
   roles: Record<string, (state: unknown, caller: string, claims: { callerType: "user" | "service" }) => boolean>;
   messages?: Record<string, Record<string, {
     readonly schema: z.ZodType;
-    readonly handler: Function;
+    handler(state: unknown, payload: unknown, ctx: unknown): unknown;
     readonly guard: ((state: unknown) => boolean) | undefined;
   }>>;
   states?: Record<string, {
     messages: Record<string, Record<string, {
       readonly schema: z.ZodType;
-      readonly handler: Function;
+      handler(state: unknown, payload: unknown, ctx: unknown): unknown;
       readonly guard: ((state: unknown) => boolean) | undefined;
     }>>;
   }> | {
@@ -49,7 +49,7 @@ interface ActorDef {
       states: Record<string, {
         messages: Record<string, Record<string, {
           readonly schema: z.ZodType;
-          readonly handler: Function;
+          handler(state: unknown, payload: unknown, ctx: unknown): unknown;
           readonly guard: ((state: unknown) => boolean) | undefined;
         }>>;
       }>;

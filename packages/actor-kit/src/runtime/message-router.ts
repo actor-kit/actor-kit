@@ -22,9 +22,13 @@ export type RouteResult<TState> =
 // The router only needs schema + handler + guard. It doesn't care about the payload
 // generic because Zod validates at runtime. We extract these fields structurally.
 
+// Uses a method signature for bivariance — allows MessageHandler<ConcreteState, ConcretePayload>
+// to be assignable without contravariance issues on the parameters. This is safe because
+// Zod validates the payload at runtime before the handler is called.
 interface RoutableMessage<TState> {
   readonly schema: z.ZodType;
-  readonly handler: Function;
+  // Method signature (bivariant in --strict) instead of property signature (contravariant)
+  handler(state: TState, payload: unknown, ctx: MessageContext): unknown;
   readonly guard: ((state: TState) => boolean) | undefined;
 }
 

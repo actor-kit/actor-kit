@@ -18,7 +18,7 @@ interface TestableActorDef<TState, TInput> {
   roles: Record<string, RolePredicate<TState>>;
   messages: Record<string, Record<string, {
     readonly schema: z.ZodType;
-    readonly handler: Function;
+    handler(state: TState, payload: unknown, ctx: unknown): unknown;
     readonly guard: ((state: TState) => boolean) | undefined;
   }>>;
   views: Record<string, {
