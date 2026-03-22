@@ -31,6 +31,14 @@ const reset = message(
   (_state: CounterState) => ({ count: 0, lastCaller: null }),
 );
 
+const notify = message(
+  z.object({}),
+  (state: CounterState, _payload, ctx) => {
+    ctx.emit({ queue: "ANALYTICS", body: { count: state.count } });
+    return state;
+  },
+);
+
 export const Counter = actor("counter", {
   input: z.object({}),
   init: () => ({ count: 0, lastCaller: null }),
@@ -39,7 +47,7 @@ export const Counter = actor("counter", {
     user: () => true,
   },
   messages: {
-    admin: { INCREMENT: increment, DECREMENT: decrement, RESET: reset },
+    admin: { INCREMENT: increment, DECREMENT: decrement, RESET: reset, NOTIFY: notify },
     user: { INCREMENT: increment },
   },
   views: {
