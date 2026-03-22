@@ -88,15 +88,16 @@ Do NOT load all docs upfront. Load only when relevant to the current task.
 - **`actor<Env>(name, def)`** — single function defines an actor. Returns a DO class. `Env` is the only explicit generic (Worker env bindings).
 - **`schema({ field: type })`** — defines binary-encodable view shapes with TypeScript inference.
 - **`view(Schema, fn)`** — pairs a schema with a projection function.
-- **`message(zodSchema, handler)`** — pairs a Zod payload schema with a handler function. Required for all message and RPC handlers.
+- **`message(zodSchema, handler)`** or **`message(zodSchema, { guard, handler })`** — pairs a Zod payload schema with a handler. Optional guard rejects before handler runs. Required for all message and RPC handlers.
 - **`ref(env, actorType, actorId)`** — gets a typed stub for DO-to-DO RPC.
-- **`emit(type, payload)`** — queues a side effect in the transactional outbox.
+- **`ctx.emit(effect)`** — fire-and-forget side effect via transactional outbox. Effect is `{ queue, body }`, `{ fetch, body }`, or `{ actor, id, message, payload }`.
+- **`ctx.request(config)`** — async side effect with response. Same as emit but adds `onDone`/`onError` message names that get delivered back to the actor's `on` block.
 - **`connect(actorType, opts)`** — client SDK, WebSocket connection with binary decoding.
 - **`testActor(Actor)`** — test helper, runs transitions without CF runtime.
 
 ### Roles and authorization
 
-- Roles are defined as `(state, caller) => boolean` predicates. First match wins (top-to-bottom).
+- Roles are defined as `(state, caller, { callerType }) => boolean` predicates. First match wins (top-to-bottom).
 - Caller is a plain string (extracted from JWT `sub` claim).
 - No match = connection rejected (403). Every actor must have a catch-all role or explicitly reject unknowns.
 - Role re-evaluated on every message (state changes can change your role).
@@ -104,11 +105,21 @@ Do NOT load all docs upfront. Load only when relevant to the current task.
 
 ### Events and messages
 
-- Messages are defined per role in the `messages` block.
+- Messages are defined per role in the `messages` block (or per state × role if using `states`).
+- All handlers use `message(zodSchema, handler)` or `message(zodSchema, { guard, handler })`.
 - Handler signature: `(state, payload, ctx) => state | Promise<state>`
-- `ctx` contains `{ caller, role, env, emit }`.
-- Zod validates message payloads at runtime. Invalid = rejected before handler.
-- System events: `connect`, `disconnect`, `resume`, `emissionFailed` — in the `on` block.
+- `ctx` contains `{ caller, callerType, role, env, emit, request }`.
+- Zod validates message payloads at runtime. Guard evaluates after validation. Invalid/guarded = rejected before handler.
+- Same message name across multiple roles must reference the same `MessageDef` object — enforced by the type system.
+- `on` block handles lifecycle events (`connect`, `disconnect`) AND async callbacks from `request()` (`onDone`/`onError` messages).
+- Actors are always separate DOs. No child actors in the same DO. Use `emit({actor, id, message})` or `request({actor, id, message, onDone, onError})` for actor-to-actor communication.
+
+### States (optional)
+
+Three modes:
+- **No states**: `messages` at top level. All messages always valid (gated only by role + guard).
+- **Sequential states**: `initial` + `states` block. Each state defines its own `messages` per role. `after` for timed transitions.
+- **Parallel states**: `parallel: true` + `regions`. Multiple independent state regions active simultaneously. Message valid if valid in any active region.
 
 ### State and persistence
 

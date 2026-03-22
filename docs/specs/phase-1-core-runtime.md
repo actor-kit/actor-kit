@@ -153,8 +153,19 @@ export const TodoList = actor<Env>("todo-list", {
       NOTIFY_ALL: message(
         z.object({}),
         (state, _, { emit }) => {
-          emit("queue", { queue: "EMAIL_QUEUE", body: { to: state.memberIds } });
+          emit({ queue: "EMAIL_QUEUE", body: { to: state.memberIds } });
           return state;
+        },
+      ),
+      FETCH_REPORT: message(
+        z.object({}),
+        (state, _, { request }) => {
+          request({
+            fetch: "https://api.example.com/report",
+            onDone: "REPORT_LOADED",
+            onError: "REPORT_FAILED",
+          });
+          return produce(state, d => { d.reportStatus = "loading"; });
         },
       ),
     },
@@ -183,6 +194,10 @@ export const TodoList = actor<Env>("todo-list", {
   on: {
     connect: (state, caller, ctx) => state,
     disconnect: (state, caller, ctx) => state,
+    REPORT_LOADED: (state, result) =>
+      produce(state, d => { d.report = result; d.reportStatus = "loaded"; }),
+    REPORT_FAILED: (state, error) =>
+      produce(state, d => { d.reportError = error; d.reportStatus = "failed"; }),
   },
 });
 ```
@@ -236,9 +251,12 @@ Requirements:
 - If the message type exists → `safeParse` payload with the MessageDef's Zod schema
 - If parse fails → reject with structured validation error (handler never runs)
 - If parse succeeds → call handler with `(state, parsedPayload, ctx)`
-- `ctx` contains `{ caller, callerType, role, env, emit }`
+- `ctx` contains `{ caller, callerType, role, env, emit, request }`
+- If guard is present: evaluate `guard(state)` — reject if false (handler never runs)
 - Handler can be sync or async
-- Collect any `emit()` calls during the handler execution
+- Collect any `emit()` and `request()` calls during the handler execution
+- If using `states`: look up messages for the current state × role. In parallel mode, scan all active regions.
+- Same message name across multiple roles must reference the same `MessageDef` object (type-enforced)
 
 ### 7. DO class generation
 
@@ -274,17 +292,54 @@ Requirements:
 - Outbox: INSERT emissions in same transaction as state, drain async
 - All SQLite operations use the DO's `ctx.storage.sql()` API
 
-### 9. `emit()` and outbox
+### 9. `emit()` and `request()` — transactional outbox
 
 **File**: `packages/actor-kit/src/runtime/outbox.ts`
 
+Two functions on `ctx`:
+
+**`emit(effect)`** — fire-and-forget side effect:
+```typescript
+ctx.emit({ queue: "EMAIL_QUEUE", body: { to: state.memberIds } });
+ctx.emit({ fetch: "https://analytics.example.com/track", body: { event: "created" } });
+ctx.emit({ actor: "audit-log", id: "global", message: "LOG", payload: { action: "deleted" } });
+```
+
+**`request(config)`** — async with response callbacks:
+```typescript
+ctx.request({
+  fetch: "https://api.example.com/data",
+  onDone: "FETCH_SUCCEEDED",
+  onError: "FETCH_FAILED",
+});
+ctx.request({
+  actor: "inventory", id: callerId, message: "RESERVE_ITEM", payload: { itemId },
+  onDone: "ITEM_RESERVED",
+  onError: "RESERVE_FAILED",
+});
+```
+
+`onDone`/`onError` are message names delivered to the actor's `on` block. They're strings (serializable to SQLite), not closures.
+
+Effect types:
+```typescript
+type Effect =
+  | { queue: string; body: unknown }
+  | { fetch: string; method?: string; body?: unknown; headers?: Record<string, string> }
+  | { actor: string; id: string; message: string; payload: unknown };
+
+type RequestConfig = Effect & { onDone: string; onError: string };
+```
+
 Requirements:
-- `emit(type, payload)` records intent during transition (does not execute)
-- After transition: BEGIN transaction, persist state + outbox entries, COMMIT
+- `emit(effect)` and `request(config)` record intent during transition (do not execute)
+- After transition: BEGIN SQLite transaction, persist state + outbox entries, COMMIT
+- Outbox entries for `request()` store `onDone`/`onError` message names alongside the effect
 - Drain: execute side effects, mark as sent or retry
+- For `request()`: on success, deliver `onDone` message to actor's `on` block with result. On failure, deliver `onError`.
 - 3 retries with exponential backoff (1s, 5s, 25s)
-- After 3 failures: move to emission_failures, deliver `emissionFailed` system event
-- On DO restart: drain pending outbox entries
+- After 3 failures: move to emission_failures, deliver `onError` if it was a request, or system `emissionFailed` event if it was a fire-and-forget emit
+- On DO restart: drain pending outbox entries (callbacks survive crash because they're stored as strings)
 
 ### 10. Auth helpers
 
@@ -311,6 +366,115 @@ Requirements:
 - No CF runtime dependencies — pure TypeScript
 - `env` in ctx is a mock object that records calls (for emit testing)
 
+### 12. States (optional)
+
+**File**: `packages/actor-kit/src/runtime/states.ts`
+
+Three modes — all supported in Phase 1:
+
+**Mode A: No states** — messages at top level. All messages always valid (gated by role + guard only).
+
+```typescript
+actor<Env>("counter", {
+  init: () => ({ count: 0 }),
+  roles: { anyone: () => true },
+  messages: {
+    anyone: { INCREMENT: increment },
+  },
+  views: { ... },
+});
+```
+
+**Mode B: Sequential states** — one active state at a time. Messages defined per state × role.
+
+```typescript
+actor<Env>("auction", {
+  init: (input) => ({ item: input.item, bids: [], winner: null }),
+  initial: "bidding",
+  roles: {
+    bidder: (state, caller) => true,
+    auctioneer: (state, caller, { callerType }) => callerType === "service",
+  },
+  states: {
+    bidding: {
+      messages: {
+        bidder: {
+          BID: message(z.object({ amount: z.number() }), (state, { amount }, { caller }) =>
+            produce(state, d => { d.bids.push({ caller, amount }); }),
+          ),
+        },
+        auctioneer: {},
+      },
+      after: { "1 hour": "evaluating" },
+    },
+    evaluating: {
+      messages: {
+        bidder: {},
+        auctioneer: {
+          CLOSE: message(z.object({}), (state) => {
+            const winner = state.bids.reduce((a, b) => a.amount > b.amount ? a : b);
+            return produce(state, d => { d.winner = winner.caller; });
+          }),
+        },
+      },
+    },
+    closed: {
+      messages: { bidder: {}, auctioneer: {} },
+    },
+  },
+  views: { ... },
+});
+```
+
+**Mode C: Parallel states** — multiple independent regions active simultaneously.
+
+```typescript
+actor<Env>("player", {
+  init: () => ({ health: 100, ... }),
+  roles: { player: () => true },
+  states: {
+    parallel: true,
+    regions: {
+      vitality: {
+        initial: "alive",
+        states: {
+          alive: {
+            messages: { player: { MOVE: move, ATTACK: attack } },
+          },
+          dead: {
+            messages: { player: {} },
+            after: { "10 seconds": "alive" },
+          },
+        },
+      },
+      combat: {
+        initial: "peaceful",
+        states: {
+          peaceful: {
+            messages: { player: { ENGAGE: engage } },
+          },
+          in_combat: {
+            messages: { player: { DISENGAGE: disengage } },
+            after: { "30 seconds": "peaceful" },
+          },
+        },
+      },
+    },
+  },
+  views: { ... },
+});
+```
+
+Requirements:
+- `states` is optional. If absent, `messages` must be at top level.
+- If `states` is present, `messages` must NOT be at top level (type error).
+- `initial` required for sequential states, required per region for parallel states.
+- State transitions: handler returns state with updated status field, or `after` triggers timed transition.
+- `after` maps to DO Alarms (survives hibernation). String parsed: "1 hour", "30 seconds", "5 minutes".
+- Parallel: a message is valid if it's valid in ANY active region.
+- Framework tracks current state(s) and persists alongside actor state.
+- State value is framework-managed (not a user field) — accessed via `ctx.state` or `state.__actorState`.
+
 ## Acceptance criteria
 
 1. A counter actor can be defined with `actor()` and deployed to CF Workers
@@ -318,10 +482,16 @@ Requirements:
 3. Messages are routed to the correct role's handler
 4. Unauthorized messages are rejected (wrong role)
 5. Invalid message payloads are rejected by Zod (handler never runs)
-6. State persists across DO restarts
-7. `emit()` calls are persisted in outbox and drained
-8. `testActor()` can test all of the above without CF runtime
-9. Zero `any` or `as` casts in the implementation
-10. All types infer correctly without manual annotation
-11. `callerType` from JWT flows into role predicates and message context
-12. Shared `message()` handlers work across multiple roles without duplication
+6. Guards reject messages before handler runs
+7. State persists across DO restarts
+8. `emit()` calls are persisted in outbox and drained
+9. `request()` calls deliver onDone/onError callbacks to the `on` block
+10. `testActor()` can test all of the above without CF runtime
+11. Zero `any` or `as` casts in the implementation
+12. All types infer correctly without manual annotation
+13. `callerType` from JWT flows into role predicates and message context
+14. Shared `message()` handlers work across multiple roles without duplication
+15. Sequential states constrain which messages are valid per state
+16. Parallel states allow messages valid in any active region
+17. `after` timers trigger state transitions
+18. Same message name across roles must be same `MessageDef` (type-enforced)

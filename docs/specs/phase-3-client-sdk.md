@@ -28,9 +28,9 @@ Requirements:
 - Opens WebSocket to `wss://{host}/api/{actorType}/{actorId}`
 - Sends JWT as Authorization header (or query param if headers unsupported)
 - Receives initial SNAPSHOT frame, decodes using actor's view schemas
-- Returns a typed `ActorConnection<TView, TMessages>` object
-- `TView` is the discriminated union of all role views
-- `TMessages` is scoped to the caller's role (determined from first SNAPSHOT frame's role field)
+- Returns a typed `ActorConnection<TView, TAllMessages>` object
+- `TView` is the discriminated union of all role views (narrowed via `view.role`)
+- `TAllMessages` is the **union of all message types across all roles** — role enforcement is server-side only. The client can send any message; the server rejects unauthorized ones with an error frame.
 
 ### 2. `ActorConnection` interface
 
