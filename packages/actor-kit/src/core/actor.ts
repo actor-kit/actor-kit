@@ -29,6 +29,7 @@ interface ActorDef {
   input: z.ZodType;
   init: (input: unknown) => unknown;
   version?: number;
+  initial?: string; // Initial state name for sequential states
   roles: Record<string, (state: unknown, caller: string, claims: { callerType: "user" | "service" }) => boolean>;
   messages?: Record<string, Record<string, {
     readonly schema: z.ZodType;
@@ -41,7 +42,19 @@ interface ActorDef {
       readonly handler: Function;
       readonly guard: ((state: unknown) => boolean) | undefined;
     }>>;
-  }>;
+  }> | {
+    parallel: true;
+    regions: Record<string, {
+      initial: string;
+      states: Record<string, {
+        messages: Record<string, Record<string, {
+          readonly schema: z.ZodType;
+          readonly handler: Function;
+          readonly guard: ((state: unknown) => boolean) | undefined;
+        }>>;
+      }>;
+    }>;
+  };
   views: Record<string, {
     readonly fn: (state: unknown, caller: string) => unknown;
   }>;
@@ -186,19 +199,19 @@ export function actor(
 
       // Initialize state tracker if using states
       if (def.states) {
-        // Check if parallel (has "parallel" and "regions" keys)
         const statesDef = def.states;
-        if ("parallel" in statesDef && "regions" in statesDef) {
+        if ("parallel" in statesDef && statesDef.parallel === true) {
           // Parallel: track each region's initial state
-          const regions = (statesDef as { regions: Record<string, { initial: string }> }).regions;
           const tracker: Record<string, string> = {};
-          for (const [regionName, regionDef] of Object.entries(regions)) {
+          for (const [regionName, regionDef] of Object.entries(statesDef.regions)) {
             tracker[regionName] = regionDef.initial;
           }
           this.stateTracker = tracker;
+        } else if (def.initial) {
+          // Sequential: use the explicit initial state
+          this.stateTracker = { current: def.initial };
         } else {
-          // Sequential: need an "initial" on the actor def
-          // For now, use the first state key as default
+          // Sequential without explicit initial: use first state key
           const firstState = Object.keys(statesDef)[0];
           if (firstState !== undefined) {
             this.stateTracker = { current: firstState };
