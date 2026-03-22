@@ -75,6 +75,7 @@ const CREATE_TABLES_SQL = `
     id INTEGER PRIMARY KEY CHECK (id = 1),
     version INTEGER,
     state TEXT,
+    state_tracker TEXT,
     checksum TEXT,
     updated_at INTEGER
   );
@@ -126,11 +127,11 @@ export function actor(
       await this.ensureTables();
 
       const rows = this.ctx.storage.sql
-        .exec("SELECT state, version FROM snapshots WHERE id = 1")
+        .exec("SELECT state, version, state_tracker FROM snapshots WHERE id = 1")
         .toArray();
 
       if (rows.length > 0 && rows[0] !== undefined) {
-        const row = rows[0] as { state: string; version: number };
+        const row = rows[0] as { state: string; version: number; state_tracker: string | null };
         let parsed: unknown = JSON.parse(row.state);
 
         // Run migration if needed
@@ -138,8 +139,14 @@ export function actor(
           parsed = def.migrate(parsed, row.version);
         }
 
-        // Restore
+        // Restore state
         this.state = def.restore ? def.restore(parsed) : parsed;
+
+        // Restore state tracker
+        if (row.state_tracker !== null) {
+          this.stateTracker = JSON.parse(row.state_tracker);
+        }
+
         this.initialized = true;
       }
     }
@@ -148,11 +155,13 @@ export function actor(
       const serialized = def.serialize ? def.serialize(this.state) : this.state;
       const json = JSON.stringify(serialized);
       const checksum = this.computeChecksum(json);
+      const stateTrackerJson = this.stateTracker ? JSON.stringify(this.stateTracker) : null;
 
       this.ctx.storage.sql.exec(
-        "INSERT OR REPLACE INTO snapshots (id, version, state, checksum, updated_at) VALUES (1, ?, ?, ?, ?)",
+        "INSERT OR REPLACE INTO snapshots (id, version, state, state_tracker, checksum, updated_at) VALUES (1, ?, ?, ?, ?, ?)",
         this.version,
         json,
+        stateTrackerJson,
         checksum,
         Date.now(),
       );
