@@ -15,7 +15,7 @@ import type { z } from "zod";
 interface AnyMessageDef<TState> {
   readonly schema: z.ZodType;
   handler(state: TState, payload: unknown, ctx: unknown): unknown;
-  readonly guard: ((state: TState) => boolean) | undefined;
+  guard?(state: TState): boolean;
 }
 
 type RoleMessages<TState> = Record<string, Record<string, AnyMessageDef<TState>>>;

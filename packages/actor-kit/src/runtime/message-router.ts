@@ -29,7 +29,7 @@ interface RoutableMessage<TState> {
   readonly schema: z.ZodType;
   // Method signature (bivariant in --strict) instead of property signature (contravariant)
   handler(state: TState, payload: unknown, ctx: MessageContext): unknown;
-  readonly guard: ((state: TState) => boolean) | undefined;
+  guard?(state: TState): boolean;
 }
 
 // --- Router ---

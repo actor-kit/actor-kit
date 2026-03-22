@@ -66,7 +66,7 @@ interface GuardedHandler<TState, TPayload, TEnv = unknown> {
 export interface MessageDef<TState = unknown, TPayload = unknown, TEnv = unknown> {
   readonly schema: z.ZodType<TPayload>;
   readonly handler: MessageHandler<TState, TPayload, TEnv>;
-  readonly guard: GuardFn<TState> | undefined;
+  readonly guard?: GuardFn<TState>;
 }
 
 // --- message() function ---
@@ -106,7 +106,6 @@ export function message<
     return {
       schema: zodSchema,
       handler: handlerOrConfig,
-      guard: undefined,
     };
   }
   return {

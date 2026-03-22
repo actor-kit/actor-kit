@@ -25,43 +25,46 @@ import type { MessageContext, Effect, RequestConfig } from "./message";
 // Runtime actor definition — uses structural types that erase generics.
 // Type safety is enforced at the definition site (message(), view(), etc.),
 // not at the runtime level. The DO class just needs schemas, handlers, and predicates.
+// Runtime actor definition — uses bivariant method signatures throughout
+// so that MessageDef<ConcreteState> is assignable without contravariance issues.
+// Type safety is enforced at the definition site (message(), view(), etc.),
+// not at the runtime level. The DO class just needs schemas, handlers, and predicates.
+interface ActorMessageSlot {
+  readonly schema: z.ZodType;
+  handler(state: unknown, payload: unknown, ctx: unknown): unknown;
+  guard?(state: unknown): boolean; // bivariant method signature
+}
+
 interface ActorDef {
   input: z.ZodType;
-  init: (input: unknown) => unknown;
+  init(input: unknown): unknown; // bivariant
   version?: number;
-  initial?: string; // Initial state name for sequential states
-  roles: Record<string, (state: unknown, caller: string, claims: { callerType: "user" | "service" }) => boolean>;
-  messages?: Record<string, Record<string, {
-    readonly schema: z.ZodType;
-    handler(state: unknown, payload: unknown, ctx: unknown): unknown;
-    readonly guard: ((state: unknown) => boolean) | undefined;
-  }>>;
+  initial?: string;
+  roles: Record<string, {
+    // bivariant method signature for role predicates
+    (state: unknown, caller: string, claims: { callerType: "user" | "service" }): boolean;
+  }>;
+  messages?: Record<string, Record<string, ActorMessageSlot>>;
   states?: Record<string, {
-    messages: Record<string, Record<string, {
-      readonly schema: z.ZodType;
-      handler(state: unknown, payload: unknown, ctx: unknown): unknown;
-      readonly guard: ((state: unknown) => boolean) | undefined;
-    }>>;
+    messages: Record<string, Record<string, ActorMessageSlot>>;
   }> | {
     parallel: true;
     regions: Record<string, {
       initial: string;
       states: Record<string, {
-        messages: Record<string, Record<string, {
-          readonly schema: z.ZodType;
-          handler(state: unknown, payload: unknown, ctx: unknown): unknown;
-          readonly guard: ((state: unknown) => boolean) | undefined;
-        }>>;
+        messages: Record<string, Record<string, ActorMessageSlot>>;
       }>;
     }>;
   };
   views: Record<string, {
-    readonly fn: (state: unknown, caller: string) => unknown;
+    fn(state: unknown, caller: string): unknown; // bivariant
   }>;
-  on?: Record<string, (state: unknown, ...args: unknown[]) => unknown | Promise<unknown>>;
-  migrate?: (persisted: unknown, fromVersion: number) => unknown;
-  serialize?: (state: unknown) => unknown;
-  restore?: (serialized: unknown) => unknown;
+  on?: Record<string, {
+    (state: unknown, ...args: unknown[]): unknown | Promise<unknown>; // bivariant
+  }>;
+  migrate?(persisted: unknown, fromVersion: number): unknown;
+  serialize?(state: unknown): unknown;
+  restore?(serialized: unknown): unknown;
 }
 
 // --- SQL table creation ---

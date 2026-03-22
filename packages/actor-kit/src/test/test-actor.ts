@@ -19,7 +19,7 @@ interface TestableActorDef<TState, TInput> {
   messages: Record<string, Record<string, {
     readonly schema: z.ZodType;
     handler(state: TState, payload: unknown, ctx: unknown): unknown;
-    readonly guard: ((state: TState) => boolean) | undefined;
+    guard?(state: TState): boolean;
   }>>;
   views: Record<string, {
     readonly fn: (state: TState, caller: string) => unknown;
