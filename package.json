@@ -1,0 +1,25 @@
+{
+  "name": "actor-kit-2-root",
+  "private": true,
+  "scripts": {
+    "typecheck": "pnpm -r run typecheck",
+    "test:unit": "vitest run --project unit",
+    "test:integration": "vitest run --project integration",
+    "test": "pnpm test:unit && pnpm test:integration",
+    "lint": "eslint packages/",
+    "build": "pnpm -r run build"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.0",
+    "vitest": "^3.0.0",
+    "@cloudflare/vitest-pool-workers": "^0.8.0",
+    "eslint": "^9.0.0",
+    "@typescript-eslint/eslint-plugin": "^8.0.0",
+    "@typescript-eslint/parser": "^8.0.0",
+    "tsdown": "^0.12.0"
+  },
+  "packageManager": "pnpm@9.15.0",
+  "engines": {
+    "node": ">=20"
+  }
+}
