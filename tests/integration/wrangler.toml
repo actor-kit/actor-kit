@@ -1,0 +1,19 @@
+name = "actor-kit-test"
+main = "src/worker.ts"
+compatibility_date = "2024-09-25"
+compatibility_flags = ["nodejs_compat"]
+
+[vars]
+ACTOR_KIT_SECRET = "test-secret-for-integration-tests-only"
+
+[[durable_objects.bindings]]
+name = "COUNTER"
+class_name = "Counter"
+
+[[durable_objects.bindings]]
+name = "TODO_LIST"
+class_name = "TodoList"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["Counter", "TodoList"]
