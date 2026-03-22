@@ -1,0 +1,129 @@
+import { describe, it, expect } from "vitest";
+import { z } from "zod";
+import { message } from "../../packages/actor-kit/src/core/message";
+
+type State = { count: number; items: string[] };
+type Env = { ACTOR_KIT_SECRET: string };
+
+describe("message() helper", () => {
+  it("pairs a Zod schema with a handler", () => {
+    const increment = message(
+      z.object({ amount: z.number() }),
+      (state: State, { amount }) => ({
+        ...state,
+        count: state.count + amount,
+      }),
+    );
+
+    expect(increment.schema).toBeDefined();
+    expect(typeof increment.handler).toBe("function");
+    expect(increment.guard).toBeUndefined();
+  });
+
+  it("handler receives parsed payload and ctx", () => {
+    const emissions: unknown[] = [];
+    const increment = message(
+      z.object({ amount: z.number() }),
+      (state: State, { amount }, ctx) => {
+        expect(ctx.caller).toBe("alice");
+        expect(ctx.callerType).toBe("user");
+        expect(ctx.role).toBe("owner");
+        expect(typeof ctx.emit).toBe("function");
+        expect(typeof ctx.request).toBe("function");
+        return { ...state, count: state.count + amount };
+      },
+    );
+
+    const ctx = {
+      caller: "alice",
+      callerType: "user" as const,
+      role: "owner",
+      env: { ACTOR_KIT_SECRET: "test" },
+      emit: (effect: unknown) => { emissions.push(effect); },
+      request: (config: unknown) => { emissions.push(config); },
+    };
+
+    const result = increment.handler({ count: 0, items: [] }, { amount: 5 }, ctx);
+    expect(result).toEqual({ count: 5, items: [] });
+  });
+
+  it("supports guard + handler object form", () => {
+    const addItem = message(
+      z.object({ text: z.string() }),
+      {
+        guard: (state: State) => state.items.length < 10,
+        handler: (state: State, { text }) => ({
+          ...state,
+          items: [...state.items, text],
+        }),
+      },
+    );
+
+    expect(typeof addItem.guard).toBe("function");
+    expect(typeof addItem.handler).toBe("function");
+  });
+
+  it("guard receives state", () => {
+    const addItem = message(
+      z.object({ text: z.string() }),
+      {
+        guard: (state: State) => state.items.length < 2,
+        handler: (state: State, { text }) => ({
+          ...state,
+          items: [...state.items, text],
+        }),
+      },
+    );
+
+    expect(addItem.guard?.({ count: 0, items: [] })).toBe(true);
+    expect(addItem.guard?.({ count: 0, items: ["a", "b"] })).toBe(false);
+  });
+
+  it("schema validates payload at runtime", () => {
+    const increment = message(
+      z.object({ amount: z.number().positive() }),
+      (state: State, { amount }) => ({
+        ...state,
+        count: state.count + amount,
+      }),
+    );
+
+    const validResult = increment.schema.safeParse({ amount: 5 });
+    expect(validResult.success).toBe(true);
+
+    const invalidResult = increment.schema.safeParse({ amount: -1 });
+    expect(invalidResult.success).toBe(false);
+
+    const missingResult = increment.schema.safeParse({});
+    expect(missingResult.success).toBe(false);
+
+    const wrongTypeResult = increment.schema.safeParse({ amount: "five" });
+    expect(wrongTypeResult.success).toBe(false);
+  });
+
+  it("supports async handlers", () => {
+    const fetchData = message(
+      z.object({}),
+      async (state: State, _, { request }) => {
+        request({
+          fetch: "https://api.example.com/data",
+          onDone: "FETCH_DONE",
+          onError: "FETCH_ERROR",
+        });
+        return state;
+      },
+    );
+
+    expect(typeof fetchData.handler).toBe("function");
+  });
+
+  it("no-payload messages use z.object({})", () => {
+    const reset = message(
+      z.object({}),
+      (state: State) => ({ count: 0, items: [] }),
+    );
+
+    const validResult = reset.schema.safeParse({});
+    expect(validResult.success).toBe(true);
+  });
+});
