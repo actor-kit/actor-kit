@@ -13,7 +13,7 @@ Actor Kit v2 is a framework for building real-time, event-driven applications on
 ```
 actor-kit/
 ├── src/
-│   ├── core/          Public API: actor(), view(), ref(), emit()
+│   ├── core/          Public API: actor(), schema(), view(), message(), ref(), emit()
 │   ├── schema/        schema() builder, type primitives, binary codec
 │   ├── runtime/       DO class factory, WebSocket lifecycle, persistence, outbox
 │   ├── auth/          JWT creation (createAccessToken) + validation (getCallerFromRequest)
@@ -54,27 +54,61 @@ The root export (`.`) includes the server-side runtime. Users import it in their
 ### The `actor()` function
 
 ```typescript
-function actor<
-  TInput extends z.ZodType,
-  TState,
-  TRoles extends Record<string, RolePredicate<TState>>,
-  TMessages extends RoleMessages<TState, TRoles>,
-  TViews extends RoleViews<TState, TRoles>,
->(
+function actor<TEnv>(
   name: string,
-  def: ActorDef<TInput, TState, TRoles, TMessages, TViews>,
-): ActorClass<TInput, TState, TRoles, TMessages, TViews>;
+  def: ActorDef<TEnv, ...inferred>,
+): ActorClass<...inferred>;
+
+// TEnv is the only explicit generic — Worker env bindings type
+// Everything else is inferred from the definition object
 ```
 
 Key type relationships:
 
 ```
+TEnv         ← explicit generic parameter (Worker env bindings)
 TState       ← inferred from init() return type
 TRoles       ← inferred from roles object keys + predicates
-TMessages    ← constrained to keys of TRoles, handlers receive TState
+TMessages    ← constrained to keys of TRoles, values are Record<string, MessageDef>
 TViews       ← constrained to keys of TRoles, view functions receive TState
 TView (union) ← computed: { role: R } & Infer<TViews[R]["schema"]> for each R in TRoles
+TAllMessages ← union of all message types across all roles (what the client sees)
 ```
+
+### The `message()` helper
+
+```typescript
+function message<TSchema extends z.ZodType, TState, TEnv>(
+  schema: TSchema,
+  handler: (state: TState, payload: z.infer<TSchema>, ctx: MessageContext<TEnv>) => TState | Promise<TState>,
+): MessageDef<z.infer<TSchema>, TState, TEnv>;
+```
+
+Every message handler must be wrapped in `message()` to pair a Zod schema with the handler. The schema is used at runtime for boundary parsing — invalid payloads are rejected before the handler runs.
+
+### MessageContext
+
+```typescript
+type MessageContext<TEnv> = {
+  caller: string;              // "user-123" — from JWT sub claim
+  callerType: "user" | "service";  // from JWT act claim (stable identity, not authorization)
+  role: string;                // "owner" — computed from state by role predicates
+  env: TEnv;                   // Worker env bindings (queues, AI, secrets, etc.)
+  emit: EmitFn;                // (type, payload) → void — transactional outbox
+};
+```
+
+### RolePredicate
+
+```typescript
+type RolePredicate<TState> = (
+  state: TState,
+  caller: string,
+  claims: { callerType: "user" | "service" },
+) => boolean;
+```
+
+Role predicates receive `callerType` from JWT claims for distinguishing service vs user callers. Authorization is still derived from state — `callerType` is identity metadata, not a role.
 
 ### Schema type inference
 

@@ -2,7 +2,7 @@
 
 ## Goal
 
-Implement the foundational runtime: `actor()`, `schema()`, `view()`, role evaluation, message routing, DO class generation, and SQLite persistence. After this phase, a user can define an actor, deploy it to CF Workers, and interact with it over WebSocket (JSON sync, not binary — binary is Phase 2).
+Implement the foundational runtime: `actor()`, `schema()`, `view()`, `message()`, role evaluation, message routing, DO class generation, and SQLite persistence. After this phase, a user can define an actor, deploy it to CF Workers, and interact with it over WebSocket (JSON sync, not binary — binary is Phase 2).
 
 ## Deliverables
 
@@ -53,20 +53,79 @@ Requirements:
 - Type error if fn's return type doesn't match schema shape
 - The view object carries both the schema and the function
 
-### 3. `actor()` function
+### 3. `message()` helper
+
+**File**: `packages/actor-kit/src/core/message.ts`
+
+Pairs a Zod schema with a handler function. Every message handler must have a runtime schema for payload validation at the boundary.
+
+```typescript
+import { message } from "actor-kit";
+import { z } from "zod";
+
+const addTodo = message(
+  z.object({ text: z.string() }),
+  (state, { text }, { caller }) =>
+    produce(state, d => {
+      d.todos.push({ id: crypto.randomUUID(), text, done: false });
+    }),
+);
+
+// No-payload messages use z.object({})
+const reset = message(
+  z.object({}),
+  (state, _, { caller, emit }) => {
+    emit("queue", { queue: "AUDIT_LOG", body: { action: "reset", caller } });
+    return { ...state, todos: [] };
+  },
+);
+```
+
+Requirements:
+- `message(zodSchema, handler)` — returns a `MessageDef<TPayload, TState, TEnv>` object
+- The Zod schema is used at runtime to `safeParse` the incoming payload before the handler runs
+- Invalid payloads are rejected with a structured error — the handler never executes
+- Handler signature: `(state: TState, payload: z.infer<TSchema>, ctx: MessageContext<TEnv>) => TState | Promise<TState>`
+- `MessageContext<TEnv>` contains `{ caller: string, callerType: "user" | "service", role: string, env: TEnv, emit: EmitFn }`
+- `message()` objects can be shared across roles (extract to a variable, reference in multiple roles)
+- Handlers can be sync or async
+
+### 4. `actor()` function
 
 **File**: `packages/actor-kit/src/core/actor.ts`
 
-Single function that defines an actor and returns a DO class.
+Single function that defines an actor and returns a DO class. Takes a generic `TEnv` parameter for typed Worker env bindings.
 
 ```typescript
-export const TodoList = actor("todo-list", {
+type Env = {
+  ACTOR_KIT_SECRET: string;
+  EMAIL_QUEUE: Queue;
+};
+
+const addTodo = message(
+  z.object({ text: z.string() }),
+  (state, { text }, { caller }) =>
+    produce(state, d => {
+      d.todos.push({ id: crypto.randomUUID(), text, done: false });
+    }),
+);
+
+const toggle = message(
+  z.object({ id: z.string() }),
+  (state, { id }) =>
+    produce(state, d => {
+      const todo = d.todos.find(t => t.id === id);
+      if (todo) todo.done = !todo.done;
+    }),
+);
+
+export const TodoList = actor<Env>("todo-list", {
   input: z.object({ creator: z.string() }),
 
   init: (input) => ({
-    todos: [],
+    todos: [] as { id: string; text: string; done: false }[],
     ownerId: input.creator,
-    memberIds: [],
+    memberIds: [] as string[],
   }),
 
   version: 1,
@@ -79,30 +138,61 @@ export const TodoList = actor("todo-list", {
 
   messages: {
     owner: {
-      ADD_TODO: (state, { text }) => produce(state, d => { ... }),
+      ADD_TODO: addTodo,
+      TOGGLE: toggle,
+      DELETE_TODO: message(
+        z.object({ id: z.string() }),
+        (state, { id }) =>
+          produce(state, d => { d.todos = d.todos.filter(t => t.id !== id); }),
+      ),
+      INVITE: message(
+        z.object({ userId: z.string() }),
+        (state, { userId }) =>
+          produce(state, d => { d.memberIds.push(userId); }),
+      ),
+      NOTIFY_ALL: message(
+        z.object({}),
+        (state, _, { emit }) => {
+          emit("queue", { queue: "EMAIL_QUEUE", body: { to: state.memberIds } });
+          return state;
+        },
+      ),
     },
-    member: {},
+    member: {
+      ADD_TODO: addTodo,
+      TOGGLE: toggle,
+    },
     viewer: {},
   },
 
   views: {
-    owner: view(OwnerView, (state) => ({ ... })),
-    member: view(MemberView, (state) => ({ ... })),
-    viewer: view(ViewerView, (state) => ({ ... })),
+    owner: view(OwnerView, (state) => ({
+      todos: state.todos,
+      memberCount: state.memberIds.length,
+    })),
+    member: view(OwnerView, (state) => ({
+      todos: state.todos,
+      memberCount: state.memberIds.length,
+    })),
+    viewer: view(ViewerView, (state) => ({
+      todoCount: state.todos.length,
+      doneCount: state.todos.filter(t => t.done).length,
+    })),
   },
 
   on: {
-    connect: (state, caller) => state,
-    disconnect: (state, caller) => state,
+    connect: (state, caller, ctx) => state,
+    disconnect: (state, caller, ctx) => state,
   },
 });
 ```
 
 Requirements:
+- `actor<TEnv>(name, def)` — TEnv is the Worker env type, flows into `MessageContext<TEnv>`
 - Returns a class that extends `DurableObject` (from `cloudflare:workers`)
 - TState inferred from `init()` return type
 - TRoles inferred from `roles` object keys
-- TMessages constrained: keys must be subset of TRoles keys
+- TMessages constrained: keys must be subset of TRoles keys, values must be `Record<string, MessageDef>`
 - TViews constrained: keys must match TRoles keys exactly
 - `input` is a Zod schema — parsed on spawn, type flows into `init()`
 - `version` is a number — used for migration
@@ -110,15 +200,22 @@ Requirements:
 - `serialize(state)` / `restore(serialized)` are optional — for non-JSON-safe state
 - No `any` or `as` in the type signature
 
-### 4. Role evaluation
+### 5. Role evaluation
 
 **File**: `packages/actor-kit/src/runtime/roles.ts`
 
 ```typescript
-function resolveRole<TState, TRoles>(
+type RolePredicate<TState> = (
+  state: TState,
+  caller: string,
+  claims: { callerType: "user" | "service" },
+) => boolean;
+
+function resolveRole<TState, TRoles extends Record<string, RolePredicate<TState>>>(
   roles: TRoles,
   state: TState,
   caller: string,
+  claims: { callerType: "user" | "service" },
 ): keyof TRoles | null;
 ```
 
@@ -126,34 +223,37 @@ Requirements:
 - Iterates role predicates in definition order (relies on object insertion order)
 - Returns the first role whose predicate returns `true`
 - Returns `null` if no role matches (caller rejected)
-- Role predicates receive `(state, caller)` — both readonly
+- Role predicates receive `(state, caller, claims)` — state is readonly
+- `claims.callerType` comes from JWT (stable identity metadata, not authorization)
 
-### 5. Message routing
+### 6. Message routing
 
 **File**: `packages/actor-kit/src/runtime/messages.ts`
 
 Requirements:
-- Given a role and message type, look up the handler
+- Given a role and message type, look up the `MessageDef`
 - If the message type doesn't exist for the role → reject with error
-- If the message type exists → call handler with `(state, payload, ctx)`
-- `ctx` contains `{ caller, role, env, emit }`
+- If the message type exists → `safeParse` payload with the MessageDef's Zod schema
+- If parse fails → reject with structured validation error (handler never runs)
+- If parse succeeds → call handler with `(state, parsedPayload, ctx)`
+- `ctx` contains `{ caller, callerType, role, env, emit }`
 - Handler can be sync or async
 - Collect any `emit()` calls during the handler execution
 
-### 6. DO class generation
+### 7. DO class generation
 
 **File**: `packages/actor-kit/src/runtime/durable-actor.ts`
 
 The class returned by `actor()`. Extends `DurableObject`.
 
 Methods:
-- `spawn(input)` — idempotent. Validates input, runs `init()`, persists metadata + state.
-- `send(caller, event)` — resolves role, routes message, persists state + outbox, broadcasts views.
-- `getSnapshot(caller)` — resolves role, computes view, returns JSON (Phase 1, binary in Phase 2).
+- `spawn(input)` — idempotent. Validates input with `safeParse`, runs `init()`, persists metadata + state. Invalid input = error, actor never created.
+- `send(caller, callerType, event)` — resolves role, routes message, persists state + outbox, broadcasts views.
+- `getSnapshot(caller, callerType)` — resolves role, computes view, returns JSON (Phase 1, binary in Phase 2).
 - `fetch(request)` — handles WebSocket upgrade, forwards to WS lifecycle.
 
 WebSocket lifecycle:
-- On connect: validate JWT, resolve role (reject 403 if no match), add to connections map, send full snapshot, run `on.connect`.
+- On connect: validate JWT, extract caller + callerType, resolve role (reject 403 if no match), add to connections map, send full snapshot, run `on.connect`.
 - On message: decode JSON, route to `send()`.
 - On close: run `on.disconnect`, remove from connections map.
 - On error: remove from connections map.
@@ -163,7 +263,7 @@ Broadcasting:
 - Compare with previous view (JSON deep equality for Phase 1).
 - If changed, send full JSON snapshot (Phase 1 — delta encoding in Phase 2).
 
-### 7. SQLite persistence
+### 8. SQLite persistence
 
 **File**: `packages/actor-kit/src/runtime/storage.ts`
 
@@ -174,7 +274,7 @@ Requirements:
 - Outbox: INSERT emissions in same transaction as state, drain async
 - All SQLite operations use the DO's `ctx.storage.sql()` API
 
-### 8. `emit()` and outbox
+### 9. `emit()` and outbox
 
 **File**: `packages/actor-kit/src/runtime/outbox.ts`
 
@@ -186,28 +286,30 @@ Requirements:
 - After 3 failures: move to emission_failures, deliver `emissionFailed` system event
 - On DO restart: drain pending outbox entries
 
-### 9. Auth helpers
+### 10. Auth helpers
 
 **File**: `packages/actor-kit/src/auth/`
 
-- `createAccessToken({ actorType, actorId, callerId, secret, expiresIn? })` → JWT string
-- `getCallerFromRequest(request, actorType, actorId, secret)` → caller string
-- JWT claims: `sub` = callerId, `jti` = actorId, `aud` = actorType
+- `createAccessToken({ actorType, actorId, callerId, callerType, secret, expiresIn? })` → JWT string
+- `getCallerFromRequest(request, actorType, actorId, secret)` → `{ caller: string, callerType: "user" | "service" }`
+- JWT claims: `sub` = callerId, `act` = callerType, `jti` = actorId, `aud` = actorType
 - HS256 signing
 - Self-contained — no imports from runtime (no `cloudflare:workers`)
 
-### 10. `testActor()` helper
+### 11. `testActor()` helper
 
 **File**: `packages/actor-kit/src/test/test-actor.ts`
 
 Requirements:
 - `testActor(ActorDef)` returns a test harness
 - `t.init(input)` — validates input, runs init, returns state
-- `t.send(state, caller, event)` — resolves role, validates message, runs handler, returns new state
+- `t.send(state, caller, event)` — resolves role (default callerType: "user"), validates message schema, runs handler, returns new state
+- `t.send(state, caller, event, { callerType: "service" })` — override callerType
 - `t.sendWithEffects(state, caller, event)` — same but also returns `{ state, emissions }`
-- `t.view(state, caller)` — resolves role, runs view function, returns typed view
+- `t.view(state, caller)` — resolves role, runs view function, returns typed view with `role` discriminant
 - `t.role(state, caller)` — resolves role, returns role name or null
 - No CF runtime dependencies — pure TypeScript
+- `env` in ctx is a mock object that records calls (for emit testing)
 
 ## Acceptance criteria
 
@@ -215,8 +317,11 @@ Requirements:
 2. WebSocket connections receive JSON snapshots on connect
 3. Messages are routed to the correct role's handler
 4. Unauthorized messages are rejected (wrong role)
-5. State persists across DO restarts
-6. `emit()` calls are persisted in outbox and drained
-7. `testActor()` can test all of the above without CF runtime
-8. Zero `any` or `as` casts in the implementation
-9. All types infer correctly without manual annotation
+5. Invalid message payloads are rejected by Zod (handler never runs)
+6. State persists across DO restarts
+7. `emit()` calls are persisted in outbox and drained
+8. `testActor()` can test all of the above without CF runtime
+9. Zero `any` or `as` casts in the implementation
+10. All types infer correctly without manual annotation
+11. `callerType` from JWT flows into role predicates and message context
+12. Shared `message()` handlers work across multiple roles without duplication

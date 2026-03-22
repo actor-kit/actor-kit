@@ -85,9 +85,10 @@ Do NOT load all docs upfront. Load only when relevant to the current task.
 
 ### API surface
 
-- **`actor(name, def)`** — single function defines an actor. Returns a DO class.
+- **`actor<Env>(name, def)`** — single function defines an actor. Returns a DO class. `Env` is the only explicit generic (Worker env bindings).
 - **`schema({ field: type })`** — defines binary-encodable view shapes with TypeScript inference.
 - **`view(Schema, fn)`** — pairs a schema with a projection function.
+- **`message(zodSchema, handler)`** — pairs a Zod payload schema with a handler function. Required for all message and RPC handlers.
 - **`ref(env, actorType, actorId)`** — gets a typed stub for DO-to-DO RPC.
 - **`emit(type, payload)`** — queues a side effect in the transactional outbox.
 - **`connect(actorType, opts)`** — client SDK, WebSocket connection with binary decoding.
@@ -126,7 +127,8 @@ Do NOT load all docs upfront. Load only when relevant to the current task.
 
 ### Auth
 
-- JWT via `jose`. Claims: `jti` = actor ID, `aud` = actor type, `sub` = caller identity.
+- JWT via `jose`. Claims: `sub` = caller identity, `act` = callerType (`"user"` or `"service"`), `jti` = actor ID, `aud` = actor type.
+- `callerType` is stable identity metadata from the token — not authorization. Roles handle authorization.
 - Signing: HS256 with `ACTOR_KIT_SECRET` from Worker env.
 - Token validated on WebSocket connect and on every HTTP request.
 

@@ -68,21 +68,33 @@ Requirements:
 
 **Receiving side: `rpc` block**
 
+Uses the same `message()` helper as client messages — Zod schema required for boundary parsing.
+
 ```typescript
 rpc: {
-  ACCEPT_TRANSFER: (state, { callerId, playerData }) =>
-    produce(state, d => {
-      d.positions[callerId] = playerData.position;
+  ACCEPT_TRANSFER: message(
+    z.object({
+      callerId: z.string(),
+      playerData: z.object({
+        position: z.object({ x: z.number(), y: z.number(), z: z.number() }),
+        health: z.object({ current: z.number(), max: z.number() }),
+        entity: z.object({ name: z.string(), type: z.string() }),
+      }),
     }),
+    (state, { callerId, playerData }) =>
+      produce(state, d => {
+        d.positions[callerId] = playerData.position;
+      }),
+  ),
 },
 ```
 
 Requirements:
 - RPC handlers are NOT exposed to WebSocket clients
 - No role evaluation — calling actor is trusted
+- **Zod schema required** — RPC is a trust boundary per ADR 002. Payloads are parsed before the handler runs.
 - Runs as a transition: persists state, broadcasts views
 - Can use `emit()` for side effects
-- Payload validated at boundary (Zod schema optional but recommended)
 
 ### 3. SQLite CDC (Change Data Capture)
 
