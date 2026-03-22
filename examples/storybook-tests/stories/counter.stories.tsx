@@ -5,12 +5,10 @@ import { createActorKitMockClient } from "@actor-kit/test";
 import { withActorKit } from "@actor-kit/storybook";
 import { Counter } from "../src/Counter";
 import { CounterContext } from "../src/counter.context";
-import type { CounterMachine, CounterSnapshot } from "../src/counter.machine";
+import type { CounterView, CounterClientEvent } from "../src/counter.machine";
 
-const defaultSnapshot: CounterSnapshot = {
-  public: { count: 0 },
-  private: {},
-  value: "active",
+const defaultSnapshot: CounterView = {
+  count: 0,
 };
 
 const meta: Meta<typeof Counter> = {
@@ -23,11 +21,10 @@ type Story = StoryObj<typeof Counter>;
 
 /**
  * Static story: uses withActorKit decorator + parameters.
- * Verifies that the component renders the initial state correctly.
  */
 export const Default: Story = {
   decorators: [
-    withActorKit<CounterMachine>({
+    withActorKit<CounterView, CounterClientEvent>({
       actorType: "counter",
       context: CounterContext,
     }),
@@ -53,7 +50,7 @@ export const Default: Story = {
  */
 export const WithInitialCount: Story = {
   decorators: [
-    withActorKit<CounterMachine>({
+    withActorKit<CounterView, CounterClientEvent>({
       actorType: "counter",
       context: CounterContext,
     }),
@@ -61,10 +58,7 @@ export const WithInitialCount: Story = {
   parameters: {
     actorKit: {
       counter: {
-        "counter-1": {
-          ...defaultSnapshot,
-          public: { count: 42 },
-        },
+        "counter-1": { count: 42 },
       },
     },
   },
@@ -76,27 +70,24 @@ export const WithInitialCount: Story = {
 
 /**
  * Interactive story: uses createActorKitMockClient directly.
- * Verifies that clicking buttons sends the correct events
- * and that produce() updates render correctly.
  */
 export const Interactive: Story = {
   render: () => <Counter />,
   play: async ({ canvasElement, mount }) => {
-    const client = createActorKitMockClient<CounterMachine>({
+    const client = createActorKitMockClient<CounterView, CounterClientEvent>({
       initialSnapshot: defaultSnapshot,
       onSend: (event) => {
-        // Simulate machine behavior in response to events
         if (event.type === "INCREMENT") {
           client.produce((draft) => {
-            draft.public.count += 1;
+            draft.count += 1;
           });
         } else if (event.type === "DECREMENT") {
           client.produce((draft) => {
-            draft.public.count -= 1;
+            draft.count -= 1;
           });
         } else if (event.type === "RESET") {
           client.produce((draft) => {
-            draft.public.count = 0;
+            draft.count = 0;
           });
         }
       },
@@ -110,22 +101,17 @@ export const Interactive: Story = {
 
     const canvas = within(canvasElement);
 
-    // Initial state
     await expect(canvas.getByTestId("count")).toHaveTextContent("Count: 0");
 
-    // Click increment
     await userEvent.click(canvas.getByText("+"));
     await expect(canvas.getByTestId("count")).toHaveTextContent("Count: 1");
 
-    // Click increment again
     await userEvent.click(canvas.getByText("+"));
     await expect(canvas.getByTestId("count")).toHaveTextContent("Count: 2");
 
-    // Click decrement
     await userEvent.click(canvas.getByText("-"));
     await expect(canvas.getByTestId("count")).toHaveTextContent("Count: 1");
 
-    // Click reset
     await userEvent.click(canvas.getByText("Reset"));
     await expect(canvas.getByTestId("count")).toHaveTextContent("Count: 0");
   },

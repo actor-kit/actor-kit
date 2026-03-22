@@ -1,0 +1,1 @@
+export { fromXStateStore } from "./fromXStateStore";

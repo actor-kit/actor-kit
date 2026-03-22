@@ -5,13 +5,33 @@ description: Install Actor Kit packages and configure your Cloudflare Worker pro
 
 ## Install packages
 
-Install the core packages plus peer dependencies:
+Choose the installation path that matches your preferred state management approach.
+
+### Plain (no state library)
+
+Use `defineLogic()` with a plain reducer — no external state library required:
 
 ```bash
-pnpm add @actor-kit/types @actor-kit/worker @actor-kit/browser @actor-kit/react @actor-kit/server xstate zod react
+pnpm add @actor-kit/core @actor-kit/browser @actor-kit/react @actor-kit/server zod
 ```
 
-> `react` is only required if using `@actor-kit/react`. The core packages (`@actor-kit/worker`, `@actor-kit/browser`, `@actor-kit/server`) work without React.
+### With XState
+
+Use `fromXStateMachine()` to wrap an XState v5 machine:
+
+```bash
+pnpm add @actor-kit/core @actor-kit/xstate @actor-kit/browser @actor-kit/react @actor-kit/server xstate zod
+```
+
+### With @xstate/store
+
+Use `fromXStateStore()` to wrap an @xstate/store:
+
+```bash
+pnpm add @actor-kit/core @actor-kit/xstate-store @actor-kit/browser @actor-kit/react @actor-kit/server @xstate/store zod
+```
+
+> `react` is only required if using `@actor-kit/react`. The core packages (`@actor-kit/core`, `@actor-kit/browser`, `@actor-kit/server`) work without React.
 
 For testing and Storybook:
 
@@ -67,4 +87,4 @@ The binding `name` must be the SCREAMING_SNAKE_CASE version of your actor type. 
 
 With packages installed and Wrangler configured, you're ready to build your first actor:
 
-→ [Quick Start](/getting-started/quick-start/)
+> [Quick Start](/getting-started/quick-start/)

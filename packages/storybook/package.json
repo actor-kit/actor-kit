@@ -20,7 +20,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@actor-kit/types": "workspace:*",
+    "@actor-kit/browser": "workspace:*",
     "@actor-kit/react": "workspace:*",
     "@actor-kit/test": "workspace:*"
   },

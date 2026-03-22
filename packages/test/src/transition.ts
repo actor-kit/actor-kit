@@ -1,31 +1,10 @@
-import {
-  type AnyStateMachine,
-  type SnapshotFrom,
-  createActor,
-  type InputFrom,
-} from "xstate";
-import type {
-  AnyActorKitStateMachine,
-  CallerSnapshotFrom,
-  Caller,
-} from "@actor-kit/types";
+import type { ActorLogic, Caller, BaseEnv } from "@actor-kit/core";
 
 /**
- * Mock storage that satisfies DurableObjectStorage interface for pure tests.
- * All operations are no-ops — the transition is pure.
- */
-const mockStorage = new Proxy(
-  {},
-  {
-    get: () => () => Promise.resolve(),
-  }
-) as unknown;
-
-/**
- * Mock env that satisfies ActorKitEnv for pure tests.
+ * Mock env for pure tests.
  */
 const mockEnv = new Proxy(
-  { ACTOR_KIT_SECRET: "test-secret" },
+  { ACTOR_KIT_SECRET: "test-secret" } as BaseEnv,
   {
     get: (target, prop) =>
       prop in target
@@ -34,113 +13,69 @@ const mockEnv = new Proxy(
   }
 );
 
-type TransitionOptions<TMachine extends AnyActorKitStateMachine> = {
-  /** Starting snapshot. If omitted, the machine starts from its initial state. */
-  snapshot?: SnapshotFrom<TMachine>;
+type TransitionOptions<TState, TEvent extends { type: string }, TEnv extends BaseEnv, TInput> = {
+  /** Starting state. If omitted, creates from initial state. */
+  state?: TState;
   /** The event to apply. */
-  event: { type: string; [key: string]: unknown };
+  event: TEvent;
   /** The caller sending this event. */
   caller: Caller;
-  /** Custom input props (passed to the machine's context factory). */
-  input?: Record<string, unknown>;
+  /** Custom input (used when no starting state is provided). */
+  input?: TInput;
+  /** Custom env (defaults to mock env with test-secret). */
+  env?: TEnv;
 };
 
-type TransitionResult<TMachine extends AnyActorKitStateMachine> = {
-  /** The raw XState snapshot — pass to the next transition() call to chain. */
-  snapshot: SnapshotFrom<TMachine>;
-  /** The full server context (public + all private). */
-  context: SnapshotFrom<TMachine> extends { context: infer C } ? C : unknown;
-  /** Caller-scoped snapshot (public + caller's private + state value). */
-  callerSnapshot: CallerSnapshotFrom<TMachine>;
+type TransitionResult<TState, TView> = {
+  /** The full internal state — pass to the next transition() call to chain. */
+  state: TState;
+  /** The caller-scoped view. */
+  view: TView;
 };
 
 /**
- * Pure transition function for testing actor-kit state machines.
+ * Pure transition function for testing actor logic.
  *
- * Applies an event to a machine and returns the next state — no DO,
- * no WebSocket, no storage required.
+ * Applies an event to an ActorLogic and returns the next state + view.
+ * No DO, no WebSocket, no storage required.
  *
  * ```ts
- * const result = transition(machine, {
+ * const result = transition(counterLogic, {
  *   event: { type: 'INCREMENT' },
  *   caller: { type: 'client', id: 'user-1' },
  * });
- * expect(result.context.public.count).toBe(1);
+ * expect(result.view.count).toBe(1);
  * ```
  */
-export function transition<TMachine extends AnyActorKitStateMachine>(
-  machine: TMachine,
-  options: TransitionOptions<TMachine>
-): TransitionResult<TMachine> {
-  const { snapshot, event, caller, input: inputProps } = options;
+export function transition<
+  TState,
+  TEvent extends { type: string },
+  TView,
+  TEnv extends BaseEnv,
+  TInput,
+>(
+  logic: ActorLogic<TState, TEvent, TView, TEnv, TInput>,
+  options: TransitionOptions<TState, TEvent, TEnv, TInput>
+): TransitionResult<TState, TView> {
+  const { state: existingState, event, caller, input, env } = options;
+  const resolvedEnv = (env ?? mockEnv) as TEnv;
 
-  // Augment event with caller, storage, env — same as createMachineServer.send()
+  // Get or create initial state
+  const currentState = existingState ?? logic.create(input as TInput, {
+    id: "test-actor",
+    caller,
+    env: resolvedEnv,
+  });
+
+  // Apply transition with augmented event
   const augmentedEvent = {
     ...event,
     caller,
-    storage: mockStorage,
-    env: mockEnv,
-  };
+    env: resolvedEnv,
+  } as TEvent & { caller: Caller; env: TEnv };
 
-  let nextSnapshot: SnapshotFrom<TMachine>;
+  const nextState = logic.transition(currentState, augmentedEvent);
+  const view = logic.getView(nextState, caller);
 
-  if (snapshot) {
-    // Apply event to existing snapshot
-    const actor = createActor(machine as AnyStateMachine, {
-      snapshot: snapshot as SnapshotFrom<AnyStateMachine>,
-    });
-    actor.start();
-    actor.send(augmentedEvent);
-    nextSnapshot = actor.getSnapshot() as SnapshotFrom<TMachine>;
-    actor.stop();
-  } else {
-    // Create from initial state with input, apply event
-    const machineInput = {
-      id: "test-actor",
-      caller,
-      storage: mockStorage,
-      env: mockEnv,
-      ...(inputProps ?? {}),
-    } as InputFrom<TMachine>;
-
-    const actor = createActor(machine as AnyStateMachine, {
-      input: machineInput as InputFrom<AnyStateMachine>,
-    });
-    actor.start();
-    actor.send(augmentedEvent);
-    nextSnapshot = actor.getSnapshot() as SnapshotFrom<TMachine>;
-    actor.stop();
-  }
-
-  const context = (
-    nextSnapshot as unknown as { context: unknown }
-  ).context as TransitionResult<TMachine>["context"];
-
-  const callerSnapshot = createCallerSnapshot<TMachine>(
-    nextSnapshot,
-    caller.id
-  );
-
-  return { snapshot: nextSnapshot, context, callerSnapshot };
-}
-
-function createCallerSnapshot<TMachine extends AnyActorKitStateMachine>(
-  fullSnapshot: SnapshotFrom<TMachine>,
-  callerId: string
-): CallerSnapshotFrom<TMachine> {
-  const snap = fullSnapshot as unknown as {
-    value: unknown;
-    context: {
-      public: unknown;
-      private: Record<string, unknown>;
-    };
-  };
-
-  return {
-    public: snap.context.public,
-    private:
-      snap.context.private[callerId] ??
-      ({} as CallerSnapshotFrom<TMachine>["private"]),
-    value: snap.value,
-  } as CallerSnapshotFrom<TMachine>;
+  return { state: nextState, view };
 }

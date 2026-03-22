@@ -10,16 +10,6 @@ type TestSnapshot = {
   private: {};
 };
 
-type TestMachine = {
-  input: unknown;
-  context: unknown;
-  events: TestEvent;
-  value: "ready";
-  output: unknown;
-  transition: unknown;
-  config: unknown;
-};
-
 class MockWebSocket {
   static OPEN = 1;
   static CONNECTING = 0;
@@ -78,7 +68,7 @@ function createTestClient(props?: {
   onError?: (error: Error) => void;
   initialSnapshot?: TestSnapshot;
 }) {
-  return createActorKitClient<TestMachine>({
+  return createActorKitClient<TestSnapshot, TestEvent>({
     accessToken: "token-123",
     actorId: "list-1",
     actorType: "todo",
@@ -125,7 +115,7 @@ describe("createActorKitClient", () => {
   });
 
   it("builds websocket URLs for local and remote hosts", async () => {
-    const localClient = createActorKitClient<TestMachine>({
+    const localClient = createActorKitClient<TestSnapshot, TestEvent>({
       accessToken: "token-123",
       actorId: "list-1",
       actorType: "todo",
@@ -145,7 +135,7 @@ describe("createActorKitClient", () => {
     MockWebSocket.instances[0]?.open();
     await localConnection;
 
-    const remoteClient = createActorKitClient<TestMachine>({
+    const remoteClient = createActorKitClient<TestSnapshot, TestEvent>({
       accessToken: "token-remote",
       actorId: "list-2",
       actorType: "todo",
@@ -376,7 +366,7 @@ describe("createActorKitClient", () => {
     socket.open();
     await connectionPromise;
 
-    expect(() => socket.emitMessage("{bad-json")).not.toThrow();
+    expect(() => socket.emitMessage("{not-json")).not.toThrow();
     expect(() => socket.emitError("socket")).not.toThrow();
     // Sending while disconnected now queues — should not throw
     client.disconnect();

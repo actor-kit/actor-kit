@@ -1,92 +1,66 @@
 import type { StoryContext, StoryFn } from "@storybook/react";
 import React from "react";
-import { createActorKitContext } from "@actor-kit/react";
+import type { ActorKitClient } from "@actor-kit/browser";
 import { createActorKitMockClient } from "@actor-kit/test";
-import type { AnyActorKitStateMachine, CallerSnapshotFrom } from "@actor-kit/types";
 
-export interface ActorKitParameters<TMachine extends AnyActorKitStateMachine> {
+export interface ActorKitParameters<TView> {
   actorKit: {
     [K: string]: {
-      [actorId: string]: CallerSnapshotFrom<TMachine>;
+      [actorId: string]: TView;
     };
   };
 }
 
-export type StoryWithActorKit<TMachine extends AnyActorKitStateMachine> = {
-  parameters: ActorKitParameters<TMachine>;
+export type StoryWithActorKit<TView> = {
+  parameters: ActorKitParameters<TView>;
 };
 
 /**
- * Storybook decorator that sets up actor-kit state machines.
- *
- * There are two main patterns for testing with actor-kit:
- *
- * 1. Static Stories (Use parameters.actorKit + within):
- * - Use this decorator with parameters.actorKit
- * - Use `within(canvasElement)` in play functions
- * - Good for simple stories that don't need state manipulation
- *
- * 2. Interactive Stories (Use mount + direct client):
- * - Don't use this decorator
- * - Create client manually and use mount in play function
- * - Good for stories that need to manipulate state
+ * Storybook decorator that sets up actor-kit contexts with mock clients.
  *
  * @example
  * ```tsx
- * // Pattern 1: Static Story
- * export const Static: Story = {
+ * export const Default: Story = {
+ *   decorators: [
+ *     withActorKit<CounterView, CounterEvent>({
+ *       actorType: "counter",
+ *       context: CounterContext,
+ *     }),
+ *   ],
  *   parameters: {
  *     actorKit: {
- *       session: {
- *         "session-123": { ... }
- *       }
- *     }
+ *       counter: { "counter-1": { count: 0 } },
+ *     },
  *   },
- *   play: async ({ canvasElement }) => {
- *     const canvas = within(canvasElement);
- *     // Test UI state...
- *   }
- * };
- *
- * // Pattern 2: Interactive Story
- * export const Interactive: Story = {
- *   play: async ({ canvasElement, mount }) => {
- *     const client = createActorKitMockClient({...});
- *     const canvas = within(canvasElement);
- *
- *     await mount(
- *       <Context.ProviderFromClient client={client}>
- *         <Component />
- *       </Context.ProviderFromClient>
- *     );
- *
- *     // Now you can manipulate client state...
- *     client.produce((draft) => { ... });
- *   }
  * };
  * ```
  */
-export const withActorKit = <TMachine extends AnyActorKitStateMachine>({
+export const withActorKit = <
+  TView,
+  TEvent extends { type: string } = { type: string },
+>({
   actorType,
   context,
 }: {
   actorType: string;
-  context: ReturnType<typeof createActorKitContext<TMachine>>;
+  context: {
+    ProviderFromClient: React.FC<{
+      children: React.ReactNode;
+      client: ActorKitClient<TView, TEvent>;
+    }>;
+  };
 }) => {
   return (Story: StoryFn, storyContext: StoryContext): React.ReactElement => {
     const actorKitParams = storyContext.parameters?.actorKit as
-      | ActorKitParameters<TMachine>["actorKit"]
+      | ActorKitParameters<TView>["actorKit"]
       | undefined;
 
-    // If no params provided, just render the story without any providers
     if (!actorKitParams?.[actorType]) {
       return <Story />;
     }
 
-    // Create nested providers for each actor ID
     const actorSnapshots = actorKitParams[actorType];
 
-    // Recursively nest providers
     const createNestedProviders = (
       actorIds: string[],
       index: number,
@@ -98,7 +72,7 @@ export const withActorKit = <TMachine extends AnyActorKitStateMachine>({
 
       const actorId = actorIds[index];
       const snapshot = actorSnapshots[actorId];
-      const client = createActorKitMockClient<TMachine>({
+      const client = createActorKitMockClient<TView, TEvent>({
         initialSnapshot: snapshot,
       });
 

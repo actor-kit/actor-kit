@@ -1,0 +1,1 @@
+export { fromXStateMachine } from "./fromXStateMachine";

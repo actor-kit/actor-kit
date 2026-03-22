@@ -1,68 +1,90 @@
 ---
 title: Persistence
-description: How Actor Kit persists and restores actor state in Durable Objects.
+description: How Actor Kit persists and restores state across Durable Object restarts.
 ---
 
-Actor Kit can persist state to Durable Object storage so actors survive restarts, deployments, and inactivity evictions.
+Actor Kit persists state to Durable Object storage so actors survive restarts, deployments, and inactivity evictions.
 
-## Enabling persistence
+## How it works
 
-Set `persisted: true` when creating your machine server:
+State is always persisted. On each transition, `createDurableActor` calls `logic.serialize(state)` and writes the result to DO storage. When the DO restarts, it calls `logic.restore(serialized)` to recreate the state.
 
-```typescript
-export const Todo = createMachineServer({
-  machine: todoMachine,
-  schemas: { /* ... */ },
-  options: {
-    persisted: true,
-  },
-});
+```
+Transition ──> logic.serialize(state) ──> DO storage
+DO restart ──> DO storage ──> logic.restore(serialized) ──> state
 ```
 
 ## What gets persisted
 
-When persistence is enabled:
+1. **On creation**: Actor metadata — `actorType`, `actorId`, initial caller, and input
+2. **On each transition**: Serialized state via `logic.serialize(state)`
+3. **On resume** (DO restart): State restored via `logic.restore()`, then `logic.onResume()` if provided
 
-1. **On creation**: Actor metadata is stored — `actorType`, `actorId`, initial caller, and input props.
-2. **On each transition**: The full snapshot is written to the `PERSISTED_SNAPSHOT_KEY` in DO storage.
-3. **On resume** (DO restart): The snapshot is restored, schema migrations are applied via `xstate-migrate`, and a `RESUME` system event is sent to the machine.
+## Migration
 
-The snapshot format:
+When your state shape changes between deployments, you need migration. How you handle it depends on your adapter:
 
-```typescript
-{
-  value: "ready",              // XState state value
-  context: {
-    public: { /* ... */ },
-    private: { /* ... */ },
-  },
-  version?: number,            // For migration tracking
-}
-```
+### Plain reducers / Redux / @xstate/store
 
-## Handling RESUME
-
-When a Durable Object restarts (after eviction, deployment, or crash), the machine receives a `RESUME` event. You can handle this to perform any re-initialization:
+Provide a `version` number and a `migrate` function:
 
 ```typescript
-states: {
-  ready: {
-    on: {
-      RESUME: {
-        actions: "handleResume",
-      },
-    },
+const logic = defineLogic({
+  // ...
+  version: 2,
+  migrate: (serialized, persistedVersion) => {
+    if (persistedVersion === 1) {
+      // Add new field that didn't exist in v1
+      return { ...serialized, newField: "default" };
+    }
+    return serialized;
   },
-},
+});
 ```
 
-## Auto-migration
+Migration only runs when the persisted version differs from the current version.
 
-If your machine's schema changes between deployments, `xstate-migrate` automatically handles snapshot migration. The `MIGRATE` system event is sent when the persisted snapshot's structure doesn't match the current machine definition.
+### XState adapter
 
-## When to use persistence
+`fromXStateMachine` provides automatic migration via `xstate-migrate`. It compares the persisted snapshot's structure against the current machine definition and generates migrations automatically — no version numbers needed.
 
-- **Persisted**: Long-lived actors (user profiles, game rooms, collaborative documents)
-- **Ephemeral**: Short-lived actors (temporary sessions, one-time computations)
+```typescript
+const logic = fromXStateMachine(todoMachine, { getView });
+// Migration is automatic — xstate-migrate handles it
+```
 
-Without persistence, actors lose state when the Durable Object is evicted from memory (typically after ~30 seconds of inactivity).
+## Lifecycle hooks
+
+When a DO restarts and state is restored, `logic.onResume(state)` is called if provided. Use this for re-initialization:
+
+```typescript
+const logic = defineLogic({
+  // ...
+  onResume: (state) => ({
+    ...state,
+    reconnectedAt: Date.now(),
+  }),
+});
+```
+
+## Serialize and restore
+
+By default, `defineLogic` uses `JSON.parse(JSON.stringify(state))` for serialization. If your state contains non-JSON-safe values (Dates, Maps, Sets), provide custom functions:
+
+```typescript
+const logic = defineLogic({
+  // ...
+  serialize: (state) => ({
+    ...state,
+    createdAt: state.createdAt.toISOString(),
+  }),
+  restore: (serialized) => ({
+    ...serialized,
+    createdAt: new Date(serialized.createdAt),
+  }),
+});
+```
+
+## DO eviction
+
+Cloudflare evicts inactive Durable Objects after ~30 seconds of no requests. With persistence, this is transparent — the state is restored on the next request. Without persistence, the actor starts fresh.

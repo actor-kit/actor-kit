@@ -64,10 +64,10 @@ jobs:
         run: pnpm run build
 
       - name: Install Playwright browsers
-        run: pnpm --filter nextjs-actorkit-todo exec playwright install --with-deps chromium
+        run: pnpm --filter nextjs-xstate-todo exec playwright install --with-deps chromium
 
       - name: Run Next.js E2E
-        run: pnpm --filter nextjs-actorkit-todo test:e2e
+        run: pnpm --filter nextjs-xstate-todo test:e2e
 
   tanstack-start-e2e:
     runs-on: ubuntu-latest
@@ -90,13 +90,13 @@ jobs:
         run: pnpm run build
 
       - name: Install Playwright browsers
-        run: pnpm --filter tanstack-start-actorkit-todo exec playwright install --with-deps chromium
+        run: pnpm --filter tanstack-start-xstate-todo exec playwright install --with-deps chromium
 
       - name: Build TanStack Start app
-        run: pnpm --filter tanstack-start-actorkit-todo run dev:e2e:build
+        run: pnpm --filter tanstack-start-xstate-todo run dev:e2e:build
 
       - name: Run TanStack Start E2E
-        run: pnpm --filter tanstack-start-actorkit-todo test:e2e
+        run: pnpm --filter tanstack-start-xstate-todo test:e2e
 
   storybook-tests:
     runs-on: ubuntu-latest
