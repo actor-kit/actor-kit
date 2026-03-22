@@ -101,7 +101,7 @@ const CREATE_TABLES_SQL = `
 // --- actor() function ---
 
 export function actor(
-  _name: string,
+  actorName: string,
   def: ActorDef,
 ) {
   return class ActorInstance extends DurableObject {
@@ -148,6 +148,9 @@ export function actor(
         }
 
         this.initialized = true;
+
+        // Drain any pending outbox entries from before crash/restart
+        this.drainOutbox();
       }
     }
 
@@ -284,11 +287,101 @@ export function actor(
       // Broadcast views to connected clients
       this.broadcastViews();
 
+      // Drain outbox asynchronously (don't await — fire and forget)
+      this.drainOutbox();
+
       return { ok: true };
+    }
+
+    private async drainOutbox(): Promise<void> {
+      const MAX_ATTEMPTS = 3;
+      const rows = this.ctx.storage.sql
+        .exec("SELECT id, type, payload, attempts, on_done, on_error FROM outbox WHERE status = 'pending' ORDER BY created_at")
+        .toArray();
+
+      for (const row of rows) {
+        const entry = row as { id: string; type: string; payload: string; attempts: number; on_done: string | null; on_error: string | null };
+        const payload: unknown = JSON.parse(entry.payload);
+
+        try {
+          await this.executeEffect(payload);
+
+          // Mark as sent
+          this.ctx.storage.sql.exec("UPDATE outbox SET status = 'sent' WHERE id = ?", entry.id);
+
+          // If this was a request with onDone, deliver the callback
+          if (entry.on_done && entry.type === "request") {
+            const onHandler = def.on?.[entry.on_done];
+            if (typeof onHandler === "function") {
+              const nextState = await onHandler(this.state, {});
+              if (nextState !== this.state) {
+                this.state = nextState;
+                this.persistState();
+                this.broadcastViews();
+              }
+            }
+          }
+        } catch (error) {
+          const newAttempts = entry.attempts + 1;
+          if (newAttempts >= MAX_ATTEMPTS) {
+            // Move to failures
+            this.ctx.storage.sql.exec(
+              "INSERT INTO emission_failures (id, type, payload, error, failed_at) VALUES (?, ?, ?, ?, ?)",
+              entry.id, entry.type, entry.payload,
+              error instanceof Error ? error.message : String(error),
+              Date.now(),
+            );
+            this.ctx.storage.sql.exec("DELETE FROM outbox WHERE id = ?", entry.id);
+
+            // Deliver onError callback if this was a request
+            if (entry.on_error && entry.type === "request") {
+              const onHandler = def.on?.[entry.on_error];
+              if (typeof onHandler === "function") {
+                const nextState = await onHandler(this.state, { message: error instanceof Error ? error.message : String(error) });
+                if (nextState !== this.state) {
+                  this.state = nextState;
+                  this.persistState();
+                  this.broadcastViews();
+                }
+              }
+            }
+          } else {
+            this.ctx.storage.sql.exec("UPDATE outbox SET attempts = ? WHERE id = ?", newAttempts, entry.id);
+          }
+        }
+      }
+    }
+
+    private async executeEffect(payload: unknown): Promise<void> {
+      if (typeof payload !== "object" || payload === null) return;
+
+      const effect = payload as Record<string, unknown>;
+
+      if ("queue" in effect && typeof effect["queue"] === "string") {
+        // Queue effect — call env binding
+        const queueName = effect["queue"];
+        const queueBinding = (this.env as Record<string, unknown>)[queueName];
+        if (queueBinding && typeof queueBinding === "object" && "send" in queueBinding) {
+          await (queueBinding as { send: (body: unknown) => Promise<void> }).send(effect["body"]);
+        }
+      } else if ("fetch" in effect && typeof effect["fetch"] === "string") {
+        // Fetch effect
+        await fetch(effect["fetch"], {
+          method: (effect["method"] as string) ?? "POST",
+          body: effect["body"] ? JSON.stringify(effect["body"]) : undefined,
+          headers: (effect["headers"] as Record<string, string>) ?? { "Content-Type": "application/json" },
+        });
+      } else if ("actor" in effect && typeof effect["actor"] === "string") {
+        // Actor RPC effect — not implemented in Phase 1, would use ref()
+        // For now, log and skip
+      }
     }
 
     async getSnapshot(caller: string, callerType: "user" | "service"): Promise<{ checksum: string; snapshot: unknown; role: string }> {
       await this.loadState();
+      if (!this.initialized) {
+        throw new Error("Actor not initialized — call spawn() first");
+      }
 
       const role = resolveRole(def.roles, this.state, caller, { callerType });
       if (role === null) {
@@ -307,10 +400,33 @@ export function actor(
       return { checksum, snapshot, role };
     }
 
-    private broadcastViews(): void {
+    private getCallerFromWs(ws: WebSocket): { caller: string; callerType: "user" | "service" } | null {
+      // Try in-memory map first
       for (const [caller, conn] of this.connections) {
+        if (conn.ws === ws) return { caller, callerType: conn.callerType };
+      }
+      // Fall back to DO tags (survives hibernation)
+      const tags = this.ctx.getTags(ws);
+      const callerTag = tags.find((t: string) => t.startsWith("caller:"));
+      const typeTag = tags.find((t: string) => t.startsWith("callerType:"));
+      if (!callerTag || !typeTag) return null;
+      const caller = callerTag.slice("caller:".length);
+      const callerType = typeTag.slice("callerType:".length);
+      if (callerType !== "user" && callerType !== "service") return null;
+      // Re-populate in-memory map
+      this.connections.set(caller, { ws, callerType });
+      return { caller, callerType };
+    }
+
+    private broadcastViews(): void {
+      // Use getWebSockets() to get all connected sockets (survives hibernation)
+      const allSockets = this.ctx.getWebSockets();
+      for (const ws of allSockets) {
+        const info = this.getCallerFromWs(ws);
+        if (!info) continue;
+        const { caller, callerType: ct } = info;
         try {
-          const role = resolveRole(def.roles, this.state, caller, { callerType: conn.callerType });
+          const role = resolveRole(def.roles, this.state, caller, { callerType: ct });
           if (role === null) continue;
 
           const viewDef = def.views[role];
@@ -324,7 +440,7 @@ export function actor(
           if (json === prevJson) continue;
 
           this.previousViews.set(caller, json);
-          conn.ws.send(JSON.stringify({ type: "snapshot", role, data: viewData }));
+          ws.send(JSON.stringify({ type: "snapshot", role, data: viewData }));
         } catch {
           // Connection may have closed
         }
@@ -350,22 +466,23 @@ export function actor(
         return new Response("Server misconfigured", { status: 500 });
       }
 
-      // Validate token — we need actorType and actorId from somewhere
-      // For now, extract from the URL path: /api/{actorType}/{actorId}
-      const url = new URL(request.url);
-      const parts = url.pathname.split("/").filter(Boolean);
-      const actorType = parts[1] ?? "";
-      const actorId = parts[2] ?? "";
+      // Validate token against the actual DO identity, not the URL path.
+      // actorName comes from the actor() definition. actorId comes from the DO's own ID.
+      const actorId = this.ctx.id.toString();
 
       let callerInfo: { caller: string; callerType: "user" | "service" };
       try {
-        callerInfo = await getCallerFromToken(token, actorType, actorId, secret);
+        callerInfo = await getCallerFromToken(token, actorName, actorId, secret);
       } catch {
         return new Response("Invalid token", { status: 401 });
       }
 
-      // Check role
+      // Check actor is initialized
       await this.loadState();
+      if (!this.initialized) {
+        return new Response("Actor not initialized", { status: 404 });
+      }
+
       const role = resolveRole(def.roles, this.state, callerInfo.caller, { callerType: callerInfo.callerType });
       if (role === null) {
         return new Response("Forbidden", { status: 403 });
@@ -375,7 +492,12 @@ export function actor(
       const pair = new WebSocketPair();
       const [client, server] = [pair[0], pair[1]];
 
-      this.ctx.acceptWebSocket(server);
+      // Store caller metadata as WebSocket tags so they survive DO hibernation.
+      // Tags: ["caller:{id}", "callerType:{type}"]
+      this.ctx.acceptWebSocket(server, [
+        `caller:${callerInfo.caller}`,
+        `callerType:${callerInfo.callerType}`,
+      ]);
       this.connections.set(callerInfo.caller, { ws: server, callerType: callerInfo.callerType });
 
       // Send initial snapshot
@@ -406,17 +528,9 @@ export function actor(
     async webSocketMessage(ws: WebSocket, data: string | ArrayBuffer): Promise<void> {
       if (typeof data !== "string") return;
 
-      // Find caller for this WebSocket
-      let caller: string | undefined;
-      let callerType: "user" | "service" = "user";
-      for (const [c, conn] of this.connections) {
-        if (conn.ws === ws) {
-          caller = c;
-          callerType = conn.callerType;
-          break;
-        }
-      }
-      if (!caller) return;
+      const info = this.getCallerFromWs(ws);
+      if (!info) return;
+      const { caller, callerType } = info;
 
       try {
         const parsed: unknown = JSON.parse(data);
@@ -438,14 +552,9 @@ export function actor(
     }
 
     async webSocketClose(ws: WebSocket): Promise<void> {
-      let caller: string | undefined;
-      for (const [c, conn] of this.connections) {
-        if (conn.ws === ws) {
-          caller = c;
-          break;
-        }
-      }
-      if (!caller) return;
+      const info = this.getCallerFromWs(ws);
+      if (!info) return;
+      const { caller } = info;
 
       this.connections.delete(caller);
       this.previousViews.delete(caller);
