@@ -125,8 +125,10 @@ export function actor(
     private stateTracker: Record<string, string> | { current: string } | undefined = undefined;
     private initialized = false;
     private version: number;
-    private connections = new Map<string, { ws: WebSocket; callerType: "user" | "service" }>();
-    private previousViews = new Map<string, unknown>();
+    // Keyed by WebSocket (not caller) to support multi-tab/multi-device
+    private connections = new Map<WebSocket, { caller: string; callerType: "user" | "service" }>();
+    private previousViews = new Map<WebSocket, string>(); // JSON string of last sent view
+    private draining = false; // Prevents concurrent outbox drains
 
     constructor(ctx: DurableObjectState, env: Record<string, unknown>) {
       super(ctx, env);
@@ -334,6 +336,18 @@ export function actor(
     }
 
     private async drainOutbox(): Promise<void> {
+      // Prevent concurrent drains (second message arriving mid-flight would re-process same rows)
+      if (this.draining) return;
+      this.draining = true;
+
+      try {
+        await this.drainOutboxInner();
+      } finally {
+        this.draining = false;
+      }
+    }
+
+    private async drainOutboxInner(): Promise<void> {
       const MAX_ATTEMPTS = 3;
       const rows = this.ctx.storage.sql
         .exec("SELECT id, type, payload, attempts, on_done, on_error FROM outbox WHERE status = 'pending' ORDER BY created_at")
@@ -405,12 +419,15 @@ export function actor(
           await (queueBinding as { send: (body: unknown) => Promise<void> }).send(effect["body"]);
         }
       } else if ("fetch" in effect && typeof effect["fetch"] === "string") {
-        // Fetch effect
-        await fetch(effect["fetch"], {
+        // Fetch effect — check HTTP status, throw on failure
+        const response = await fetch(effect["fetch"], {
           method: (effect["method"] as string) ?? "POST",
           body: effect["body"] ? JSON.stringify(effect["body"]) : undefined,
           headers: (effect["headers"] as Record<string, string>) ?? { "Content-Type": "application/json" },
         });
+        if (!response.ok) {
+          throw new Error(`Fetch failed: ${response.status} ${response.statusText}`);
+        }
       } else if ("actor" in effect && typeof effect["actor"] === "string") {
         // Actor RPC effect — not implemented in Phase 1, would use ref()
         // For now, log and skip
@@ -441,10 +458,10 @@ export function actor(
     }
 
     private getCallerFromWs(ws: WebSocket): { caller: string; callerType: "user" | "service" } | null {
-      // Try in-memory map first
-      for (const [caller, conn] of this.connections) {
-        if (conn.ws === ws) return { caller, callerType: conn.callerType };
-      }
+      // Try in-memory map first (keyed by WebSocket)
+      const conn = this.connections.get(ws);
+      if (conn) return conn;
+
       // Fall back to DO tags (survives hibernation)
       const tags = this.ctx.getTags(ws);
       const callerTag = tags.find((t: string) => t.startsWith("caller:"));
@@ -454,7 +471,7 @@ export function actor(
       const callerType = typeTag.slice("callerType:".length);
       if (callerType !== "user" && callerType !== "service") return null;
       // Re-populate in-memory map
-      this.connections.set(caller, { ws, callerType });
+      this.connections.set(ws, { caller, callerType });
       return { caller, callerType };
     }
 
@@ -475,11 +492,11 @@ export function actor(
           const viewData = viewDef.fn(this.state, caller);
           const json = JSON.stringify(viewData);
 
-          // Check if view changed (simple JSON equality for Phase 1)
-          const prevJson = this.previousViews.get(caller);
+          // Check if view changed PER CONNECTION (not per caller)
+          const prevJson = this.previousViews.get(ws);
           if (json === prevJson) continue;
 
-          this.previousViews.set(caller, json);
+          this.previousViews.set(ws, json);
           ws.send(JSON.stringify({ type: "snapshot", role, data: viewData }));
         } catch {
           // Connection may have closed
@@ -506,8 +523,14 @@ export function actor(
         return new Response("Server misconfigured", { status: 500 });
       }
 
+      // Load state FIRST so this.actorId is restored from SQLite
+      // (otherwise after hibernation, actorId is undefined and JWT check fails)
+      await this.loadState();
+      if (!this.initialized) {
+        return new Response("Actor not initialized", { status: 404 });
+      }
+
       // Validate token against the stored actor identity.
-      // actorId is set on spawn (human-readable name, not DO hash).
       const actorId = this.actorId ?? this.ctx.id.toString();
 
       let callerInfo: { caller: string; callerType: "user" | "service" };
@@ -515,12 +538,6 @@ export function actor(
         callerInfo = await getCallerFromToken(token, actorName, actorId, secret);
       } catch {
         return new Response("Invalid token", { status: 401 });
-      }
-
-      // Check actor is initialized
-      await this.loadState();
-      if (!this.initialized) {
-        return new Response("Actor not initialized", { status: 404 });
       }
 
       const role = resolveRole(def.roles, this.state, callerInfo.caller, { callerType: callerInfo.callerType });
@@ -538,14 +555,14 @@ export function actor(
         `caller:${callerInfo.caller}`,
         `callerType:${callerInfo.callerType}`,
       ]);
-      this.connections.set(callerInfo.caller, { ws: server, callerType: callerInfo.callerType });
+      this.connections.set(server, { caller: callerInfo.caller, callerType: callerInfo.callerType });
 
       // Send initial snapshot
       const viewDef = def.views[role];
       if (viewDef) {
         const viewData = viewDef.fn(this.state, callerInfo.caller);
         const json = JSON.stringify(viewData);
-        this.previousViews.set(callerInfo.caller, json);
+        this.previousViews.set(server, json);
         server.send(JSON.stringify({ type: "snapshot", role, data: viewData }));
       }
 
@@ -588,7 +605,11 @@ export function actor(
           return;
         }
         const event = parsed as Record<string, unknown> & { type: string };
-        await this.send(caller, callerType, event);
+        const result = await this.send(caller, callerType, event);
+        // Send error frame back to client if message was rejected
+        if (!result.ok) {
+          ws.send(JSON.stringify({ type: "__error", message: event.type, error: result.error }));
+        }
       } catch {
         ws.send(JSON.stringify({ type: "__error", detail: "Invalid message" }));
       }
@@ -599,8 +620,8 @@ export function actor(
       if (!info) return;
       const { caller } = info;
 
-      this.connections.delete(caller);
-      this.previousViews.delete(caller);
+      this.connections.delete(ws);
+      this.previousViews.delete(ws);
 
       // Run on.disconnect if defined
       if (def.on?.["disconnect"]) {
