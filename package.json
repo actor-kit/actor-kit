@@ -3,12 +3,13 @@
   "private": true,
   "scripts": {
     "typecheck": "pnpm -r run typecheck",
-    "test:unit": "vitest run --project unit",
-    "test:integration": "vitest run --project integration",
+    "test:unit": "vitest run",
+    "test:integration": "cd tests/integration && vitest run --config vitest.config.ts && vitest run --config vitest.ws.config.ts",
     "test": "pnpm test:unit && pnpm test:integration",
-    "lint": "biome check packages/ tests/",
-    "lint:fix": "biome check --write packages/ tests/",
-    "build": "pnpm -r run build"
+    "lint": "biome check packages/actor-kit/src/ tests/",
+    "lint:fix": "biome check --write packages/actor-kit/src/ tests/",
+    "build": "pnpm -r run build",
+    "prepare": "husky"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.4.8",
@@ -23,6 +24,7 @@
     "@typescript-eslint/eslint-plugin": "^8.0.0",
     "@typescript-eslint/parser": "^8.0.0",
     "eslint": "^9.0.0",
+    "husky": "^9.1.7",
     "immer": "^10.0.0",
     "jose": "^6.0.0",
     "jsdom": "^29.0.1",

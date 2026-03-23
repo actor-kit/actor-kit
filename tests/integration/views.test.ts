@@ -1,9 +1,9 @@
 import { env } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
+import { createAccessToken } from "../../packages/actor-kit/src/auth/auth";
 import { decode } from "../../packages/actor-kit/src/schema/binary";
 import { FrameType, parseFrame } from "../../packages/actor-kit/src/schema/frame";
 import { schema, string, uint32 } from "../../packages/actor-kit/src/schema/schema";
-import { createAccessToken } from "../../packages/actor-kit/src/auth/auth";
 
 const SECRET = "test-secret-for-integration-tests-only";
 const CounterView = schema({ count: uint32, lastCaller: string });

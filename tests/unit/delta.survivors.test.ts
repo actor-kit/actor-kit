@@ -1,6 +1,16 @@
 import { describe, expect, it } from "vitest";
 import { applyDelta, encodeDelta } from "../../packages/actor-kit/src/schema/delta";
-import { array, boolean, float32, float64, schema, string, uint8, uint16, uint32 } from "../../packages/actor-kit/src/schema/schema";
+import {
+  array,
+  boolean,
+  float32,
+  float64,
+  schema,
+  string,
+  uint8,
+  uint16,
+  uint32,
+} from "../../packages/actor-kit/src/schema/schema";
 
 describe("delta encoding — kill survivors", () => {
   it("detects string field change", () => {

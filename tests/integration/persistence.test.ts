@@ -60,9 +60,7 @@ describe("Persistence (integration)", () => {
     await stub.spawn({ actorId, caller: "u1", callerType: "user", input: {} });
 
     // Send 10 increments concurrently
-    const promises = Array.from({ length: 10 }, () =>
-      stub.send("u1", "user", { type: "INCREMENT", amount: 1 }),
-    );
+    const promises = Array.from({ length: 10 }, () => stub.send("u1", "user", { type: "INCREMENT", amount: 1 }));
     const results = await Promise.all(promises);
     expect(results.every((r) => r.ok)).toBe(true);
 

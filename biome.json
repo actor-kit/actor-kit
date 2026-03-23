@@ -23,7 +23,7 @@
     "lineWidth": 120
   },
   "files": {
-    "includes": ["packages/**/*.ts", "tests/**/*.ts"],
+    "includes": ["packages/actor-kit/src/**/*.ts", "tests/**/*.ts"],
     "ignoreUnknown": true
   },
   "assist": {

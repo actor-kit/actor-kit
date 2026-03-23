@@ -1,7 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { message } from "../../packages/actor-kit/src/core/message";
-import { type ParallelStates, type SequentialStates, resolveMessagesForState } from "../../packages/actor-kit/src/runtime/states";
+import {
+  type ParallelStates,
+  resolveMessagesForState,
+  type SequentialStates,
+} from "../../packages/actor-kit/src/runtime/states";
 
 type State = { status: string };
 

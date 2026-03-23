@@ -1,6 +1,16 @@
 import { describe, expect, it } from "vitest";
 import { decode, encode } from "../../packages/actor-kit/src/schema/binary";
-import { array, boolean, float32, float64, schema, string, uint8, uint16, uint32 } from "../../packages/actor-kit/src/schema/schema";
+import {
+  array,
+  boolean,
+  float32,
+  float64,
+  schema,
+  string,
+  uint8,
+  uint16,
+  uint32,
+} from "../../packages/actor-kit/src/schema/schema";
 
 describe("binary encode/decode — kill survivors", () => {
   it("uint8 max value (255)", () => {
