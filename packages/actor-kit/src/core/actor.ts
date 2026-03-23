@@ -44,6 +44,7 @@ interface ActorDef {
   init(input: unknown): unknown; // bivariant
   version?: number;
   initial?: string;
+  binarySync?: boolean; // opt-in: send binary frames instead of JSON
   roles: Record<string, {
     // bivariant method signature for role predicates
     (state: unknown, caller: string, claims: { callerType: "user" | "service" }): boolean;
@@ -538,9 +539,9 @@ export function actor(
 
           this.previousViews.set(ws, dedupeKey);
 
-          // Use binary encoding if schema is available, otherwise JSON fallback
+          // Use binary encoding only if binarySync is enabled and schema is available
           const viewSchema = viewDef.schema;
-          if (viewSchema && viewSchema.fields) {
+          if (def.binarySync && viewSchema && viewSchema.fields) {
             const schemaDef = viewSchema as SchemaDefinition<Record<string, FieldDescriptor>>;
             const payload = encode(schemaDef, viewData as Record<string, unknown>);
             const roleIndex = roleNames.indexOf(role);
@@ -767,16 +768,27 @@ export function actor(
           }
         }
 
-        // Clean up and schedule next timer using creation time (drift-free)
+        // Track fired timer and schedule next (drift-free)
         this.ctx.storage.sql.exec("DELETE FROM actor_meta WHERE key = 'scheduled_alarm'");
 
-        // Get creation time for drift-free scheduling
+        // Persist fired key so it's never re-picked
+        const firedRows = this.ctx.storage.sql
+          .exec("SELECT value FROM actor_meta WHERE key = 'after_fired_keys'")
+          .toArray();
+        const previouslyFired = firedRows.length > 0
+          ? JSON.parse((firedRows[0] as { value: string }).value) as string[]
+          : [];
+        const allFired = [...previouslyFired, scheduledKey];
+        this.ctx.storage.sql.exec(
+          "INSERT OR REPLACE INTO actor_meta (key, value) VALUES ('after_fired_keys', ?)",
+          JSON.stringify(allFired),
+        );
+
         const createdRows = this.ctx.storage.sql
           .exec("SELECT value FROM actor_meta WHERE key = 'after_created_at'")
           .toArray();
         const createdAt = Number((createdRows[0] as { value: string } | undefined)?.value ?? Date.now());
-        const firedKeys = new Set([scheduledKey]);
-        this.pickNextAfterTimer(createdAt, firedKeys);
+        this.pickNextAfterTimer(createdAt, new Set(allFired));
       }
 
       // Check for outbox retry
@@ -849,16 +861,21 @@ export function actor(
 
     private tickInterval: ReturnType<typeof setInterval> | undefined = undefined;
     private lastTickPersist = 0;
+    private tickRunning = false; // Reentrancy guard for async tick handlers
 
     private startTick(): void {
       if (!def.tick || this.tickInterval !== undefined) return;
 
       this.tickInterval = setInterval(async () => {
         if (!this.initialized) return;
-        const handler = def.tick?.handler;
-        if (typeof handler !== "function") return;
+        if (this.tickRunning) return; // Skip if previous tick is still running
+        this.tickRunning = true;
 
-        const nextState = await handler(this.state);
+        try {
+          const handler = def.tick?.handler;
+          if (typeof handler !== "function") return;
+
+          const nextState = await handler(this.state);
         if (nextState !== this.state) {
           this.state = nextState;
 
@@ -870,6 +887,9 @@ export function actor(
           }
 
           this.broadcastViews();
+        }
+        } finally {
+          this.tickRunning = false;
         }
       }, def.tick.frequency);
     }

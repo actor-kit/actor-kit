@@ -143,6 +143,11 @@ export function createActorClient(options: ClientOptions): ActorClient {
     const url = `wss://${host}/api/${actorType}/${encodedActorId}`;
     ws = new WebSocketImpl(url, [`token.${accessToken}`]);
 
+    // Request ArrayBuffer for binary frames (browsers default to Blob)
+    if ("binaryType" in ws) {
+      (ws as { binaryType: string }).binaryType = "arraybuffer";
+    }
+
     ws.addEventListener("open", () => {
       reconnectAttempts = 0;
     });

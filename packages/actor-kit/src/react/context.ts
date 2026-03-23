@@ -17,6 +17,7 @@
 
 import {
   createContext,
+  createElement,
   useContext,
   useEffect,
   useRef,
@@ -79,7 +80,7 @@ export function createActorContext(actorType: string): ActorContext {
       return null;
     }
 
-    return ClientContext.Provider({ value: client, children });
+    return createElement(ClientContext.Provider, { value: client }, children);
   }
 
   function useView(): unknown {
