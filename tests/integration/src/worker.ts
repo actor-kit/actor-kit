@@ -89,6 +89,13 @@ export const TimerActor = actor("timer", {
   after: {
     "1 second": (state: unknown) => ({ ...(state as TimerState), expired: true }),
   },
+  tick: {
+    frequency: 50, // 50ms tick
+    handler: (state: unknown) => ({
+      ...(state as TimerState),
+      count: (state as TimerState).count + 1,
+    }),
+  },
 });
 
 // --- Auction actor (for testing sequential states) ---
