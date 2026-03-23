@@ -682,25 +682,42 @@ export function actor(
     private scheduleAfterTimers(): void {
       if (!def.after) return;
 
-      // Find the soonest timer and schedule it
-      let soonestMs = Infinity;
+      const createdAt = Date.now();
+
+      // Store creation time so all timers are relative to it (prevents drift)
+      this.ctx.storage.sql.exec(
+        "INSERT OR REPLACE INTO actor_meta (key, value) VALUES ('after_created_at', ?)",
+        String(createdAt),
+      );
+
+      // Schedule ALL timers relative to creation time, pick the soonest
+      this.scheduleNextAlarm(createdAt);
+    }
+
+    private scheduleNextAlarm(createdAt: number, excludeKeys?: Set<string>): void {
+      if (!def.after) return;
+
+      let soonestAbsoluteTime = Infinity;
       let soonestKey: string | undefined;
 
       for (const [durationStr] of Object.entries(def.after)) {
+        if (excludeKeys?.has(durationStr)) continue;
         const ms = parseDuration(durationStr);
-        if (ms < soonestMs) {
-          soonestMs = ms;
+        const absoluteTime = createdAt + ms;
+        if (absoluteTime < soonestAbsoluteTime) {
+          soonestAbsoluteTime = absoluteTime;
           soonestKey = durationStr;
         }
       }
 
-      if (soonestKey !== undefined && soonestMs < Infinity) {
-        // Store which timer is scheduled so alarm() knows which handler to run
+      if (soonestKey !== undefined && soonestAbsoluteTime < Infinity) {
         this.ctx.storage.sql.exec(
           "INSERT OR REPLACE INTO actor_meta (key, value) VALUES ('scheduled_alarm', ?)",
           soonestKey,
         );
-        this.ctx.storage.setAlarm(Date.now() + soonestMs);
+        // Schedule at absolute time, not relative — prevents drift
+        const delay = Math.max(0, soonestAbsoluteTime - Date.now());
+        this.ctx.storage.setAlarm(Date.now() + delay);
       }
     }
 
@@ -725,27 +742,16 @@ export function actor(
           }
         }
 
-        // Clean up and schedule next timer (excluding the one that just fired)
+        // Clean up and schedule next timer using creation time (drift-free)
         this.ctx.storage.sql.exec("DELETE FROM actor_meta WHERE key = 'scheduled_alarm'");
 
-        // Schedule remaining timers
-        let soonestMs = Infinity;
-        let soonestKey: string | undefined;
-        for (const [durationStr] of Object.entries(def.after)) {
-          if (durationStr === scheduledKey) continue;
-          const ms = parseDuration(durationStr);
-          if (ms < soonestMs) {
-            soonestMs = ms;
-            soonestKey = durationStr;
-          }
-        }
-        if (soonestKey !== undefined && soonestMs < Infinity) {
-          this.ctx.storage.sql.exec(
-            "INSERT OR REPLACE INTO actor_meta (key, value) VALUES ('scheduled_alarm', ?)",
-            soonestKey,
-          );
-          this.ctx.storage.setAlarm(Date.now() + soonestMs);
-        }
+        // Get creation time for drift-free scheduling
+        const createdRows = this.ctx.storage.sql
+          .exec("SELECT value FROM actor_meta WHERE key = 'after_created_at'")
+          .toArray();
+        const createdAt = Number((createdRows[0] as { value: string } | undefined)?.value ?? Date.now());
+        const firedKeys = new Set([scheduledKey]);
+        this.scheduleNextAlarm(createdAt, firedKeys);
       }
 
       // Check for outbox retry alarm
