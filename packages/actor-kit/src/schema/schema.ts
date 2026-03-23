@@ -93,7 +93,10 @@ function buildElementMeta(descriptor: FieldDescriptor): FieldMeta["element"] & o
   if (descriptor.kind === "schema") {
     return { type: "schema", schema: descriptor };
   }
-  // Nested array — array of arrays (unusual but possible)
+  // Nested array — array of arrays. Preserve inner element metadata.
+  if (descriptor.kind === "array") {
+    return { type: "array", element: buildElementMeta(descriptor.element) };
+  }
   return { type: "array" };
 }
 

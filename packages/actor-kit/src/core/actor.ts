@@ -21,8 +21,7 @@ import { getCallerFromToken } from "../auth/auth";
 import type { MessageContext, Effect, RequestConfig } from "./message";
 import { parseDuration } from "../runtime/timers";
 import { encode } from "../schema/binary";
-import { encodeDelta } from "../schema/delta";
-import { createSnapshotFrame, createDeltaFrame, FrameType } from "../schema/frame";
+import { createSnapshotFrame } from "../schema/frame";
 import type { SchemaDefinition, FieldDescriptor } from "../schema/schema";
 
 // --- Actor definition ---
@@ -292,9 +291,8 @@ export function actor(
         return { ok: false, error: "No messages available" };
       }
 
-      // Create outbox collector + state transition tracker
+      // Create outbox collector
       const outbox = createOutbox();
-      let pendingStateTransition: string | undefined;
 
       const ctx: Omit<MessageContext, "role"> = {
         caller,
@@ -419,14 +417,14 @@ export function actor(
             }
           } else {
             this.ctx.storage.sql.exec("UPDATE outbox SET attempts = ? WHERE id = ?", newAttempts, entry.id);
-            // Schedule retry via DO Alarm — exponential backoff: 1s, 5s, 25s
+            // Schedule retry — store desired time, then use unified alarm scheduler
             const retryDelays = [1000, 5000, 25000];
             const delay = retryDelays[newAttempts - 1] ?? 25000;
             this.ctx.storage.sql.exec(
-              "INSERT OR REPLACE INTO actor_meta (key, value) VALUES ('outbox_retry', ?)",
+              "INSERT OR REPLACE INTO actor_meta (key, value) VALUES ('outbox_retry_at', ?)",
               String(Date.now() + delay),
             );
-            this.ctx.storage.setAlarm(Date.now() + delay);
+            this.scheduleUnifiedAlarm();
           }
         }
       }
@@ -532,13 +530,13 @@ export function actor(
           if (viewDef === undefined) continue;
 
           const viewData = viewDef.fn(this.state, caller);
-          const json = JSON.stringify(viewData);
+          // Include role in dedupe key — role change with identical data still triggers update
+          const dedupeKey = `${role}:${JSON.stringify(viewData)}`;
 
-          // Check if view changed PER CONNECTION (not per caller)
-          const prevJson = this.previousViews.get(ws);
-          if (json === prevJson) continue;
+          const prevKey = this.previousViews.get(ws);
+          if (dedupeKey === prevKey) continue;
 
-          this.previousViews.set(ws, json);
+          this.previousViews.set(ws, dedupeKey);
 
           // Use binary encoding if schema is available, otherwise JSON fallback
           const viewSchema = viewDef.schema;
@@ -717,11 +715,12 @@ export function actor(
         String(createdAt),
       );
 
-      // Schedule ALL timers relative to creation time, pick the soonest
-      this.scheduleNextAlarm(createdAt);
+      // Find the soonest timer and store it, then use unified scheduler
+      this.pickNextAfterTimer(createdAt);
+      this.scheduleUnifiedAlarm();
     }
 
-    private scheduleNextAlarm(createdAt: number, excludeKeys?: Set<string>): void {
+    private pickNextAfterTimer(createdAt: number, excludeKeys?: Set<string>): void {
       if (!def.after) return;
 
       let soonestAbsoluteTime = Infinity;
@@ -737,14 +736,13 @@ export function actor(
         }
       }
 
-      if (soonestKey !== undefined && soonestAbsoluteTime < Infinity) {
+      if (soonestKey !== undefined) {
         this.ctx.storage.sql.exec(
           "INSERT OR REPLACE INTO actor_meta (key, value) VALUES ('scheduled_alarm', ?)",
           soonestKey,
         );
-        // Schedule at absolute time, not relative — prevents drift
-        const delay = Math.max(0, soonestAbsoluteTime - Date.now());
-        this.ctx.storage.setAlarm(Date.now() + delay);
+      } else {
+        this.ctx.storage.sql.exec("DELETE FROM actor_meta WHERE key = 'scheduled_alarm'");
       }
     }
 
@@ -778,16 +776,72 @@ export function actor(
           .toArray();
         const createdAt = Number((createdRows[0] as { value: string } | undefined)?.value ?? Date.now());
         const firedKeys = new Set([scheduledKey]);
-        this.scheduleNextAlarm(createdAt, firedKeys);
+        this.pickNextAfterTimer(createdAt, firedKeys);
       }
 
-      // Check for outbox retry alarm
+      // Check for outbox retry
       const retryRows = this.ctx.storage.sql
-        .exec("SELECT value FROM actor_meta WHERE key = 'outbox_retry'")
+        .exec("SELECT value FROM actor_meta WHERE key = 'outbox_retry_at'")
+        .toArray();
+      const retryAt = retryRows.length > 0 ? Number((retryRows[0] as { value: string }).value) : undefined;
+      if (retryAt !== undefined && Date.now() >= retryAt) {
+        this.ctx.storage.sql.exec("DELETE FROM actor_meta WHERE key = 'outbox_retry_at'");
+        this.drainOutbox();
+      }
+
+      // Re-schedule unified alarm for any remaining timers/retries
+      this.scheduleUnifiedAlarm();
+    }
+
+    // --- Unified alarm scheduler ---
+    // DOs only have one alarm slot. This method picks the soonest needed
+    // alarm across after timers and outbox retries.
+
+    private scheduleUnifiedAlarm(): void {
+      let soonestTime = Infinity;
+
+      // Check after timers
+      if (def.after) {
+        const createdRows = this.ctx.storage.sql
+          .exec("SELECT value FROM actor_meta WHERE key = 'after_created_at'")
+          .toArray();
+        const createdAt = createdRows.length > 0
+          ? Number((createdRows[0] as { value: string }).value)
+          : undefined;
+
+        if (createdAt !== undefined) {
+          const scheduledRows = this.ctx.storage.sql
+            .exec("SELECT value FROM actor_meta WHERE key = 'scheduled_alarm'")
+            .toArray();
+          const scheduledKey = scheduledRows.length > 0
+            ? (scheduledRows[0] as { value: string }).value
+            : undefined;
+
+          if (scheduledKey) {
+            const ms = parseDuration(scheduledKey);
+            const absoluteTime = createdAt + ms;
+            if (absoluteTime < soonestTime) {
+              soonestTime = absoluteTime;
+            }
+          }
+        }
+      }
+
+      // Check outbox retry
+      const retryRows = this.ctx.storage.sql
+        .exec("SELECT value FROM actor_meta WHERE key = 'outbox_retry_at'")
         .toArray();
       if (retryRows.length > 0) {
-        this.ctx.storage.sql.exec("DELETE FROM actor_meta WHERE key = 'outbox_retry'");
-        this.drainOutbox();
+        const retryAt = Number((retryRows[0] as { value: string }).value);
+        if (retryAt < soonestTime) {
+          soonestTime = retryAt;
+        }
+      }
+
+      // Schedule the soonest alarm
+      if (soonestTime < Infinity) {
+        const delay = Math.max(0, soonestTime - Date.now());
+        this.ctx.storage.setAlarm(Date.now() + delay);
       }
     }
 
