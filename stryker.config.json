@@ -4,8 +4,9 @@
   "vitest": {
     "configFile": "vitest.config.ts"
   },
-  "checkers": ["typescript"],
-  "tsconfigFile": "packages/actor-kit/tsconfig.json",
+  "plugins": [
+    "@stryker-mutator/vitest-runner"
+  ],
   "mutate": [
     "packages/actor-kit/src/schema/schema.ts",
     "packages/actor-kit/src/schema/binary.ts",
@@ -23,12 +24,12 @@
     "packages/actor-kit/src/auth/auth.ts",
     "packages/actor-kit/src/test/test-actor.ts"
   ],
-  "reporters": ["clear-text", "html"],
+  "reporters": ["clear-text"],
   "thresholds": {
     "high": 90,
     "low": 70,
     "break": 60
   },
-  "concurrency": 4,
+  "concurrency": 2,
   "timeoutMS": 30000
 }
