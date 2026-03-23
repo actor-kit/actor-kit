@@ -127,12 +127,10 @@ export function createActorContext(actorType: string): ActorContext {
     const [state, setState] = useState<ConnectionState>(client.connectionState);
 
     useEffect(() => {
-      const check = () => {
-        if (client.connectionState !== state) {
-          setState(client.connectionState);
-        }
-      };
-      return client.subscribe(check);
+      // Use onStateChange for real connection events (not just snapshot-driven)
+      return client.onStateChange((newState) => {
+        setState(newState);
+      });
     }, [client]);
 
     return state;

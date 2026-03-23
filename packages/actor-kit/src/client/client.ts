@@ -17,6 +17,7 @@ export interface ActorClient {
   readonly view: unknown;
   readonly role: string | undefined;
   subscribe(listener: (view: unknown) => void): () => void;
+  onStateChange(listener: (state: ConnectionState) => void): () => void;
   send(event: { type: string; [key: string]: unknown }): void;
   trigger(type: string, payload?: Record<string, unknown>): void;
   disconnect(): void;
@@ -53,6 +54,7 @@ export function createActorClient(options: ClientOptions): ActorClient {
   let currentView: unknown = undefined;
   let currentRole: string | undefined = undefined;
   const listeners = new Set<(view: unknown) => void>();
+  const stateListeners = new Set<(state: ConnectionState) => void>();
   let ws: InstanceType<typeof WebSocketImpl> | undefined;
   let intentionalClose = false;
   let reconnectAttempts = 0;
@@ -61,6 +63,14 @@ export function createActorClient(options: ClientOptions): ActorClient {
   function notifyListeners() {
     for (const listener of listeners) {
       listener(currentView);
+    }
+  }
+
+  function setConnectionState(newState: ConnectionState) {
+    if (newState === connectionState) return;
+    connectionState = newState;
+    for (const listener of stateListeners) {
+      listener(newState);
     }
   }
 
@@ -79,7 +89,7 @@ export function createActorClient(options: ClientOptions): ActorClient {
         if (roleNames && frame.roleIndex !== undefined) {
           currentRole = roleNames[frame.roleIndex];
         }
-        connectionState = "connected";
+        setConnectionState("connected");
         notifyListeners();
       } else if (frame.type === FrameType.CONTROL && frame.controlType !== undefined) {
         // Handle control frames (redirect, error, etc.)
@@ -113,7 +123,7 @@ export function createActorClient(options: ClientOptions): ActorClient {
       if (msgObj["type"] === "snapshot") {
         currentView = msgObj["data"];
         currentRole = typeof msgObj["role"] === "string" ? msgObj["role"] : currentRole;
-        connectionState = "connected";
+        setConnectionState("connected");
         notifyListeners();
       } else if (msgObj["type"] === "__redirect") {
         onRedirect?.({
@@ -147,19 +157,19 @@ export function createActorClient(options: ClientOptions): ActorClient {
 
     ws.addEventListener("close", () => {
       if (intentionalClose) {
-        connectionState = "disconnected";
+        setConnectionState("disconnected");
         return;
       }
 
       if (reconnectAttempts < maxReconnectAttempts) {
-        connectionState = "reconnecting";
+        setConnectionState("reconnecting");
         const delay = Math.min(1000 * Math.pow(2, reconnectAttempts), 30000);
         reconnectAttempts += 1;
         reconnectTimer = setTimeout(() => {
           connect();
         }, delay);
       } else {
-        connectionState = "disconnected";
+        setConnectionState("disconnected");
       }
     });
 
@@ -183,6 +193,10 @@ export function createActorClient(options: ClientOptions): ActorClient {
     subscribe(listener: (view: unknown) => void): () => void {
       listeners.add(listener);
       return () => { listeners.delete(listener); };
+    },
+    onStateChange(listener: (state: ConnectionState) => void): () => void {
+      stateListeners.add(listener);
+      return () => { stateListeners.delete(listener); };
     },
     send(event: { type: string; [key: string]: unknown }) {
       if (ws && ws.readyState === 1) {
