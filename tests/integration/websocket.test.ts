@@ -1,16 +1,21 @@
 import { env } from "cloudflare:test";
-import { describe, it, expect } from "vitest";
+import { describe, expect, it } from "vitest";
 import { createAccessToken } from "../../packages/actor-kit/src/auth/auth";
 import { decode } from "../../packages/actor-kit/src/schema/binary";
-import { parseFrame, FrameType } from "../../packages/actor-kit/src/schema/frame";
-import { schema, uint32, string } from "../../packages/actor-kit/src/schema/schema";
+import { FrameType, parseFrame } from "../../packages/actor-kit/src/schema/frame";
+import { schema, string, uint32 } from "../../packages/actor-kit/src/schema/schema";
 
 const SECRET = "test-secret-for-integration-tests-only";
 
 // Must match the CounterView from the test worker
 const CounterView = schema({ count: uint32, lastCaller: string });
 
-async function connectWs(stub: DurableObjectStub, actorId: string, callerId: string, callerType: "user" | "service" = "user") {
+async function connectWs(
+  stub: DurableObjectStub,
+  actorId: string,
+  callerId: string,
+  callerType: "user" | "service" = "user",
+) {
   const token = await createAccessToken({
     actorType: "counter",
     actorId,
@@ -29,14 +34,18 @@ async function connectWs(stub: DurableObjectStub, actorId: string, callerId: str
 
 function waitForBinaryMessage(ws: WebSocket): Promise<ArrayBuffer> {
   return new Promise<ArrayBuffer>((resolve) => {
-    ws.addEventListener("message", (event) => {
-      if (event.data instanceof ArrayBuffer) {
-        resolve(event.data);
-      } else if (typeof event.data === "string") {
-        // JSON fallback — convert to buffer for uniform handling
-        resolve(new TextEncoder().encode(event.data).buffer);
-      }
-    }, { once: true });
+    ws.addEventListener(
+      "message",
+      (event) => {
+        if (event.data instanceof ArrayBuffer) {
+          resolve(event.data);
+        } else if (typeof event.data === "string") {
+          // JSON fallback — convert to buffer for uniform handling
+          resolve(new TextEncoder().encode(event.data).buffer);
+        }
+      },
+      { once: true },
+    );
   });
 }
 

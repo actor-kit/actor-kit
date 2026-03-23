@@ -1,5 +1,5 @@
 import { env } from "cloudflare:test";
-import { describe, it, expect } from "vitest";
+import { describe, expect, it } from "vitest";
 
 function getStub(name: string) {
   const id = env.COUNTER.idFromName(name);
@@ -20,7 +20,7 @@ describe("Counter DO edge cases", () => {
     await stub.spawn({ actorId, caller: "user-1", callerType: "user", input: {} });
 
     // Send 10 increments rapidly
-    const promises = Array.from({ length: 10 }, (_, i) =>
+    const promises = Array.from({ length: 10 }, (_, _i) =>
       stub.send("user-1", "user", { type: "INCREMENT", amount: 1 }),
     );
     const results = await Promise.all(promises);

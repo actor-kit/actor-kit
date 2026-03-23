@@ -1,25 +1,19 @@
-import { describe, it, expect } from "vitest";
+import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { message } from "../../packages/actor-kit/src/core/message";
-import { testActor } from "../../packages/actor-kit/src/test/test-actor";
-import { schema, uint32 } from "../../packages/actor-kit/src/schema/schema";
 import { view } from "../../packages/actor-kit/src/core/view";
+import { schema, uint32 } from "../../packages/actor-kit/src/schema/schema";
+import { testActor } from "../../packages/actor-kit/src/test/test-actor";
 
 type State = { count: number; maxCount: number };
 const CountView = schema({ count: uint32 });
 
-const increment = message(
-  z.object({}),
-  {
-    guard: (state: State) => state.count < state.maxCount,
-    handler: (state: State) => ({ ...state, count: state.count + 1 }),
-  },
-);
+const increment = message(z.object({}), {
+  guard: (state: State) => state.count < state.maxCount,
+  handler: (state: State) => ({ ...state, count: state.count + 1 }),
+});
 
-const reset = message(
-  z.object({}),
-  (state: State) => ({ ...state, count: 0 }),
-);
+const reset = message(z.object({}), (state: State) => ({ ...state, count: 0 }));
 
 describe("testActor with guards", () => {
   const def = {
@@ -46,9 +40,7 @@ describe("testActor with guards", () => {
     state = await t.send(state, "alice", { type: "INCREMENT" });
     expect(state.count).toBe(2);
 
-    await expect(
-      t.send(state, "alice", { type: "INCREMENT" }),
-    ).rejects.toThrow(/guard/i);
+    await expect(t.send(state, "alice", { type: "INCREMENT" })).rejects.toThrow(/guard/i);
   });
 
   it("guard re-evaluates on each send", async () => {

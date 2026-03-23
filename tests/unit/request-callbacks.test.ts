@@ -1,30 +1,27 @@
-import { describe, it, expect } from "vitest";
+import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { message } from "../../packages/actor-kit/src/core/message";
-import { testActor } from "../../packages/actor-kit/src/test/test-actor";
-import { schema, uint32, string } from "../../packages/actor-kit/src/schema/schema";
 import { view } from "../../packages/actor-kit/src/core/view";
+import { schema, string, uint32 } from "../../packages/actor-kit/src/schema/schema";
+import { testActor } from "../../packages/actor-kit/src/test/test-actor";
 
 type State = { count: number; status: string; fetchResult: string | null };
 
 const CountView = schema({ count: uint32, status: string });
 
-const fetchData = message(
-  z.object({ url: z.string() }),
-  (state: State, { url }, ctx) => {
-    ctx.request({
-      fetch: url,
-      onDone: "FETCH_DONE",
-      onError: "FETCH_FAILED",
-    });
-    return { ...state, status: "loading" };
-  },
-);
+const fetchData = message(z.object({ url: z.string() }), (state: State, { url }, ctx) => {
+  ctx.request({
+    fetch: url,
+    onDone: "FETCH_DONE",
+    onError: "FETCH_FAILED",
+  });
+  return { ...state, status: "loading" };
+});
 
-const increment = message(
-  z.object({ amount: z.number() }),
-  (state: State, { amount }) => ({ ...state, count: state.count + amount }),
-);
+const increment = message(z.object({ amount: z.number() }), (state: State, { amount }) => ({
+  ...state,
+  count: state.count + amount,
+}));
 
 describe("request() callback capture", () => {
   const def = {
@@ -40,9 +37,11 @@ describe("request() callback capture", () => {
   it("captures request() calls with onDone/onError names", async () => {
     const t = testActor(def);
     const state = t.init({});
-    const { state: nextState, requests, emissions } = await t.sendWithEffects(
-      state, "alice", { type: "FETCH", url: "https://example.com" },
-    );
+    const {
+      state: nextState,
+      requests,
+      emissions,
+    } = await t.sendWithEffects(state, "alice", { type: "FETCH", url: "https://example.com" });
 
     expect(nextState.status).toBe("loading");
     expect(emissions).toHaveLength(0);

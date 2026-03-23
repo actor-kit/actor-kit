@@ -13,16 +13,16 @@
 
 import { DurableObject } from "cloudflare:workers";
 import type { z } from "zod";
-import { resolveRole } from "../runtime/roles";
-import { routeMessage } from "../runtime/message-router";
-import { resolveMessagesForState } from "../runtime/states";
-import { createOutbox, type OutboxEntry } from "../runtime/outbox";
 import { getCallerFromToken } from "../auth/auth";
-import type { MessageContext, Effect, RequestConfig } from "./message";
+import { routeMessage } from "../runtime/message-router";
+import { createOutbox, type OutboxEntry } from "../runtime/outbox";
+import { resolveRole } from "../runtime/roles";
+import { resolveMessagesForState } from "../runtime/states";
 import { parseDuration } from "../runtime/timers";
 import { encode } from "../schema/binary";
 import { createSnapshotFrame } from "../schema/frame";
-import type { SchemaDefinition, FieldDescriptor } from "../schema/schema";
+import type { FieldDescriptor, SchemaDefinition } from "../schema/schema";
+import type { Effect, MessageContext, RequestConfig } from "./message";
 
 // --- Actor definition ---
 
@@ -45,38 +45,61 @@ interface ActorDef {
   version?: number;
   initial?: string;
   binarySync?: boolean; // opt-in: send binary frames instead of JSON
-  roles: Record<string, {
-    // bivariant method signature for role predicates
-    (state: unknown, caller: string, claims: { callerType: "user" | "service" }): boolean;
-  }>;
+  roles: Record<
+    string,
+    {
+      // bivariant method signature for role predicates
+      (state: unknown, caller: string, claims: { callerType: "user" | "service" }): boolean;
+    }
+  >;
   messages?: Record<string, Record<string, ActorMessageSlot>>;
-  states?: Record<string, {
-    messages: Record<string, Record<string, ActorMessageSlot>>;
-  }> | {
-    parallel: true;
-    regions: Record<string, {
-      initial: string;
-      states: Record<string, {
-        messages: Record<string, Record<string, ActorMessageSlot>>;
-      }>;
-    }>;
-  };
-  views: Record<string, {
-    fn(state: unknown, caller: string): unknown; // bivariant
-    schema?: { fields: readonly { name: string; type: string }[] }; // optional schema for binary encoding
-  }>;
-  on?: Record<string, {
-    (state: unknown, ...args: unknown[]): unknown | Promise<unknown>; // bivariant
-  }>;
-  after?: Record<string, {
-    (state: unknown): unknown | Promise<unknown>;
-  }>;
+  states?:
+    | Record<
+        string,
+        {
+          messages: Record<string, Record<string, ActorMessageSlot>>;
+        }
+      >
+    | {
+        parallel: true;
+        regions: Record<
+          string,
+          {
+            initial: string;
+            states: Record<
+              string,
+              {
+                messages: Record<string, Record<string, ActorMessageSlot>>;
+              }
+            >;
+          }
+        >;
+      };
+  views: Record<
+    string,
+    {
+      fn(state: unknown, caller: string): unknown; // bivariant
+      schema?: { fields: readonly { name: string; type: string }[] }; // optional schema for binary encoding
+    }
+  >;
+  on?: Record<
+    string,
+    {
+      (state: unknown, ...args: unknown[]): unknown | Promise<unknown>; // bivariant
+    }
+  >;
+  after?: Record<string, (state: unknown) => unknown | Promise<unknown>>;
   tick?: {
     frequency: number;
     handler(state: unknown): unknown | Promise<unknown>;
   };
   observe?: {
-    onTransition?(prevState: unknown, nextState: unknown, event: { type: string }, ctx: { caller: string; role: string }): void;
+    onTransition?(
+      prevState: unknown,
+      nextState: unknown,
+      event: { type: string },
+      ctx: { caller: string; role: string },
+    ): void;
   };
   migrate?(persisted: unknown, fromVersion: number): unknown;
   serialize?(state: unknown): unknown;
@@ -123,28 +146,28 @@ const CREATE_TABLES_SQL = `
 export function actor(
   actorName: string,
   def: ActorDef,
-) {
+): { new (ctx: DurableObjectState, env: Record<string, unknown>): DurableObject } {
   return class ActorInstance extends DurableObject {
-    private state: unknown = undefined;
-    private actorId: string | undefined = undefined; // Human-readable ID (the name passed to idFromName)
-    private stateTracker: Record<string, string> | { current: string } | undefined = undefined;
-    private initialized = false;
-    private version: number;
+    state: unknown = undefined;
+    actorId: string | undefined = undefined; // Human-readable ID (the name passed to idFromName)
+    stateTracker: Record<string, string> | { current: string } | undefined = undefined;
+    initialized = false;
+    version: number;
     // Keyed by WebSocket (not caller) to support multi-tab/multi-device
-    private connections = new Map<WebSocket, { caller: string; callerType: "user" | "service" }>();
-    private previousViews = new Map<WebSocket, string>(); // JSON string of last sent view
-    private draining = false; // Prevents concurrent outbox drains
+    connections = new Map<WebSocket, { caller: string; callerType: "user" | "service" }>();
+    previousViews = new Map<WebSocket, string>(); // JSON string of last sent view
+    draining = false; // Prevents concurrent outbox drains
 
     constructor(ctx: DurableObjectState, env: Record<string, unknown>) {
       super(ctx, env);
       this.version = def.version ?? 1;
     }
 
-    private async ensureTables(): Promise<void> {
+    async ensureTables(): Promise<void> {
       this.ctx.storage.sql.exec(CREATE_TABLES_SQL);
     }
 
-    private async loadState(): Promise<void> {
+    async loadState(): Promise<void> {
       if (this.initialized) return;
 
       await this.ensureTables();
@@ -154,7 +177,12 @@ export function actor(
         .toArray();
 
       if (rows.length > 0 && rows[0] !== undefined) {
-        const row = rows[0] as { state: string; version: number; state_tracker: string | null; actor_id: string | null };
+        const row = rows[0] as {
+          state: string;
+          version: number;
+          state_tracker: string | null;
+          actor_id: string | null;
+        };
         let parsed: unknown = JSON.parse(row.state);
 
         // Run migration if needed
@@ -182,7 +210,7 @@ export function actor(
       }
     }
 
-    private persistState(): void {
+    persistState(): void {
       const serialized = def.serialize ? def.serialize(this.state) : this.state;
       const json = JSON.stringify(serialized);
       const checksum = this.computeChecksum(json);
@@ -199,7 +227,7 @@ export function actor(
       );
     }
 
-    private persistOutbox(entries: OutboxEntry[]): void {
+    persistOutbox(entries: OutboxEntry[]): void {
       for (const entry of entries) {
         this.ctx.storage.sql.exec(
           "INSERT INTO outbox (id, type, payload, status, attempts, on_done, on_error, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
@@ -215,7 +243,7 @@ export function actor(
       }
     }
 
-    private computeChecksum(json: string): string {
+    computeChecksum(json: string): string {
       // Simple hash for Phase 1 — replace with xxhash64 in Phase 2
       let h = 0;
       for (let i = 0; i < json.length; i++) {
@@ -224,7 +252,12 @@ export function actor(
       return (h >>> 0).toString(16);
     }
 
-    async spawn(input: { actorId?: string; caller: string; callerType: "user" | "service"; input: unknown }): Promise<void> {
+    async spawn(input: {
+      actorId?: string;
+      caller: string;
+      callerType: "user" | "service";
+      input: unknown;
+    }): Promise<void> {
       await this.loadState();
       if (this.initialized) return; // Idempotent
 
@@ -270,7 +303,11 @@ export function actor(
       this.scheduleAfterTimers();
     }
 
-    async send(caller: string, callerType: "user" | "service", event: { type: string; [key: string]: unknown }): Promise<{ ok: boolean; error?: string }> {
+    async send(
+      caller: string,
+      callerType: "user" | "service",
+      event: { type: string; [key: string]: unknown },
+    ): Promise<{ ok: boolean; error?: string }> {
       await this.loadState();
       if (!this.initialized) {
         return { ok: false, error: "Actor not initialized" };
@@ -283,11 +320,7 @@ export function actor(
       }
 
       // Resolve messages for current state
-      const messages = resolveMessagesForState(
-        def.messages,
-        def.states,
-        this.stateTracker,
-      );
+      const messages = resolveMessagesForState(def.messages, def.states, this.stateTracker);
       if (messages === undefined) {
         return { ok: false, error: "No messages available" };
       }
@@ -352,7 +385,7 @@ export function actor(
       return { ok: true };
     }
 
-    private async drainOutbox(): Promise<void> {
+    async drainOutbox(): Promise<void> {
       // Prevent concurrent drains (second message arriving mid-flight would re-process same rows)
       if (this.draining) return;
       this.draining = true;
@@ -364,14 +397,23 @@ export function actor(
       }
     }
 
-    private async drainOutboxInner(): Promise<void> {
+    async drainOutboxInner(): Promise<void> {
       const MAX_ATTEMPTS = 3;
       const rows = this.ctx.storage.sql
-        .exec("SELECT id, type, payload, attempts, on_done, on_error FROM outbox WHERE status = 'pending' ORDER BY created_at")
+        .exec(
+          "SELECT id, type, payload, attempts, on_done, on_error FROM outbox WHERE status = 'pending' ORDER BY created_at",
+        )
         .toArray();
 
       for (const row of rows) {
-        const entry = row as { id: string; type: string; payload: string; attempts: number; on_done: string | null; on_error: string | null };
+        const entry = row as {
+          id: string;
+          type: string;
+          payload: string;
+          attempts: number;
+          on_done: string | null;
+          on_error: string | null;
+        };
         const payload: unknown = JSON.parse(entry.payload);
 
         try {
@@ -398,7 +440,9 @@ export function actor(
             // Move to failures
             this.ctx.storage.sql.exec(
               "INSERT INTO emission_failures (id, type, payload, error, failed_at) VALUES (?, ?, ?, ?, ?)",
-              entry.id, entry.type, entry.payload,
+              entry.id,
+              entry.type,
+              entry.payload,
               error instanceof Error ? error.message : String(error),
               Date.now(),
             );
@@ -408,7 +452,9 @@ export function actor(
             if (entry.on_error && entry.type === "request") {
               const onHandler = def.on?.[entry.on_error];
               if (typeof onHandler === "function") {
-                const nextState = await onHandler(this.state, { message: error instanceof Error ? error.message : String(error) });
+                const nextState = await onHandler(this.state, {
+                  message: error instanceof Error ? error.message : String(error),
+                });
                 if (nextState !== this.state) {
                   this.state = nextState;
                   this.persistState();
@@ -431,7 +477,7 @@ export function actor(
       }
     }
 
-    private async executeEffect(payload: unknown): Promise<void> {
+    async executeEffect(payload: unknown): Promise<void> {
       if (typeof payload !== "object" || payload === null) return;
 
       const effect = payload as Record<string, unknown>;
@@ -447,7 +493,7 @@ export function actor(
         // Fetch effect — check HTTP status, throw on failure
         const response = await fetch(effect["fetch"], {
           method: (effect["method"] as string) ?? "POST",
-          body: effect["body"] ? JSON.stringify(effect["body"]) : undefined,
+          body: effect["body"] ? JSON.stringify(effect["body"]) : null,
           headers: (effect["headers"] as Record<string, string>) ?? { "Content-Type": "application/json" },
         });
         if (!response.ok) {
@@ -466,14 +512,25 @@ export function actor(
         if (!namespace || typeof namespace !== "object" || !("idFromName" in namespace)) {
           throw new Error(`DO namespace "${targetType.toUpperCase()}" not found in env`);
         }
-        const ns = namespace as { idFromName: (name: string) => { toString: () => string }; get: (id: unknown) => { send: (c: string, ct: string, e: unknown) => Promise<unknown> } };
+        const ns = namespace as {
+          idFromName: (name: string) => { toString: () => string };
+          get: (id: unknown) => { send: (c: string, ct: string, e: unknown) => Promise<unknown> };
+        };
         const doId = ns.idFromName(targetId);
         const stub = ns.get(doId);
-        await stub.send("system", "service", { type: targetMessage, ...((typeof targetPayload === "object" && targetPayload !== null) ? targetPayload as Record<string, unknown> : {}) });
+        await stub.send("system", "service", {
+          type: targetMessage,
+          ...(typeof targetPayload === "object" && targetPayload !== null
+            ? (targetPayload as Record<string, unknown>)
+            : {}),
+        });
       }
     }
 
-    async getSnapshot(caller: string, callerType: "user" | "service"): Promise<{ checksum: string; snapshot: unknown; role: string }> {
+    async getSnapshot(
+      caller: string,
+      callerType: "user" | "service",
+    ): Promise<{ checksum: string; snapshot: unknown; role: string }> {
       await this.loadState();
       if (!this.initialized) {
         throw new Error("Actor not initialized — call spawn() first");
@@ -496,7 +553,7 @@ export function actor(
       return { checksum, snapshot, role };
     }
 
-    private getCallerFromWs(ws: WebSocket): { caller: string; callerType: "user" | "service" } | null {
+    getCallerFromWs(ws: WebSocket): { caller: string; callerType: "user" | "service" } | null {
       // Try in-memory map first (keyed by WebSocket)
       const conn = this.connections.get(ws);
       if (conn) return conn;
@@ -514,7 +571,7 @@ export function actor(
       return { caller, callerType };
     }
 
-    private broadcastViews(): void {
+    broadcastViews(): void {
       // Use getWebSockets() to get all connected sockets (survives hibernation)
       const allSockets = this.ctx.getWebSockets();
       const roleNames = Object.keys(def.roles);
@@ -565,7 +622,10 @@ export function actor(
 
       // Extract JWT from Sec-WebSocket-Protocol
       const protocols = request.headers.get("Sec-WebSocket-Protocol") ?? "";
-      const tokenProtocol = protocols.split(",").map((p) => p.trim()).find((p) => p.startsWith("token."));
+      const tokenProtocol = protocols
+        .split(",")
+        .map((p) => p.trim())
+        .find((p) => p.startsWith("token."));
       if (!tokenProtocol) {
         return new Response("Missing auth token", { status: 401 });
       }
@@ -604,10 +664,7 @@ export function actor(
 
       // Store caller metadata as WebSocket tags so they survive DO hibernation.
       // Tags: ["caller:{id}", "callerType:{type}"]
-      this.ctx.acceptWebSocket(server, [
-        `caller:${callerInfo.caller}`,
-        `callerType:${callerInfo.callerType}`,
-      ]);
+      this.ctx.acceptWebSocket(server, [`caller:${callerInfo.caller}`, `callerType:${callerInfo.callerType}`]);
       this.connections.set(server, { caller: callerInfo.caller, callerType: callerInfo.callerType });
 
       // Send initial snapshot — binary if schema available, JSON fallback
@@ -705,7 +762,7 @@ export function actor(
 
     // --- DO Alarms (after timers) ---
 
-    private scheduleAfterTimers(): void {
+    scheduleAfterTimers(): void {
       if (!def.after) return;
 
       const createdAt = Date.now();
@@ -721,7 +778,7 @@ export function actor(
       this.scheduleUnifiedAlarm();
     }
 
-    private pickNextAfterTimer(createdAt: number, excludeKeys?: Set<string>): void {
+    pickNextAfterTimer(createdAt: number, excludeKeys?: Set<string>): void {
       if (!def.after) return;
 
       let soonestAbsoluteTime = Infinity;
@@ -752,9 +809,7 @@ export function actor(
       if (!this.initialized) return;
 
       // Find which timer fired
-      const rows = this.ctx.storage.sql
-        .exec("SELECT value FROM actor_meta WHERE key = 'scheduled_alarm'")
-        .toArray();
+      const rows = this.ctx.storage.sql.exec("SELECT value FROM actor_meta WHERE key = 'scheduled_alarm'").toArray();
       const scheduledKey = (rows[0] as { value: string } | undefined)?.value;
 
       if (scheduledKey && def.after) {
@@ -775,9 +830,8 @@ export function actor(
         const firedRows = this.ctx.storage.sql
           .exec("SELECT value FROM actor_meta WHERE key = 'after_fired_keys'")
           .toArray();
-        const previouslyFired = firedRows.length > 0
-          ? JSON.parse((firedRows[0] as { value: string }).value) as string[]
-          : [];
+        const previouslyFired =
+          firedRows.length > 0 ? (JSON.parse((firedRows[0] as { value: string }).value) as string[]) : [];
         const allFired = [...previouslyFired, scheduledKey];
         this.ctx.storage.sql.exec(
           "INSERT OR REPLACE INTO actor_meta (key, value) VALUES ('after_fired_keys', ?)",
@@ -809,7 +863,7 @@ export function actor(
     // DOs only have one alarm slot. This method picks the soonest needed
     // alarm across after timers and outbox retries.
 
-    private scheduleUnifiedAlarm(): void {
+    scheduleUnifiedAlarm(): void {
       let soonestTime = Infinity;
 
       // Check after timers
@@ -817,17 +871,13 @@ export function actor(
         const createdRows = this.ctx.storage.sql
           .exec("SELECT value FROM actor_meta WHERE key = 'after_created_at'")
           .toArray();
-        const createdAt = createdRows.length > 0
-          ? Number((createdRows[0] as { value: string }).value)
-          : undefined;
+        const createdAt = createdRows.length > 0 ? Number((createdRows[0] as { value: string }).value) : undefined;
 
         if (createdAt !== undefined) {
           const scheduledRows = this.ctx.storage.sql
             .exec("SELECT value FROM actor_meta WHERE key = 'scheduled_alarm'")
             .toArray();
-          const scheduledKey = scheduledRows.length > 0
-            ? (scheduledRows[0] as { value: string }).value
-            : undefined;
+          const scheduledKey = scheduledRows.length > 0 ? (scheduledRows[0] as { value: string }).value : undefined;
 
           if (scheduledKey) {
             const ms = parseDuration(scheduledKey);
@@ -859,11 +909,11 @@ export function actor(
 
     // --- Tick (game loop) ---
 
-    private tickInterval: ReturnType<typeof setInterval> | undefined = undefined;
-    private lastTickPersist = 0;
-    private tickRunning = false; // Reentrancy guard for async tick handlers
+    tickInterval: ReturnType<typeof setInterval> | undefined = undefined;
+    lastTickPersist = 0;
+    tickRunning = false; // Reentrancy guard for async tick handlers
 
-    private startTick(): void {
+    startTick(): void {
       if (!def.tick || this.tickInterval !== undefined) return;
 
       this.tickInterval = setInterval(async () => {
@@ -876,25 +926,25 @@ export function actor(
           if (typeof handler !== "function") return;
 
           const nextState = await handler(this.state);
-        if (nextState !== this.state) {
-          this.state = nextState;
+          if (nextState !== this.state) {
+            this.state = nextState;
 
-          // Throttle persistence to max 1/second for ticks
-          const now = Date.now();
-          if (now - this.lastTickPersist >= 1000) {
-            this.persistState();
-            this.lastTickPersist = now;
+            // Throttle persistence to max 1/second for ticks
+            const now = Date.now();
+            if (now - this.lastTickPersist >= 1000) {
+              this.persistState();
+              this.lastTickPersist = now;
+            }
+
+            this.broadcastViews();
           }
-
-          this.broadcastViews();
-        }
         } finally {
           this.tickRunning = false;
         }
       }, def.tick.frequency);
     }
 
-    private stopTick(): void {
+    stopTick(): void {
       if (this.tickInterval !== undefined) {
         clearInterval(this.tickInterval);
         this.tickInterval = undefined;

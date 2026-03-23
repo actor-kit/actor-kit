@@ -12,7 +12,7 @@
  *   exp = expiry
  */
 
-import { SignJWT, jwtVerify } from "jose";
+import { jwtVerify, SignJWT } from "jose";
 
 // --- Types ---
 

@@ -7,8 +7,8 @@
  */
 
 import { decode } from "../schema/binary";
-import { parseFrame, FrameType } from "../schema/frame";
-import type { SchemaDefinition, FieldDescriptor } from "../schema/schema";
+import { FrameType, parseFrame } from "../schema/frame";
+import type { FieldDescriptor, SchemaDefinition } from "../schema/schema";
 
 export type ConnectionState = "connecting" | "connected" | "disconnected" | "reconnecting";
 
@@ -51,8 +51,8 @@ export function createActorClient(options: ClientOptions): ActorClient {
   } = options;
 
   let connectionState: ConnectionState = "connecting";
-  let currentView: unknown = undefined;
-  let currentRole: string | undefined = undefined;
+  let currentView: unknown;
+  let currentRole: string | undefined;
   const listeners = new Set<(view: unknown) => void>();
   const stateListeners = new Set<(state: ConnectionState) => void>();
   let ws: InstanceType<typeof WebSocketImpl> | undefined;
@@ -168,7 +168,7 @@ export function createActorClient(options: ClientOptions): ActorClient {
 
       if (reconnectAttempts < maxReconnectAttempts) {
         setConnectionState("reconnecting");
-        const delay = Math.min(1000 * Math.pow(2, reconnectAttempts), 30000);
+        const delay = Math.min(1000 * 2 ** reconnectAttempts, 30000);
         reconnectAttempts += 1;
         reconnectTimer = setTimeout(() => {
           connect();
@@ -197,11 +197,15 @@ export function createActorClient(options: ClientOptions): ActorClient {
     },
     subscribe(listener: (view: unknown) => void): () => void {
       listeners.add(listener);
-      return () => { listeners.delete(listener); };
+      return () => {
+        listeners.delete(listener);
+      };
     },
     onStateChange(listener: (state: ConnectionState) => void): () => void {
       stateListeners.add(listener);
-      return () => { stateListeners.delete(listener); };
+      return () => {
+        stateListeners.delete(listener);
+      };
     },
     send(event: { type: string; [key: string]: unknown }) {
       if (ws && ws.readyState === 1) {

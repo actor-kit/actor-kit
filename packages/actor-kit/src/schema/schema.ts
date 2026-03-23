@@ -9,14 +9,7 @@
 
 // --- Primitive type descriptors ---
 
-type PrimitiveTypeName =
-  | "uint8"
-  | "uint16"
-  | "uint32"
-  | "float32"
-  | "float64"
-  | "string"
-  | "boolean";
+type PrimitiveTypeName = "uint8" | "uint16" | "uint32" | "float32" | "float64" | "string" | "boolean";
 
 interface PrimitiveDescriptor<T extends PrimitiveTypeName, V> {
   readonly kind: "primitive";
@@ -24,9 +17,7 @@ interface PrimitiveDescriptor<T extends PrimitiveTypeName, V> {
   readonly _phantom: V;
 }
 
-function primitive<T extends PrimitiveTypeName, V>(
-  type: T,
-): PrimitiveDescriptor<T, V> {
+function primitive<T extends PrimitiveTypeName, V>(type: T): PrimitiveDescriptor<T, V> {
   return Object.freeze({ kind: "primitive" as const, type, _phantom: undefined as unknown as V });
 }
 
@@ -63,7 +54,9 @@ export type FieldDescriptor =
 interface FieldMeta {
   readonly name: string;
   readonly type: string;
-  readonly element?: FieldMeta | { readonly type: string; readonly schema?: SchemaDefinition<Record<string, FieldDescriptor>> };
+  readonly element?:
+    | FieldMeta
+    | { readonly type: string; readonly schema?: SchemaDefinition<Record<string, FieldDescriptor>> };
   readonly schema?: SchemaDefinition<Record<string, FieldDescriptor>>;
 }
 
@@ -100,13 +93,9 @@ function buildElementMeta(descriptor: FieldDescriptor): FieldMeta["element"] & o
   return { type: "array" };
 }
 
-export function schema<TShape extends Record<string, FieldDescriptor>>(
-  shape: TShape,
-): SchemaDefinition<TShape> {
+export function schema<TShape extends Record<string, FieldDescriptor>>(shape: TShape): SchemaDefinition<TShape> {
   const entries = Object.entries(shape);
-  const fields: FieldMeta[] = entries.map(([name, descriptor]) =>
-    buildFieldMeta(name, descriptor as FieldDescriptor),
-  );
+  const fields: FieldMeta[] = entries.map(([name, descriptor]) => buildFieldMeta(name, descriptor as FieldDescriptor));
 
   const def: SchemaDefinition<TShape> = {
     kind: "schema" as const,
@@ -122,13 +111,14 @@ export function schema<TShape extends Record<string, FieldDescriptor>>(
 
 // Infer the TypeScript type from a FieldDescriptor
 type InferField<F extends FieldDescriptor> =
-  F extends PrimitiveDescriptor<infer _T, infer V> ? V :
-  F extends ArrayDescriptor<infer E> ? InferField<E>[] :
-  F extends SchemaDefinition<infer S> ? { [K in keyof S]: InferField<S[K]> } :
-  never;
+  F extends PrimitiveDescriptor<infer _T, infer V>
+    ? V
+    : F extends ArrayDescriptor<infer E>
+      ? InferField<E>[]
+      : F extends SchemaDefinition<infer S>
+        ? { [K in keyof S]: InferField<S[K]> }
+        : never;
 
 // Infer the full TypeScript type from a SchemaDefinition
 export type Infer<S> =
-  S extends SchemaDefinition<infer TShape>
-    ? { [K in keyof TShape]: InferField<TShape[K]> }
-    : never;
+  S extends SchemaDefinition<infer TShape> ? { [K in keyof TShape]: InferField<TShape[K]> } : never;

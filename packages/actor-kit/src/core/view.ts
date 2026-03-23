@@ -8,17 +8,14 @@
  *   }));
  */
 
-import type { SchemaDefinition, Infer, FieldDescriptor } from "../schema/schema";
+import type { FieldDescriptor, Infer, SchemaDefinition } from "../schema/schema";
 
 export interface ViewDef<TState, TShape extends Record<string, FieldDescriptor>> {
   readonly schema: SchemaDefinition<TShape>;
   readonly fn: (state: TState, caller: string) => Infer<SchemaDefinition<TShape>>;
 }
 
-export function view<
-  TState,
-  TShape extends Record<string, FieldDescriptor>,
->(
+export function view<TState, TShape extends Record<string, FieldDescriptor>>(
   schemaArg: SchemaDefinition<TShape>,
   fn: (state: TState, caller: string) => Infer<SchemaDefinition<TShape>>,
 ): ViewDef<TState, TShape> {

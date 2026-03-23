@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, expect, it } from "vitest";
 import { createRef } from "../../packages/actor-kit/src/core/ref";
 
 describe("createRef()", () => {
@@ -47,7 +47,7 @@ describe("createRef()", () => {
       COUNTER: {
         idFromName: () => ({ toString: () => "id-1" }),
         get: () => ({
-          spawn: async (input: unknown) => {
+          spawn: async (_input: unknown) => {
             spawnCalled = true;
           },
         }),

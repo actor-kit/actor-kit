@@ -1,8 +1,8 @@
-import { describe, it, expect } from "vitest";
+import { describe, expect, it } from "vitest";
 import { z } from "zod";
-import { schema, uint32, string, boolean, array } from "../../packages/actor-kit/src/schema/schema";
-import { view } from "../../packages/actor-kit/src/core/view";
 import { message } from "../../packages/actor-kit/src/core/message";
+import { view } from "../../packages/actor-kit/src/core/view";
+import { array, boolean, schema, string, uint32 } from "../../packages/actor-kit/src/schema/schema";
 import { testActor } from "../../packages/actor-kit/src/test/test-actor";
 
 // --- Define a Todo actor for testing ---
@@ -18,37 +18,25 @@ type State = {
   memberIds: string[];
 };
 
-const addTodo = message(
-  z.object({ text: z.string().min(1) }),
-  (state: State, { text }) => ({
-    ...state,
-    todos: [...state.todos, { id: `todo-${state.todos.length + 1}`, text, done: false }],
-  }),
-);
+const addTodo = message(z.object({ text: z.string().min(1) }), (state: State, { text }) => ({
+  ...state,
+  todos: [...state.todos, { id: `todo-${state.todos.length + 1}`, text, done: false }],
+}));
 
-const toggle = message(
-  z.object({ id: z.string() }),
-  (state: State, { id }) => ({
-    ...state,
-    todos: state.todos.map((t) => (t.id === id ? { ...t, done: !t.done } : t)),
-  }),
-);
+const toggle = message(z.object({ id: z.string() }), (state: State, { id }) => ({
+  ...state,
+  todos: state.todos.map((t) => (t.id === id ? { ...t, done: !t.done } : t)),
+}));
 
-const deleteTodo = message(
-  z.object({ id: z.string() }),
-  (state: State, { id }) => ({
-    ...state,
-    todos: state.todos.filter((t) => t.id !== id),
-  }),
-);
+const deleteTodo = message(z.object({ id: z.string() }), (state: State, { id }) => ({
+  ...state,
+  todos: state.todos.filter((t) => t.id !== id),
+}));
 
-const invite = message(
-  z.object({ userId: z.string() }),
-  (state: State, { userId }) => ({
-    ...state,
-    memberIds: [...state.memberIds, userId],
-  }),
-);
+const invite = message(z.object({ userId: z.string() }), (state: State, { userId }) => ({
+  ...state,
+  memberIds: [...state.memberIds, userId],
+}));
 
 const todoActorDef = {
   input: z.object({ creator: z.string() }),
@@ -137,25 +125,19 @@ describe("testActor()", () => {
 
     it("viewer cannot send messages (empty message set)", async () => {
       const state = t.init({ creator: "alice" });
-      await expect(
-        t.send(state, "stranger", { type: "ADD_TODO", text: "Nope" }),
-      ).rejects.toThrow(/not found/i);
+      await expect(t.send(state, "stranger", { type: "ADD_TODO", text: "Nope" })).rejects.toThrow(/not found/i);
     });
 
     it("member cannot delete (not in their role)", async () => {
       let state = t.init({ creator: "alice" });
       state = await t.send(state, "alice", { type: "INVITE", userId: "bob" });
       state = await t.send(state, "alice", { type: "ADD_TODO", text: "Test" });
-      await expect(
-        t.send(state, "bob", { type: "DELETE_TODO", id: "todo-1" }),
-      ).rejects.toThrow(/not found/i);
+      await expect(t.send(state, "bob", { type: "DELETE_TODO", id: "todo-1" })).rejects.toThrow(/not found/i);
     });
 
     it("rejects invalid payload", async () => {
       const state = t.init({ creator: "alice" });
-      await expect(
-        t.send(state, "alice", { type: "ADD_TODO", text: "" }),
-      ).rejects.toThrow(/validation/i);
+      await expect(t.send(state, "alice", { type: "ADD_TODO", text: "" })).rejects.toThrow(/validation/i);
     });
 
     it("toggle works", async () => {
@@ -209,13 +191,10 @@ describe("testActor()", () => {
 
   describe("sendWithEffects", () => {
     it("captures emissions from emit()", async () => {
-      const notifyMsg = message(
-        z.object({}),
-        (state: State, _payload, ctx) => {
-          ctx.emit({ queue: "EMAIL", body: { to: state.memberIds } });
-          return state;
-        },
-      );
+      const notifyMsg = message(z.object({}), (state: State, _payload, ctx) => {
+        ctx.emit({ queue: "EMAIL", body: { to: state.memberIds } });
+        return state;
+      });
 
       const defWithNotify = {
         ...todoActorDef,
@@ -235,17 +214,14 @@ describe("testActor()", () => {
     });
 
     it("captures request() calls with onDone/onError", async () => {
-      const fetchMsg = message(
-        z.object({}),
-        (state: State, _payload, ctx) => {
-          ctx.request({
-            fetch: "https://api.example.com",
-            onDone: "FETCH_DONE",
-            onError: "FETCH_ERROR",
-          });
-          return state;
-        },
-      );
+      const fetchMsg = message(z.object({}), (state: State, _payload, ctx) => {
+        ctx.request({
+          fetch: "https://api.example.com",
+          onDone: "FETCH_DONE",
+          onError: "FETCH_ERROR",
+        });
+        return state;
+      });
 
       const defWithFetch = {
         ...todoActorDef,

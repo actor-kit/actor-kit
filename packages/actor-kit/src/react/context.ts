@@ -15,16 +15,8 @@
  *   }
  */
 
-import {
-  createContext,
-  createElement,
-  useContext,
-  useEffect,
-  useRef,
-  useState,
-  type ReactNode,
-} from "react";
-import { createActorClient, type ActorClient, type ConnectionState } from "../client/client";
+import { createContext, createElement, type ReactNode, useContext, useEffect, useRef, useState } from "react";
+import { type ActorClient, type ConnectionState, createActorClient } from "../client/client";
 
 // --- Types ---
 
@@ -74,7 +66,7 @@ export function createActorContext(actorType: string): ActorContext {
       return () => {
         c.disconnect();
       };
-    }, [actorId, host, accessToken]);
+    }, [actorId, host, accessToken, onRedirect]);
 
     if (client === null) {
       return null;
@@ -118,7 +110,7 @@ export function createActorContext(actorType: string): ActorContext {
           setRole(client.role);
         }
       });
-    }, [client]);
+    }, [client, role]);
 
     return role;
   }
@@ -137,10 +129,7 @@ export function createActorContext(actorType: string): ActorContext {
     return state;
   }
 
-  function useSelector<T>(
-    selector: (view: unknown) => T,
-    equalityFn: (a: T, b: T) => boolean = Object.is,
-  ): T {
+  function useSelector<T>(selector: (view: unknown) => T, equalityFn: (a: T, b: T) => boolean = Object.is): T {
     const client = useClient();
     const [selected, setSelected] = useState<T>(() => selector(client.view));
 

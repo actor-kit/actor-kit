@@ -1,5 +1,5 @@
-import { describe, it, expect, vi } from "vitest";
-import { createActorClient, type ActorClient } from "../../packages/actor-kit/src/client/client";
+import { describe, expect, it } from "vitest";
+import { createActorClient } from "../../packages/actor-kit/src/client/client";
 
 // Fake WebSocket for testing
 class FakeWebSocket {
@@ -8,7 +8,10 @@ class FakeWebSocket {
   readyState = 1; // OPEN
   protocol = "";
 
-  constructor(public url: string, public protocols?: string | string[]) {
+  constructor(
+    public url: string,
+    public protocols?: string | string[],
+  ) {
     if (Array.isArray(protocols)) {
       this.protocol = protocols[0] ?? "";
     }
@@ -79,11 +82,13 @@ describe("createActorClient()", () => {
     expect(fakeWs).toBeDefined();
 
     // Server sends snapshot
-    fakeWs?.receiveMessage(JSON.stringify({
-      type: "snapshot",
-      role: "user",
-      data: { count: 42, lastCaller: "alice" },
-    }));
+    fakeWs?.receiveMessage(
+      JSON.stringify({
+        type: "snapshot",
+        role: "user",
+        data: { count: 42, lastCaller: "alice" },
+      }),
+    );
 
     expect(client.view).toEqual({ count: 42, lastCaller: "alice" });
     expect(client.role).toBe("user");
@@ -110,17 +115,21 @@ describe("createActorClient()", () => {
     const views: unknown[] = [];
     client.subscribe((view) => views.push(view));
 
-    fakeWs?.receiveMessage(JSON.stringify({
-      type: "snapshot",
-      role: "user",
-      data: { count: 1 },
-    }));
+    fakeWs?.receiveMessage(
+      JSON.stringify({
+        type: "snapshot",
+        role: "user",
+        data: { count: 1 },
+      }),
+    );
 
-    fakeWs?.receiveMessage(JSON.stringify({
-      type: "snapshot",
-      role: "user",
-      data: { count: 2 },
-    }));
+    fakeWs?.receiveMessage(
+      JSON.stringify({
+        type: "snapshot",
+        role: "user",
+        data: { count: 2 },
+      }),
+    );
 
     expect(views).toHaveLength(2);
     expect(views[0]).toEqual({ count: 1 });
@@ -145,9 +154,13 @@ describe("createActorClient()", () => {
     await new Promise((r) => setTimeout(r, 10));
 
     // Send initial snapshot so client is "connected"
-    fakeWs?.receiveMessage(JSON.stringify({
-      type: "snapshot", role: "user", data: { count: 0 },
-    }));
+    fakeWs?.receiveMessage(
+      JSON.stringify({
+        type: "snapshot",
+        role: "user",
+        data: { count: 0 },
+      }),
+    );
 
     client.send({ type: "INCREMENT", amount: 5 });
 
@@ -171,9 +184,13 @@ describe("createActorClient()", () => {
     });
 
     await new Promise((r) => setTimeout(r, 10));
-    fakeWs?.receiveMessage(JSON.stringify({
-      type: "snapshot", role: "user", data: { count: 0 },
-    }));
+    fakeWs?.receiveMessage(
+      JSON.stringify({
+        type: "snapshot",
+        role: "user",
+        data: { count: 0 },
+      }),
+    );
 
     client.trigger("INCREMENT", { amount: 5 });
 
@@ -197,9 +214,13 @@ describe("createActorClient()", () => {
     });
 
     await new Promise((r) => setTimeout(r, 10));
-    fakeWs?.receiveMessage(JSON.stringify({
-      type: "snapshot", role: "user", data: {},
-    }));
+    fakeWs?.receiveMessage(
+      JSON.stringify({
+        type: "snapshot",
+        role: "user",
+        data: {},
+      }),
+    );
 
     client.disconnect();
     expect(client.connectionState).toBe("disconnected");
@@ -234,7 +255,7 @@ describe("createActorClient()", () => {
 
   it("connects with Sec-WebSocket-Protocol for auth", async () => {
     let capturedProtocols: string | string[] | undefined;
-    const client = createActorClient({
+    const _client = createActorClient({
       actorType: "counter",
       actorId: "test-1",
       host: "example.com",
@@ -253,7 +274,7 @@ describe("createActorClient()", () => {
 
   it("constructs correct WebSocket URL", async () => {
     let capturedUrl: string | undefined;
-    const client = createActorClient({
+    const _client = createActorClient({
       actorType: "counter",
       actorId: "test-1",
       host: "example.com",

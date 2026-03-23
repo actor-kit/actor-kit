@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, expect, it } from "vitest";
 import { createAccessToken, getCallerFromToken } from "../../packages/actor-kit/src/auth/auth";
 
 const SECRET = "test-secret-at-least-32-chars-long!!";
@@ -82,9 +82,7 @@ describe("auth", () => {
         secret: SECRET,
       });
 
-      await expect(
-        getCallerFromToken(token, "zone", "todo-123", SECRET),
-      ).rejects.toThrow();
+      await expect(getCallerFromToken(token, "zone", "todo-123", SECRET)).rejects.toThrow();
     });
 
     it("rejects token with wrong actorId", async () => {
@@ -96,9 +94,7 @@ describe("auth", () => {
         secret: SECRET,
       });
 
-      await expect(
-        getCallerFromToken(token, "todo-list", "wrong-id", SECRET),
-      ).rejects.toThrow();
+      await expect(getCallerFromToken(token, "todo-list", "wrong-id", SECRET)).rejects.toThrow();
     });
 
     it("rejects token with wrong secret", async () => {
@@ -128,9 +124,7 @@ describe("auth", () => {
       // Wait a tick for expiry
       await new Promise((r) => setTimeout(r, 10));
 
-      await expect(
-        getCallerFromToken(token, "todo-list", "todo-123", SECRET),
-      ).rejects.toThrow();
+      await expect(getCallerFromToken(token, "todo-list", "todo-123", SECRET)).rejects.toThrow();
     });
   });
 });

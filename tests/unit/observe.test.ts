@@ -1,19 +1,16 @@
-import { describe, it, expect } from "vitest";
+import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { message } from "../../packages/actor-kit/src/core/message";
-import { testActor } from "../../packages/actor-kit/src/test/test-actor";
-import { schema, uint32 } from "../../packages/actor-kit/src/schema/schema";
 import { view } from "../../packages/actor-kit/src/core/view";
+import { schema, uint32 } from "../../packages/actor-kit/src/schema/schema";
+import { testActor } from "../../packages/actor-kit/src/test/test-actor";
 
 type State = { count: number };
 const CountView = schema({ count: uint32 });
 
-const increment = message(
-  z.object({ amount: z.number() }),
-  (state: State, { amount }) => ({
-    count: state.count + amount,
-  }),
-);
+const increment = message(z.object({ amount: z.number() }), (state: State, { amount }) => ({
+  count: state.count + amount,
+}));
 
 describe("observe.onTransition", () => {
   it("fires after each transition with correct args", async () => {
@@ -34,7 +31,12 @@ describe("observe.onTransition", () => {
         user: view(CountView, (state: State) => ({ count: state.count })),
       },
       observe: {
-        onTransition(prevState: State, nextState: State, event: { type: string }, ctx: { caller: string; role: string }) {
+        onTransition(
+          prevState: State,
+          nextState: State,
+          event: { type: string },
+          ctx: { caller: string; role: string },
+        ) {
           transitions.push({
             prevState: { ...prevState },
             nextState: { ...nextState },
@@ -88,9 +90,7 @@ describe("observe.onTransition", () => {
     const state = t.init({});
 
     // "bob" has no role — should throw, not fire onTransition
-    await expect(
-      t.send(state, "bob", { type: "INCREMENT", amount: 1 }),
-    ).rejects.toThrow();
+    await expect(t.send(state, "bob", { type: "INCREMENT", amount: 1 })).rejects.toThrow();
 
     expect(transitions).toHaveLength(0);
   });

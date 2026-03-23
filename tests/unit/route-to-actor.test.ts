@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, expect, it } from "vitest";
 import { parseActorRoute } from "../../packages/actor-kit/src/runtime/route-to-actor";
 
 describe("parseActorRoute()", () => {

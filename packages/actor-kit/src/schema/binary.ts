@@ -8,7 +8,7 @@
  * All multi-byte integers are big-endian.
  */
 
-import type { SchemaDefinition, FieldDescriptor, Infer } from "./schema";
+import type { FieldDescriptor, Infer, SchemaDefinition } from "./schema";
 
 // --- Encoder ---
 
@@ -32,7 +32,10 @@ export function encode<TShape extends Record<string, FieldDescriptor>>(
   return bytes;
 }
 
-function calculateSize(schemaDef: SchemaDefinition<Record<string, FieldDescriptor>>, data: Record<string, unknown>): number {
+function calculateSize(
+  schemaDef: SchemaDefinition<Record<string, FieldDescriptor>>,
+  data: Record<string, unknown>,
+): number {
   let size = 0;
   for (const field of schemaDef.fields) {
     size += calculateFieldSize(field, data[field.name]);
@@ -77,7 +80,10 @@ function calculateElementSize(element: unknown, value: unknown): number {
   if (typeof element !== "object" || element === null) return 0;
   const el = element as { type: string; schema?: unknown };
   if (el.type === "schema" && el.schema) {
-    return calculateSize(el.schema as SchemaDefinition<Record<string, FieldDescriptor>>, (value ?? {}) as Record<string, unknown>);
+    return calculateSize(
+      el.schema as SchemaDefinition<Record<string, FieldDescriptor>>,
+      (value ?? {}) as Record<string, unknown>,
+    );
   }
   return calculateFieldSize(el, value);
 }
@@ -145,17 +151,17 @@ function encodeField(
   }
 }
 
-function encodeElement(
-  element: unknown,
-  value: unknown,
-  view: DataView,
-  bytes: Uint8Array,
-  offset: number,
-): number {
+function encodeElement(element: unknown, value: unknown, view: DataView, bytes: Uint8Array, offset: number): number {
   if (typeof element !== "object" || element === null) return offset;
   const el = element as { type: string; schema?: unknown };
   if (el.type === "schema" && el.schema) {
-    return encodeFields(el.schema as SchemaDefinition<Record<string, FieldDescriptor>>, (value ?? {}) as Record<string, unknown>, view, bytes, offset);
+    return encodeFields(
+      el.schema as SchemaDefinition<Record<string, FieldDescriptor>>,
+      (value ?? {}) as Record<string, unknown>,
+      view,
+      bytes,
+      offset,
+    );
   }
   return encodeField({ name: "", ...el }, value, view, bytes, offset);
 }
@@ -231,12 +237,7 @@ function decodeField(
   }
 }
 
-function decodeElement(
-  element: unknown,
-  view: DataView,
-  bytes: Uint8Array,
-  offset: number,
-): [unknown, number] {
+function decodeElement(element: unknown, view: DataView, bytes: Uint8Array, offset: number): [unknown, number] {
   if (typeof element !== "object" || element === null) return [undefined, offset];
   const el = element as { type: string; schema?: unknown };
   if (el.type === "schema" && el.schema) {

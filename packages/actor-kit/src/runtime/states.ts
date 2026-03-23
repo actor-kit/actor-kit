@@ -29,10 +29,13 @@ export type SequentialStates<TState> = Record<string, StateConfig<TState>>;
 
 export interface ParallelStates<TState> {
   parallel: true;
-  regions: Record<string, {
-    initial: string;
-    states: Record<string, StateConfig<TState>>;
-  }>;
+  regions: Record<
+    string,
+    {
+      initial: string;
+      states: Record<string, StateConfig<TState>>;
+    }
+  >;
 }
 
 // State tracking — what's currently active

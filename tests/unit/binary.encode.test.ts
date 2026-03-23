@@ -1,6 +1,16 @@
-import { describe, it, expect } from "vitest";
-import { schema, uint8, uint16, uint32, float32, float64, string, boolean, array } from "../../packages/actor-kit/src/schema/schema";
-import { encode, decode } from "../../packages/actor-kit/src/schema/binary";
+import { describe, expect, it } from "vitest";
+import { decode, encode } from "../../packages/actor-kit/src/schema/binary";
+import {
+  array,
+  boolean,
+  float32,
+  float64,
+  schema,
+  string,
+  uint8,
+  uint16,
+  uint32,
+} from "../../packages/actor-kit/src/schema/schema";
 
 describe("binary encoder/decoder", () => {
   describe("primitives", () => {
@@ -24,14 +34,14 @@ describe("binary encoder/decoder", () => {
 
     it("round-trips float32", () => {
       const S = schema({ value: float32 });
-      const data = { value: 3.140000104904175 }; // float32 precision
+      const _data = { value: 3.140000104904175 }; // float32 precision
       const result = decode(S, encode(S, { value: 3.14 }));
       expect(Math.abs((result as { value: number }).value - 3.14)).toBeLessThan(0.001);
     });
 
     it("round-trips float64", () => {
       const S = schema({ value: float64 });
-      const data = { value: 3.141592653589793 };
+      const data = { value: Math.PI };
       expect(decode(S, encode(S, data))).toEqual(data);
     });
 

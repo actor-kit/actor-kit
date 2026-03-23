@@ -1,5 +1,5 @@
 import { env } from "cloudflare:test";
-import { describe, it, expect } from "vitest";
+import { describe, expect, it } from "vitest";
 
 function getStub(name: string) {
   const id = env.COUNTER.idFromName(name);

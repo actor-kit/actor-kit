@@ -12,7 +12,7 @@
  * MESSAGE frame: header + payload (JSON-encoded client message)
  */
 
-export const enum FrameType {
+export enum FrameType {
   SNAPSHOT = 0x01,
   DELTA = 0x02,
   MESSAGE = 0x03,
@@ -20,7 +20,7 @@ export const enum FrameType {
   ACK = 0x05,
 }
 
-export const enum ControlType {
+export enum ControlType {
   REDIRECT = 0x01,
   SCHEMA_CHANGED = 0x02,
   ERROR = 0x03,

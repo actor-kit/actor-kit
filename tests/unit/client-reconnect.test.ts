@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import { createActorClient } from "../../packages/actor-kit/src/client/client";
 
 // Controllable fake WebSocket
@@ -8,7 +8,10 @@ class FakeWebSocket {
   readyState = 1;
   protocol = "";
 
-  constructor(public url: string, public protocols?: string | string[]) {
+  constructor(
+    public url: string,
+    public protocols?: string | string[],
+  ) {
     if (Array.isArray(protocols)) this.protocol = protocols[0] ?? "";
     setTimeout(() => this.fireEvent("open", {}), 0);
   }
@@ -22,7 +25,9 @@ class FakeWebSocket {
     this.listeners.get(event)?.delete(fn);
   }
 
-  send(data: string) { this.sent.push(data); }
+  send(data: string) {
+    this.sent.push(data);
+  }
 
   close() {
     this.readyState = 3;

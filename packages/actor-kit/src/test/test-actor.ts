@@ -6,9 +6,9 @@
  */
 
 import type { z } from "zod";
-import { resolveRole, type RolePredicate } from "../runtime/roles";
+import type { Effect, MessageContext, RequestConfig } from "../core/message";
 import { routeMessage } from "../runtime/message-router";
-import type { Effect, RequestConfig, MessageContext } from "../core/message";
+import { type RolePredicate, resolveRole } from "../runtime/roles";
 
 // --- Actor definition shape (minimal for testing) ---
 
@@ -16,16 +16,30 @@ interface TestableActorDef<TState, TInput> {
   input: z.ZodType<TInput>;
   init: (input: TInput) => TState;
   roles: Record<string, RolePredicate<TState>>;
-  messages: Record<string, Record<string, {
-    readonly schema: z.ZodType;
-    handler(state: TState, payload: unknown, ctx: unknown): unknown;
-    guard?(state: TState): boolean;
-  }>>;
-  views: Record<string, {
-    readonly fn: (state: TState, caller: string) => unknown;
-  }>;
+  messages: Record<
+    string,
+    Record<
+      string,
+      {
+        readonly schema: z.ZodType;
+        handler(state: TState, payload: unknown, ctx: unknown): unknown;
+        guard?(state: TState): boolean;
+      }
+    >
+  >;
+  views: Record<
+    string,
+    {
+      readonly fn: (state: TState, caller: string) => unknown;
+    }
+  >;
   observe?: {
-    onTransition?(prevState: TState, nextState: TState, event: { type: string }, ctx: { caller: string; role: string }): void;
+    onTransition?(
+      prevState: TState,
+      nextState: TState,
+      event: { type: string },
+      ctx: { caller: string; role: string },
+    ): void;
   };
 }
 
@@ -34,8 +48,18 @@ interface TestableActorDef<TState, TInput> {
 interface TestHarness<TState, TInput> {
   init(input: TInput): TState;
   role(state: TState, caller: string, opts?: { callerType?: "user" | "service" }): string | null;
-  send(state: TState, caller: string, event: { type: string; [key: string]: unknown }, opts?: { callerType?: "user" | "service" }): Promise<TState>;
-  sendWithEffects(state: TState, caller: string, event: { type: string; [key: string]: unknown }, opts?: { callerType?: "user" | "service" }): Promise<{
+  send(
+    state: TState,
+    caller: string,
+    event: { type: string; [key: string]: unknown },
+    opts?: { callerType?: "user" | "service" },
+  ): Promise<TState>;
+  sendWithEffects(
+    state: TState,
+    caller: string,
+    event: { type: string; [key: string]: unknown },
+    opts?: { callerType?: "user" | "service" },
+  ): Promise<{
     state: TState;
     emissions: Effect[];
     requests: RequestConfig[];
@@ -45,9 +69,7 @@ interface TestHarness<TState, TInput> {
 
 // --- Implementation ---
 
-export function testActor<TState, TInput>(
-  def: TestableActorDef<TState, TInput>,
-): TestHarness<TState, TInput> {
+export function testActor<TState, TInput>(def: TestableActorDef<TState, TInput>): TestHarness<TState, TInput> {
   return {
     init(input: TInput): TState {
       const parsed = def.input.safeParse(input);
@@ -63,12 +85,22 @@ export function testActor<TState, TInput>(
       });
     },
 
-    async send(state: TState, caller: string, event: { type: string; [key: string]: unknown }, opts?: { callerType?: "user" | "service" }): Promise<TState> {
+    async send(
+      state: TState,
+      caller: string,
+      event: { type: string; [key: string]: unknown },
+      opts?: { callerType?: "user" | "service" },
+    ): Promise<TState> {
       const { state: nextState } = await this.sendWithEffects(state, caller, event, opts);
       return nextState;
     },
 
-    async sendWithEffects(state: TState, caller: string, event: { type: string; [key: string]: unknown }, opts?: { callerType?: "user" | "service" }): Promise<{
+    async sendWithEffects(
+      state: TState,
+      caller: string,
+      event: { type: string; [key: string]: unknown },
+      opts?: { callerType?: "user" | "service" },
+    ): Promise<{
       state: TState;
       emissions: Effect[];
       requests: RequestConfig[];
@@ -88,8 +120,12 @@ export function testActor<TState, TInput>(
         caller,
         callerType,
         env: {},
-        emit: (effect: Effect) => { emissions.push(effect); },
-        request: (config: RequestConfig) => { requests.push(config); },
+        emit: (effect: Effect) => {
+          emissions.push(effect);
+        },
+        request: (config: RequestConfig) => {
+          requests.push(config);
+        },
       };
 
       const result = await routeMessage(def.messages, role, state, event, ctx);

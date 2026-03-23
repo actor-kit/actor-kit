@@ -1,8 +1,8 @@
 import { z } from "zod";
 import { actor } from "../../../packages/actor-kit/src/core/actor";
 import { message } from "../../../packages/actor-kit/src/core/message";
-import { schema, uint32, string } from "../../../packages/actor-kit/src/schema/schema";
 import { view } from "../../../packages/actor-kit/src/core/view";
+import { schema, string, uint32 } from "../../../packages/actor-kit/src/schema/schema";
 
 // --- Counter actor ---
 
@@ -26,25 +26,20 @@ const decrement = message(
   }),
 );
 
-const reset = message(
-  z.object({}),
-  (_state: CounterState) => ({ count: 0, lastCaller: null }),
-);
+const reset = message(z.object({}), (_state: CounterState) => ({ count: 0, lastCaller: null }));
 
-const notify = message(
-  z.object({}),
-  (state: CounterState, _payload, ctx) => {
-    ctx.emit({ queue: "ANALYTICS", body: { count: state.count } });
-    return state;
-  },
-);
+const notify = message(z.object({}), (state: CounterState, _payload, ctx) => {
+  ctx.emit({ queue: "ANALYTICS", body: { count: state.count } });
+  return state;
+});
 
 export const Counter = actor("counter", {
   binarySync: true,
   input: z.object({}),
   init: () => ({ count: 0, lastCaller: null }),
   roles: {
-    admin: (_state: CounterState, _caller: string, { callerType }: { callerType: "user" | "service" }) => callerType === "service",
+    admin: (_state: CounterState, _caller: string, { callerType }: { callerType: "user" | "service" }) =>
+      callerType === "service",
     user: () => true,
   },
   messages: {

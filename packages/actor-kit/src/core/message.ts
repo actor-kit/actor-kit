@@ -72,35 +72,21 @@ export interface MessageDef<TState = unknown, TPayload = unknown, TEnv = unknown
 // --- message() function ---
 
 // Overload 1: bare handler (no guard)
-export function message<
-  TSchema extends z.ZodType,
-  TState,
-  TEnv = unknown,
->(
+export function message<TSchema extends z.ZodType, TState, TEnv = unknown>(
   zodSchema: TSchema,
   handler: MessageHandler<TState, z.infer<TSchema>, TEnv>,
 ): MessageDef<TState, z.infer<TSchema>, TEnv>;
 
 // Overload 2: guarded handler
-export function message<
-  TSchema extends z.ZodType,
-  TState,
-  TEnv = unknown,
->(
+export function message<TSchema extends z.ZodType, TState, TEnv = unknown>(
   zodSchema: TSchema,
   config: GuardedHandler<TState, z.infer<TSchema>, TEnv>,
 ): MessageDef<TState, z.infer<TSchema>, TEnv>;
 
 // Implementation
-export function message<
-  TSchema extends z.ZodType,
-  TState,
-  TEnv = unknown,
->(
+export function message<TSchema extends z.ZodType, TState, TEnv = unknown>(
   zodSchema: TSchema,
-  handlerOrConfig:
-    | MessageHandler<TState, z.infer<TSchema>, TEnv>
-    | GuardedHandler<TState, z.infer<TSchema>, TEnv>,
+  handlerOrConfig: MessageHandler<TState, z.infer<TSchema>, TEnv> | GuardedHandler<TState, z.infer<TSchema>, TEnv>,
 ): MessageDef<TState, z.infer<TSchema>, TEnv> {
   if (typeof handlerOrConfig === "function") {
     return {

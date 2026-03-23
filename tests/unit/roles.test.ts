@@ -1,5 +1,5 @@
-import { describe, it, expect } from "vitest";
-import { resolveRole, type RolePredicate } from "../../packages/actor-kit/src/runtime/roles";
+import { describe, expect, it } from "vitest";
+import { type RolePredicate, resolveRole } from "../../packages/actor-kit/src/runtime/roles";
 
 type State = {
   ownerId: string;
@@ -11,10 +11,8 @@ describe("resolveRole()", () => {
   const roles = {
     service: ((_state: State, _caller: string, claims: { callerType: "user" | "service" }) =>
       claims.callerType === "service") satisfies RolePredicate<State>,
-    owner: ((state: State, caller: string) =>
-      caller === state.ownerId) satisfies RolePredicate<State>,
-    member: ((state: State, caller: string) =>
-      state.memberIds.includes(caller)) satisfies RolePredicate<State>,
+    owner: ((state: State, caller: string) => caller === state.ownerId) satisfies RolePredicate<State>,
+    member: ((state: State, caller: string) => state.memberIds.includes(caller)) satisfies RolePredicate<State>,
     viewer: (() => true) satisfies RolePredicate<State>,
   };
 
@@ -56,8 +54,7 @@ describe("resolveRole()", () => {
 
   it("returns null when no role matches", () => {
     const strictRoles = {
-      owner: ((state: State, caller: string) =>
-        caller === state.ownerId) satisfies RolePredicate<State>,
+      owner: ((state: State, caller: string) => caller === state.ownerId) satisfies RolePredicate<State>,
       // No catch-all
     };
     const role = resolveRole(strictRoles, state, "stranger", { callerType: "user" });

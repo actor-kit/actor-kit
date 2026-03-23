@@ -11,10 +11,7 @@ export type RolePredicate<TState> = (
   claims: { callerType: "user" | "service" },
 ) => boolean;
 
-export function resolveRole<
-  TState,
-  TRoles extends Record<string, RolePredicate<TState>>,
->(
+export function resolveRole<TState, TRoles extends Record<string, RolePredicate<TState>>>(
   roles: TRoles,
   state: TState,
   caller: string,
@@ -22,7 +19,7 @@ export function resolveRole<
 ): (keyof TRoles & string) | null {
   for (const roleName of Object.keys(roles)) {
     const predicate = roles[roleName];
-    if (predicate !== undefined && predicate(state, caller, claims)) {
+    if (predicate?.(state, caller, claims)) {
       return roleName;
     }
   }

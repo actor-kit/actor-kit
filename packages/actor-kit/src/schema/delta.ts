@@ -8,7 +8,7 @@
  * applyDelta(schema, current, deltaBytes) → new object with changes applied
  */
 
-import type { SchemaDefinition, FieldDescriptor, Infer } from "./schema";
+import type { FieldDescriptor, Infer, SchemaDefinition } from "./schema";
 
 const textEncoder = new TextEncoder();
 const textDecoder = new TextDecoder();

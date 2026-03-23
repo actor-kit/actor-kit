@@ -27,15 +27,18 @@ export interface ActorRef {
   readonly actorType: string;
   readonly actorId: string;
   spawn(input: { actorId?: string; caller: string; callerType: "user" | "service"; input: unknown }): Promise<void>;
-  send(caller: string, callerType: "user" | "service", event: { type: string; [key: string]: unknown }): Promise<{ ok: boolean; error?: string }>;
-  getSnapshot(caller: string, callerType: "user" | "service"): Promise<{ snapshot: unknown; role: string; checksum: string }>;
+  send(
+    caller: string,
+    callerType: "user" | "service",
+    event: { type: string; [key: string]: unknown },
+  ): Promise<{ ok: boolean; error?: string }>;
+  getSnapshot(
+    caller: string,
+    callerType: "user" | "service",
+  ): Promise<{ snapshot: unknown; role: string; checksum: string }>;
 }
 
-export function createRef(
-  env: Record<string, unknown>,
-  actorType: string,
-  actorId: string,
-): ActorRef {
+export function createRef(env: Record<string, unknown>, actorType: string, actorId: string): ActorRef {
   const namespace = env[actorType] as DONamespace | undefined;
   if (!namespace) {
     throw new Error(`DO namespace "${actorType}" not found in env`);

@@ -1,7 +1,7 @@
-import { describe, it, expect } from "vitest";
-import { schema, uint32, float32, string, boolean } from "../../packages/actor-kit/src/schema/schema";
-import { encode, decode } from "../../packages/actor-kit/src/schema/binary";
-import { encodeDelta, applyDelta } from "../../packages/actor-kit/src/schema/delta";
+import { describe, expect, it } from "vitest";
+import { encode } from "../../packages/actor-kit/src/schema/binary";
+import { applyDelta, encodeDelta } from "../../packages/actor-kit/src/schema/delta";
+import { boolean, float32, schema, string, uint32 } from "../../packages/actor-kit/src/schema/schema";
 
 describe("binary delta encoding", () => {
   const PlayerView = schema({
@@ -28,7 +28,7 @@ describe("binary delta encoding", () => {
 
     // Delta should be smaller than full encode
     const full = encode(PlayerView, next);
-    expect(delta!.byteLength).toBeLessThan(full.byteLength);
+    expect(delta?.byteLength).toBeLessThan(full.byteLength);
   });
 
   it("applyDelta reconstructs the correct state", () => {
@@ -66,7 +66,7 @@ describe("binary delta encoding", () => {
     expect(delta).not.toBeNull();
 
     // Bitmask (1 byte for 6 fields) + uint32 health (4 bytes) = 5 bytes
-    expect(delta!.byteLength).toBe(5);
+    expect(delta?.byteLength).toBe(5);
 
     const result = applyDelta(PlayerView, prev, delta!);
     expect(result.health).toBe(99);
@@ -80,6 +80,6 @@ describe("binary delta encoding", () => {
     const delta = encodeDelta(PosView, prev, next);
     expect(delta).not.toBeNull();
     // Bitmask (1 byte) + 3 floats (12 bytes) = 13 bytes
-    expect(delta!.byteLength).toBe(13);
+    expect(delta?.byteLength).toBe(13);
   });
 });

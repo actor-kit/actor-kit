@@ -53,7 +53,7 @@ Run before committing:
 1. `pnpm typecheck` — strict TypeScript, zero errors
 2. `pnpm test:unit` — Vitest unit tests
 3. `pnpm test:integration` — vitest-pool-workers (DO lifecycle, WebSocket, persistence)
-4. `pnpm lint` — ESLint with no-explicit-any, no-non-null-assertion
+4. `pnpm lint` — Biome: no-explicit-any, formatting, import ordering
 
 ## Knowledge base
 

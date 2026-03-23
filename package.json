@@ -6,11 +6,14 @@
     "test:unit": "vitest run --project unit",
     "test:integration": "vitest run --project integration",
     "test": "pnpm test:unit && pnpm test:integration",
-    "lint": "eslint packages/",
+    "lint": "biome check packages/ tests/",
+    "lint:fix": "biome check --write packages/ tests/",
     "build": "pnpm -r run build"
   },
   "devDependencies": {
+    "@biomejs/biome": "^2.4.8",
     "@cloudflare/vitest-pool-workers": "^0.8.0",
+    "@cloudflare/workers-types": "^4.20250310.0",
     "@testing-library/react": "^16.3.2",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",

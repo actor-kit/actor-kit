@@ -1,8 +1,13 @@
-import { describe, it, expect } from "vitest";
-import { schema, uint32, float32, string, boolean, array } from "../../packages/actor-kit/src/schema/schema";
-import { encode, decode } from "../../packages/actor-kit/src/schema/binary";
-import { encodeDelta, applyDelta } from "../../packages/actor-kit/src/schema/delta";
-import { createSnapshotFrame, createDeltaFrame, parseFrame, FrameType } from "../../packages/actor-kit/src/schema/frame";
+import { describe, expect, it } from "vitest";
+import { decode, encode } from "../../packages/actor-kit/src/schema/binary";
+import { applyDelta, encodeDelta } from "../../packages/actor-kit/src/schema/delta";
+import {
+  createDeltaFrame,
+  createSnapshotFrame,
+  FrameType,
+  parseFrame,
+} from "../../packages/actor-kit/src/schema/frame";
+import { array, boolean, float32, schema, string, uint32 } from "../../packages/actor-kit/src/schema/schema";
 
 describe("binary frame round-trip (encode → frame → parse → decode)", () => {
   const PlayerView = schema({
