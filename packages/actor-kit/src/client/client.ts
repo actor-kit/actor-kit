@@ -24,7 +24,7 @@ interface ClientOptions {
   host: string;
   accessToken: string;
   WebSocketImpl?: typeof WebSocket;
-  onRedirect?: (target: { actorType: string; actorId: string }) => void;
+  onRedirect?: ((target: { actorType: string; actorId: string }) => void) | undefined;
 }
 
 export function createActorClient(options: ClientOptions): ActorClient {
