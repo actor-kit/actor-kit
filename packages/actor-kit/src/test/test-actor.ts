@@ -24,6 +24,9 @@ interface TestableActorDef<TState, TInput> {
   views: Record<string, {
     readonly fn: (state: TState, caller: string) => unknown;
   }>;
+  observe?: {
+    onTransition?(prevState: TState, nextState: TState, event: { type: string }, ctx: { caller: string; role: string }): void;
+  };
 }
 
 // --- Test harness return type ---
@@ -100,6 +103,11 @@ export function testActor<TState, TInput>(
           case "guard_failed":
             throw new Error(`Guard rejected "${event.type}"`);
         }
+      }
+
+      // Fire onTransition hook if defined
+      if (def.observe?.onTransition) {
+        def.observe.onTransition(state, result.state, event, { caller, role });
       }
 
       return { state: result.state, emissions, requests };
