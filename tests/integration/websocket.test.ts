@@ -2,6 +2,7 @@ import { env } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
 import { createAccessToken } from "../../packages/actor-kit/src/auth/auth";
 import { decode } from "../../packages/actor-kit/src/schema/binary";
+import { applyDelta } from "../../packages/actor-kit/src/schema/delta";
 import { FrameType, parseFrame } from "../../packages/actor-kit/src/schema/frame";
 import { schema, string, uint32 } from "../../packages/actor-kit/src/schema/schema";
 
@@ -78,7 +79,7 @@ describe("Counter DO WebSocket (binary)", () => {
     await new Promise((r) => setTimeout(r, 50));
   });
 
-  it("receives updated binary snapshot after send", async () => {
+  it("receives binary delta after send", async () => {
     const actorId = "ws-binary-update";
     const id = env.COUNTER.idFromName(actorId);
     const stub = env.COUNTER.get(id);
@@ -89,18 +90,22 @@ describe("Counter DO WebSocket (binary)", () => {
     const ws = response.webSocket!;
     ws.accept();
 
-    // Consume initial snapshot
-    await waitForBinaryMessage(ws);
+    // Get initial snapshot
+    const initialData = await waitForBinaryMessage(ws);
+    const initialFrame = parseFrame(new Uint8Array(initialData));
+    expect(initialFrame.type).toBe(FrameType.SNAPSHOT);
+    const initialView = decode(CounterView, initialFrame.payload) as Record<string, unknown>;
 
-    // Send INCREMENT — client messages are still JSON
+    // Send INCREMENT
     ws.send(JSON.stringify({ type: "INCREMENT", amount: 7 }));
 
-    // Receive updated binary snapshot
+    // Receive DELTA frame (not snapshot — delta encoding is active)
     const data = await waitForBinaryMessage(ws);
     const frame = parseFrame(new Uint8Array(data));
-    expect(frame.type).toBe(FrameType.SNAPSHOT);
+    expect(frame.type).toBe(FrameType.DELTA);
 
-    const view = decode(CounterView, frame.payload);
+    // Apply delta to get updated view
+    const view = applyDelta(CounterView, initialView, frame.payload);
     expect((view as { count: number }).count).toBe(7);
 
     ws.close(1000, "done");

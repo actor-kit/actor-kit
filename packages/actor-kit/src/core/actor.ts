@@ -688,7 +688,9 @@ export function actor(
       if (viewDef) {
         const viewData = viewDef.fn(this.state, callerInfo.caller);
         const json = JSON.stringify(viewData);
-        this.previousViews.set(server, json);
+        const dedupeKey = `${role}:${json}`;
+        this.previousViews.set(server, dedupeKey);
+        this.previousViewData.set(server, viewData as Record<string, unknown>);
 
         const viewSchema = viewDef.schema;
         if (viewSchema && viewSchema.fields) {

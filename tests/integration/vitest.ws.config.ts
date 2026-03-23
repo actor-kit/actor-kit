@@ -8,6 +8,12 @@ export default defineWorkersConfig({
         isolatedStorage: false, // WebSocket tests can't use isolated storage with SQLite DOs
       },
     },
-    include: ["websocket.test.ts", "binary-views.test.ts", "auth.test.ts", "error-feedback.test.ts"],
+    include: [
+      "websocket.test.ts",
+      "binary-views.test.ts",
+      "auth.test.ts",
+      "error-feedback.test.ts",
+      "delta-sync.test.ts",
+    ],
   },
 });

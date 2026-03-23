@@ -2,6 +2,7 @@ import { env } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
 import { createAccessToken } from "../../packages/actor-kit/src/auth/auth";
 import { decode } from "../../packages/actor-kit/src/schema/binary";
+import { applyDelta } from "../../packages/actor-kit/src/schema/delta";
 import { FrameType, parseFrame } from "../../packages/actor-kit/src/schema/frame";
 import { schema, string, uint32 } from "../../packages/actor-kit/src/schema/schema";
 
@@ -64,16 +65,20 @@ describe("Binary view sync (integration)", () => {
     await new Promise((r) => setTimeout(r, 50));
   });
 
-  it("view updates are broadcast as binary after message", async () => {
+  it("view updates are broadcast as binary delta after message", async () => {
     const { stub, actorId } = getStub("binary-view-2");
     await stub.spawn({ actorId, caller: "u1", callerType: "user", input: {} });
 
-    const { ws } = await connectAndGetSnapshot(stub, actorId, "u1");
+    const { ws, data: snapshotData } = await connectAndGetSnapshot(stub, actorId, "u1");
+    const initialView = decode(CounterView, parseFrame(new Uint8Array(snapshotData)).payload) as Record<
+      string,
+      unknown
+    >;
 
     // Send INCREMENT via WS (JSON)
     ws.send(JSON.stringify({ type: "INCREMENT", amount: 10 }));
 
-    // Receive binary update
+    // Receive binary DELTA update
     const updateData = await new Promise<ArrayBuffer>((resolve) => {
       ws.addEventListener(
         "message",
@@ -86,8 +91,8 @@ describe("Binary view sync (integration)", () => {
     });
 
     const frame = parseFrame(new Uint8Array(updateData));
-    expect(frame.type).toBe(FrameType.SNAPSHOT);
-    const view = decode(CounterView, frame.payload) as { count: number };
+    expect(frame.type).toBe(FrameType.DELTA);
+    const view = applyDelta(CounterView, initialView, frame.payload) as { count: number };
     expect(view.count).toBe(10);
 
     ws.close(1000);

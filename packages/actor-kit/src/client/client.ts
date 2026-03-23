@@ -7,6 +7,7 @@
  */
 
 import { decode } from "../schema/binary";
+import { applyDelta } from "../schema/delta";
 import { FrameType, parseFrame } from "../schema/frame";
 import type { FieldDescriptor, SchemaDefinition } from "../schema/schema";
 
@@ -83,7 +84,6 @@ export function createActorClient(options: ClientOptions): ActorClient {
         if (viewSchema) {
           currentView = decode(viewSchema, frame.payload);
         } else {
-          // No schema — can't decode binary. This shouldn't happen if properly configured.
           return;
         }
         if (roleNames && frame.roleIndex !== undefined) {
@@ -91,6 +91,12 @@ export function createActorClient(options: ClientOptions): ActorClient {
         }
         setConnectionState("connected");
         notifyListeners();
+      } else if (frame.type === FrameType.DELTA) {
+        // Apply delta to current view — only changed fields
+        if (viewSchema && currentView) {
+          currentView = applyDelta(viewSchema, currentView as Record<string, unknown>, frame.payload);
+          notifyListeners();
+        }
       } else if (frame.type === FrameType.CONTROL && frame.controlType !== undefined) {
         // Handle control frames (redirect, error, etc.)
         const controlPayload = new TextDecoder().decode(frame.payload);
