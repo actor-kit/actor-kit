@@ -19,6 +19,7 @@ import { resolveMessagesForState } from "../runtime/states";
 import { createOutbox, type OutboxEntry } from "../runtime/outbox";
 import { getCallerFromToken } from "../auth/auth";
 import type { MessageContext, Effect, RequestConfig } from "./message";
+import { parseDuration } from "../runtime/timers";
 
 // --- Actor definition ---
 
@@ -62,6 +63,13 @@ interface ActorDef {
   on?: Record<string, {
     (state: unknown, ...args: unknown[]): unknown | Promise<unknown>; // bivariant
   }>;
+  after?: Record<string, {
+    (state: unknown): unknown | Promise<unknown>;
+  }>;
+  tick?: {
+    frequency: number;
+    handler(state: unknown): unknown | Promise<unknown>;
+  };
   migrate?(persisted: unknown, fromVersion: number): unknown;
   serialize?(state: unknown): unknown;
   restore?(serialized: unknown): unknown;
@@ -247,6 +255,9 @@ export function actor(
 
       // Persist
       this.persistState();
+
+      // Schedule after timers
+      this.scheduleAfterTimers();
     }
 
     async send(caller: string, callerType: "user" | "service", event: { type: string; [key: string]: unknown }): Promise<{ ok: boolean; error?: string }> {
@@ -533,6 +544,9 @@ export function actor(
         }
       }
 
+      // Start tick if defined and not already running
+      this.startTick();
+
       return new Response(null, {
         status: 101,
         webSocket: client,
@@ -580,6 +594,124 @@ export function actor(
           this.state = nextState;
           this.persistState();
           this.broadcastViews();
+        }
+      }
+
+      // Stop tick if no connections remain
+      if (this.connections.size === 0) {
+        this.stopTick();
+      }
+    }
+
+    // --- DO Alarms (after timers) ---
+
+    private scheduleAfterTimers(): void {
+      if (!def.after) return;
+
+      // Find the soonest timer and schedule it
+      let soonestMs = Infinity;
+      let soonestKey: string | undefined;
+
+      for (const [durationStr] of Object.entries(def.after)) {
+        const ms = parseDuration(durationStr);
+        if (ms < soonestMs) {
+          soonestMs = ms;
+          soonestKey = durationStr;
+        }
+      }
+
+      if (soonestKey !== undefined && soonestMs < Infinity) {
+        // Store which timer is scheduled so alarm() knows which handler to run
+        this.ctx.storage.sql.exec(
+          "INSERT OR REPLACE INTO actor_meta (key, value) VALUES ('scheduled_alarm', ?)",
+          soonestKey,
+        );
+        this.ctx.storage.setAlarm(Date.now() + soonestMs);
+      }
+    }
+
+    async alarm(): Promise<void> {
+      await this.loadState();
+      if (!this.initialized) return;
+
+      // Find which timer fired
+      const rows = this.ctx.storage.sql
+        .exec("SELECT value FROM actor_meta WHERE key = 'scheduled_alarm'")
+        .toArray();
+      const scheduledKey = (rows[0] as { value: string } | undefined)?.value;
+
+      if (scheduledKey && def.after) {
+        const handler = def.after[scheduledKey];
+        if (typeof handler === "function") {
+          const nextState = await handler(this.state);
+          if (nextState !== this.state) {
+            this.state = nextState;
+            this.persistState();
+            this.broadcastViews();
+          }
+        }
+
+        // Clean up and schedule next timer (excluding the one that just fired)
+        this.ctx.storage.sql.exec("DELETE FROM actor_meta WHERE key = 'scheduled_alarm'");
+
+        // Schedule remaining timers
+        let soonestMs = Infinity;
+        let soonestKey: string | undefined;
+        for (const [durationStr] of Object.entries(def.after)) {
+          if (durationStr === scheduledKey) continue; // Skip the one that just fired
+          const ms = parseDuration(durationStr);
+          if (ms < soonestMs) {
+            soonestMs = ms;
+            soonestKey = durationStr;
+          }
+        }
+        if (soonestKey !== undefined && soonestMs < Infinity) {
+          this.ctx.storage.sql.exec(
+            "INSERT OR REPLACE INTO actor_meta (key, value) VALUES ('scheduled_alarm', ?)",
+            soonestKey,
+          );
+          this.ctx.storage.setAlarm(Date.now() + soonestMs);
+        }
+      }
+    }
+
+    // --- Tick (game loop) ---
+
+    private tickInterval: ReturnType<typeof setInterval> | undefined = undefined;
+    private lastTickPersist = 0;
+
+    private startTick(): void {
+      if (!def.tick || this.tickInterval !== undefined) return;
+
+      this.tickInterval = setInterval(async () => {
+        if (!this.initialized) return;
+        const handler = def.tick?.handler;
+        if (typeof handler !== "function") return;
+
+        const nextState = await handler(this.state);
+        if (nextState !== this.state) {
+          this.state = nextState;
+
+          // Throttle persistence to max 1/second for ticks
+          const now = Date.now();
+          if (now - this.lastTickPersist >= 1000) {
+            this.persistState();
+            this.lastTickPersist = now;
+          }
+
+          this.broadcastViews();
+        }
+      }, def.tick.frequency);
+    }
+
+    private stopTick(): void {
+      if (this.tickInterval !== undefined) {
+        clearInterval(this.tickInterval);
+        this.tickInterval = undefined;
+
+        // Persist final state on tick stop
+        if (this.initialized) {
+          this.persistState();
         }
       }
     }
