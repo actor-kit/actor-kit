@@ -401,6 +401,14 @@ export function actor(
             }
           } else {
             this.ctx.storage.sql.exec("UPDATE outbox SET attempts = ? WHERE id = ?", newAttempts, entry.id);
+            // Schedule retry via DO Alarm — exponential backoff: 1s, 5s, 25s
+            const retryDelays = [1000, 5000, 25000];
+            const delay = retryDelays[newAttempts - 1] ?? 25000;
+            this.ctx.storage.sql.exec(
+              "INSERT OR REPLACE INTO actor_meta (key, value) VALUES ('outbox_retry', ?)",
+              String(Date.now() + delay),
+            );
+            this.ctx.storage.setAlarm(Date.now() + delay);
           }
         }
       }
@@ -694,7 +702,7 @@ export function actor(
         let soonestMs = Infinity;
         let soonestKey: string | undefined;
         for (const [durationStr] of Object.entries(def.after)) {
-          if (durationStr === scheduledKey) continue; // Skip the one that just fired
+          if (durationStr === scheduledKey) continue;
           const ms = parseDuration(durationStr);
           if (ms < soonestMs) {
             soonestMs = ms;
@@ -708,6 +716,15 @@ export function actor(
           );
           this.ctx.storage.setAlarm(Date.now() + soonestMs);
         }
+      }
+
+      // Check for outbox retry alarm
+      const retryRows = this.ctx.storage.sql
+        .exec("SELECT value FROM actor_meta WHERE key = 'outbox_retry'")
+        .toArray();
+      if (retryRows.length > 0) {
+        this.ctx.storage.sql.exec("DELETE FROM actor_meta WHERE key = 'outbox_retry'");
+        this.drainOutbox();
       }
     }
 
