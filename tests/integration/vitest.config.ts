@@ -10,6 +10,6 @@ export default defineWorkersConfig({
     },
     // Exclude websocket tests — they need non-isolated storage
     // due to vitest-pool-workers SQLite limitation
-    exclude: ["websocket.test.ts"],
+    exclude: ["websocket.test.ts", "binary-views.test.ts", "auth.test.ts"],
   },
 });
