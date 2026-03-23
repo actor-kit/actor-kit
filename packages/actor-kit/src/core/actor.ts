@@ -158,6 +158,7 @@ export function actor(
     connections = new Map<WebSocket, { caller: string; callerType: "user" | "service" }>();
     previousViews = new Map<WebSocket, string>(); // dedupe key: "role:json"
     previousViewData = new Map<WebSocket, Record<string, unknown>>(); // actual view data for delta computation
+    connectionChecksums = new Map<WebSocket, string>(); // last checksum sent per connection
     draining = false; // Prevents concurrent outbox drains
 
     constructor(ctx: DurableObjectState, env: Record<string, unknown>) {
@@ -599,6 +600,7 @@ export function actor(
           const prevViewData = this.previousViewData.get(ws);
           this.previousViews.set(ws, dedupeKey);
           this.previousViewData.set(ws, viewData as Record<string, unknown>);
+          this.connectionChecksums.set(ws, this.computeChecksum(JSON.stringify(viewData)));
 
           // Use binary encoding only if binarySync is enabled and schema is available
           const viewSchema = viewDef.schema;
@@ -689,8 +691,10 @@ export function actor(
         const viewData = viewDef.fn(this.state, callerInfo.caller);
         const json = JSON.stringify(viewData);
         const dedupeKey = `${role}:${json}`;
+        const checksum = this.computeChecksum(json);
         this.previousViews.set(server, dedupeKey);
         this.previousViewData.set(server, viewData as Record<string, unknown>);
+        this.connectionChecksums.set(server, checksum);
 
         const viewSchema = viewDef.schema;
         if (viewSchema && viewSchema.fields) {
@@ -744,6 +748,13 @@ export function actor(
           return;
         }
         const event = parsed as Record<string, unknown> & { type: string };
+
+        // Handle reconnect handshake
+        if (event.type === "__reconnect" && typeof event["lastChecksum"] === "string") {
+          await this.handleReconnect(ws, caller, callerType, event["lastChecksum"]);
+          return;
+        }
+
         const result = await this.send(caller, callerType, event);
         // Send error frame back to client if message was rejected
         if (!result.ok) {
@@ -751,6 +762,43 @@ export function actor(
         }
       } catch {
         ws.send(JSON.stringify({ type: "__error", detail: "Invalid message" }));
+      }
+    }
+
+    async handleReconnect(
+      ws: WebSocket,
+      caller: string,
+      callerType: "user" | "service",
+      lastChecksum: string,
+    ): Promise<void> {
+      const role = resolveRole(def.roles, this.state, caller, { callerType });
+      if (role === null) return;
+
+      const viewDef = def.views[role];
+      if (!viewDef) return;
+
+      const viewData = viewDef.fn(this.state, caller);
+      const json = JSON.stringify(viewData);
+      const currentChecksum = this.computeChecksum(json);
+
+      if (currentChecksum === lastChecksum) {
+        // State hasn't changed — send ack, no data needed
+        ws.send(JSON.stringify({ type: "__reconnect_ack", checksum: currentChecksum }));
+      } else {
+        // State changed — send full snapshot (we don't have the client's previous view)
+        this.previousViewData.set(ws, viewData as Record<string, unknown>);
+        this.connectionChecksums.set(ws, currentChecksum);
+
+        const viewSchema = viewDef.schema;
+        if (def.binarySync && viewSchema?.fields) {
+          const schemaDef = viewSchema as SchemaDefinition<Record<string, FieldDescriptor>>;
+          const payload = encode(schemaDef, viewData as Record<string, unknown>);
+          const roleNames = Object.keys(def.roles);
+          const roleIndex = roleNames.indexOf(role);
+          ws.send(createSnapshotFrame(this.version, roleIndex, payload));
+        } else {
+          ws.send(JSON.stringify({ type: "snapshot", role, data: viewData }));
+        }
       }
     }
 
@@ -762,6 +810,7 @@ export function actor(
       this.connections.delete(ws);
       this.previousViews.delete(ws);
       this.previousViewData.delete(ws);
+      this.connectionChecksums.delete(ws);
 
       // Run on.disconnect if defined
       if (def.on?.["disconnect"]) {

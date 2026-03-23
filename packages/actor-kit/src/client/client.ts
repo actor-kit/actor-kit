@@ -60,6 +60,16 @@ export function createActorClient(options: ClientOptions): ActorClient {
   let intentionalClose = false;
   let reconnectAttempts = 0;
   let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
+  let lastChecksum: string | undefined;
+  let isReconnecting = false;
+
+  function computeChecksum(json: string): string {
+    let h = 0;
+    for (let i = 0; i < json.length; i++) {
+      h = ((h << 5) - h + json.charCodeAt(i)) | 0;
+    }
+    return (h >>> 0).toString(16);
+  }
 
   function notifyListeners() {
     for (const listener of listeners) {
@@ -89,12 +99,15 @@ export function createActorClient(options: ClientOptions): ActorClient {
         if (roleNames && frame.roleIndex !== undefined) {
           currentRole = roleNames[frame.roleIndex];
         }
+        // Store checksum for reconnection
+        lastChecksum = computeChecksum(JSON.stringify(currentView));
         setConnectionState("connected");
         notifyListeners();
       } else if (frame.type === FrameType.DELTA) {
         // Apply delta to current view — only changed fields
         if (viewSchema && currentView) {
           currentView = applyDelta(viewSchema, currentView as Record<string, unknown>, frame.payload);
+          lastChecksum = computeChecksum(JSON.stringify(currentView));
           notifyListeners();
         }
       } else if (frame.type === FrameType.CONTROL && frame.controlType !== undefined) {
@@ -136,6 +149,9 @@ export function createActorClient(options: ClientOptions): ActorClient {
           actorType: typeof msgObj["actorType"] === "string" ? msgObj["actorType"] : actorType,
           actorId: typeof msgObj["actorId"] === "string" ? msgObj["actorId"] : actorId,
         });
+      } else if (msgObj["type"] === "__reconnect_ack") {
+        // Server confirmed our checksum matches — no data needed
+        setConnectionState("connected");
       } else if (msgObj["type"] === "__error") {
         // Error frame from server
       }
@@ -156,6 +172,11 @@ export function createActorClient(options: ClientOptions): ActorClient {
 
     ws.addEventListener("open", () => {
       reconnectAttempts = 0;
+      // If reconnecting with a previous checksum, send reconnect handshake
+      if (isReconnecting && lastChecksum) {
+        ws?.send(JSON.stringify({ type: "__reconnect", lastChecksum }));
+        isReconnecting = false;
+      }
     });
 
     ws.addEventListener("message", (event: MessageEvent) => {
@@ -174,6 +195,7 @@ export function createActorClient(options: ClientOptions): ActorClient {
 
       if (reconnectAttempts < maxReconnectAttempts) {
         setConnectionState("reconnecting");
+        isReconnecting = true;
         const delay = Math.min(1000 * 2 ** reconnectAttempts, 30000);
         reconnectAttempts += 1;
         reconnectTimer = setTimeout(() => {
