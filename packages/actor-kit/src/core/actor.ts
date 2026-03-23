@@ -20,7 +20,8 @@ import { resolveRole } from "../runtime/roles";
 import { resolveMessagesForState } from "../runtime/states";
 import { parseDuration } from "../runtime/timers";
 import { encode } from "../schema/binary";
-import { createSnapshotFrame } from "../schema/frame";
+import { encodeDelta } from "../schema/delta";
+import { createDeltaFrame, createSnapshotFrame } from "../schema/frame";
 import type { FieldDescriptor, SchemaDefinition } from "../schema/schema";
 import type { Effect, MessageContext, RequestConfig } from "./message";
 
@@ -155,7 +156,8 @@ export function actor(
     version: number;
     // Keyed by WebSocket (not caller) to support multi-tab/multi-device
     connections = new Map<WebSocket, { caller: string; callerType: "user" | "service" }>();
-    previousViews = new Map<WebSocket, string>(); // JSON string of last sent view
+    previousViews = new Map<WebSocket, string>(); // dedupe key: "role:json"
+    previousViewData = new Map<WebSocket, Record<string, unknown>>(); // actual view data for delta computation
     draining = false; // Prevents concurrent outbox drains
 
     constructor(ctx: DurableObjectState, env: Record<string, unknown>) {
@@ -594,12 +596,26 @@ export function actor(
           const prevKey = this.previousViews.get(ws);
           if (dedupeKey === prevKey) continue;
 
+          const prevViewData = this.previousViewData.get(ws);
           this.previousViews.set(ws, dedupeKey);
+          this.previousViewData.set(ws, viewData as Record<string, unknown>);
 
           // Use binary encoding only if binarySync is enabled and schema is available
           const viewSchema = viewDef.schema;
-          if (def.binarySync && viewSchema && viewSchema.fields) {
+          if (def.binarySync && viewSchema?.fields) {
             const schemaDef = viewSchema as SchemaDefinition<Record<string, FieldDescriptor>>;
+
+            // Try delta encoding if we have previous view data
+            if (prevViewData) {
+              const deltaPayload = encodeDelta(schemaDef, prevViewData, viewData as Record<string, unknown>);
+              if (deltaPayload) {
+                const frame = createDeltaFrame(this.version, deltaPayload);
+                ws.send(frame);
+                continue; // Delta sent successfully
+              }
+            }
+
+            // Full snapshot (first connect or delta returned null)
             const payload = encode(schemaDef, viewData as Record<string, unknown>);
             const roleIndex = roleNames.indexOf(role);
             const frame = createSnapshotFrame(this.version, roleIndex, payload);
@@ -743,6 +759,7 @@ export function actor(
 
       this.connections.delete(ws);
       this.previousViews.delete(ws);
+      this.previousViewData.delete(ws);
 
       // Run on.disconnect if defined
       if (def.on?.["disconnect"]) {
