@@ -292,8 +292,9 @@ export function actor(
         return { ok: false, error: "No messages available" };
       }
 
-      // Create outbox collector
+      // Create outbox collector + state transition tracker
       const outbox = createOutbox();
+      let pendingStateTransition: string | undefined;
 
       const ctx: Omit<MessageContext, "role"> = {
         caller,
@@ -315,6 +316,18 @@ export function actor(
 
       // Update state
       this.state = result.state;
+
+      // Check if handler triggered a state transition via the state field
+      // Convention: if the state has a `__actorState` field, use it to advance the tracker
+      if (this.stateTracker && typeof this.state === "object" && this.state !== null) {
+        const stateObj = this.state as Record<string, unknown>;
+        if (typeof stateObj["__actorState"] === "string") {
+          const newStateName = stateObj["__actorState"];
+          if ("current" in this.stateTracker) {
+            this.stateTracker = { current: newStateName };
+          }
+        }
+      }
 
       // Fire onTransition if defined
       if (def.observe?.onTransition) {
@@ -442,8 +455,22 @@ export function actor(
           throw new Error(`Fetch failed: ${response.status} ${response.statusText}`);
         }
       } else if ("actor" in effect && typeof effect["actor"] === "string") {
-        // Actor RPC effect — not implemented in Phase 1, would use ref()
-        // For now, log and skip
+        // Actor RPC — use ref() to send message to another DO
+        const targetType = effect["actor"];
+        const targetId = effect["id"];
+        const targetMessage = effect["message"];
+        const targetPayload = effect["payload"];
+        if (typeof targetId !== "string" || typeof targetMessage !== "string") {
+          throw new Error(`Invalid actor RPC effect: missing id or message`);
+        }
+        const namespace = (this.env as Record<string, unknown>)[targetType.toUpperCase()];
+        if (!namespace || typeof namespace !== "object" || !("idFromName" in namespace)) {
+          throw new Error(`DO namespace "${targetType.toUpperCase()}" not found in env`);
+        }
+        const ns = namespace as { idFromName: (name: string) => { toString: () => string }; get: (id: unknown) => { send: (c: string, ct: string, e: unknown) => Promise<unknown> } };
+        const doId = ns.idFromName(targetId);
+        const stub = ns.get(doId);
+        await stub.send("system", "service", { type: targetMessage, ...((typeof targetPayload === "object" && targetPayload !== null) ? targetPayload as Record<string, unknown> : {}) });
       }
     }
 

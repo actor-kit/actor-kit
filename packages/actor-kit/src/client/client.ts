@@ -2,9 +2,13 @@
  * Client SDK — connects to an actor via WebSocket and provides
  * subscribe/send/trigger API with automatic reconnection.
  *
+ * Handles both binary frames (Phase 2) and JSON fallback (Phase 1).
  * Browser-safe: no CF deps.
- * Phase 1: JSON sync. Phase 2: binary sync.
  */
+
+import { decode } from "../schema/binary";
+import { parseFrame, FrameType } from "../schema/frame";
+import type { SchemaDefinition, FieldDescriptor } from "../schema/schema";
 
 export type ConnectionState = "connecting" | "connected" | "disconnected" | "reconnecting";
 
@@ -23,6 +27,10 @@ interface ClientOptions {
   actorId: string;
   host: string;
   accessToken: string;
+  /** Schema for decoding binary frames. If not provided, falls back to JSON. */
+  viewSchema?: SchemaDefinition<Record<string, FieldDescriptor>>;
+  /** Role names in definition order (for mapping roleIndex to role name) */
+  roleNames?: string[];
   WebSocketImpl?: typeof WebSocket;
   onRedirect?: ((target: { actorType: string; actorId: string }) => void) | undefined;
   maxReconnectAttempts?: number;
@@ -34,6 +42,8 @@ export function createActorClient(options: ClientOptions): ActorClient {
     actorId,
     host,
     accessToken,
+    viewSchema,
+    roleNames,
     WebSocketImpl = WebSocket,
     onRedirect,
     maxReconnectAttempts = 10,
@@ -48,41 +58,90 @@ export function createActorClient(options: ClientOptions): ActorClient {
   let reconnectAttempts = 0;
   let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
 
+  function notifyListeners() {
+    for (const listener of listeners) {
+      listener(currentView);
+    }
+  }
+
+  function handleBinaryMessage(data: ArrayBuffer) {
+    try {
+      const bytes = new Uint8Array(data);
+      const frame = parseFrame(bytes);
+
+      if (frame.type === FrameType.SNAPSHOT) {
+        if (viewSchema) {
+          currentView = decode(viewSchema, frame.payload);
+        } else {
+          // No schema — can't decode binary. This shouldn't happen if properly configured.
+          return;
+        }
+        if (roleNames && frame.roleIndex !== undefined) {
+          currentRole = roleNames[frame.roleIndex];
+        }
+        connectionState = "connected";
+        notifyListeners();
+      } else if (frame.type === FrameType.CONTROL && frame.controlType !== undefined) {
+        // Handle control frames (redirect, error, etc.)
+        const controlPayload = new TextDecoder().decode(frame.payload);
+        try {
+          const ctrl = JSON.parse(controlPayload);
+          if (typeof ctrl === "object" && ctrl !== null) {
+            if ("actorType" in ctrl || "actorId" in ctrl) {
+              onRedirect?.({
+                actorType: typeof ctrl.actorType === "string" ? ctrl.actorType : actorType,
+                actorId: typeof ctrl.actorId === "string" ? ctrl.actorId : actorId,
+              });
+            }
+          }
+        } catch {
+          // Invalid control payload
+        }
+      }
+    } catch {
+      // Binary decode error — ignore
+    }
+  }
+
+  function handleJsonMessage(data: string) {
+    try {
+      const msg: unknown = JSON.parse(data);
+      if (typeof msg !== "object" || msg === null) return;
+
+      const msgObj = msg as Record<string, unknown>;
+
+      if (msgObj["type"] === "snapshot") {
+        currentView = msgObj["data"];
+        currentRole = typeof msgObj["role"] === "string" ? msgObj["role"] : currentRole;
+        connectionState = "connected";
+        notifyListeners();
+      } else if (msgObj["type"] === "__redirect") {
+        onRedirect?.({
+          actorType: typeof msgObj["actorType"] === "string" ? msgObj["actorType"] : actorType,
+          actorId: typeof msgObj["actorId"] === "string" ? msgObj["actorId"] : actorId,
+        });
+      } else if (msgObj["type"] === "__error") {
+        // Error frame from server
+      }
+    } catch {
+      // Invalid JSON
+    }
+  }
+
   function connect() {
-    const url = `wss://${host}/api/${actorType}/${actorId}`;
+    const encodedActorId = encodeURIComponent(actorId);
+    const url = `wss://${host}/api/${actorType}/${encodedActorId}`;
     ws = new WebSocketImpl(url, [`token.${accessToken}`]);
 
     ws.addEventListener("open", () => {
       reconnectAttempts = 0;
-      // Still "connecting" until we receive first snapshot
     });
 
     ws.addEventListener("message", (event: MessageEvent) => {
-      const data = typeof event.data === "string" ? event.data : "";
-      try {
-        const msg: unknown = JSON.parse(data);
-        if (typeof msg !== "object" || msg === null) return;
-
-        const msgObj = msg as Record<string, unknown>;
-
-        if (msgObj["type"] === "snapshot") {
-          currentView = msgObj["data"];
-          currentRole = typeof msgObj["role"] === "string" ? msgObj["role"] : currentRole;
-          connectionState = "connected";
-          for (const listener of listeners) {
-            listener(currentView);
-          }
-        } else if (msgObj["type"] === "__redirect") {
-          const target = {
-            actorType: typeof msgObj["actorType"] === "string" ? msgObj["actorType"] : actorType,
-            actorId: typeof msgObj["actorId"] === "string" ? msgObj["actorId"] : actorId,
-          };
-          onRedirect?.(target);
-        } else if (msgObj["type"] === "__error") {
-          // Error frame from server — could notify listeners in future
-        }
-      } catch {
-        // Invalid JSON — ignore
+      if (event.data instanceof ArrayBuffer) {
+        handleBinaryMessage(event.data);
+      } else if (typeof event.data === "string") {
+        handleJsonMessage(event.data);
       }
     });
 
@@ -92,7 +151,6 @@ export function createActorClient(options: ClientOptions): ActorClient {
         return;
       }
 
-      // Auto-reconnect with exponential backoff
       if (reconnectAttempts < maxReconnectAttempts) {
         connectionState = "reconnecting";
         const delay = Math.min(1000 * Math.pow(2, reconnectAttempts), 30000);
@@ -106,41 +164,34 @@ export function createActorClient(options: ClientOptions): ActorClient {
     });
 
     ws.addEventListener("error", () => {
-      // Error will trigger close event, which handles reconnection
+      // Error triggers close, which handles reconnection
     });
   }
 
-  // Initial connection
   connect();
 
   return {
     get connectionState() {
       return connectionState;
     },
-
     get view() {
       return currentView;
     },
-
     get role() {
       return currentRole;
     },
-
     subscribe(listener: (view: unknown) => void): () => void {
       listeners.add(listener);
       return () => { listeners.delete(listener); };
     },
-
     send(event: { type: string; [key: string]: unknown }) {
       if (ws && ws.readyState === 1) {
         ws.send(JSON.stringify(event));
       }
     },
-
     trigger(type: string, payload?: Record<string, unknown>) {
       this.send({ type, ...payload });
     },
-
     disconnect() {
       intentionalClose = true;
       connectionState = "disconnected";
