@@ -1,8 +1,14 @@
 import { env } from "cloudflare:test";
 import { describe, it, expect } from "vitest";
 import { createAccessToken } from "../../packages/actor-kit/src/auth/auth";
+import { decode } from "../../packages/actor-kit/src/schema/binary";
+import { parseFrame, FrameType } from "../../packages/actor-kit/src/schema/frame";
+import { schema, uint32, string } from "../../packages/actor-kit/src/schema/schema";
 
 const SECRET = "test-secret-for-integration-tests-only";
+
+// Must match the CounterView from the test worker
+const CounterView = schema({ count: uint32, lastCaller: string });
 
 async function connectWs(stub: DurableObjectStub, actorId: string, callerId: string, callerType: "user" | "service" = "user") {
   const token = await createAccessToken({
@@ -13,27 +19,30 @@ async function connectWs(stub: DurableObjectStub, actorId: string, callerId: str
     secret: SECRET,
   });
 
-  const response = await stub.fetch(`http://localhost/api/counter/${actorId}`, {
+  return stub.fetch(`http://localhost/api/counter/${actorId}`, {
     headers: {
       Upgrade: "websocket",
       "Sec-WebSocket-Protocol": `token.${token}`,
     },
   });
-
-  return response;
 }
 
-function waitForMessage(ws: WebSocket): Promise<string> {
-  return new Promise<string>((resolve) => {
+function waitForBinaryMessage(ws: WebSocket): Promise<ArrayBuffer> {
+  return new Promise<ArrayBuffer>((resolve) => {
     ws.addEventListener("message", (event) => {
-      resolve(event.data as string);
+      if (event.data instanceof ArrayBuffer) {
+        resolve(event.data);
+      } else if (typeof event.data === "string") {
+        // JSON fallback — convert to buffer for uniform handling
+        resolve(new TextEncoder().encode(event.data).buffer);
+      }
     }, { once: true });
   });
 }
 
-describe("Counter DO WebSocket", () => {
-  it("connects via WebSocket and receives initial snapshot", async () => {
-    const actorId = "ws-snapshot-test";
+describe("Counter DO WebSocket (binary)", () => {
+  it("connects and receives binary snapshot frame", async () => {
+    const actorId = "ws-binary-test";
     const id = env.COUNTER.idFromName(actorId);
     const stub = env.COUNTER.get(id);
 
@@ -41,25 +50,27 @@ describe("Counter DO WebSocket", () => {
 
     const response = await connectWs(stub, actorId, "user-1");
     expect(response.status).toBe(101);
-    expect(response.webSocket).toBeDefined();
 
     const ws = response.webSocket!;
     ws.accept();
 
-    const message = await waitForMessage(ws);
-    const parsed = JSON.parse(message);
+    const data = await waitForBinaryMessage(ws);
+    const bytes = new Uint8Array(data);
 
-    expect(parsed.type).toBe("snapshot");
-    expect(parsed.role).toBe("user");
-    expect(parsed.data).toEqual({ count: 0, lastCaller: "" });
+    // Parse the frame
+    const frame = parseFrame(bytes);
+    expect(frame.type).toBe(FrameType.SNAPSHOT);
 
-    // Close cleanly — send close and wait a tick for DO handler
-    ws.close(1000, "test complete");
+    // Decode the payload using the schema
+    const view = decode(CounterView, frame.payload);
+    expect(view).toEqual({ count: 0, lastCaller: "" });
+
+    ws.close(1000, "done");
     await new Promise((r) => setTimeout(r, 50));
   });
 
-  it("receives view updates after sending messages", async () => {
-    const actorId = "ws-update-test";
+  it("receives updated binary snapshot after send", async () => {
+    const actorId = "ws-binary-update";
     const id = env.COUNTER.idFromName(actorId);
     const stub = env.COUNTER.get(id);
 
@@ -70,24 +81,25 @@ describe("Counter DO WebSocket", () => {
     ws.accept();
 
     // Consume initial snapshot
-    await waitForMessage(ws);
+    await waitForBinaryMessage(ws);
 
-    // Send INCREMENT via WebSocket
+    // Send INCREMENT — client messages are still JSON
     ws.send(JSON.stringify({ type: "INCREMENT", amount: 7 }));
 
-    // Should receive updated view
-    const update = await waitForMessage(ws);
-    const parsed = JSON.parse(update);
+    // Receive updated binary snapshot
+    const data = await waitForBinaryMessage(ws);
+    const frame = parseFrame(new Uint8Array(data));
+    expect(frame.type).toBe(FrameType.SNAPSHOT);
 
-    expect(parsed.type).toBe("snapshot");
-    expect(parsed.data.count).toBe(7);
+    const view = decode(CounterView, frame.payload);
+    expect((view as { count: number }).count).toBe(7);
 
-    ws.close(1000, "test complete");
+    ws.close(1000, "done");
     await new Promise((r) => setTimeout(r, 50));
   });
 
   it("rejects WebSocket without auth token", async () => {
-    const actorId = "ws-noauth-test";
+    const actorId = "ws-noauth-binary";
     const id = env.COUNTER.idFromName(actorId);
     const stub = env.COUNTER.get(id);
 

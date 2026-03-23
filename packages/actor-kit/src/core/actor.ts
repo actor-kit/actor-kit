@@ -20,6 +20,10 @@ import { createOutbox, type OutboxEntry } from "../runtime/outbox";
 import { getCallerFromToken } from "../auth/auth";
 import type { MessageContext, Effect, RequestConfig } from "./message";
 import { parseDuration } from "../runtime/timers";
+import { encode } from "../schema/binary";
+import { encodeDelta } from "../schema/delta";
+import { createSnapshotFrame, createDeltaFrame, FrameType } from "../schema/frame";
+import type { SchemaDefinition, FieldDescriptor } from "../schema/schema";
 
 // --- Actor definition ---
 
@@ -59,6 +63,7 @@ interface ActorDef {
   };
   views: Record<string, {
     fn(state: unknown, caller: string): unknown; // bivariant
+    schema?: { fields: readonly { name: string; type: string }[] }; // optional schema for binary encoding
   }>;
   on?: Record<string, {
     (state: unknown, ...args: unknown[]): unknown | Promise<unknown>; // bivariant
@@ -486,6 +491,8 @@ export function actor(
     private broadcastViews(): void {
       // Use getWebSockets() to get all connected sockets (survives hibernation)
       const allSockets = this.ctx.getWebSockets();
+      const roleNames = Object.keys(def.roles);
+
       for (const ws of allSockets) {
         const info = this.getCallerFromWs(ws);
         if (!info) continue;
@@ -505,7 +512,19 @@ export function actor(
           if (json === prevJson) continue;
 
           this.previousViews.set(ws, json);
-          ws.send(JSON.stringify({ type: "snapshot", role, data: viewData }));
+
+          // Use binary encoding if schema is available, otherwise JSON fallback
+          const viewSchema = viewDef.schema;
+          if (viewSchema && viewSchema.fields) {
+            const schemaDef = viewSchema as SchemaDefinition<Record<string, FieldDescriptor>>;
+            const payload = encode(schemaDef, viewData as Record<string, unknown>);
+            const roleIndex = roleNames.indexOf(role);
+            const frame = createSnapshotFrame(this.version, roleIndex, payload);
+            ws.send(frame);
+          } else {
+            // JSON fallback
+            ws.send(JSON.stringify({ type: "snapshot", role, data: viewData }));
+          }
         } catch {
           // Connection may have closed
         }
@@ -565,13 +584,24 @@ export function actor(
       ]);
       this.connections.set(server, { caller: callerInfo.caller, callerType: callerInfo.callerType });
 
-      // Send initial snapshot
+      // Send initial snapshot — binary if schema available, JSON fallback
       const viewDef = def.views[role];
       if (viewDef) {
         const viewData = viewDef.fn(this.state, callerInfo.caller);
         const json = JSON.stringify(viewData);
         this.previousViews.set(server, json);
-        server.send(JSON.stringify({ type: "snapshot", role, data: viewData }));
+
+        const viewSchema = viewDef.schema;
+        if (viewSchema && viewSchema.fields) {
+          const schemaDef = viewSchema as SchemaDefinition<Record<string, FieldDescriptor>>;
+          const payload = encode(schemaDef, viewData as Record<string, unknown>);
+          const roleNames = Object.keys(def.roles);
+          const roleIndex = roleNames.indexOf(role);
+          const frame = createSnapshotFrame(this.version, roleIndex, payload);
+          server.send(frame);
+        } else {
+          server.send(JSON.stringify({ type: "snapshot", role, data: viewData }));
+        }
       }
 
       // Run on.connect if defined
