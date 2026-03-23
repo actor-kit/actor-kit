@@ -70,6 +70,9 @@ interface ActorDef {
     frequency: number;
     handler(state: unknown): unknown | Promise<unknown>;
   };
+  observe?: {
+    onTransition?(prevState: unknown, nextState: unknown, event: { type: string }, ctx: { caller: string; role: string }): void;
+  };
   migrate?(persisted: unknown, fromVersion: number): unknown;
   serialize?(state: unknown): unknown;
   restore?(serialized: unknown): unknown;
@@ -300,8 +303,20 @@ export function actor(
         return { ok: false, error: result.error };
       }
 
+      // Observability hook
+      const prevState = this.state;
+
       // Update state
       this.state = result.state;
+
+      // Fire onTransition if defined
+      if (def.observe?.onTransition) {
+        try {
+          def.observe.onTransition(prevState, this.state, event, { caller, role });
+        } catch {
+          // Observability hooks must not break the transition
+        }
+      }
 
       // Persist state + outbox atomically
       this.ctx.storage.transactionSync(() => {
