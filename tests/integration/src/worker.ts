@@ -91,6 +91,48 @@ export const TimerActor = actor("timer", {
   },
 });
 
+// --- Auction actor (for testing sequential states) ---
+
+type AuctionState = { bids: number[]; winner: number | null };
+
+const AuctionView = schema({ bidCount: uint32 });
+
+const bid = message(z.object({ amount: z.number() }), (state: AuctionState, { amount }) => ({
+  ...state,
+  bids: [...state.bids, amount],
+}));
+
+const closeAuction = message(z.object({}), (state: AuctionState) => ({
+  ...state,
+  winner: Math.max(...state.bids, 0),
+}));
+
+export const Auction = actor("auction", {
+  input: z.object({}),
+  initial: "bidding",
+  init: (): AuctionState => ({ bids: [], winner: null }),
+  roles: {
+    user: () => true,
+  },
+  states: {
+    bidding: {
+      messages: {
+        user: { BID: bid, CLOSE: closeAuction },
+      },
+    },
+    closed: {
+      messages: {
+        user: {},
+      },
+    },
+  },
+  views: {
+    user: view(AuctionView, (state: AuctionState) => ({
+      bidCount: state.bids.length,
+    })),
+  },
+});
+
 // --- Worker entrypoint ---
 
 export default {
