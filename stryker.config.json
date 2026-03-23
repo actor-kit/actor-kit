@@ -1,0 +1,34 @@
+{
+  "$schema": "https://raw.githubusercontent.com/stryker-mutator/stryker/master/packages/core/schema/stryker-core.schema.json",
+  "testRunner": "vitest",
+  "vitest": {
+    "configFile": "vitest.config.ts"
+  },
+  "checkers": ["typescript"],
+  "tsconfigFile": "packages/actor-kit/tsconfig.json",
+  "mutate": [
+    "packages/actor-kit/src/schema/schema.ts",
+    "packages/actor-kit/src/schema/binary.ts",
+    "packages/actor-kit/src/schema/delta.ts",
+    "packages/actor-kit/src/schema/frame.ts",
+    "packages/actor-kit/src/runtime/roles.ts",
+    "packages/actor-kit/src/runtime/message-router.ts",
+    "packages/actor-kit/src/runtime/states.ts",
+    "packages/actor-kit/src/runtime/outbox.ts",
+    "packages/actor-kit/src/runtime/timers.ts",
+    "packages/actor-kit/src/runtime/route-to-actor.ts",
+    "packages/actor-kit/src/core/message.ts",
+    "packages/actor-kit/src/core/view.ts",
+    "packages/actor-kit/src/core/ref.ts",
+    "packages/actor-kit/src/auth/auth.ts",
+    "packages/actor-kit/src/test/test-actor.ts"
+  ],
+  "reporters": ["clear-text", "html"],
+  "thresholds": {
+    "high": 90,
+    "low": 70,
+    "break": 60
+  },
+  "concurrency": 4,
+  "timeoutMS": 30000
+}
