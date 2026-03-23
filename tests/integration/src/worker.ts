@@ -58,6 +58,39 @@ export const Counter = actor("counter", {
   },
 });
 
+// --- Timer actor (for testing after/alarm) ---
+
+import { boolean } from "../../../packages/actor-kit/src/schema/schema";
+
+type TimerState = { expired: boolean; count: number };
+
+const TimerView = schema({ expired: boolean, count: uint32 });
+
+const timerIncrement = message(z.object({}), (state: TimerState) => ({
+  ...state,
+  count: state.count + 1,
+}));
+
+export const TimerActor = actor("timer", {
+  input: z.object({}),
+  init: (): TimerState => ({ expired: false, count: 0 }),
+  roles: {
+    user: () => true,
+  },
+  messages: {
+    user: { INCREMENT: timerIncrement },
+  },
+  views: {
+    user: view(TimerView, (state: TimerState) => ({
+      expired: state.expired,
+      count: state.count,
+    })),
+  },
+  after: {
+    "1 second": (state: unknown) => ({ ...(state as TimerState), expired: true }),
+  },
+});
+
 // --- Worker entrypoint ---
 
 export default {

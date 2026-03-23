@@ -11,9 +11,9 @@ name = "COUNTER"
 class_name = "Counter"
 
 [[durable_objects.bindings]]
-name = "TODO_LIST"
-class_name = "TodoList"
+name = "TIMER_ACTOR"
+class_name = "TimerActor"
 
 [[migrations]]
 tag = "v1"
-new_sqlite_classes = ["Counter", "TodoList"]
+new_sqlite_classes = ["Counter", "TimerActor"]
