@@ -697,7 +697,7 @@ export function actor(
         this.connectionChecksums.set(server, checksum);
 
         const viewSchema = viewDef.schema;
-        if (viewSchema && viewSchema.fields) {
+        if (def.binarySync && viewSchema?.fields) {
           const schemaDef = viewSchema as SchemaDefinition<Record<string, FieldDescriptor>>;
           const payload = encode(schemaDef, viewData as Record<string, unknown>);
           const roleNames = Object.keys(def.roles);
