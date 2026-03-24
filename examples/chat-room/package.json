@@ -1,0 +1,16 @@
+{
+  "name": "actor-kit-chat-example",
+  "private": true,
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy"
+  },
+  "dependencies": {
+    "actor-kit": "workspace:*",
+    "zod": "^3.24.0"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20250310.0",
+    "wrangler": "^4.0.0"
+  }
+}

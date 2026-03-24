@@ -15,6 +15,11 @@ export default defineConfig({
       testMatch: "todo-list/**/*.e2e.ts",
       use: { baseURL: "http://localhost:8800" },
     },
+    {
+      name: "chat-room",
+      testMatch: "chat-room/**/*.e2e.ts",
+      use: { baseURL: "http://localhost:8801" },
+    },
   ],
   webServer: [
     {
@@ -26,6 +31,12 @@ export default defineConfig({
     {
       command: "cd examples/todo-list && npx wrangler dev --port 8800",
       port: 8800,
+      reuseExistingServer: true,
+      timeout: 15000,
+    },
+    {
+      command: "cd examples/chat-room && npx wrangler dev --port 8801",
+      port: 8801,
       reuseExistingServer: true,
       timeout: 15000,
     },
