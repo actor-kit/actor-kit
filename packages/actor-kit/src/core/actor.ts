@@ -718,13 +718,26 @@ export function actor(
         }
       }
 
-      // Run on.connect if defined
+      // Run on.connect if defined — with ctx for emit/request
       if (def.on?.["connect"]) {
-        const nextState = await def.on["connect"](this.state, callerInfo.caller);
+        const connectOutbox = createOutbox();
+        const connectCtx = {
+          caller: callerInfo.caller,
+          callerType: callerInfo.callerType,
+          env: this.env,
+          emit: (effect: Effect) => connectOutbox.emit(effect),
+          request: (config: RequestConfig) => connectOutbox.request(config),
+        };
+        const nextState = await def.on["connect"](this.state, callerInfo.caller, connectCtx);
         if (nextState !== this.state) {
           this.state = nextState;
-          this.persistState();
+          const outboxEntries = connectOutbox.toEntries();
+          this.ctx.storage.transactionSync(() => {
+            this.persistState();
+            if (outboxEntries.length > 0) this.persistOutbox(outboxEntries);
+          });
           this.broadcastViews();
+          if (outboxEntries.length > 0) this.drainOutbox();
         }
       }
 
@@ -825,13 +838,26 @@ export function actor(
       this.previousViewData.delete(ws);
       this.connectionChecksums.delete(ws);
 
-      // Run on.disconnect if defined
+      // Run on.disconnect if defined — with ctx for emit/request
       if (def.on?.["disconnect"]) {
-        const nextState = await def.on["disconnect"](this.state, caller);
+        const disconnectOutbox = createOutbox();
+        const disconnectCtx = {
+          caller,
+          callerType: info.callerType,
+          env: this.env,
+          emit: (effect: Effect) => disconnectOutbox.emit(effect),
+          request: (config: RequestConfig) => disconnectOutbox.request(config),
+        };
+        const nextState = await def.on["disconnect"](this.state, caller, disconnectCtx);
         if (nextState !== this.state) {
           this.state = nextState;
-          this.persistState();
+          const outboxEntries = disconnectOutbox.toEntries();
+          this.ctx.storage.transactionSync(() => {
+            this.persistState();
+            if (outboxEntries.length > 0) this.persistOutbox(outboxEntries);
+          });
           this.broadcastViews();
+          if (outboxEntries.length > 0) this.drainOutbox();
         }
       }
 
