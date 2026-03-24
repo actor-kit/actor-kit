@@ -36,9 +36,6 @@ main = "src/worker.ts"
 compatibility_date = "2024-09-25"
 compatibility_flags = ["nodejs_compat"]
 
-[vars]
-ACTOR_KIT_SECRET = "your-secret-here"
-
 [[durable_objects.bindings]]
 name = "MY_ACTOR"
 class_name = "MyActor"
@@ -50,8 +47,23 @@ new_sqlite_classes = ["MyActor"]
 
 Key points:
 - `nodejs_compat` is required for the `jose` JWT library
-- `ACTOR_KIT_SECRET` is used for JWT signing — use a strong secret in production
 - `new_sqlite_classes` enables DO SQLite storage for your actor
+
+### 3. Set up secrets
+
+**Never put secrets in `wrangler.toml`** — they get committed to git.
+
+For local development, create a `.dev.vars` file (gitignored):
+
+```
+ACTOR_KIT_SECRET = "dev-secret-do-not-use-in-production"
+```
+
+For production, use `wrangler secret`:
+
+```bash
+npx wrangler secret put ACTOR_KIT_SECRET
+```
 
 ### 3. Define your actor
 
