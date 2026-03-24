@@ -1,77 +1,65 @@
 ---
 title: Overview
-description: What Actor Kit is and why you'd use it.
+description: When to use Actor Kit and how it compares to alternatives.
 ---
 
-Actor Kit is a framework for building real-time, event-driven applications on [Cloudflare Workers](https://developers.cloudflare.com/workers/) and [Durable Objects](https://developers.cloudflare.com/durable-objects/).
+## When to use Actor Kit
 
-## The Actor Model
+Actor Kit is for applications where **multiple users interact with shared, real-time state**. Each piece of shared state is an actor — a Durable Object that processes messages one at a time and pushes updates to connected clients.
 
-Each actor is a Durable Object — a single-threaded, globally addressable unit of state. It has:
+Good fits:
+- Collaborative apps (shared documents, whiteboards, project boards)
+- Multiplayer games (zones, lobbies, match state)
+- Real-time dashboards (live metrics, monitoring)
+- Chat and messaging (rooms, threads, presence)
+- Auction/bidding systems (competitive real-time updates)
 
-- **A mailbox** — messages are processed one at a time (no race conditions)
-- **Private state** — persisted to DO SQLite (survives restarts)
-- **Behavior** — you define how messages change state and what clients see
+Not a good fit:
+- Static sites or CRUD apps without real-time requirements
+- Batch processing or data pipelines
+- Applications that don't need WebSocket connections
 
-## What Actor Kit Provides
-
-A single `actor()` function defines everything:
-
-| Concern | How |
-|---------|-----|
-| State shape | `init()` returns the initial state |
-| Authorization | `roles` — predicates that derive roles from state |
-| Event handling | `messages` — per-role handlers with Zod validation |
-| Client views | `views` — per-role projections with schema-defined encoding |
-| Side effects | `emit()` for fire-and-forget, `request()` for async with callbacks |
-| Timers | `after` for DO Alarms, `tick` for game loops |
-| Lifecycle | `on.connect` / `on.disconnect` for WebSocket events |
-
-## Subpath Exports
-
-Actor Kit is one package with four entry points:
+## How it works
 
 ```
-actor-kit          → Server: actor(), schema(), view(), message(), ref()
-actor-kit/client   → Browser: createActorClient(), binary decoder
-actor-kit/react    → React: createActorContext(), useView(), useSend()
-actor-kit/test     → Test: testActor() — no CF runtime needed
+Browser → WebSocket → CF Worker → Durable Object (Actor)
+                                    ├── State (SQLite)
+                                    ├── Roles (who can do what)
+                                    ├── Messages (what changes state)
+                                    └── Views (what each role sees)
 ```
 
-## Key Features
+1. A Worker routes the WebSocket connection to the right Durable Object
+2. The DO validates the JWT and resolves the caller's role
+3. Messages from the client are validated (Zod) and routed to the role's handler
+4. State changes are persisted to SQLite and broadcast as view updates
+5. Each connected client gets a role-specific projection of the state
 
-### Role-Based Access Control
+## How it compares
 
-Roles are derived from state, not tokens. The actor decides who has what role based on the current state.
+| | Actor Kit | PartyKit | Liveblocks | Socket.IO |
+|---|---|---|---|---|
+| Runtime | CF Durable Objects | CF Durable Objects | Managed cloud | Self-hosted |
+| State model | Actor per entity | Room per party | Document per room | No built-in state |
+| Authorization | Role-based, derived from state | Custom middleware | Custom middleware | Custom middleware |
+| Sync protocol | Binary delta or JSON | JSON | CRDT | JSON |
+| Persistence | Automatic (DO SQLite) | Manual | Managed | Manual |
+| TypeScript | Full inference from definition | Partial | SDK types | Partial |
 
-```typescript
-roles: {
-  owner: (state, caller) => caller === state.ownerId,
-  member: (state, caller) => state.memberIds.includes(caller),
-  viewer: () => true,
-},
-```
+## Architecture
 
-### Binary Delta Sync
+Actor Kit embraces Cloudflare's infrastructure:
 
-Views are defined with schemas that enable binary encoding. After the first snapshot, only changed fields are sent — using a bitmask to indicate which fields changed.
+| CF Feature | How Actor Kit uses it |
+|------------|----------------------|
+| Durable Objects | Each actor is a DO — single-threaded, globally addressable |
+| DO SQLite | State persistence, outbox, change log |
+| DO Alarms | Durable timers (`after`) that survive hibernation |
+| DO WebSocket Hibernation | Caller metadata stored as tags, survives restarts |
+| Workers | Route requests, serve UI, issue JWT tokens |
 
-### Guards
+## Next steps
 
-Message handlers can have guards — conditions that must be true before the handler runs. The framework rejects the message if the guard fails.
-
-```typescript
-const placeBid = message(z.object({ amount: z.number() }), {
-  guard: (state) => !state.closed,
-  handler: (state, { amount }, { caller }) => ({ ...state, bids: [...state.bids, { caller, amount }] }),
-});
-```
-
-### Transactional Side Effects
-
-Side effects go through a SQLite outbox — persisted atomically with state. If the DO crashes, pending effects retry on restart.
-
-```typescript
-ctx.emit({ queue: "EMAIL_QUEUE", body: { to: state.memberIds } });
-ctx.request({ fetch: "https://api.example.com", onDone: "FETCH_DONE", onError: "FETCH_FAILED" });
-```
+- [Installation](/getting-started/installation/) — set up your project
+- [Quick Start](/getting-started/quick-start/) — build a counter in 5 minutes
+- [Counter Guide](/guides/counter/) — full walkthrough with UI
