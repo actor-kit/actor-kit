@@ -78,6 +78,22 @@ importers:
         specifier: ^3.24.0
         version: 3.25.76
 
+  examples/auction:
+    dependencies:
+      actor-kit:
+        specifier: workspace:*
+        version: link:../../packages/actor-kit
+      zod:
+        specifier: ^3.24.0
+        version: 3.25.76
+    devDependencies:
+      '@cloudflare/workers-types':
+        specifier: ^4.20250310.0
+        version: 4.20260317.1
+      wrangler:
+        specifier: ^4.0.0
+        version: 4.35.0(@cloudflare/workers-types@4.20260317.1)
+
   examples/chat-room:
     dependencies:
       actor-kit:

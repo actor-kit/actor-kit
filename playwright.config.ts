@@ -20,6 +20,11 @@ export default defineConfig({
       testMatch: "chat-room/**/*.e2e.ts",
       use: { baseURL: "http://localhost:8801" },
     },
+    {
+      name: "auction",
+      testMatch: "auction/**/*.e2e.ts",
+      use: { baseURL: "http://localhost:8802" },
+    },
   ],
   webServer: [
     {
@@ -37,6 +42,12 @@ export default defineConfig({
     {
       command: "cd examples/chat-room && npx wrangler dev --port 8801",
       port: 8801,
+      reuseExistingServer: true,
+      timeout: 15000,
+    },
+    {
+      command: "cd examples/auction && npx wrangler dev --port 8802",
+      port: 8802,
       reuseExistingServer: true,
       timeout: 15000,
     },

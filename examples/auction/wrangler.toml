@@ -1,0 +1,15 @@
+name = "actor-kit-auction-example"
+main = "src/worker.ts"
+compatibility_date = "2024-09-25"
+compatibility_flags = ["nodejs_compat"]
+
+[vars]
+ACTOR_KIT_SECRET = "example-secret-change-in-production"
+
+[[durable_objects.bindings]]
+name = "AUCTION"
+class_name = "Auction"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["Auction"]
