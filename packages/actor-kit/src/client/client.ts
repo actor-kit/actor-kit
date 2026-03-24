@@ -35,6 +35,7 @@ interface ClientOptions {
   roleNames?: string[];
   WebSocketImpl?: typeof WebSocket;
   onRedirect?: ((target: { actorType: string; actorId: string }) => void) | undefined;
+  onError?: ((error: { message: string; error: string }) => void) | undefined;
   maxReconnectAttempts?: number;
 }
 
@@ -48,6 +49,7 @@ export function createActorClient(options: ClientOptions): ActorClient {
     roleNames,
     WebSocketImpl = WebSocket,
     onRedirect,
+    onError,
     maxReconnectAttempts = 10,
   } = options;
 
@@ -153,7 +155,11 @@ export function createActorClient(options: ClientOptions): ActorClient {
         // Server confirmed our checksum matches — no data needed
         setConnectionState("connected");
       } else if (msgObj["type"] === "__error") {
-        // Error frame from server
+        const errorData = {
+          message: typeof msgObj["message"] === "string" ? msgObj["message"] : "",
+          error: typeof msgObj["error"] === "string" ? msgObj["error"] : typeof msgObj["detail"] === "string" ? msgObj["detail"] : "unknown",
+        };
+        onError?.(errorData);
       }
     } catch {
       // Invalid JSON
@@ -162,7 +168,17 @@ export function createActorClient(options: ClientOptions): ActorClient {
 
   function connect() {
     const encodedActorId = encodeURIComponent(actorId);
-    const url = `wss://${host}/api/${actorType}/${encodedActorId}`;
+    // Detect protocol from host — support http://, https://, or bare hostname
+    let wsProtocol = "wss:";
+    let wsHost = host;
+    if (host.startsWith("http://")) {
+      wsProtocol = "ws:";
+      wsHost = host.slice(7);
+    } else if (host.startsWith("https://")) {
+      wsProtocol = "wss:";
+      wsHost = host.slice(8);
+    }
+    const url = `${wsProtocol}//${wsHost}/api/${actorType}/${encodedActorId}`;
     ws = new WebSocketImpl(url, [`token.${accessToken}`]);
 
     // Request ArrayBuffer for binary frames (browsers default to Blob)
