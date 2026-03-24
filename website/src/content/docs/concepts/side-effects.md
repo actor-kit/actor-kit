@@ -1,0 +1,64 @@
+---
+title: Side Effects
+description: Fire-and-forget effects and async callbacks.
+---
+
+## The Problem
+
+If a transition calls an external API and then the DO crashes, the API was called but the state wasn't persisted. On restart, the transition reruns — calling the API again.
+
+## The Solution: Transactional Outbox
+
+Actor Kit provides two functions on the message context for side effects:
+
+### `emit()` — Fire-and-Forget
+
+```typescript
+const notify = message(z.object({}), (state, _payload, { emit }) => {
+  emit({ queue: "EMAIL_QUEUE", body: { to: state.memberIds } });
+  return state;  // State unchanged
+});
+```
+
+`emit()` does not execute the side effect immediately. It records the intent in a SQLite outbox table, atomically with the state change. After the transaction commits, the outbox drains asynchronously.
+
+### `request()` — Async with Callbacks
+
+```typescript
+const fetchData = message(z.object({ url: z.string() }), (state, { url }, { request }) => {
+  request({
+    fetch: url,
+    onDone: "FETCH_SUCCEEDED",
+    onError: "FETCH_FAILED",
+  });
+  return { ...state, status: "loading" };
+});
+```
+
+`request()` is like `emit()` but with callback message names. When the effect completes, the framework delivers `onDone` or `onError` to the actor's `on` block:
+
+```typescript
+on: {
+  FETCH_SUCCEEDED: (state, result) => ({ ...state, data: result, status: "loaded" }),
+  FETCH_FAILED: (state, error) => ({ ...state, error: error.message, status: "failed" }),
+},
+```
+
+## Effect Types
+
+```typescript
+// Send to a CF Queue
+emit({ queue: "ANALYTICS", body: { event: "todo_added" } });
+
+// Call an external API
+emit({ fetch: "https://api.example.com/track", body: { event: "created" } });
+
+// Send to another actor (DO-to-DO)
+emit({ actor: "audit-log", id: "global", message: "LOG", payload: { action: "deleted" } });
+```
+
+## Guarantees
+
+- **At-least-once delivery**: if the DO crashes after commit, pending effects retry on restart
+- **Retry with backoff**: failed effects retry 3 times (1s, 5s, 25s) then move to a failures table
+- **Idempotency**: each emission gets a UUID — downstream services can deduplicate
