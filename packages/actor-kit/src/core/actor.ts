@@ -725,6 +725,10 @@ export function actor(
       return new Response(null, {
         status: 101,
         webSocket: client,
+        headers: {
+          // Echo back the selected subprotocol — required by WebSocket spec
+          "Sec-WebSocket-Protocol": tokenProtocol,
+        },
       });
     }
 
