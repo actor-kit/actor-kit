@@ -3,10 +3,17 @@ import { defineConfig } from "astro/config";
 import starlight from "@astrojs/starlight";
 
 export default defineConfig({
+  site: "https://actorkit.dev",
   integrations: [
     starlight({
       title: "Actor Kit",
-      tagline: "Actors on the Edge",
+      logo: {
+        dark: "./src/assets/logo.svg",
+        light: "./src/assets/logo-light.svg",
+        replacesTitle: false,
+      },
+      description:
+        "Actors on the Edge — real-time state sync with Cloudflare Durable Objects.",
       social: [
         {
           icon: "github",
@@ -14,52 +21,55 @@ export default defineConfig({
           href: "https://github.com/actor-kit/actor-kit",
         },
       ],
+      editLink: {
+        baseUrl:
+          "https://github.com/actor-kit/actor-kit/edit/main/website/src/content/docs/",
+      },
       sidebar: [
         {
           label: "Getting Started",
           items: [
-            { label: "Overview", slug: "getting-started/overview" },
-            { label: "Installation", slug: "getting-started/installation" },
-            { label: "Quick Start", slug: "getting-started/quick-start" },
+            { slug: "getting-started/overview" },
+            { slug: "getting-started/installation" },
+            { slug: "getting-started/quick-start" },
           ],
         },
         {
           label: "Guides",
           items: [
-            { label: "Counter", slug: "guides/counter" },
-            { label: "Todo List", slug: "guides/todo-list" },
-            { label: "Chat Room", slug: "guides/chat-room" },
-            { label: "Auction", slug: "guides/auction" },
+            { slug: "guides/counter" },
+            { slug: "guides/todo-list" },
+            { slug: "guides/chat-room" },
+            { slug: "guides/auction" },
           ],
         },
         {
           label: "Concepts",
           items: [
-            { label: "Actors & State", slug: "concepts/actors-and-state" },
-            {
-              label: "Roles & Authorization",
-              slug: "concepts/roles-and-authorization",
-            },
-            {
-              label: "Messages & Guards",
-              slug: "concepts/messages-and-guards",
-            },
-            { label: "Views", slug: "concepts/views" },
-            { label: "Side Effects", slug: "concepts/side-effects" },
-            { label: "Timers", slug: "concepts/timers" },
-            { label: "Testing", slug: "concepts/testing" },
+            { slug: "concepts/actors-and-state" },
+            { slug: "concepts/roles-and-authorization" },
+            { slug: "concepts/messages-and-guards" },
+            { slug: "concepts/views" },
+            { slug: "concepts/side-effects" },
+            { slug: "concepts/timers" },
+            { slug: "concepts/testing" },
           ],
         },
         {
           label: "API Reference",
           items: [
-            { label: "actor-kit", slug: "api/core" },
-            { label: "actor-kit/client", slug: "api/client" },
-            { label: "actor-kit/react", slug: "api/react" },
-            { label: "actor-kit/test", slug: "api/test" },
+            { slug: "api/core" },
+            { slug: "api/client" },
+            { slug: "api/react" },
+            { slug: "api/test" },
           ],
         },
       ],
+      components: {
+        PageTitle: "./src/overrides/PageTitle.astro",
+        Header: "./src/overrides/Header.astro",
+      },
+      customCss: ["./src/styles/custom.css"],
     }),
   ],
 });

@@ -1,0 +1,198 @@
+---
+const PAGE_TITLE_ID = "_top";
+
+const isSplash =
+  Astro.locals.starlightRoute.entry.data.template === "splash";
+---
+
+<div class="page-title-row">
+  <h1 id={PAGE_TITLE_ID}>
+    {Astro.locals.starlightRoute.entry.data.title}
+  </h1>
+  {!isSplash && (
+    <button
+      class="copy-markdown-btn"
+      id="copy-markdown-btn"
+      title="Copy page as markdown"
+    >
+      <svg
+        xmlns="http://www.w3.org/2000/svg"
+        width="14"
+        height="14"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="2"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+      >
+        <rect width="14" height="14" x="8" y="8" rx="2" ry="2"></rect>
+        <path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"
+        ></path>
+      </svg>
+      <span class="copy-markdown-label">Copy markdown</span>
+    </button>
+  )}
+</div>
+
+<style>
+  @layer starlight.core {
+    h1 {
+      margin-top: 1rem;
+      font-size: var(--sl-text-h1);
+      line-height: var(--sl-line-height-headings);
+      font-weight: 600;
+      color: var(--sl-color-white);
+    }
+  }
+
+  .page-title-row {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 1rem;
+  }
+
+  .copy-markdown-btn {
+    flex-shrink: 0;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.375rem;
+    margin-top: 1.25rem;
+    padding: 0.35rem 0.75rem;
+    border-radius: 0.375rem;
+    border: 1px solid var(--sl-color-gray-5);
+    background: transparent;
+    color: var(--sl-color-gray-3);
+    font-size: var(--sl-text-xs);
+    font-family: var(--sl-font);
+    cursor: pointer;
+    transition: all 0.15s ease;
+    white-space: nowrap;
+  }
+
+  .copy-markdown-btn:hover {
+    border-color: var(--sl-color-gray-3);
+    color: var(--sl-color-gray-1);
+  }
+
+  .copy-markdown-btn[data-copied="true"] {
+    border-color: var(--sl-color-green);
+    color: var(--sl-color-green);
+  }
+
+  @media (max-width: 50rem) {
+    .copy-markdown-label {
+      display: none;
+    }
+  }
+</style>
+
+<script>
+  function setupCopyMarkdown() {
+    const btn = document.getElementById("copy-markdown-btn");
+    if (!btn) return;
+
+    // Remove old listeners by cloning
+    const fresh = btn.cloneNode(true) as HTMLElement;
+    btn.parentNode?.replaceChild(fresh, btn);
+
+    fresh.addEventListener("click", async () => {
+      const content =
+        document.querySelector("[data-pagefind-body]") ??
+        document.querySelector(".sl-markdown-content") ??
+        document.querySelector("main");
+
+      if (!content) return;
+
+      const text = extractMarkdown(content as HTMLElement);
+
+      try {
+        await navigator.clipboard.writeText(text);
+        fresh.setAttribute("data-copied", "true");
+        const label = fresh.querySelector(".copy-markdown-label");
+        const prev = label?.textContent;
+        if (label) label.textContent = "Copied!";
+
+        setTimeout(() => {
+          fresh.removeAttribute("data-copied");
+          if (label) label.textContent = prev ?? "Copy markdown";
+        }, 2000);
+      } catch {
+        const textarea = document.createElement("textarea");
+        textarea.value = text;
+        textarea.style.position = "fixed";
+        textarea.style.opacity = "0";
+        document.body.appendChild(textarea);
+        textarea.select();
+        document.execCommand("copy");
+        document.body.removeChild(textarea);
+      }
+    });
+  }
+
+  function extractMarkdown(el: HTMLElement): string {
+    const lines: string[] = [];
+    const title = document.querySelector("h1")?.textContent?.trim();
+    if (title) lines.push(`# ${title}\n`);
+
+    const content = el.querySelector(".sl-markdown-content") ?? el;
+
+    for (const node of content.children) {
+      const tag = node.tagName.toLowerCase();
+
+      if (tag === "h1") continue;
+      if (tag === "h2") lines.push(`\n## ${node.textContent?.trim()}\n`);
+      else if (tag === "h3") lines.push(`\n### ${node.textContent?.trim()}\n`);
+      else if (tag === "h4") lines.push(`\n#### ${node.textContent?.trim()}\n`);
+      else if (tag === "p") lines.push(`${node.textContent?.trim()}\n`);
+      else if (tag === "ul" || tag === "ol") {
+        for (const li of node.querySelectorAll(":scope > li")) {
+          const prefix =
+            tag === "ol"
+              ? `${Array.from(node.children).indexOf(li) + 1}. `
+              : "- ";
+          lines.push(`${prefix}${li.textContent?.trim()}`);
+        }
+        lines.push("");
+      } else if (
+        tag === "pre" ||
+        node.querySelector("pre") ||
+        node.classList.contains("expressive-code")
+      ) {
+        const code = node.querySelector("code");
+        const lang = code?.className?.match(/language-(\w+)/)?.[1] ?? "";
+        const text =
+          code?.textContent?.trim() ?? node.textContent?.trim() ?? "";
+        lines.push(`\n\`\`\`${lang}\n${text}\n\`\`\`\n`);
+      } else if (tag === "table") {
+        // Extract table as markdown
+        const rows = node.querySelectorAll("tr");
+        const tableLines: string[] = [];
+        rows.forEach((row, i) => {
+          const cells = Array.from(row.querySelectorAll("th, td")).map(
+            (c) => c.textContent?.trim() ?? ""
+          );
+          tableLines.push(`| ${cells.join(" | ")} |`);
+          if (i === 0) {
+            tableLines.push(`| ${cells.map(() => "---").join(" | ")} |`);
+          }
+        });
+        lines.push(`\n${tableLines.join("\n")}\n`);
+      } else if (tag === "blockquote") {
+        lines.push(`> ${node.textContent?.trim()}\n`);
+      } else {
+        const text = node.textContent?.trim();
+        if (text) lines.push(`${text}\n`);
+      }
+    }
+
+    return lines
+      .join("\n")
+      .replace(/\n{3,}/g, "\n\n")
+      .trim();
+  }
+
+  setupCopyMarkdown();
+  document.addEventListener("astro:after-swap", setupCopyMarkdown);
+</script>
