@@ -30,13 +30,13 @@ interface ClientOptions {
   host: string;
   accessToken: string;
   /** Schema for decoding binary frames. If not provided, falls back to JSON. */
-  viewSchema?: SchemaDefinition<Record<string, FieldDescriptor>>;
+  viewSchema?: SchemaDefinition<Record<string, FieldDescriptor>> | undefined;
   /** Role names in definition order (for mapping roleIndex to role name) */
-  roleNames?: string[];
+  roleNames?: string[] | undefined;
   WebSocketImpl?: typeof WebSocket;
   onRedirect?: ((target: { actorType: string; actorId: string }) => void) | undefined;
   onError?: ((error: { message: string; error: string }) => void) | undefined;
-  maxReconnectAttempts?: number;
+  maxReconnectAttempts?: number | undefined;
 }
 
 export function createActorClient(options: ClientOptions): ActorClient {

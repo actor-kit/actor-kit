@@ -17,6 +17,7 @@
 
 import { createContext, createElement, type ReactNode, useContext, useEffect, useRef, useState } from "react";
 import { type ActorClient, type ConnectionState, createActorClient } from "../client/client";
+import type { FieldDescriptor, SchemaDefinition } from "../schema/schema";
 
 // --- Types ---
 
@@ -25,7 +26,10 @@ interface ProviderProps {
   host: string;
   accessToken: string;
   children: ReactNode;
+  viewSchema?: SchemaDefinition<Record<string, FieldDescriptor>>;
+  roleNames?: string[];
   onRedirect?: (target: { actorType: string; actorId: string }) => void;
+  onError?: (error: { message: string; error: string }) => void;
 }
 
 interface ActorContext {
@@ -50,7 +54,16 @@ export function createActorContext(actorType: string): ActorContext {
     return client;
   }
 
-  function Provider({ actorId, host, accessToken, children, onRedirect }: ProviderProps): ReactNode {
+  function Provider({
+    actorId,
+    host,
+    accessToken,
+    children,
+    viewSchema,
+    roleNames,
+    onRedirect,
+    onError,
+  }: ProviderProps): ReactNode {
     const [client, setClient] = useState<ActorClient | null>(null);
 
     useEffect(() => {
@@ -59,7 +72,10 @@ export function createActorContext(actorType: string): ActorContext {
         actorId,
         host,
         accessToken,
+        viewSchema,
+        roleNames,
         onRedirect,
+        onError,
       });
       setClient(c);
 
