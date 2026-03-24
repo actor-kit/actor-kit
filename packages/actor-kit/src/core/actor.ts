@@ -420,16 +420,16 @@ export function actor(
         const payload: unknown = JSON.parse(entry.payload);
 
         try {
-          await this.executeEffect(payload);
+          const effectResult = await this.executeEffect(payload);
 
           // Mark as sent
           this.ctx.storage.sql.exec("UPDATE outbox SET status = 'sent' WHERE id = ?", entry.id);
 
-          // If this was a request with onDone, deliver the callback
+          // If this was a request with onDone, deliver the callback with the result
           if (entry.on_done && entry.type === "request") {
             const onHandler = def.on?.[entry.on_done];
             if (typeof onHandler === "function") {
-              const nextState = await onHandler(this.state, {});
+              const nextState = await onHandler(this.state, effectResult ?? {});
               if (nextState !== this.state) {
                 this.state = nextState;
                 this.persistState();
@@ -480,8 +480,8 @@ export function actor(
       }
     }
 
-    async executeEffect(payload: unknown): Promise<void> {
-      if (typeof payload !== "object" || payload === null) return;
+    async executeEffect(payload: unknown): Promise<unknown> {
+      if (typeof payload !== "object" || payload === null) return undefined;
 
       const effect = payload as Record<string, unknown>;
 
@@ -492,6 +492,7 @@ export function actor(
         if (queueBinding && typeof queueBinding === "object" && "send" in queueBinding) {
           await (queueBinding as { send: (body: unknown) => Promise<void> }).send(effect["body"]);
         }
+        return undefined;
       } else if ("fetch" in effect && typeof effect["fetch"] === "string") {
         // Fetch effect — check HTTP status, throw on failure
         const response = await fetch(effect["fetch"], {
@@ -501,6 +502,12 @@ export function actor(
         });
         if (!response.ok) {
           throw new Error(`Fetch failed: ${response.status} ${response.statusText}`);
+        }
+        // Return parsed response body for request() onDone callbacks
+        try {
+          return await response.json();
+        } catch {
+          return await response.text();
         }
       } else if ("actor" in effect && typeof effect["actor"] === "string") {
         // Actor RPC — use ref() to send message to another DO
@@ -527,7 +534,9 @@ export function actor(
             ? (targetPayload as Record<string, unknown>)
             : {}),
         });
+        return undefined;
       }
+      return undefined;
     }
 
     async getSnapshot(
