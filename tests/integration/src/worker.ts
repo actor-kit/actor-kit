@@ -1,8 +1,6 @@
+import { boolean, schema, string, uint32, view } from "@actor-kit/core";
+import { actor, message } from "@actor-kit/worker";
 import { z } from "zod";
-import { actor } from "../../../packages/actor-kit/src/core/actor";
-import { message } from "../../../packages/actor-kit/src/core/message";
-import { view } from "../../../packages/actor-kit/src/core/view";
-import { schema, string, uint32 } from "../../../packages/actor-kit/src/schema/schema";
 
 // --- Counter actor ---
 
@@ -58,8 +56,6 @@ export const Counter = actor("counter", {
 });
 
 // --- Timer actor (for testing after/alarm) ---
-
-import { boolean } from "../../../packages/actor-kit/src/schema/schema";
 
 type TimerState = { expired: boolean; count: number };
 

@@ -1,6 +1,6 @@
 import { env } from "cloudflare:test";
+import { createAccessToken } from "@actor-kit/worker";
 import { describe, expect, it } from "vitest";
-import { createAccessToken } from "../../packages/actor-kit/src/auth/auth";
 
 const SECRET = "test-secret-for-integration-tests-only";
 

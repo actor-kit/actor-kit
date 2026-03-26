@@ -1,10 +1,7 @@
 import { env } from "cloudflare:test";
+import { applyDelta, decode, FrameType, parseFrame, schema, string, uint32 } from "@actor-kit/core";
+import { createAccessToken } from "@actor-kit/worker";
 import { describe, expect, it } from "vitest";
-import { createAccessToken } from "../../packages/actor-kit/src/auth/auth";
-import { decode } from "../../packages/actor-kit/src/schema/binary";
-import { applyDelta } from "../../packages/actor-kit/src/schema/delta";
-import { FrameType, parseFrame } from "../../packages/actor-kit/src/schema/frame";
-import { schema, string, uint32 } from "../../packages/actor-kit/src/schema/schema";
 
 const SECRET = "test-secret-for-integration-tests-only";
 const CounterView = schema({ count: uint32, lastCaller: string });

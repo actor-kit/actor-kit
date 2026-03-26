@@ -16,6 +16,7 @@ export default defineWorkersConfig({
       "delta-sync.test.ts",
       "tick.test.ts",
       "reconnect.test.ts",
+      "views.test.ts",
     ],
   },
 });
