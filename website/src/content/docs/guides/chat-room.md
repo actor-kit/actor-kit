@@ -13,6 +13,7 @@ The chat room demonstrates WebSocket lifecycle events and real-time broadcast to
 - Online user tracking
 - Real-time message broadcast to all connected users
 - Message history (last 50 messages)
+- Client rendering from snapshot data
 
 ## Lifecycle Events
 
@@ -47,6 +48,60 @@ const sendMessage = message(
 ```
 
 The `.slice(-49)` keeps the last 50 messages — old messages are discarded to bound state size.
+
+## The Client
+
+Each snapshot contains the full message history and online user list. The client re-renders on every update:
+
+```javascript
+ws.addEventListener("message", (event) => {
+  const msg = JSON.parse(event.data);
+  if (msg.type === "snapshot") {
+    const { messages, onlineCount } = msg.data;
+
+    document.getElementById("online").textContent = `${onlineCount} online`;
+    document.getElementById("messages").innerHTML = messages
+      .map(m => `<div><b>${m.author}</b>: ${m.text}</div>`)
+      .join("");
+  }
+});
+
+// Send a chat message
+ws.send(JSON.stringify({ type: "SEND_MESSAGE", text: "Hello!" }));
+```
+
+### With React
+
+```tsx
+import { actorClient } from "actor-kit/client";
+import { actorContext } from "actor-kit/react";
+
+const ChatClient = actorClient(ChatViewSchema).events<ChatEvent>();
+const ChatCtx = actorContext<typeof ChatClient>();
+
+function ChatRoom() {
+  const view = ChatCtx.useView();   // typed from ChatViewSchema
+  const send = ChatCtx.useSend();   // (event: ChatEvent) => void
+  const [text, setText] = useState("");
+
+  return (
+    <div>
+      <div>{view?.onlineCount ?? 0} online</div>
+      <div>
+        {view?.messages.map(m => (
+          <div key={m.id}><b>{m.author}</b>: {m.text}</div>
+        ))}
+      </div>
+      <input value={text} onChange={e => setText(e.target.value)} />
+      <button onClick={() => { send({ type: "SEND_MESSAGE", text }); setText(""); }}>
+        Send
+      </button>
+    </div>
+  );
+}
+```
+
+The `on.connect` and `on.disconnect` lifecycle hooks on the actor handle online tracking — the client doesn't need to do anything special. Opening a tab increments the count; closing it decrements.
 
 ## Try it
 

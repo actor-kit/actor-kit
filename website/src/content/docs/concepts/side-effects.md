@@ -53,8 +53,8 @@ emit({ queue: "ANALYTICS", body: { event: "todo_added" } });
 // Call an external API
 emit({ fetch: "https://api.example.com/track", body: { event: "created" } });
 
-// Send to another actor (DO-to-DO)
-emit({ actor: "audit-log", id: "global", message: "LOG", payload: { action: "deleted" } });
+// Send to another actor (DO-to-DO) — "AUDIT_LOG" is the DO binding name from wrangler.jsonc
+emit({ actor: "AUDIT_LOG", id: "global", message: "LOG", payload: { action: "deleted" } });
 ```
 
 ## Guarantees
@@ -62,3 +62,8 @@ emit({ actor: "audit-log", id: "global", message: "LOG", payload: { action: "del
 - **At-least-once delivery**: if the DO crashes after commit, pending effects retry on restart
 - **Retry with backoff**: failed effects retry 3 times (1s, 5s, 25s) then move to a failures table
 - **Idempotency**: each emission gets a UUID — downstream services can deduplicate
+
+## Related
+
+- [Actor-to-Actor Communication](/recipes/actor-to-actor/) — `emit()`, `request()`, and `createRef()` patterns for DO-to-DO messaging
+- [Testing Side Effects](/recipes/testing-side-effects/) — how to capture and assert `emit()` and `request()` calls in tests

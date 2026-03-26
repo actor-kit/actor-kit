@@ -1,0 +1,181 @@
+---
+title: Binary State Sync
+description: Schema-driven binary encoding with bitmask delta frames for minimal wire overhead.
+---
+
+Actor Kit synchronizes state to connected clients over WebSocket using a binary protocol. Each client receives a role-scoped view of the actor's state, encoded directly from the schema definition into a compact binary frame. When state changes, only the fields that actually changed are sent.
+
+## How it works
+
+Every actor defines views per role using `schema()` and `view()`:
+
+```typescript
+import { schema, view, uint32, float32, string, boolean, array } from "actor-kit";
+
+const PlayerView = schema({
+  x: float32,
+  y: float32,
+  health: uint32,
+  name: string,
+  alive: boolean,
+});
+
+// In the actor definition:
+views: {
+  player: view(PlayerView, (state, caller) => ({
+    x: state.positions[caller].x,
+    y: state.positions[caller].y,
+    health: state.players[caller].health,
+    name: state.players[caller].name,
+    alive: state.players[caller].alive,
+  })),
+}
+```
+
+The schema serves double duty: it provides TypeScript type inference at compile time, and it defines the exact binary layout at runtime. Every field has a known size and encoding, so serialization is a single pass with no parsing ambiguity.
+
+## The sync cycle
+
+After every state transition, the actor broadcasts views to all connected clients:
+
+1. **Project** — For each WebSocket, resolve the caller's role and compute their view
+2. **Compare** — Check if the view changed since the last frame sent to this connection
+3. **Encode** — If changed, encode as a binary delta (or full snapshot on first connect)
+4. **Send** — Transmit the binary frame over WebSocket
+
+Each connection tracks its own previous view. This means different clients can receive different deltas at different times, and a state change that doesn't affect a particular caller's view produces no frame at all.
+
+## Snapshots and deltas
+
+There are two frame types for state sync:
+
+**Snapshot** — the complete view, binary-encoded. Sent on:
+- First connection
+- Reconnection when the client's last-known state is stale
+- Role changes (the view shape may differ)
+
+**Delta** — only the fields that changed. Sent on every subsequent state transition where at least one field differs from the previous frame.
+
+### Delta encoding
+
+Deltas use a bitmask to indicate which fields changed, followed by the encoded values of only those fields:
+
+```
+[bitmask: ceil(fieldCount / 8) bytes] [field₀ data] [field₃ data] ...
+```
+
+For a schema with 5 fields where only field 0 and field 3 changed:
+
+```
+Bitmask:  0b00001001  (1 byte — bits 0 and 3 set)
+Data:     [field₀ value] [field₃ value]
+```
+
+Fields are written in schema definition order. The decoder reads the bitmask, then reads values for only the set bits, merging them into the previous view.
+
+### Concrete example
+
+A player position update in a game — `x` and `y` changed, nothing else:
+
+| Component | Bytes |
+|-----------|-------|
+| Frame header | 6 |
+| Bitmask (5 fields) | 1 |
+| `x` (float32) | 4 |
+| `y` (float32) | 4 |
+| **Total** | **15 bytes** |
+
+The same update as a JSON string would be ~80-100 bytes — the field names alone (`"x"`, `"y"`, `"health"`, `"name"`, `"alive"`) consume more space than the entire binary frame.
+
+## Frame format
+
+Every binary frame starts with a 6-byte header:
+
+| Offset | Size | Field | Description |
+|--------|------|-------|-------------|
+| 0 | 1 | version | Schema version (for migration) |
+| 1 | 1 | type | Frame type (snapshot, delta, control) |
+| 2 | 4 | length | Payload length (big-endian uint32) |
+
+**Snapshot frames** add a 1-byte role index before the payload. The client uses a single `viewSchema` for decoding — if the caller's role changes and the view shape differs, the server sends a fresh snapshot.
+
+**Delta frames** contain the bitmask + changed field values directly as the payload.
+
+Connection lifecycle events (errors, reconnection acks, redirects) are sent as JSON messages, not binary frames.
+
+## Type encoding
+
+Each schema primitive has a fixed binary representation:
+
+| Type | Encoding | Bytes |
+|------|----------|-------|
+| `uint8` | Unsigned 8-bit integer | 1 |
+| `uint16` | Unsigned 16-bit, big-endian | 2 |
+| `uint32` | Unsigned 32-bit, big-endian | 4 |
+| `float32` | IEEE 754 single-precision | 4 |
+| `float64` | IEEE 754 double-precision | 8 |
+| `boolean` | `0x00` or `0x01` | 1 |
+| `string` | Length-prefixed UTF-8 (`uint16` length + bytes) | 2 + len |
+| `array(T)` | Count-prefixed (`uint16` count + elements) | 2 + sum |
+| Nested `schema({...})` | Fields concatenated in definition order | sum |
+
+All multi-byte integers use big-endian byte order. No padding, no alignment — fields are packed contiguously.
+
+## Client decoding
+
+The client SDK handles binary frames automatically. Pass the view schema to `actorClient()` and the decoder is wired in:
+
+```typescript
+import { actorClient } from "actor-kit/client";
+
+const GameClient = actorClient(PlayerView);  // Same schema used on server
+
+const client = GameClient.create({
+  url: `wss://${location.host}/game/rooms/room-42`,
+  accessToken: token,
+});
+
+client.subscribe((view) => {
+  // `view` is always the full, current state — snapshots and deltas
+  // are merged transparently. You never see raw frames.
+  renderPlayer(view.x, view.y, view.health);
+});
+```
+
+When a delta arrives, the client applies the changed fields to its current view and notifies subscribers with the merged result. Your application code always sees a complete object — never a partial update.
+
+## Reconnection
+
+When a client reconnects after a brief disconnection, it sends a checksum of its last-known view. The server compares this checksum against the current view:
+
+- **Match** — the client is already up to date. An acknowledgment is sent, no data retransmitted.
+- **Mismatch** — the server sends a full snapshot to resync.
+
+This avoids retransmitting state that hasn't changed during the disconnect window.
+
+## Per-connection isolation
+
+Each WebSocket connection maintains its own:
+
+- **Role** — re-evaluated on every state change (roles are derived from state)
+- **Previous view** — used to compute deltas for this specific connection
+- **View deduplication** — if a state change doesn't alter this caller's projected view, no frame is sent
+
+This means a state change that affects the `owner` view but not the `viewer` view will only produce a frame for the owner's connection.
+
+## When binary sync is active
+
+Binary sync is automatic when your views use `schema()`. If a view has a schema definition, the framework encodes it as binary frames. If no schema is defined (plain object views without `view(schema, fn)`), the framework falls back to JSON strings.
+
+In practice, any actor that uses `view(MySchema, fn)` gets binary sync for free.
+
+## When binary sync matters
+
+Binary sync has the biggest impact when:
+
+- **Updates are frequent** — games, collaborative editors, live dashboards
+- **Views have many fields** — field names dominate JSON overhead
+- **Only a few fields change per update** — delta encoding skips unchanged fields entirely
+- **Bandwidth is constrained** — mobile networks, high-concurrency servers
+
+For a simple counter actor with one `uint32` field, the difference between binary and JSON is negligible. For a game state with 20 fields updating at 60Hz, it's the difference between saturating a connection and running smoothly.

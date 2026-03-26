@@ -11,9 +11,24 @@ Creates a test harness for an actor definition.
 
 ```typescript
 import { testActor } from "actor-kit/test";
-import { TodoList } from "./todo";
+import { todoActorDef } from "./todo";
 
-const t = testActor(TodoList);
+const t = testActor(todoActorDef);
+```
+
+`testActor()` takes the raw actor definition object (the `{ input, init, roles, messages, views }` object), not the DO class returned by `actor()`. Export the definition separately from the `actor()` call:
+
+```typescript
+// todo.ts
+export const todoActorDef = {
+  input: z.object({ creator: z.string() }),
+  init: (input) => ({ todos: [], ownerId: input.creator, memberIds: [] }),
+  roles: { /* ... */ },
+  messages: { /* ... */ },
+  views: { /* ... */ },
+};
+
+export const TodoList = actor<Env>("todo-list", todoActorDef);
 ```
 
 ### `t.init(input)`

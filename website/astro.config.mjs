@@ -35,7 +35,7 @@ export default defineConfig({
           ],
         },
         {
-          label: "Guides",
+          label: "Examples",
           items: [
             { slug: "guides/counter" },
             { slug: "guides/todo-list" },
@@ -50,9 +50,19 @@ export default defineConfig({
             { slug: "concepts/roles-and-authorization" },
             { slug: "concepts/messages-and-guards" },
             { slug: "concepts/views" },
+            { slug: "concepts/binary-sync" },
             { slug: "concepts/side-effects" },
             { slug: "concepts/timers" },
             { slug: "concepts/testing" },
+          ],
+        },
+        {
+          label: "Recipes",
+          items: [
+            { slug: "recipes/actor-to-actor" },
+            { slug: "recipes/sequential-and-parallel-states" },
+            { slug: "recipes/testing-side-effects" },
+            { slug: "recipes/faq" },
           ],
         },
         {

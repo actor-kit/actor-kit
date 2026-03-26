@@ -1,56 +1,121 @@
 ---
 title: Testing
-description: Unit tests, integration tests, and E2E tests.
+description: How to test actors at every level — from pure functions to full-stack browser tests.
 ---
 
-## Testing Trophy
+## Testing strategy
 
-Actor Kit is designed for the [testing trophy](https://kentcdodds.com/blog/write-tests) — more integration tests, fewer unit tests.
+Actor Kit is designed for the [testing trophy](https://kentcdodds.com/blog/write-tests) — invest most in the middle layers where you get the highest confidence per test.
 
 ```
-        /\
-       /  \       E2E (Playwright — real browser)
-      /----\
-     /      \     Integration (vitest-pool-workers — real DO)
-    /--------\
-   /          \   Unit (vitest — pure functions)
-  /------------\
+             ╱╲
+            ╱  ╲           E2E (Playwright)
+         ╱──────╲
+        ╱          ╲
+       ╱            ╲      Actor tests (testActor)
+      ╱              ╲     + Integration (vitest-pool-workers)
+       ╲            ╱
+        ╲──────────╱
+         ╲        ╱        Unit (pure functions)
+          ╲──────╱
+     ━━━━━━━━━━━━━━━━━     Static analysis (TypeScript + Biome)
 ```
 
-## Unit Tests with `testActor()`
+The widest part is the middle: actor tests and integration tests give you the most confidence that your actor behaves correctly. Unit tests cover pure helpers. E2E proves the full stack works in a browser.
 
-`testActor()` runs transitions without a CF runtime — pure TypeScript, fast.
+Static analysis is the foundation — TypeScript strict mode and Biome catch entire categories of bugs before any test runs.
+
+## Four test levels
+
+### 1. Static analysis
+
+TypeScript strict mode (no `any`, no `as` casts) and Biome linting. These run on every save and in pre-commit hooks.
+
+```bash
+pnpm typecheck   # strict TypeScript, zero errors
+pnpm lint         # Biome: formatting, import ordering, no-explicit-any
+```
+
+### 2. Unit tests
+
+Pure function tests with Vitest. No Actor Kit APIs, no Cloudflare runtime — just input/output.
+
+```typescript
+import { describe, expect, it } from "vitest";
+import { encode, decode } from "actor-kit/schema";
+import { PlayerView } from "./schemas";
+
+describe("binary encoding", () => {
+  it("round-trips a player view", () => {
+    const data = { x: 1.5, y: 2.5, health: 100, name: "alice", alive: true };
+    const bytes = encode(PlayerView, data);
+    const decoded = decode(PlayerView, bytes);
+    expect(decoded).toEqual(data);
+  });
+});
+```
+
+Good for: schema encoding/decoding, JWT helpers, pure utility functions.
+
+### 3. Actor tests with `testActor()`
+
+`testActor()` is the workhorse of Actor Kit testing. It runs your full actor definition — role evaluation, message routing, Zod validation, guards, view projection, and side effect capture — without a Cloudflare runtime.
 
 ```typescript
 import { testActor } from "actor-kit/test";
-import { TodoList } from "./todo";
+import { todoActorDef } from "./todo";
 
-const t = testActor(TodoList);
+const t = testActor(todoActorDef);
+```
 
-// Init
+`testActor()` takes the raw definition object (`{ input, init, roles, messages, views }`), not the DO class returned by `actor()`. Export your definition separately — see [actor-kit/test API reference](/api/test/).
+
+**Initialize state** from input:
+
+```typescript
 const state = t.init({ creator: "alice" });
+```
 
-// Send messages
+**Send messages** and get back the new state:
+
+```typescript
 const next = await t.send(state, "alice", { type: "ADD_TODO", text: "Buy milk" });
+```
 
-// Check role
+**Check which role** a caller resolves to:
+
+```typescript
 expect(t.role(state, "alice")).toBe("owner");
+expect(t.role(state, "bob")).toBe("viewer");
+```
 
-// Get view
-const view = t.view(state, "alice");
-expect(view.role).toBe("owner");
+**Compute a view** for a caller and verify the projection:
 
-// Capture emissions
-const { state: s, emissions, requests } = await t.sendWithEffects(
-  state, "alice", { type: "NOTIFY" }
+```typescript
+const { role, data } = t.view(state, "alice");
+expect(role).toBe("owner");
+expect(data.todos).toHaveLength(1);
+```
+
+**Capture side effects** (emissions and requests) without executing them:
+
+```typescript
+const { state: next, emissions, requests } = await t.sendWithEffects(
+  state, "alice", { type: "NOTIFY_MEMBERS" }
+);
+
+expect(emissions).toContainEqual(
+  expect.objectContaining({ queue: "notifications" })
 );
 ```
 
-Good for: role evaluation, message routing, view computation, emission capture.
+Actor tests are fast (pure TypeScript, no I/O) and cover the most important behavior: does this message, from this caller, in this state, produce the right result?
 
-## Integration Tests with `vitest-pool-workers`
+### 4. Integration tests with `vitest-pool-workers`
 
-Real Durable Objects, real SQLite, real WebSocket.
+Real Durable Objects, real SQLite, real WebSocket — running in the Cloudflare Workers test runtime.
+
+**Spawn and query an actor:**
 
 ```typescript
 import { env } from "cloudflare:test";
@@ -65,11 +130,11 @@ const snapshot = await stub.getSnapshot("u1", "user");
 expect(snapshot.snapshot.count).toBe(5);
 ```
 
-Good for: persistence, WebSocket lifecycle, binary frames, alarms, outbox drain.
+Good for: persistence across restarts, WebSocket lifecycle, binary frame encoding over the wire, DO Alarms, outbox drain and side effect delivery.
 
-## E2E Tests with Playwright
+### 5. E2E tests with Playwright
 
-Real browser, real Worker, real Durable Object.
+Real browser, real Worker, real Durable Object. Proves the full stack works end-to-end.
 
 ```typescript
 import { test, expect } from "@playwright/test";
@@ -77,10 +142,13 @@ import { test, expect } from "@playwright/test";
 test("increment button increases count", async ({ page }) => {
   await page.goto("/?id=test-" + Date.now());
   await expect(page.locator("#status")).toContainText("Connected", { timeout: 5000 });
+
   await page.locator("#increment").click();
   await expect(page.locator("#count")).toHaveText("1", { timeout: 3000 });
 });
+```
 
+```typescript
 test("two browsers see the same counter", async ({ browser }) => {
   const ctx1 = await browser.newContext();
   const ctx2 = await browser.newContext();
@@ -95,21 +163,38 @@ test("two browsers see the same counter", async ({ browser }) => {
 });
 ```
 
-Good for: full-stack proof, multi-user sync, UI behavior.
+Good for: multi-user sync, UI rendering, full auth flow, client reconnection behavior.
 
 ## What to test where
 
-| Concern | Unit | Integration | E2E |
-|---------|------|-------------|-----|
-| Role evaluation | ✓ | ✓ | |
-| Message routing | ✓ | ✓ | |
-| Zod validation | ✓ | ✓ | |
-| Guards | ✓ | ✓ | |
-| View projection | ✓ | ✓ | |
-| Persistence | | ✓ | |
-| WebSocket lifecycle | | ✓ | |
-| Binary delta frames | | ✓ | |
-| DO Alarms | | ✓ | |
-| Multi-user sync | | | ✓ |
-| Browser rendering | | | ✓ |
-| Full auth flow | | | ✓ |
+| Concern | Unit | Actor (`testActor`) | Integration (DO) | E2E |
+|---------|------|---------------------|-------------------|-----|
+| Schema encoding/decoding | ✓ | | | |
+| JWT helpers | ✓ | | | |
+| Role evaluation | | ✓ | ✓ | |
+| Message routing | | ✓ | ✓ | |
+| Zod validation | | ✓ | ✓ | |
+| Guards | | ✓ | ✓ | |
+| View projection | | ✓ | ✓ | |
+| Emission capture | | ✓ | | |
+| Persistence | | | ✓ | |
+| WebSocket lifecycle | | | ✓ | |
+| Binary delta frames | | | ✓ | |
+| DO Alarms | | | ✓ | |
+| Multi-user sync | | | | ✓ |
+| Browser rendering | | | | ✓ |
+| Full auth flow | | | | ✓ |
+
+## Running tests
+
+```bash
+pnpm typecheck          # static analysis
+pnpm test:unit          # unit + actor tests (vitest)
+pnpm test:integration   # DO integration tests (vitest-pool-workers)
+pnpm test               # all of the above
+```
+
+## Related
+
+- [Testing Side Effects](/recipes/testing-side-effects/) — how to capture and assert `emit()` and `request()` calls
+- [actor-kit/test API Reference](/api/test/) — full `testActor()` API documentation

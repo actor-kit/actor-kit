@@ -14,6 +14,7 @@ The todo list demonstrates the role system in depth — different users see diff
 - Shared message handlers across roles
 - Per-role views: owner/member see todos, viewer sees counts
 - State persistence across page reloads
+- Client role detection: adapting UI based on `role` from the server
 
 ## Roles
 
@@ -63,6 +64,80 @@ views: {
 ```
 
 The owner sees the full todo list. The viewer sees only counts — the individual todo items are never sent.
+
+## The Client
+
+The example uses raw WebSocket. Each snapshot includes the caller's `role`, so the UI adapts:
+
+```javascript
+ws.addEventListener("message", (event) => {
+  const msg = JSON.parse(event.data);
+  if (msg.type === "snapshot") {
+    const { role, data } = msg;
+
+    if (role === "owner" || role === "member") {
+      // Show full todo list
+      renderTodos(data.todos);
+    } else {
+      // Viewer — show counts only (individual todos are never sent)
+      renderSummary(data.todoCount, data.doneCount);
+    }
+  }
+});
+
+// Send a message
+ws.send(JSON.stringify({ type: "ADD_TODO", text: "Buy milk" }));
+```
+
+### With React
+
+```tsx
+import { actorClient } from "actor-kit/client";
+import { actorContext } from "actor-kit/react";
+
+const TodoClient = actorClient(OwnerViewSchema).events<TodoEvent>();
+const TodoCtx = actorContext<typeof TodoClient>();
+
+function TodoApp({ listId, token }: { listId: string; token: string }) {
+  const client = TodoClient.create({
+    url: `wss://${location.host}/api/todo-list/${encodeURIComponent(listId)}`,
+    accessToken: token,
+  });
+
+  return (
+    <TodoCtx.Provider client={client}>
+      <TodoList />
+    </TodoCtx.Provider>
+  );
+}
+
+function TodoList() {
+  const view = TodoCtx.useView();   // typed from OwnerViewSchema
+  const role = TodoCtx.useRole();
+  const send = TodoCtx.useSend();   // (event: TodoEvent) => void
+
+  if (!view) return <div>Loading...</div>;
+
+  return (
+    <div>
+      <ul>
+        {view.todos.map(t => (
+          <li key={t.id}>
+            <span onClick={() => send({ type: "TOGGLE", todoId: t.id })}>
+              {t.done ? "done" : "todo"} {t.text}
+            </span>
+          </li>
+        ))}
+      </ul>
+      <button onClick={() => send({ type: "ADD_TODO", text: "New item" })}>
+        Add
+      </button>
+    </div>
+  );
+}
+```
+
+`useRole()` re-renders when the role changes — if the owner invites someone, their role shifts from `viewer` to `member` and the UI updates automatically.
 
 ## Try it
 

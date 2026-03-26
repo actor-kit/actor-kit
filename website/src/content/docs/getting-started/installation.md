@@ -65,7 +65,7 @@ For production, use `wrangler secret`:
 npx wrangler secret put ACTOR_KIT_SECRET
 ```
 
-### 3. Define your actor
+### 4. Define your actor
 
 See the [Quick Start](/getting-started/quick-start/) for a complete example.
 

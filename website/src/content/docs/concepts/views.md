@@ -61,25 +61,14 @@ type PlayerViewType = Infer<typeof PlayerView>;
 
 ## Binary Sync
 
-When `binarySync: true` is set on the actor, views are encoded as binary frames:
+When a view uses `schema()`, the framework automatically encodes it as binary frames:
 
 1. **First connect**: full SNAPSHOT frame (all fields encoded)
 2. **Subsequent updates**: DELTA frame (bitmask + only changed fields)
 
 A position update (3 float32 fields) = 13 bytes as a delta (1 byte bitmask + 12 bytes data), vs ~100 bytes as JSON.
 
-### Opt-in
-
-Binary sync is off by default. Set `binarySync: true` on the actor definition to enable it:
-
-```typescript
-export const MyActor = actor("my-actor", {
-  binarySync: true,
-  // ...
-});
-```
-
-When binary sync is off, the DO sends JSON snapshots — compatible with simple browser clients that don't bundle the decoder.
+Binary sync is automatic — any view defined with `view(mySchema, fn)` gets binary encoding. Views without a schema fall back to JSON.
 
 ## View Computation
 
@@ -90,3 +79,7 @@ Views are computed after every transition. The framework:
 4. If unchanged: skips (no frame sent)
 
 This means views are cheap — if nothing changed for a particular caller, nothing is sent.
+
+## Related
+
+- [Binary State Sync](/concepts/binary-sync/) — deep dive into the binary wire protocol, delta encoding, and frame format

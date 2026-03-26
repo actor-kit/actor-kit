@@ -53,7 +53,7 @@ Actor Kit embraces Cloudflare's infrastructure:
 | CF Feature | How Actor Kit uses it |
 |------------|----------------------|
 | Durable Objects | Each actor is a DO — single-threaded, globally addressable |
-| DO SQLite | State persistence, outbox, change log |
+| DO SQLite | State persistence, transactional outbox |
 | DO Alarms | Durable timers (`after`) that survive hibernation |
 | DO WebSocket Hibernation | Caller metadata stored as tags, survives restarts |
 | Workers | Route requests, serve UI, issue JWT tokens |

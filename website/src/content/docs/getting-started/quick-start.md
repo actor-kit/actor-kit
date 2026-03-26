@@ -131,18 +131,20 @@ ws.addEventListener("message", (event) => {
 ws.send(JSON.stringify({ type: "INCREMENT" }));
 ```
 
-Or use the client SDK:
+Or use the typed client SDK:
 
 ```typescript
-import { createActorClient } from "actor-kit/client";
+import { actorClient } from "actor-kit/client";
+import { CounterView } from "./counter";
 
-const client = createActorClient({
-  actorType: "counter",
-  actorId: "my-counter",
-  host: location.host,
+const CounterClient = actorClient(CounterView);
+
+const client = CounterClient.create({
+  url: `wss://${location.host}/api/counter/my-counter`,
   accessToken: token,
 });
 
+// view is typed from CounterView — no casting needed
 client.subscribe((view) => {
   console.log("Count:", view.count);
 });
@@ -158,6 +160,7 @@ npx wrangler deploy
 
 ## Next Steps
 
-- [Counter Guide](/guides/counter/) — full walkthrough with UI
-- [Todo List Guide](/guides/todo-list/) — multiple roles, guards, shared handlers
+- [Counter Example](/guides/counter/) — full source with UI
+- [Todo List Example](/guides/todo-list/) — multiple roles, guards, shared handlers
 - [Concepts](/concepts/actors-and-state/) — deep dive into the actor model
+- [Recipes](/recipes/actor-to-actor/) — focused how-to guides for specific tasks

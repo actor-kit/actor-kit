@@ -41,7 +41,6 @@ export const Counter = actor("counter", {
 | `tick` | No | Game loop (setInterval) |
 | `on` | No | Lifecycle handlers + request callbacks |
 | `observe` | No | `{ onTransition }` hook |
-| `binarySync` | No | Enable binary delta encoding |
 | `migrate` | No | `(persisted, fromVersion) => newState` |
 | `serialize` | No | Custom state serializer |
 | `restore` | No | Custom state deserializer |
@@ -83,7 +82,7 @@ await zone.send("system", "service", { type: "ACCEPT_TRANSFER", ... });
 
 ## `createAccessToken(params)`
 
-Creates a JWT for WebSocket authentication.
+Creates a JWT for WebSocket authentication. Returns `Promise<string>`.
 
 ```typescript
 const token = await createAccessToken({
@@ -93,6 +92,37 @@ const token = await createAccessToken({
   callerType: "user",
   secret: env.ACTOR_KIT_SECRET,
 });
+```
+
+| Param | Type | Description |
+|-------|------|-------------|
+| `actorType` | `string` | Actor type name (JWT `aud` claim) |
+| `actorId` | `string` | Actor instance ID (JWT `jti` claim) |
+| `callerId` | `string` | Caller identity (JWT `sub` claim) |
+| `callerType` | `"user" \| "service"` | Caller type (JWT `act` claim) |
+| `secret` | `string` | HS256 signing secret |
+| `expiresIn` | `string` | Optional expiry (default: `"1h"`) |
+
+## `getCallerFromToken(token, secret, actorType, actorId)`
+
+Validates a JWT and extracts the caller identity. Returns `Promise<{ caller: string; callerType: "user" | "service" }>`. Throws on invalid/expired tokens or audience/ID mismatch.
+
+## `parseActorRoute(pathname)`
+
+Parses `/api/:actorType/:actorId` from a URL pathname. Returns `{ actorType, actorId }` or `null`.
+
+```typescript
+const route = parseActorRoute("/api/counter/my-counter");
+// { actorType: "counter", actorId: "my-counter" }
+```
+
+## `encode(schema, data)` / `decode(schema, bytes)`
+
+Binary encoder and decoder for schema-defined data. Used internally for binary sync, but exported for custom use.
+
+```typescript
+const bytes = encode(PlayerView, { x: 1.5, y: 2.5, health: 100 });
+const data = decode(PlayerView, bytes);
 ```
 
 ## Schema primitives
