@@ -1,0 +1,20 @@
+{
+  "name": "@actor-kit/test",
+  "version": "0.0.1",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "build": "tsdown"
+  },
+  "dependencies": {
+    "@actor-kit/core": "workspace:*",
+    "@actor-kit/worker": "workspace:*",
+    "zod": "^3.24.0"
+  }
+}

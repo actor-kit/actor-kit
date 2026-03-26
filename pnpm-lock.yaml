@@ -185,6 +185,18 @@ importers:
         specifier: '>=18'
         version: 19.2.4
 
+  packages/test:
+    dependencies:
+      '@actor-kit/core':
+        specifier: workspace:*
+        version: link:../core
+      '@actor-kit/worker':
+        specifier: workspace:*
+        version: link:../worker
+      zod:
+        specifier: ^3.24.0
+        version: 3.25.76
+
   packages/worker:
     dependencies:
       '@actor-kit/core':

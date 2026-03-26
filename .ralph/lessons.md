@@ -16,3 +16,5 @@ Patterns and mistakes. Review at start of each iteration.
 - React package needs `"jsx": "react-jsx"` in tsconfig.json even though source uses createElement (not JSX) — required for type resolution of React types.
 - React package uses `react` as peerDependency, `@actor-kit/client` as regular dependency. Both must be externalized in tsdown.
 - Codex findings about stale hook state on client swap (useView, useSelector) are pre-existing bugs from the original code — not regressions from the split.
+- Importing from `@actor-kit/worker` root pulls in actor.ts which imports `cloudflare:workers`. Use `@actor-kit/worker/testing` subpath for pure-logic runtime utilities (routeMessage, resolveRole) that need to run outside CF runtime.
+- When returning a plain object with methods that call each other, avoid `this` binding — extract shared logic as a closed-over function so destructuring works (`const { send } = testActor(def)`).

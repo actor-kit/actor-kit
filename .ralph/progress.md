@@ -43,3 +43,15 @@ Working memory for ralph-package-split. Delete after run.
 - `pnpm typecheck` passes for full workspace (core, actor-kit, worker, client, react)
 - All 277 unit tests pass
 - Codex review: 2 P1 findings (stale view on client swap in useView, stale selection in useSelector) — both are pre-existing bugs from original actor-kit/src/react/context.ts, not regressions from the split
+
+## Task 5: Create @actor-kit/test — DONE
+- Created `packages/test/` with package.json, tsconfig.json, tsdown.config.ts
+- Source files: test-actor.ts, index.ts
+- test-actor.ts: testActor() harness — init, role, send, sendWithEffects, view
+- Imports `routeMessage`/`resolveRole` from `@actor-kit/worker/testing` (not root — avoids cloudflare:workers)
+- Added `@actor-kit/worker/testing` subpath export: separate entrypoint (testing.ts) with only pure-logic runtime functions
+- Updated worker package.json (exports), tsdown.config.ts (entry), added src/testing.ts
+- `pnpm typecheck` passes for full workspace (core, actor-kit, worker, client, react, test)
+- All 277 unit tests pass
+- Codex review round 1: 1 P1 (importing worker root pulls in cloudflare:workers) — fixed with ./testing subpath
+- Codex review round 2: 1 P3 (`this`-bound send() breaks on destructure) — fixed by extracting sendWithEffectsImpl as closed-over function

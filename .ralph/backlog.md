@@ -43,7 +43,7 @@ deps: @actor-kit/core,  deps: @actor-kit/client,
 
 - [x] **4. Create @actor-kit/react** — Create `packages/react/` with package.json (`@actor-kit/react`, dep: `@actor-kit/client`, peer: `react`). Move: context.ts, actor-context.ts. Update imports. Create `src/index.ts`. Verify: `pnpm typecheck` passes.
 
-- [ ] **5. Create @actor-kit/test** — Create `packages/test/` with package.json (`@actor-kit/test`, deps: `@actor-kit/core`, `@actor-kit/worker`). Move: test-actor.ts. Update imports. Create `src/index.ts`. Verify: `pnpm typecheck` passes.
+- [x] **5. Create @actor-kit/test** — Create `packages/test/` with package.json (`@actor-kit/test`, deps: `@actor-kit/core`, `@actor-kit/worker`). Move: test-actor.ts. Update imports. Create `src/index.ts`. Verify: `pnpm typecheck` passes.
 
 - [ ] **6. Update workspace and remove old package** — Update pnpm-workspace.yaml to include all new packages. Remove `packages/actor-kit/`. Update root package.json scripts. Update biome.json lint paths. Run `pnpm install`.
 
