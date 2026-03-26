@@ -176,6 +176,15 @@ importers:
         specifier: ^3.24.0
         version: 3.25.76
 
+  packages/react:
+    dependencies:
+      '@actor-kit/client':
+        specifier: workspace:*
+        version: link:../client
+      react:
+        specifier: '>=18'
+        version: 19.2.4
+
   packages/worker:
     dependencies:
       '@actor-kit/core':

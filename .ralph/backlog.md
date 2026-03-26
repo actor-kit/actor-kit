@@ -37,11 +37,11 @@ deps: @actor-kit/core,  deps: @actor-kit/client,
 
 - [x] **1. Create @actor-kit/core** — Create `packages/core/` with package.json (`@actor-kit/core`, dep: `zod`), tsconfig.json, and `src/` containing: schema.ts, binary.ts, delta.ts, frame.ts. Also extract shared types from message.ts (CallbackDef, Effect, RequestConfig, NormalizedRequestConfig, normalizeRequest, EmitFn, RequestFn, MessageDef, MessageContext) and view.ts (ViewDef, view()). Create `src/index.ts` exporting everything. Build with tsdown. Verify: `pnpm typecheck` passes for the new package.
 
-- [ ] **2. Create @actor-kit/worker** — Create `packages/worker/` with package.json (`@actor-kit/worker`, deps: `@actor-kit/core`, `zod`, `jose`). Move: actor.ts, message.ts (keep only `message()` and `callback()` implementations, import types from core), ref.ts, and full runtime/ and auth/ dirs. Update all imports from `../schema/` to `@actor-kit/core`. Create `src/index.ts`. Verify: `pnpm typecheck` passes.
+- [x] **2. Create @actor-kit/worker** — Create `packages/worker/` with package.json (`@actor-kit/worker`, deps: `@actor-kit/core`, `zod`, `jose`). Move: actor.ts, message.ts (keep only `message()` and `callback()` implementations, import types from core), ref.ts, and full runtime/ and auth/ dirs. Update all imports from `../schema/` to `@actor-kit/core`. Create `src/index.ts`. Verify: `pnpm typecheck` passes.
 
-- [ ] **3. Create @actor-kit/client** — Create `packages/client/` with package.json (`@actor-kit/client`, dep: `@actor-kit/core`). Move: client.ts, builder.ts. Update imports from `../schema/` to `@actor-kit/core`. Create `src/index.ts`. Verify: `pnpm typecheck` passes.
+- [x] **3. Create @actor-kit/client** — Create `packages/client/` with package.json (`@actor-kit/client`, dep: `@actor-kit/core`). Move: client.ts, builder.ts. Update imports from `../schema/` to `@actor-kit/core`. Create `src/index.ts`. Verify: `pnpm typecheck` passes.
 
-- [ ] **4. Create @actor-kit/react** — Create `packages/react/` with package.json (`@actor-kit/react`, dep: `@actor-kit/client`, peer: `react`). Move: context.ts, actor-context.ts. Update imports. Create `src/index.ts`. Verify: `pnpm typecheck` passes.
+- [x] **4. Create @actor-kit/react** — Create `packages/react/` with package.json (`@actor-kit/react`, dep: `@actor-kit/client`, peer: `react`). Move: context.ts, actor-context.ts. Update imports. Create `src/index.ts`. Verify: `pnpm typecheck` passes.
 
 - [ ] **5. Create @actor-kit/test** — Create `packages/test/` with package.json (`@actor-kit/test`, deps: `@actor-kit/core`, `@actor-kit/worker`). Move: test-actor.ts. Update imports. Create `src/index.ts`. Verify: `pnpm typecheck` passes.
 

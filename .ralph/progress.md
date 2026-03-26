@@ -8,3 +8,38 @@ Working memory for ralph-package-split. Delete after run.
 - view.ts contains ViewDef interface and view() function
 - All imports updated to use relative paths within the package
 - `pnpm typecheck` passes for both @actor-kit/core and full workspace
+
+## Task 2: Create @actor-kit/worker — DONE
+- Created `packages/worker/` with package.json, tsconfig.json, tsdown.config.ts
+- Source files: actor.ts, message.ts, callback.ts, ref.ts, auth.ts, index.ts
+- Runtime files: runtime/message-router.ts, runtime/outbox.ts, runtime/roles.ts, runtime/states.ts, runtime/timers.ts, runtime/route-to-actor.ts, runtime/cdc.ts
+- All imports updated: `../schema/*` → `@actor-kit/core`, `../core/message` → `@actor-kit/core`
+- message.ts keeps only `message()` function, imports `MessageDef`/`MessageContext` types from core
+- callback.ts keeps only `callback()` function, imports `CallbackDef` type from core
+- Built @actor-kit/core first (required for workspace resolution)
+- `pnpm typecheck` passes for full workspace (core, actor-kit, worker)
+- All 277 unit tests pass
+- Codex review: 3 P2 findings, all pre-existing code or by-design — no regressions
+
+## Task 3: Create @actor-kit/client — DONE
+- Created `packages/client/` with package.json, tsconfig.json, tsdown.config.ts
+- Source files: client.ts, builder.ts, index.ts
+- client.ts: WebSocket client with binary frame handling, JSON fallback, reconnection
+- builder.ts: Typed actorClient() factory builder with schema inference
+- All imports updated: `../schema/*` → `@actor-kit/core`
+- tsconfig.json includes `"DOM"` in lib (browser APIs: WebSocket, TextDecoder, ArrayBuffer)
+- `pnpm typecheck` passes for full workspace (core, actor-kit, worker, client)
+- All 277 unit tests pass
+- Codex review: 1 P1 finding (dist/ not present until build) — same pattern as core/worker, by-design for workspace packages
+
+## Task 4: Create @actor-kit/react — DONE
+- Created `packages/react/` with package.json, tsconfig.json, tsdown.config.ts
+- Source files: context.ts, actor-context.ts, index.ts
+- context.ts: createActorContext() with Provider + useView/useSend/useRole/useConnectionState/useSelector hooks
+- actor-context.ts: actorContext() convenience wrapper that infers types from ActorClientFactory
+- All imports updated: `../client/client` → `@actor-kit/client`, `../client/builder` → `@actor-kit/client`
+- tsconfig.json includes `"DOM"` in lib and `"jsx": "react-jsx"`
+- Dependencies: `@actor-kit/client` (workspace), `react` (peer dep >=18)
+- `pnpm typecheck` passes for full workspace (core, actor-kit, worker, client, react)
+- All 277 unit tests pass
+- Codex review: 2 P1 findings (stale view on client swap in useView, stale selection in useSelector) — both are pre-existing bugs from original actor-kit/src/react/context.ts, not regressions from the split
