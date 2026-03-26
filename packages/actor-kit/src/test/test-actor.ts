@@ -34,6 +34,26 @@ interface TestableActorDef<TState, TInput> {
       readonly fn: (state: TState, caller: string) => unknown;
     }
   >;
+  lifecycle?: {
+    connect?(
+      state: TState,
+      event: { caller: string; callerType: "user" | "service" },
+      ctx: unknown,
+    ): TState | Promise<TState>;
+    disconnect?(
+      state: TState,
+      event: { caller: string; callerType: "user" | "service" },
+      ctx: unknown,
+    ): TState | Promise<TState>;
+  };
+  callbacks?: Record<
+    string,
+    {
+      // bivariant method signature so typed callbacks are assignable
+      (state: TState, payload: unknown, ctx: unknown): TState | Promise<TState>;
+    }
+  >;
+  on?: Record<string, (state: TState, ...args: unknown[]) => TState | Promise<TState>>;
   observe?: {
     onTransition?(
       prevState: TState,

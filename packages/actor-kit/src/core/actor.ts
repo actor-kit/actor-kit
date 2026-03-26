@@ -88,6 +88,24 @@ interface ActorDef {
       (state: unknown, ...args: unknown[]): unknown | Promise<unknown>; // bivariant
     }
   >;
+  lifecycle?: {
+    connect?(
+      state: unknown,
+      event: { caller: string; callerType: "user" | "service" },
+      ctx: unknown,
+    ): unknown | Promise<unknown>;
+    disconnect?(
+      state: unknown,
+      event: { caller: string; callerType: "user" | "service" },
+      ctx: unknown,
+    ): unknown | Promise<unknown>;
+  };
+  callbacks?: Record<
+    string,
+    {
+      (state: unknown, payload: unknown, ctx: unknown): unknown | Promise<unknown>; // bivariant
+    }
+  >;
   after?: Record<string, (state: unknown) => unknown | Promise<unknown>>;
   tick?: {
     frequency: number;
@@ -130,6 +148,7 @@ const CREATE_TABLES_SQL = `
     attempts INTEGER DEFAULT 0,
     on_done TEXT,
     on_error TEXT,
+    meta TEXT,
     created_at INTEGER
   );
   CREATE TABLE IF NOT EXISTS emission_failures (
@@ -232,7 +251,7 @@ export function actor(
     persistOutbox(entries: OutboxEntry[]): void {
       for (const entry of entries) {
         this.ctx.storage.sql.exec(
-          "INSERT INTO outbox (id, type, payload, status, attempts, on_done, on_error, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+          "INSERT INTO outbox (id, type, payload, status, attempts, on_done, on_error, meta, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
           entry.id,
           entry.type,
           JSON.stringify(entry.payload),
@@ -240,6 +259,7 @@ export function actor(
           entry.attempts,
           entry.onDone ?? null,
           entry.onError ?? null,
+          entry.meta !== undefined ? JSON.stringify(entry.meta) : null,
           entry.createdAt,
         );
       }
@@ -403,7 +423,7 @@ export function actor(
       const MAX_ATTEMPTS = 3;
       const rows = this.ctx.storage.sql
         .exec(
-          "SELECT id, type, payload, attempts, on_done, on_error FROM outbox WHERE status = 'pending' ORDER BY created_at",
+          "SELECT id, type, payload, attempts, on_done, on_error, meta FROM outbox WHERE status = 'pending' ORDER BY created_at",
         )
         .toArray();
 
@@ -415,6 +435,7 @@ export function actor(
           attempts: number;
           on_done: string | null;
           on_error: string | null;
+          meta: string | null;
         };
         const payload: unknown = JSON.parse(entry.payload);
 
@@ -426,9 +447,18 @@ export function actor(
 
           // If this was a request with onDone, deliver the callback with the result
           if (entry.on_done && entry.type === "request") {
-            const onHandler = def.on?.[entry.on_done];
-            if (typeof onHandler === "function") {
-              const nextState = await onHandler(this.state, effectResult ?? {});
+            const callbackHandler = def.callbacks?.[entry.on_done] ?? def.on?.[entry.on_done];
+            if (typeof callbackHandler === "function") {
+              // Build payload: callbacks get { result, meta }, legacy on gets raw result
+              const parsedMeta = entry.meta !== null ? JSON.parse(entry.meta) : undefined;
+              const callbackPayload = def.callbacks?.[entry.on_done]
+                ? { result: effectResult ?? {}, meta: parsedMeta }
+                : (effectResult ?? {});
+              const nextState = await callbackHandler(this.state, callbackPayload, {
+                caller: "system",
+                callerType: "service" as const,
+                env: this.env,
+              });
               if (nextState !== this.state) {
                 this.state = nextState;
                 this.persistState();
@@ -452,10 +482,17 @@ export function actor(
 
             // Deliver onError callback if this was a request
             if (entry.on_error && entry.type === "request") {
-              const onHandler = def.on?.[entry.on_error];
-              if (typeof onHandler === "function") {
-                const nextState = await onHandler(this.state, {
-                  message: error instanceof Error ? error.message : String(error),
+              const errorHandler = def.callbacks?.[entry.on_error] ?? def.on?.[entry.on_error];
+              if (typeof errorHandler === "function") {
+                const errorResult = { message: error instanceof Error ? error.message : String(error) };
+                const parsedErrorMeta = entry.meta !== null ? JSON.parse(entry.meta) : undefined;
+                const errorPayload = def.callbacks?.[entry.on_error]
+                  ? { error: errorResult, meta: parsedErrorMeta }
+                  : errorResult;
+                const nextState = await errorHandler(this.state, errorPayload, {
+                  caller: "system",
+                  callerType: "service" as const,
+                  env: this.env,
                 });
                 if (nextState !== this.state) {
                   this.state = nextState;
@@ -717,8 +754,8 @@ export function actor(
         }
       }
 
-      // Run on.connect if defined — with ctx for emit/request
-      if (def.on?.["connect"]) {
+      // Run lifecycle.connect (or legacy on.connect) if defined
+      if (def.lifecycle?.connect || def.on?.["connect"]) {
         const connectOutbox = createOutbox();
         const connectCtx = {
           caller: callerInfo.caller,
@@ -727,7 +764,13 @@ export function actor(
           emit: (effect: Effect) => connectOutbox.emit(effect),
           request: (config: RequestConfig) => connectOutbox.request(config),
         };
-        const nextState = await def.on["connect"](this.state, callerInfo.caller, connectCtx);
+        const nextState = def.lifecycle?.connect
+          ? await def.lifecycle.connect(
+              this.state,
+              { caller: callerInfo.caller, callerType: callerInfo.callerType },
+              connectCtx,
+            )
+          : await def.on!["connect"]!(this.state, callerInfo.caller, connectCtx);
         if (nextState !== this.state) {
           this.state = nextState;
           const outboxEntries = connectOutbox.toEntries();
@@ -837,8 +880,8 @@ export function actor(
       this.previousViewData.delete(ws);
       this.connectionChecksums.delete(ws);
 
-      // Run on.disconnect if defined — with ctx for emit/request
-      if (def.on?.["disconnect"]) {
+      // Run lifecycle.disconnect (or legacy on.disconnect) if defined
+      if (def.lifecycle?.disconnect || def.on?.["disconnect"]) {
         const disconnectOutbox = createOutbox();
         const disconnectCtx = {
           caller,
@@ -847,7 +890,9 @@ export function actor(
           emit: (effect: Effect) => disconnectOutbox.emit(effect),
           request: (config: RequestConfig) => disconnectOutbox.request(config),
         };
-        const nextState = await def.on["disconnect"](this.state, caller, disconnectCtx);
+        const nextState = def.lifecycle?.disconnect
+          ? await def.lifecycle.disconnect(this.state, { caller, callerType: info.callerType }, disconnectCtx)
+          : await def.on!["disconnect"]!(this.state, caller, disconnectCtx);
         if (nextState !== this.state) {
           this.state = nextState;
           const outboxEntries = disconnectOutbox.toEntries();
