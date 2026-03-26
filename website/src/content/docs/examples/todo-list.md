@@ -92,8 +92,8 @@ ws.send(JSON.stringify({ type: "ADD_TODO", text: "Buy milk" }));
 ### With React
 
 ```tsx
-import { actorClient } from "actor-kit/client";
-import { actorContext } from "actor-kit/react";
+import { actorClient } from "@actor-kit/client";
+import { actorContext } from "@actor-kit/react";
 
 // Use the owner schema — viewers will receive JSON fallback snapshots
 // since their view shape differs from the binary schema

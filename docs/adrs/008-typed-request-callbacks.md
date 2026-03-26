@@ -36,7 +36,7 @@ A type safety audit (see ADR-001) found this is the biggest user-facing type gap
 Introduce a `callback()` helper (analogous to `message()`) that pairs a name with a Zod payload schema:
 
 ```typescript
-import { callback } from "actor-kit";
+import { callback } from "@actor-kit/worker";
 
 const PriceReceived = callback(
   "PRICE_RECEIVED",

@@ -42,7 +42,7 @@ Pure function tests with Vitest. No Actor Kit APIs, no Cloudflare runtime — ju
 
 ```typescript
 import { describe, expect, it } from "vitest";
-import { encode, decode } from "actor-kit";
+import { encode, decode } from "@actor-kit/core";
 import { PlayerView } from "./schemas";
 
 describe("binary encoding", () => {
@@ -62,13 +62,13 @@ Good for: schema encoding/decoding, JWT helpers, pure utility functions.
 `testActor()` is the workhorse of Actor Kit testing. It runs your full actor definition — role evaluation, message routing, Zod validation, guards, view projection, and side effect capture — without a Cloudflare runtime.
 
 ```typescript
-import { testActor } from "actor-kit/test";
+import { testActor } from "@actor-kit/test";
 import { todoActorDef } from "./todo";
 
 const t = testActor(todoActorDef);
 ```
 
-`testActor()` takes the raw definition object (`{ input, init, roles, messages, views }`), not the DO class returned by `actor()`. Export your definition separately — see [actor-kit/test API reference](/api/test/).
+`testActor()` takes the raw definition object (`{ input, init, roles, messages, views }`), not the DO class returned by `actor()`. Export your definition separately — see [@actor-kit/test API reference](/api/test/).
 
 **Initialize state** from input:
 
@@ -212,4 +212,4 @@ pnpm test               # all of the above
 ## Related
 
 - [Testing Side Effects](/recipes/testing-side-effects/) — how to capture and assert `emit()` and `request()` calls
-- [actor-kit/test API Reference](/api/test/) — full `testActor()` API documentation
+- [@actor-kit/test API Reference](/api/test/) — full `testActor()` API documentation

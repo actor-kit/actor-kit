@@ -1,7 +1,7 @@
 # ADR 006: Single Package with Subpath Exports
 
 **Date**: 2026-03-22
-**Status**: Accepted
+**Status**: Superseded — the package has been split into `@actor-kit/core`, `@actor-kit/worker`, `@actor-kit/client`, `@actor-kit/react`, and `@actor-kit/test`.
 
 ## Context
 
@@ -44,3 +44,19 @@ Single published package: `actor-kit` with subpath exports.
 - React code: `import { createContext } from "actor-kit/react"`
 - Test code: `import { testActor } from "actor-kit/test"`
 - Shared types flow naturally between exports without cross-package versioning
+
+> **Note**: This decision was later superseded by a package split. The framework is now published as five scoped packages:
+>
+> - `@actor-kit/core` — schema, view, types, encode/decode
+> - `@actor-kit/worker` — actor, message, callback, auth helpers, createRef
+> - `@actor-kit/client` — browser client SDK
+> - `@actor-kit/react` — React bindings
+> - `@actor-kit/test` — testActor() helper
+>
+> ```typescript
+> import { schema, view, uint32, string } from "@actor-kit/core";
+> import { actor, message, createAccessToken } from "@actor-kit/worker";
+> import { actorClient } from "@actor-kit/client";
+> import { actorContext } from "@actor-kit/react";
+> import { testActor } from "@actor-kit/test";
+> ```

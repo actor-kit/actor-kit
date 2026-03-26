@@ -1,9 +1,9 @@
 ---
-title: actor-kit
+title: "@actor-kit/core & @actor-kit/worker"
 description: Server-side API reference.
 ---
 
-The root export (`import from "actor-kit"`) provides the server-side API. Use this in your Cloudflare Worker.
+The server-side API is split across two packages: `@actor-kit/core` (schema, view, types) and `@actor-kit/worker` (actor, message, callback, auth helpers). Use these in your Cloudflare Worker.
 
 ## `actor(name, def)`
 
@@ -77,7 +77,7 @@ const guarded = message(z.object({}), { guard: (s) => !s.closed, handler: (s) =>
 Creates a typed callback definition for use with `request()`. Pairs a callback name with Zod schemas for the result and optional per-request meta.
 
 ```typescript
-import { callback } from "actor-kit";
+import { callback } from "@actor-kit/worker";
 
 // Without meta
 const PriceReceived = callback("PRICE_RECEIVED", z.object({ total: z.number() }));

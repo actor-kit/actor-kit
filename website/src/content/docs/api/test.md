@@ -1,16 +1,16 @@
 ---
-title: actor-kit/test
+title: "@actor-kit/test"
 description: Test helper reference.
 ---
 
-The test export (`import from "actor-kit/test"`) provides a test harness that runs actor transitions without a Cloudflare runtime.
+The test export (`import from "@actor-kit/test"`) provides a test harness that runs actor transitions without a Cloudflare runtime.
 
 ## `testActor(def)`
 
 Creates a test harness for an actor definition.
 
 ```typescript
-import { testActor } from "actor-kit/test";
+import { testActor } from "@actor-kit/test";
 import { todoActorDef } from "./todo";
 
 const t = testActor(todoActorDef);

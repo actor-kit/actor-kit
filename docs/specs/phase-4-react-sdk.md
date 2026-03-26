@@ -15,7 +15,7 @@ Phase 3 complete. Client SDK working.
 **File**: `packages/actor-kit/src/react/context.ts`
 
 ```typescript
-import { createContext } from "actor-kit/react";
+import { createContext } from "@actor-kit/react";
 import { TodoList } from "./actors/todo";
 
 const TodoContext = createContext(TodoList);

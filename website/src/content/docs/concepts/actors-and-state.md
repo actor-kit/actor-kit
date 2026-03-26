@@ -15,7 +15,7 @@ In Actor Kit, each actor is a Cloudflare Durable Object. DOs are single-threaded
 ## Defining an Actor
 
 ```typescript
-import { actor } from "actor-kit";
+import { actor } from "@actor-kit/worker";
 import { z } from "zod";
 
 export const MyActor = actor("my-actor", {

@@ -12,7 +12,7 @@ Replace string-based `onDone`/`onError` with typed `callback()` defs. Split `on`
 ### `callback(name, resultSchema)` — no meta
 
 ```typescript
-import { callback } from "actor-kit";
+import { callback } from "@actor-kit/worker";
 
 const PriceReceived = callback("PRICE_RECEIVED", z.object({ total: z.number() }));
 const PriceFailed = callback("PRICE_FAILED", z.object({ message: z.string() }));

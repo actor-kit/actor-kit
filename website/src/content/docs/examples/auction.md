@@ -88,8 +88,8 @@ ws.send(JSON.stringify({ type: "BID", amount: 100 }));
 ### With React
 
 ```tsx
-import { actorClient } from "actor-kit/client";
-import { actorContext } from "actor-kit/react";
+import { actorClient } from "@actor-kit/client";
+import { actorContext } from "@actor-kit/react";
 
 const AuctionClient = actorClient(AuctionViewSchema).events<AuctionEvent>();
 const AuctionCtx = actorContext<typeof AuctionClient>();

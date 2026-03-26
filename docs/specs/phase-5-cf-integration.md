@@ -129,7 +129,7 @@ Requirements:
 ### 5. `routeToActor()` helper
 
 ```typescript
-import { routeToActor } from "actor-kit";
+import { routeToActor } from "@actor-kit/worker";
 
 app.all("/api/:actorType/:actorId/*", async (c) => {
   return routeToActor(c.req.raw, c.env, {

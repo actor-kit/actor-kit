@@ -73,8 +73,8 @@ ws.send(JSON.stringify({ type: "SEND_MESSAGE", text: "Hello!" }));
 ### With React
 
 ```tsx
-import { actorClient } from "actor-kit/client";
-import { actorContext } from "actor-kit/react";
+import { actorClient } from "@actor-kit/client";
+import { actorContext } from "@actor-kit/react";
 
 const ChatClient = actorClient(ChatViewSchema).events<ChatEvent>();
 const ChatCtx = actorContext<typeof ChatClient>();

@@ -10,7 +10,8 @@ Build a shared counter that multiple users can increment in real-time. The full 
 ```typescript
 // src/counter.ts
 import { z } from "zod";
-import { actor, message, view, schema, uint32, string } from "actor-kit";
+import { schema, view, uint32, string } from "@actor-kit/core";
+import { actor, message } from "@actor-kit/worker";
 
 type CounterState = { count: number; lastUpdatedBy: string | null };
 
@@ -66,7 +67,7 @@ Key things happening:
 
 ```typescript
 // src/worker.ts
-import { createAccessToken } from "actor-kit";
+import { createAccessToken } from "@actor-kit/worker";
 import { Counter } from "./counter";
 
 export { Counter };
@@ -134,7 +135,7 @@ ws.send(JSON.stringify({ type: "INCREMENT" }));
 Or use the typed client SDK:
 
 ```typescript
-import { actorClient } from "actor-kit/client";
+import { actorClient } from "@actor-kit/client";
 import { CounterView } from "./counter";
 
 const CounterClient = actorClient(CounterView);

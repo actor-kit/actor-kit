@@ -38,7 +38,8 @@ Actor Kit is a framework for building real-time, event-driven applications on Cl
 ## Quick Example
 
 ```typescript
-import { actor, message, view, schema, uint32, string } from "actor-kit";
+import { schema, view, uint32, string } from "@actor-kit/core";
+import { actor, message } from "@actor-kit/worker";
 import { z } from "zod";
 
 const CounterView = schema({ count: uint32, lastUpdatedBy: string });

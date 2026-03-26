@@ -27,7 +27,7 @@ const notify = message(z.object({}), (state, _payload, { emit }) => {
 Define typed callbacks with `callback()`, then reference them in `request()`:
 
 ```typescript
-import { callback, message } from "actor-kit";
+import { callback, message } from "@actor-kit/worker";
 import { z } from "zod";
 
 const FetchSucceeded = callback("FETCH_SUCCEEDED", z.object({ data: z.string() }));

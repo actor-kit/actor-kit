@@ -27,7 +27,7 @@ Following Kent C. Dodds' testing trophy: more integration tests, fewer unit test
 
 ```typescript
 import { describe, it, expect } from "vitest";
-import { schema, uint32, string, encode, decode } from "actor-kit";
+import { schema, uint32, string, encode, decode } from "@actor-kit/core";
 
 describe("schema encoder", () => {
   it("encodes uint32 as 4 bytes big-endian", () => {
@@ -53,13 +53,13 @@ describe("schema encoder", () => {
 ### Level 2: Actor logic tests (testActor)
 
 **What**: Transitions, role resolution, view computation, emission capture. Full actor behavior without CF runtime.
-**How**: `testActor()` from `actor-kit/test`. Runs init, send, view in-process.
+**How**: `testActor()` from `@actor-kit/test`. Runs init, send, view in-process.
 **Speed**: < 5ms per test.
 **Location**: `tests/unit/` (they're still unit tests — no external deps)
 
 ```typescript
 import { describe, it, expect } from "vitest";
-import { testActor } from "actor-kit/test";
+import { testActor } from "@actor-kit/test";
 import { TodoList } from "../../packages/actor-kit/src/examples/todo";
 
 describe("TodoList actor", () => {

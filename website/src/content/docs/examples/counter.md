@@ -74,7 +74,7 @@ document.getElementById("increment").onclick = () =>
 A real app would use `actorClient()` for typed views, automatic reconnection, and binary delta decoding. The `subscribe` callback always receives the full, merged view — you never see raw deltas:
 
 ```typescript
-import { actorClient } from "actor-kit/client";
+import { actorClient } from "@actor-kit/client";
 import { CounterView } from "./counter";
 
 type CounterEvent = { type: "INCREMENT" } | { type: "DECREMENT" };
@@ -99,8 +99,8 @@ client.send({ type: "INCREMENT" });
 ### With React
 
 ```tsx
-import { actorClient } from "actor-kit/client";
-import { actorContext } from "actor-kit/react";
+import { actorClient } from "@actor-kit/client";
+import { actorContext } from "@actor-kit/react";
 import { CounterView } from "./counter";
 
 type CounterEvent = { type: "INCREMENT" } | { type: "DECREMENT" };

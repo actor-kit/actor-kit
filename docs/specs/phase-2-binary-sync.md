@@ -41,7 +41,7 @@ Requirements:
 - `decode()` reads a SNAPSHOT payload → typed object
 - `applyDelta()` reads a DELTA payload, applies changed fields to current state → new object
 - Immutable: `applyDelta` returns a new object, doesn't mutate `current`
-- Decoder must be browser-safe (ships in `actor-kit/client`)
+- Decoder must be browser-safe (ships in `@actor-kit/client`)
 - Handles malformed input gracefully (throws typed error, doesn't crash)
 
 ### 3. Frame framing

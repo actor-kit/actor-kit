@@ -1,17 +1,17 @@
 ---
-title: actor-kit/react
+title: "@actor-kit/react"
 description: React SDK reference.
 ---
 
-The React export (`import from "actor-kit/react"`) provides typed context and hooks for React applications.
+The React export (`import from "@actor-kit/react"`) provides typed context and hooks for React applications.
 
 ## `actorContext<typeof Factory>()`
 
 Creates a typed React context from an `actorClient()` factory. Types are inferred from the factory — no manual generics for view or events.
 
 ```typescript
-import { actorClient } from "actor-kit/client";
-import { actorContext } from "actor-kit/react";
+import { actorClient } from "@actor-kit/client";
+import { actorContext } from "@actor-kit/react";
 
 const CounterClient = actorClient(CounterView).events<CounterEvent>();
 const CounterCtx = actorContext<typeof CounterClient>();
@@ -139,7 +139,7 @@ function Status() {
 If you prefer explicit generics over the factory pattern:
 
 ```typescript
-import { createActorContext } from "actor-kit/react";
+import { createActorContext } from "@actor-kit/react";
 
 type MyView = { count: number };
 type MyEvent = { type: "INCREMENT" } | { type: "DECREMENT" };

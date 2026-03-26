@@ -15,7 +15,7 @@ Phase 2 complete. Binary encoding/decoding working.
 **File**: `packages/actor-kit/src/client/connect.ts`
 
 ```typescript
-import { connect } from "actor-kit/client";
+import { connect } from "@actor-kit/client";
 
 const todo = await connect(TodoList, {
   host: "example.com",

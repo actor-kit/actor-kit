@@ -1,16 +1,16 @@
 ---
-title: actor-kit/client
+title: "@actor-kit/client"
 description: Browser client SDK reference.
 ---
 
-The client export (`import from "actor-kit/client"`) provides the browser-side SDK. No Cloudflare or React dependencies.
+The client export (`import from "@actor-kit/client"`) provides the browser-side SDK. No Cloudflare or React dependencies.
 
 ## `actorClient(viewSchema)`
 
 Creates a typed client factory. The view type is **inferred from the schema** — no generics needed.
 
 ```typescript
-import { actorClient } from "actor-kit/client";
+import { actorClient } from "@actor-kit/client";
 import { CounterView } from "./counter";
 
 // Define the client contract (co-locate with your actor definition)
@@ -111,7 +111,7 @@ On unexpected disconnect, the client auto-reconnects with exponential backoff (1
 For cases where you don't need the builder pattern, `createActorClient()` is the underlying function:
 
 ```typescript
-import { createActorClient } from "actor-kit/client";
+import { createActorClient } from "@actor-kit/client";
 
 const client = createActorClient({
   url: "wss://example.com/counter/test",

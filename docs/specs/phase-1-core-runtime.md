@@ -13,7 +13,7 @@ Implement the foundational runtime: `actor()`, `schema()`, `view()`, `message()`
 Define view shapes with runtime type information and TypeScript inference.
 
 ```typescript
-import { schema, uint32, float32, string, boolean, array } from "actor-kit";
+import { schema, uint32, float32, string, boolean, array } from "@actor-kit/core";
 
 const TodoItem = schema({
   id: string,
@@ -60,7 +60,7 @@ Requirements:
 Pairs a Zod schema with a handler function. Every message handler must have a runtime schema for payload validation at the boundary.
 
 ```typescript
-import { message } from "actor-kit";
+import { message } from "@actor-kit/worker";
 import { z } from "zod";
 
 const addTodo = message(

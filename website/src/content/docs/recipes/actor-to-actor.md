@@ -37,7 +37,7 @@ The source actor removes the player from its state immediately. The target actor
 Use `request()` when you need to know whether a side effect succeeded or failed. Define typed callbacks with `callback()`, then reference them in `request()`. The framework delivers the result to your actor's `callbacks` block.
 
 ```typescript
-import { callback, message } from "actor-kit";
+import { callback, message } from "@actor-kit/worker";
 import { z } from "zod";
 
 const PriceReceived = callback("PRICE_RECEIVED", z.object({ price: z.number() }));
@@ -81,7 +81,7 @@ For actor-to-actor effects, `request()` with `onDone` confirms that the message 
 Use `createRef()` inside your Worker's `fetch` handler (not inside an actor) when you need to interact with actors from request-handling code — spawning, sending messages, or reading snapshots.
 
 ```typescript
-import { createRef } from "actor-kit";
+import { createRef } from "@actor-kit/worker";
 
 export default {
   async fetch(request: Request, env: Env) {

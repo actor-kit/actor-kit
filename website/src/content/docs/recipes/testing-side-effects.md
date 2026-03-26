@@ -10,7 +10,7 @@ Side effects (`emit()` and `request()`) are recorded during transitions but not 
 Use `sendWithEffects()` instead of `send()`:
 
 ```typescript
-import { testActor } from "actor-kit/test";
+import { testActor } from "@actor-kit/test";
 import { orderActorDef } from "./order";
 
 const t = testActor(orderActorDef);

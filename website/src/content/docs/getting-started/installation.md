@@ -6,7 +6,19 @@ description: Install Actor Kit and set up your project.
 ## Install
 
 ```bash
-pnpm add actor-kit zod
+pnpm add @actor-kit/core @actor-kit/worker zod
+```
+
+For client-side usage, also install:
+
+```bash
+pnpm add @actor-kit/client
+```
+
+For React bindings (requires `@actor-kit/client` as well):
+
+```bash
+pnpm add @actor-kit/client @actor-kit/react
 ```
 
 Actor Kit uses [Zod](https://zod.dev) for message payload validation at runtime boundaries.
@@ -25,7 +37,7 @@ Actor Kit uses [Zod](https://zod.dev) for message payload validation at runtime 
 ```bash
 pnpm create cloudflare@latest my-actor-app
 cd my-actor-app
-pnpm add actor-kit zod
+pnpm add @actor-kit/core @actor-kit/worker zod
 ```
 
 ### 2. Configure wrangler.toml
@@ -84,7 +96,7 @@ pnpm add -D @cloudflare/workers-types
 For unit tests with `testActor()`:
 
 ```bash
-pnpm add -D vitest
+pnpm add -D vitest @actor-kit/test
 ```
 
 For integration tests with real Durable Objects:
