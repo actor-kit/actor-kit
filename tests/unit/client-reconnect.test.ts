@@ -1,5 +1,5 @@
+import { createActorClient } from "@actor-kit/client";
 import { describe, expect, it } from "vitest";
-import { createActorClient } from "../../packages/actor-kit/src/client/client";
 
 // Controllable fake WebSocket
 class FakeWebSocket {

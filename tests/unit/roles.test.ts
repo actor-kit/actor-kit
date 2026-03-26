@@ -1,5 +1,5 @@
+import { type RolePredicate, resolveRole } from "@actor-kit/worker/testing";
 import { describe, expect, it } from "vitest";
-import { type RolePredicate, resolveRole } from "../../packages/actor-kit/src/runtime/roles";
 
 type State = {
   ownerId: string;

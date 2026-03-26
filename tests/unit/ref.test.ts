@@ -1,5 +1,5 @@
+import { createRef } from "@actor-kit/worker/testing";
 import { describe, expect, it } from "vitest";
-import { createRef } from "../../packages/actor-kit/src/core/ref";
 
 describe("createRef()", () => {
   it("creates a ref with actor type and id", () => {

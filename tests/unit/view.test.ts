@@ -1,6 +1,5 @@
+import { array, boolean, schema, string, uint32, view } from "@actor-kit/core";
 import { describe, expect, it } from "vitest";
-import { view } from "../../packages/actor-kit/src/core/view";
-import { array, boolean, schema, string, uint32 } from "../../packages/actor-kit/src/schema/schema";
 
 describe("view() helper", () => {
   const TodoItem = schema({ id: string, text: string, done: boolean });

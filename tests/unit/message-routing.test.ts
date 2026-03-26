@@ -1,7 +1,6 @@
+import { message, routeMessage } from "@actor-kit/worker/testing";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
-import { message } from "../../packages/actor-kit/src/core/message";
-import { routeMessage } from "../../packages/actor-kit/src/runtime/message-router";
 
 type State = { count: number; items: string[] };
 

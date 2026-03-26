@@ -1,7 +1,7 @@
+import { actorClient } from "@actor-kit/client";
+import { schema, string, uint32 } from "@actor-kit/core";
+import { actorContext } from "@actor-kit/react";
 import { describe, expect, expectTypeOf, it } from "vitest";
-import { actorClient } from "../../packages/actor-kit/src/client/builder";
-import { actorContext } from "../../packages/actor-kit/src/react/actor-context";
-import { schema, string, uint32 } from "../../packages/actor-kit/src/schema/schema";
 
 const CounterView = schema({ count: uint32, lastUpdatedBy: string });
 

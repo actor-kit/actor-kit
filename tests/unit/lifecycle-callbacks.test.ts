@@ -1,8 +1,7 @@
+import { testActor } from "@actor-kit/test";
+import { callback, message } from "@actor-kit/worker/testing";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
-import { callback } from "../../packages/actor-kit/src/core/callback";
-import { message } from "../../packages/actor-kit/src/core/message";
-import { testActor } from "../../packages/actor-kit/src/test/test-actor";
 
 // --- Callback definitions ---
 

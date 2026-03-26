@@ -1,4 +1,3 @@
-import { describe, expect, it } from "vitest";
 import {
   ControlType,
   createControlFrame,
@@ -6,7 +5,8 @@ import {
   createSnapshotFrame,
   FrameType,
   parseFrame,
-} from "../../packages/actor-kit/src/schema/frame";
+} from "@actor-kit/core";
+import { describe, expect, it } from "vitest";
 
 describe("frame — kill survivors", () => {
   it("snapshot frame version is preserved", () => {

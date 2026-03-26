@@ -4,8 +4,8 @@
 import { cleanup, render, screen, act } from "@testing-library/react";
 import React from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { createActorContext } from "../../packages/actor-kit/src/react/context";
-import type { ActorClient } from "../../packages/actor-kit/src/client/client";
+import type { ActorClient } from "@actor-kit/client";
+import { createActorContext } from "@actor-kit/react";
 
 // --- Fake client that matches ActorClient interface ---
 function createFakeClient() {

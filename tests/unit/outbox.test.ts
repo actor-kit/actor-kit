@@ -1,5 +1,5 @@
+import { createOutbox, type OutboxEntry, type OutboxStorage } from "@actor-kit/worker/testing";
 import { describe, expect, it } from "vitest";
-import { createOutbox, type OutboxEntry, type OutboxStorage } from "../../packages/actor-kit/src/runtime/outbox";
 
 // Fake in-memory storage for testing
 function createFakeStorage(): OutboxStorage & { entries: OutboxEntry[]; failures: OutboxEntry[] } {

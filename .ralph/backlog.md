@@ -45,9 +45,9 @@ deps: @actor-kit/core,  deps: @actor-kit/client,
 
 - [x] **5. Create @actor-kit/test** — Create `packages/test/` with package.json (`@actor-kit/test`, deps: `@actor-kit/core`, `@actor-kit/worker`). Move: test-actor.ts. Update imports. Create `src/index.ts`. Verify: `pnpm typecheck` passes.
 
-- [ ] **6. Update workspace and remove old package** — Update pnpm-workspace.yaml to include all new packages. Remove `packages/actor-kit/`. Update root package.json scripts. Update biome.json lint paths. Run `pnpm install`.
+- [x] **6. Update workspace and remove old package** — Update pnpm-workspace.yaml to include all new packages. Remove `packages/actor-kit/`. Update root package.json scripts. Update biome.json lint paths. Run `pnpm install`.
 
-- [ ] **7. Update unit test imports** — Update all files in `tests/unit/` to import from `@actor-kit/core`, `@actor-kit/worker`, `@actor-kit/client`, `@actor-kit/react`, `@actor-kit/test` instead of relative paths. Run `pnpm test:unit` — all 277 tests must pass.
+- [x] **7. Update unit test imports** — Update all files in `tests/unit/` to import from `@actor-kit/core`, `@actor-kit/worker`, `@actor-kit/client`, `@actor-kit/react`, `@actor-kit/test` instead of relative paths. Run `pnpm test:unit` — all 277 tests must pass.
 
 - [ ] **8. Update integration test imports** — Update `tests/integration/src/worker.ts` and all integration test files to import from `@actor-kit/worker` and `@actor-kit/core`. Run `pnpm test:integration`.
 

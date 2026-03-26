@@ -1,5 +1,5 @@
+import { createRef } from "@actor-kit/worker/testing";
 import { describe, expect, it } from "vitest";
-import { createRef } from "../../packages/actor-kit/src/core/ref";
 
 describe("createRef — kill survivors", () => {
   it("throws when namespace not found in env", () => {

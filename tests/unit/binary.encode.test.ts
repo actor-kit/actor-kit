@@ -1,8 +1,8 @@
-import { describe, expect, it } from "vitest";
-import { decode, encode } from "../../packages/actor-kit/src/schema/binary";
 import {
   array,
   boolean,
+  decode,
+  encode,
   float32,
   float64,
   schema,
@@ -10,7 +10,8 @@ import {
   uint8,
   uint16,
   uint32,
-} from "../../packages/actor-kit/src/schema/schema";
+} from "@actor-kit/core";
+import { describe, expect, it } from "vitest";
 
 describe("binary encoder/decoder", () => {
   describe("primitives", () => {

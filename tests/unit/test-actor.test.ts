@@ -1,9 +1,8 @@
+import { array, boolean, schema, string, uint32, view } from "@actor-kit/core";
+import { testActor } from "@actor-kit/test";
+import { message } from "@actor-kit/worker/testing";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
-import { message } from "../../packages/actor-kit/src/core/message";
-import { view } from "../../packages/actor-kit/src/core/view";
-import { array, boolean, schema, string, uint32 } from "../../packages/actor-kit/src/schema/schema";
-import { testActor } from "../../packages/actor-kit/src/test/test-actor";
 
 // --- Define a Todo actor for testing ---
 

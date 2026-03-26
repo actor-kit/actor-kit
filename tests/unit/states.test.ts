@@ -1,11 +1,11 @@
-import { describe, expect, it } from "vitest";
-import { z } from "zod";
-import { message } from "../../packages/actor-kit/src/core/message";
 import {
+  message,
   type ParallelStates,
   resolveMessagesForState,
   type SequentialStates,
-} from "../../packages/actor-kit/src/runtime/states";
+} from "@actor-kit/worker/testing";
+import { describe, expect, it } from "vitest";
+import { z } from "zod";
 
 type State = { status: string; count: number; items: string[] };
 

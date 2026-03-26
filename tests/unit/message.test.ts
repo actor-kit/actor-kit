@@ -1,6 +1,6 @@
+import { message } from "@actor-kit/worker/testing";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
-import { message } from "../../packages/actor-kit/src/core/message";
 
 type State = { count: number; items: string[] };
 type Env = { ACTOR_KIT_SECRET: string };

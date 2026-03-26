@@ -1,5 +1,5 @@
+import { createActorContext } from "@actor-kit/react";
 import { describe, expectTypeOf, it } from "vitest";
-import { createActorContext } from "../../packages/actor-kit/src/react/context";
 
 type CounterView = { count: number; lastUpdatedBy: string };
 type CounterEvent = { type: "INCREMENT" } | { type: "DECREMENT" } | { type: "RESET" };

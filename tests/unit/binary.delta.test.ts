@@ -1,7 +1,5 @@
+import { applyDelta, boolean, encode, encodeDelta, float32, schema, string, uint32 } from "@actor-kit/core";
 import { describe, expect, it } from "vitest";
-import { encode } from "../../packages/actor-kit/src/schema/binary";
-import { applyDelta, encodeDelta } from "../../packages/actor-kit/src/schema/delta";
-import { boolean, float32, schema, string, uint32 } from "../../packages/actor-kit/src/schema/schema";
 
 describe("binary delta encoding", () => {
   const PlayerView = schema({

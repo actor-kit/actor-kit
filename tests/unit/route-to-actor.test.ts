@@ -1,5 +1,5 @@
+import { parseActorRoute } from "@actor-kit/worker/testing";
 import { describe, expect, it } from "vitest";
-import { parseActorRoute } from "../../packages/actor-kit/src/runtime/route-to-actor";
 
 describe("parseActorRoute()", () => {
   it("parses /api/:actorType/:actorId", () => {

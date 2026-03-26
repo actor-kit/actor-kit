@@ -1,5 +1,5 @@
+import { parseDuration } from "@actor-kit/worker/testing";
 import { describe, expect, it } from "vitest";
-import { parseDuration } from "../../packages/actor-kit/src/runtime/timers";
 
 describe("parseDuration()", () => {
   it("parses seconds", () => {

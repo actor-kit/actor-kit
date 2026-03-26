@@ -1,6 +1,6 @@
+import { callback } from "@actor-kit/worker/testing";
 import { describe, expect, expectTypeOf, it } from "vitest";
 import { z } from "zod";
-import { callback } from "../../packages/actor-kit/src/core/callback";
 
 describe("callback()", () => {
   it("creates a callback def with name and result schema", () => {

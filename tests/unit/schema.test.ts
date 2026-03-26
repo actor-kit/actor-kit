@@ -1,16 +1,5 @@
+import { array, boolean, float32, float64, type Infer, schema, string, uint8, uint16, uint32 } from "@actor-kit/core";
 import { describe, expect, it } from "vitest";
-import type { Infer } from "../../packages/actor-kit/src/schema/schema";
-import {
-  array,
-  boolean,
-  float32,
-  float64,
-  schema,
-  string,
-  uint8,
-  uint16,
-  uint32,
-} from "../../packages/actor-kit/src/schema/schema";
 
 describe("schema() builder", () => {
   describe("primitive types", () => {

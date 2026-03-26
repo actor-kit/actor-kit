@@ -1,5 +1,5 @@
+import { createChangeEntry } from "@actor-kit/worker/testing";
 import { describe, expect, it } from "vitest";
-import { createChangeEntry } from "../../packages/actor-kit/src/runtime/cdc";
 
 describe("CDC (Change Data Capture)", () => {
   it("creates a change entry with event metadata", () => {
