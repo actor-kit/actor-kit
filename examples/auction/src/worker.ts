@@ -1,4 +1,4 @@
-import { createAccessToken } from "actor-kit";
+import { createAccessToken } from "@actor-kit/worker";
 import { Auction } from "./auction";
 
 export { Auction };

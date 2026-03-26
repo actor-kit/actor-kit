@@ -1,4 +1,4 @@
-import { createAccessToken } from "actor-kit";
+import { createAccessToken } from "@actor-kit/worker";
 import { ChatRoom } from "./chat";
 
 export { ChatRoom };

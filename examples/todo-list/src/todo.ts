@@ -1,5 +1,6 @@
 import { z } from "zod";
-import { actor, message, view, schema, uint32, string, boolean, array } from "actor-kit";
+import { array, boolean, schema, string, uint32, view } from "@actor-kit/core";
+import { actor, message } from "@actor-kit/worker";
 
 // --- Types ---
 type Todo = { id: string; text: string; done: boolean };

@@ -1,5 +1,6 @@
 import { z } from "zod";
-import { actor, message, view, schema, uint32, string } from "actor-kit";
+import { schema, string, uint32, view } from "@actor-kit/core";
+import { actor, message } from "@actor-kit/worker";
 
 type CounterState = { count: number; lastUpdatedBy: string | null };
 

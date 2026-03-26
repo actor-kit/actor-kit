@@ -1,5 +1,6 @@
 import { z } from "zod";
-import { actor, message, view, schema, uint32, string, array } from "actor-kit";
+import { array, schema, string, uint32, view } from "@actor-kit/core";
+import { actor, message } from "@actor-kit/worker";
 
 type ChatMessage = { id: string; author: string; text: string; timestamp: number };
 type ChatState = {

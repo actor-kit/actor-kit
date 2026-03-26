@@ -1,4 +1,4 @@
-import { createAccessToken } from "actor-kit";
+import { createAccessToken } from "@actor-kit/worker";
 import { TodoList } from "./todo";
 
 export { TodoList };
