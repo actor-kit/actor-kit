@@ -57,9 +57,10 @@ describe("outbox", () => {
       expect(outbox.getEmissions()).toHaveLength(0);
       expect(outbox.getRequests()).toHaveLength(1);
       expect(outbox.getRequests()[0]).toEqual({
-        fetch: "https://api.example.com",
+        effect: { fetch: "https://api.example.com" },
         onDone: "FETCH_DONE",
         onError: "FETCH_ERROR",
+        meta: undefined,
       });
     });
 

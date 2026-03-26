@@ -47,9 +47,10 @@ describe("request() callback capture", () => {
     expect(emissions).toHaveLength(0);
     expect(requests).toHaveLength(1);
     expect(requests[0]).toEqual({
-      fetch: "https://example.com",
+      effect: { fetch: "https://example.com" },
       onDone: "FETCH_DONE",
       onError: "FETCH_FAILED",
+      meta: undefined,
     });
   });
 

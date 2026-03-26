@@ -34,7 +34,6 @@ const notify = message(z.object({}), (state: CounterState, _payload, ctx) => {
 });
 
 export const Counter = actor("counter", {
-  binarySync: true,
   input: z.object({}),
   init: () => ({ count: 0, lastCaller: null }),
   roles: {

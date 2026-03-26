@@ -237,9 +237,10 @@ describe("testActor()", () => {
 
       expect(requests).toHaveLength(1);
       expect(requests[0]).toEqual({
-        fetch: "https://api.example.com",
+        effect: { fetch: "https://api.example.com" },
         onDone: "FETCH_DONE",
         onError: "FETCH_ERROR",
+        meta: undefined,
       });
     });
   });

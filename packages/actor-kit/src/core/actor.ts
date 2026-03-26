@@ -45,7 +45,6 @@ interface ActorDef {
   init(input: unknown): unknown; // bivariant
   version?: number;
   initial?: string;
-  binarySync?: boolean; // opt-in: send binary frames instead of JSON
   roles: Record<
     string,
     {
@@ -611,9 +610,9 @@ export function actor(
           this.previousViewData.set(ws, viewData as Record<string, unknown>);
           this.connectionChecksums.set(ws, this.computeChecksum(JSON.stringify(viewData)));
 
-          // Use binary encoding only if binarySync is enabled and schema is available
+          // Use binary encoding when the view has a schema
           const viewSchema = viewDef.schema;
-          if (def.binarySync && viewSchema?.fields) {
+          if (viewSchema?.fields) {
             const schemaDef = viewSchema as SchemaDefinition<Record<string, FieldDescriptor>>;
 
             // Try delta encoding if we have previous view data
@@ -706,7 +705,7 @@ export function actor(
         this.connectionChecksums.set(server, checksum);
 
         const viewSchema = viewDef.schema;
-        if (def.binarySync && viewSchema?.fields) {
+        if (viewSchema?.fields) {
           const schemaDef = viewSchema as SchemaDefinition<Record<string, FieldDescriptor>>;
           const payload = encode(schemaDef, viewData as Record<string, unknown>);
           const roleNames = Object.keys(def.roles);
@@ -816,7 +815,7 @@ export function actor(
         this.connectionChecksums.set(ws, currentChecksum);
 
         const viewSchema = viewDef.schema;
-        if (def.binarySync && viewSchema?.fields) {
+        if (viewSchema?.fields) {
           const schemaDef = viewSchema as SchemaDefinition<Record<string, FieldDescriptor>>;
           const payload = encode(schemaDef, viewData as Record<string, unknown>);
           const roleNames = Object.keys(def.roles);

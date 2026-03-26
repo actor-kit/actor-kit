@@ -16,7 +16,17 @@ export {
 export type { FieldDescriptor, Infer, SchemaDefinition } from "../schema/schema";
 export { array, boolean, float32, float64, schema, string, uint8, uint16, uint32 } from "../schema/schema";
 export { actor } from "./actor";
-export type { Effect, EmitFn, MessageContext, MessageDef, RequestConfig, RequestFn } from "./message";
+export type { CallbackDef } from "./callback";
+export { callback } from "./callback";
+export type {
+  Effect,
+  EmitFn,
+  MessageContext,
+  MessageDef,
+  NormalizedRequestConfig,
+  RequestConfig,
+  RequestFn,
+} from "./message";
 export { message } from "./message";
 export type { ActorRef } from "./ref";
 export { createRef } from "./ref";

@@ -8,18 +8,20 @@
  * Outbox is drained asynchronously. Failed entries retry with backoff.
  */
 
-import type { Effect, RequestConfig } from "../core/message";
+import type { Effect, NormalizedRequestConfig, RequestConfig } from "../core/message";
+import { normalizeRequest } from "../core/message";
 
 // --- Outbox entry ---
 
 export interface OutboxEntry {
   id: string;
   type: "emit" | "request";
-  payload: Effect | RequestConfig;
+  payload: Effect;
   status: "pending" | "sent";
   attempts: number;
   onDone?: string;
   onError?: string;
+  meta?: unknown;
   createdAt: number;
 }
 
@@ -39,7 +41,7 @@ interface OutboxCollector {
   emit(effect: Effect): void;
   request(config: RequestConfig): void;
   getEmissions(): Effect[];
-  getRequests(): RequestConfig[];
+  getRequests(): NormalizedRequestConfig[];
   toEntries(): OutboxEntry[];
 }
 
@@ -67,8 +69,8 @@ export function createOutbox(): OutboxCollector {
       return [...emissions];
     },
 
-    getRequests(): RequestConfig[] {
-      return [...requests];
+    getRequests(): NormalizedRequestConfig[] {
+      return requests.map(normalizeRequest);
     },
 
     toEntries(): OutboxEntry[] {
@@ -87,14 +89,16 @@ export function createOutbox(): OutboxCollector {
       }
 
       for (const config of requests) {
+        const normalized = normalizeRequest(config);
         entries.push({
           id: generateId(),
           type: "request",
-          payload: config,
+          payload: normalized.effect,
           status: "pending",
           attempts: 0,
-          onDone: config.onDone,
-          onError: config.onError,
+          onDone: normalized.onDone,
+          onError: normalized.onError,
+          meta: normalized.meta,
           createdAt: now,
         });
       }
