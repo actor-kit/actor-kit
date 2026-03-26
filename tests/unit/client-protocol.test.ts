@@ -38,12 +38,10 @@ class FakeWebSocket {
 }
 
 describe("client protocol handling", () => {
-  it("uses ws:// for http hosts (not wss://)", async () => {
+  it("connects to ws:// URL for local development", async () => {
     let capturedUrl = "";
     const client = createActorClient({
-      actorType: "counter",
-      actorId: "test",
-      host: "http://localhost:8787",
+      url: "ws://localhost:8787/api/counter/test",
       accessToken: "token",
       WebSocketImpl: class extends FakeWebSocket {
         constructor(url: string, protocols?: string | string[]) {
@@ -58,12 +56,10 @@ describe("client protocol handling", () => {
     client.disconnect();
   });
 
-  it("uses wss:// for https hosts", async () => {
+  it("connects to wss:// URL for production", async () => {
     let capturedUrl = "";
     const client = createActorClient({
-      actorType: "counter",
-      actorId: "test",
-      host: "https://example.com",
+      url: "wss://example.com/api/counter/test",
       accessToken: "token",
       WebSocketImpl: class extends FakeWebSocket {
         constructor(url: string, protocols?: string | string[]) {
@@ -78,12 +74,10 @@ describe("client protocol handling", () => {
     client.disconnect();
   });
 
-  it("uses wss:// for plain hostname (no protocol)", async () => {
+  it("connects to custom path URL", async () => {
     let capturedUrl = "";
     const client = createActorClient({
-      actorType: "counter",
-      actorId: "test",
-      host: "example.com",
+      url: "wss://example.com/game/zones/forest-north",
       accessToken: "token",
       WebSocketImpl: class extends FakeWebSocket {
         constructor(url: string, protocols?: string | string[]) {
@@ -94,7 +88,7 @@ describe("client protocol handling", () => {
     });
 
     await new Promise((r) => setTimeout(r, 10));
-    expect(capturedUrl).toBe("wss://example.com/api/counter/test");
+    expect(capturedUrl).toBe("wss://example.com/game/zones/forest-north");
     client.disconnect();
   });
 
@@ -103,9 +97,7 @@ describe("client protocol handling", () => {
     const errors: unknown[] = [];
 
     const client = createActorClient({
-      actorType: "counter",
-      actorId: "test",
-      host: "example.com",
+      url: "wss://example.com/api/counter/test",
       accessToken: "token",
       onError: (error) => {
         errors.push(error);
@@ -120,12 +112,10 @@ describe("client protocol handling", () => {
 
     await new Promise((r) => setTimeout(r, 10));
 
-    // Server sends initial snapshot
     fakeWs?.fireEvent("message", {
       data: JSON.stringify({ type: "snapshot", role: "user", data: { count: 0 } }),
     });
 
-    // Server sends error frame
     fakeWs?.fireEvent("message", {
       data: JSON.stringify({ type: "__error", message: "INCREMENT", error: "guard_failed" }),
     });

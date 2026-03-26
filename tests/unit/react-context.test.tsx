@@ -2,29 +2,40 @@
  * @vitest-environment jsdom
  */
 import { cleanup, render, screen, act } from "@testing-library/react";
-import React, { type ReactNode } from "react";
+import React from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createActorContext } from "../../packages/actor-kit/src/react/context";
+import type { ActorClient } from "../../packages/actor-kit/src/client/client";
 
-// --- Fake client to inject ---
+// --- Fake client that matches ActorClient interface ---
 function createFakeClient() {
   let view: unknown = undefined;
   let role: string | undefined = undefined;
   let connectionState: "connecting" | "connected" | "disconnected" = "connecting";
   const viewListeners = new Set<(v: unknown) => void>();
-  const stateListeners = new Set<(s: string) => void>();
+  const stateListeners = new Set<(s: "connecting" | "connected" | "disconnected" | "reconnecting") => void>();
 
   return {
-    get connectionState() { return connectionState; },
-    get view() { return view; },
-    get role() { return role; },
+    get connectionState() {
+      return connectionState;
+    },
+    get view() {
+      return view;
+    },
+    get role() {
+      return role;
+    },
     subscribe(fn: (v: unknown) => void) {
       viewListeners.add(fn);
-      return () => { viewListeners.delete(fn); };
+      return () => {
+        viewListeners.delete(fn);
+      };
     },
-    onStateChange(fn: (s: string) => void) {
+    onStateChange(fn: (s: "connecting" | "connected" | "disconnected" | "reconnecting") => void) {
       stateListeners.add(fn);
-      return () => { stateListeners.delete(fn); };
+      return () => {
+        stateListeners.delete(fn);
+      };
     },
     send: vi.fn(),
     trigger: vi.fn(),
@@ -43,16 +54,6 @@ function createFakeClient() {
   };
 }
 
-// We need to mock createActorClient to return our fake
-vi.mock("../../packages/actor-kit/src/client/client", () => {
-  return {
-    createActorClient: vi.fn(),
-  };
-});
-
-import { createActorClient } from "../../packages/actor-kit/src/client/client";
-const mockCreateClient = vi.mocked(createActorClient);
-
 afterEach(() => {
   cleanup();
   vi.clearAllMocks();
@@ -60,7 +61,7 @@ afterEach(() => {
 
 describe("createActorContext — React SDK", () => {
   it("creates a context with Provider and hooks", () => {
-    const ctx = createActorContext("counter");
+    const ctx = createActorContext();
     expect(ctx.Provider).toBeDefined();
     expect(ctx.useView).toBeDefined();
     expect(ctx.useSend).toBeDefined();
@@ -69,11 +70,9 @@ describe("createActorContext — React SDK", () => {
     expect(ctx.useSelector).toBeDefined();
   });
 
-  it("Provider renders children after client connects", async () => {
+  it("Provider renders children and useView returns view data", async () => {
     const fake = createFakeClient();
-    mockCreateClient.mockReturnValue(fake as ReturnType<typeof createActorClient>);
-
-    const ctx = createActorContext("counter");
+    const ctx = createActorContext();
 
     function Child() {
       const view = ctx.useView();
@@ -82,18 +81,13 @@ describe("createActorContext — React SDK", () => {
 
     render(
       React.createElement(ctx.Provider, {
-        actorId: "test",
-        host: "example.com",
-        accessToken: "token",
+        client: fake as unknown as ActorClient,
         children: React.createElement(Child),
       }),
     );
 
-    // Provider initially returns null while client is created via useEffect
-    // After effect runs, child renders with undefined view
-    await act(async () => {});
-    // View should be undefined initially (stringified as empty or "undefined")
-    const initial = screen.queryByTestId("view")?.textContent ?? "";
+    // View should be undefined initially
+    const initial = screen.getByTestId("view").textContent ?? "";
     expect(initial === "" || initial === "undefined" || initial === "null").toBe(true);
 
     // Simulate server sending snapshot
@@ -104,11 +98,9 @@ describe("createActorContext — React SDK", () => {
     expect(screen.getByTestId("view").textContent).toContain("42");
   });
 
-  it("useSend returns a function that delegates to client.send", async () => {
+  it("useSend returns a function that delegates to client.send", () => {
     const fake = createFakeClient();
-    mockCreateClient.mockReturnValue(fake as ReturnType<typeof createActorClient>);
-
-    const ctx = createActorContext("counter");
+    const ctx = createActorContext();
     let sendFn: ReturnType<typeof ctx.useSend> | undefined;
 
     function Child() {
@@ -118,27 +110,19 @@ describe("createActorContext — React SDK", () => {
 
     render(
       React.createElement(ctx.Provider, {
-        actorId: "test",
-        host: "example.com",
-        accessToken: "token",
+        client: fake as unknown as ActorClient,
         children: React.createElement(Child),
       }),
     );
-
-    act(() => {
-      fake._setView({}, "user");
-    });
 
     expect(sendFn).toBeDefined();
     sendFn!({ type: "INCREMENT", amount: 5 });
     expect(fake.send).toHaveBeenCalledWith({ type: "INCREMENT", amount: 5 });
   });
 
-  it("useRole returns current role", async () => {
+  it("useRole returns current role", () => {
     const fake = createFakeClient();
-    mockCreateClient.mockReturnValue(fake as ReturnType<typeof createActorClient>);
-
-    const ctx = createActorContext("counter");
+    const ctx = createActorContext();
     let currentRole: string | undefined;
 
     function Child() {
@@ -148,9 +132,7 @@ describe("createActorContext — React SDK", () => {
 
     render(
       React.createElement(ctx.Provider, {
-        actorId: "test",
-        host: "example.com",
-        accessToken: "token",
+        client: fake as unknown as ActorClient,
         children: React.createElement(Child),
       }),
     );
@@ -162,11 +144,9 @@ describe("createActorContext — React SDK", () => {
     expect(currentRole).toBe("admin");
   });
 
-  it("useSelector preserves selected value when unrelated state changes", async () => {
+  it("useSelector preserves selected value when unrelated state changes", () => {
     const fake = createFakeClient();
-    mockCreateClient.mockReturnValue(fake as ReturnType<typeof createActorClient>);
-
-    const ctx = createActorContext("counter");
+    const ctx = createActorContext();
 
     function Child() {
       const count = ctx.useSelector((v) => (v as { count?: number })?.count ?? 0);
@@ -175,9 +155,7 @@ describe("createActorContext — React SDK", () => {
 
     render(
       React.createElement(ctx.Provider, {
-        actorId: "test",
-        host: "example.com",
-        accessToken: "token",
+        client: fake as unknown as ActorClient,
         children: React.createElement(Child),
       }),
     );
@@ -201,24 +179,5 @@ describe("createActorContext — React SDK", () => {
     });
 
     expect(screen.getByTestId("count").textContent).toBe("10");
-  });
-
-  it("disconnects on unmount", async () => {
-    const fake = createFakeClient();
-    mockCreateClient.mockReturnValue(fake as ReturnType<typeof createActorClient>);
-
-    const ctx = createActorContext("counter");
-
-    const { unmount } = render(
-      React.createElement(ctx.Provider, {
-        actorId: "test",
-        host: "example.com",
-        accessToken: "token",
-        children: React.createElement("div"),
-      }),
-    );
-
-    unmount();
-    expect(fake.disconnect).toHaveBeenCalled();
   });
 });

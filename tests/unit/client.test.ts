@@ -52,9 +52,7 @@ class FakeWebSocket {
 describe("createActorClient()", () => {
   it("creates a client with initial disconnected state", () => {
     const client = createActorClient({
-      actorType: "counter",
-      actorId: "test-1",
-      host: "example.com",
+      url: "wss://example.com/api/counter/test-1",
       accessToken: "test-token",
       WebSocketImpl: FakeWebSocket as unknown as typeof WebSocket,
     });
@@ -65,9 +63,7 @@ describe("createActorClient()", () => {
   it("receives initial snapshot and updates view", async () => {
     let fakeWs: FakeWebSocket | undefined;
     const client = createActorClient({
-      actorType: "counter",
-      actorId: "test-1",
-      host: "example.com",
+      url: "wss://example.com/api/counter/test-1",
       accessToken: "test-token",
       WebSocketImpl: class extends FakeWebSocket {
         constructor(url: string, protocols?: string | string[]) {
@@ -98,9 +94,7 @@ describe("createActorClient()", () => {
   it("subscribe fires on view changes", async () => {
     let fakeWs: FakeWebSocket | undefined;
     const client = createActorClient({
-      actorType: "counter",
-      actorId: "test-1",
-      host: "example.com",
+      url: "wss://example.com/api/counter/test-1",
       accessToken: "test-token",
       WebSocketImpl: class extends FakeWebSocket {
         constructor(url: string, protocols?: string | string[]) {
@@ -139,9 +133,7 @@ describe("createActorClient()", () => {
   it("send() dispatches message via WebSocket", async () => {
     let fakeWs: FakeWebSocket | undefined;
     const client = createActorClient({
-      actorType: "counter",
-      actorId: "test-1",
-      host: "example.com",
+      url: "wss://example.com/api/counter/test-1",
       accessToken: "test-token",
       WebSocketImpl: class extends FakeWebSocket {
         constructor(url: string, protocols?: string | string[]) {
@@ -171,9 +163,7 @@ describe("createActorClient()", () => {
   it("trigger shorthand constructs message", async () => {
     let fakeWs: FakeWebSocket | undefined;
     const client = createActorClient({
-      actorType: "counter",
-      actorId: "test-1",
-      host: "example.com",
+      url: "wss://example.com/api/counter/test-1",
       accessToken: "test-token",
       WebSocketImpl: class extends FakeWebSocket {
         constructor(url: string, protocols?: string | string[]) {
@@ -201,9 +191,7 @@ describe("createActorClient()", () => {
   it("disconnect() closes WebSocket", async () => {
     let fakeWs: FakeWebSocket | undefined;
     const client = createActorClient({
-      actorType: "counter",
-      actorId: "test-1",
-      host: "example.com",
+      url: "wss://example.com/api/counter/test-1",
       accessToken: "test-token",
       WebSocketImpl: class extends FakeWebSocket {
         constructor(url: string, protocols?: string | string[]) {
@@ -229,9 +217,7 @@ describe("createActorClient()", () => {
   it("unsubscribe stops listener", async () => {
     let fakeWs: FakeWebSocket | undefined;
     const client = createActorClient({
-      actorType: "counter",
-      actorId: "test-1",
-      host: "example.com",
+      url: "wss://example.com/api/counter/test-1",
       accessToken: "test-token",
       WebSocketImpl: class extends FakeWebSocket {
         constructor(url: string, protocols?: string | string[]) {
@@ -256,9 +242,7 @@ describe("createActorClient()", () => {
   it("connects with Sec-WebSocket-Protocol for auth", async () => {
     let capturedProtocols: string | string[] | undefined;
     const _client = createActorClient({
-      actorType: "counter",
-      actorId: "test-1",
-      host: "example.com",
+      url: "wss://example.com/api/counter/test-1",
       accessToken: "my-jwt-token",
       WebSocketImpl: class extends FakeWebSocket {
         constructor(url: string, protocols?: string | string[]) {
@@ -275,9 +259,7 @@ describe("createActorClient()", () => {
   it("constructs correct WebSocket URL", async () => {
     let capturedUrl: string | undefined;
     const _client = createActorClient({
-      actorType: "counter",
-      actorId: "test-1",
-      host: "example.com",
+      url: "wss://example.com/api/counter/test-1",
       accessToken: "token",
       WebSocketImpl: class extends FakeWebSocket {
         constructor(url: string, protocols?: string | string[]) {

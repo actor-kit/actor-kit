@@ -9,25 +9,27 @@
 import { decode } from "../schema/binary";
 import { applyDelta } from "../schema/delta";
 import { FrameType, parseFrame } from "../schema/frame";
-import type { FieldDescriptor, SchemaDefinition } from "../schema/schema";
+import type { FieldDescriptor, Infer, SchemaDefinition } from "../schema/schema";
 
 export type ConnectionState = "connecting" | "connected" | "disconnected" | "reconnecting";
 
-export interface ActorClient {
+export interface ActorClient<
+  TView = unknown,
+  TEvent extends { type: string } = { type: string; [key: string]: unknown },
+> {
   readonly connectionState: ConnectionState;
-  readonly view: unknown;
+  readonly view: TView | undefined;
   readonly role: string | undefined;
-  subscribe(listener: (view: unknown) => void): () => void;
+  subscribe(listener: (view: TView) => void): () => void;
   onStateChange(listener: (state: ConnectionState) => void): () => void;
-  send(event: { type: string; [key: string]: unknown }): void;
+  send(event: TEvent): void;
   trigger(type: string, payload?: Record<string, unknown>): void;
   disconnect(): void;
 }
 
 interface ClientOptions {
-  actorType: string;
-  actorId: string;
-  host: string;
+  /** Full WebSocket URL (e.g., "wss://example.com/game/zones/forest") */
+  url: string;
   accessToken: string;
   /** Schema for decoding binary frames. If not provided, falls back to JSON. */
   viewSchema?: SchemaDefinition<Record<string, FieldDescriptor>> | undefined;
@@ -39,11 +41,21 @@ interface ClientOptions {
   maxReconnectAttempts?: number | undefined;
 }
 
-export function createActorClient(options: ClientOptions): ActorClient {
+// Overload: with viewSchema → view type inferred, TEvent explicit
+export function createActorClient<
+  TShape extends Record<string, FieldDescriptor>,
+  TEvent extends { type: string } = { type: string; [key: string]: unknown },
+>(
+  options: ClientOptions & { viewSchema: SchemaDefinition<TShape> },
+): ActorClient<Infer<SchemaDefinition<TShape>>, TEvent>;
+
+// Overload: without viewSchema → unknown view
+export function createActorClient(options: ClientOptions): ActorClient;
+
+// Implementation
+export function createActorClient(options: ClientOptions): ActorClient<unknown> {
   const {
-    actorType,
-    actorId,
-    host,
+    url,
     accessToken,
     viewSchema,
     roleNames,
@@ -120,8 +132,8 @@ export function createActorClient(options: ClientOptions): ActorClient {
           if (typeof ctrl === "object" && ctrl !== null) {
             if ("actorType" in ctrl || "actorId" in ctrl) {
               onRedirect?.({
-                actorType: typeof ctrl.actorType === "string" ? ctrl.actorType : actorType,
-                actorId: typeof ctrl.actorId === "string" ? ctrl.actorId : actorId,
+                actorType: typeof ctrl.actorType === "string" ? ctrl.actorType : "",
+                actorId: typeof ctrl.actorId === "string" ? ctrl.actorId : "",
               });
             }
           }
@@ -148,8 +160,8 @@ export function createActorClient(options: ClientOptions): ActorClient {
         notifyListeners();
       } else if (msgObj["type"] === "__redirect") {
         onRedirect?.({
-          actorType: typeof msgObj["actorType"] === "string" ? msgObj["actorType"] : actorType,
-          actorId: typeof msgObj["actorId"] === "string" ? msgObj["actorId"] : actorId,
+          actorType: typeof msgObj["actorType"] === "string" ? msgObj["actorType"] : "",
+          actorId: typeof msgObj["actorId"] === "string" ? msgObj["actorId"] : "",
         });
       } else if (msgObj["type"] === "__reconnect_ack") {
         // Server confirmed our checksum matches — no data needed
@@ -157,7 +169,12 @@ export function createActorClient(options: ClientOptions): ActorClient {
       } else if (msgObj["type"] === "__error") {
         const errorData = {
           message: typeof msgObj["message"] === "string" ? msgObj["message"] : "",
-          error: typeof msgObj["error"] === "string" ? msgObj["error"] : typeof msgObj["detail"] === "string" ? msgObj["detail"] : "unknown",
+          error:
+            typeof msgObj["error"] === "string"
+              ? msgObj["error"]
+              : typeof msgObj["detail"] === "string"
+                ? msgObj["detail"]
+                : "unknown",
         };
         onError?.(errorData);
       }
@@ -167,18 +184,6 @@ export function createActorClient(options: ClientOptions): ActorClient {
   }
 
   function connect() {
-    const encodedActorId = encodeURIComponent(actorId);
-    // Detect protocol from host — support http://, https://, or bare hostname
-    let wsProtocol = "wss:";
-    let wsHost = host;
-    if (host.startsWith("http://")) {
-      wsProtocol = "ws:";
-      wsHost = host.slice(7);
-    } else if (host.startsWith("https://")) {
-      wsProtocol = "wss:";
-      wsHost = host.slice(8);
-    }
-    const url = `${wsProtocol}//${wsHost}/api/${actorType}/${encodedActorId}`;
     ws = new WebSocketImpl(url, [`token.${accessToken}`]);
 
     // Request ArrayBuffer for binary frames (browsers default to Blob)

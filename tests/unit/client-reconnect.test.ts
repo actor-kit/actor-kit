@@ -49,9 +49,7 @@ describe("client reconnection", () => {
     const stateChanges: string[] = [];
 
     const client = createActorClient({
-      actorType: "counter",
-      actorId: "test",
-      host: "example.com",
+      url: "wss://example.com/api/counter/test",
       accessToken: "token",
       WebSocketImpl: class extends FakeWebSocket {
         constructor(url: string, protocols?: string | string[]) {
@@ -79,9 +77,7 @@ describe("client reconnection", () => {
     let fakeWs: FakeWebSocket | undefined;
 
     const client = createActorClient({
-      actorType: "counter",
-      actorId: "test",
-      host: "example.com",
+      url: "wss://example.com/api/counter/test",
       accessToken: "token",
       WebSocketImpl: class extends FakeWebSocket {
         constructor(url: string, protocols?: string | string[]) {
@@ -103,9 +99,7 @@ describe("client reconnection", () => {
     const stateChanges: string[] = [];
 
     const client = createActorClient({
-      actorType: "counter",
-      actorId: "test",
-      host: "example.com",
+      url: "wss://example.com/api/counter/test",
       accessToken: "token",
       WebSocketImpl: class extends FakeWebSocket {
         constructor(url: string, protocols?: string | string[]) {

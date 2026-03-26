@@ -1,106 +1,71 @@
 /**
- * React SDK — createActorContext() provides Provider + hooks for actor state.
+ * React SDK — createActorContext() provides Provider + hooks for typed actor state.
  *
  * Usage:
- *   const TodoContext = createActorContext("todo-list");
+ *   type MyView = { count: number };
+ *   type MyEvent = { type: "INCREMENT" } | { type: "DECREMENT" };
+ *   const CounterCtx = createActorContext<MyView, MyEvent>();
  *
- *   <TodoContext.Provider actorId="my-list" host="example.com" accessToken={jwt}>
- *     <TodoList />
- *   </TodoContext.Provider>
+ *   const client = createActorClient<typeof CounterView.shape, MyEvent>({ url, accessToken, viewSchema: CounterView });
  *
- *   function TodoList() {
- *     const view = TodoContext.useView();
- *     const send = TodoContext.useSend();
- *     const role = TodoContext.useRole();
+ *   <CounterCtx.Provider client={client}>
+ *     <Counter />
+ *   </CounterCtx.Provider>
+ *
+ *   function Counter() {
+ *     const view = CounterCtx.useView();   // MyView | undefined
+ *     const send = CounterCtx.useSend();   // (event: MyEvent) => void
  *   }
  */
 
 import { createContext, createElement, type ReactNode, useContext, useEffect, useRef, useState } from "react";
-import { type ActorClient, type ConnectionState, createActorClient } from "../client/client";
-import type { FieldDescriptor, SchemaDefinition } from "../schema/schema";
+import type { ActorClient, ConnectionState } from "../client/client";
 
 // --- Types ---
 
-interface ProviderProps {
-  actorId: string;
-  host: string;
-  accessToken: string;
+interface ProviderProps<TView, TEvent extends { type: string }> {
+  client: ActorClient<TView, TEvent>;
   children: ReactNode;
-  viewSchema?: SchemaDefinition<Record<string, FieldDescriptor>>;
-  roleNames?: string[];
-  onRedirect?: (target: { actorType: string; actorId: string }) => void;
-  onError?: (error: { message: string; error: string }) => void;
 }
 
-interface ActorContext {
-  Provider: (props: ProviderProps) => ReactNode;
-  useView: () => unknown;
-  useSend: () => (event: { type: string; [key: string]: unknown }) => void;
+interface ActorContext<TView = unknown, TEvent extends { type: string } = { type: string; [key: string]: unknown }> {
+  Provider: (props: ProviderProps<TView, TEvent>) => ReactNode;
+  useView: () => TView | undefined;
+  useSend: () => (event: TEvent) => void;
   useRole: () => string | undefined;
   useConnectionState: () => ConnectionState;
-  useSelector: <T>(selector: (view: unknown) => T, equalityFn?: (a: T, b: T) => boolean) => T;
+  useSelector: <T>(selector: (view: TView | undefined) => T, equalityFn?: (a: T, b: T) => boolean) => T;
 }
 
 // --- Implementation ---
 
-export function createActorContext(actorType: string): ActorContext {
-  const ClientContext = createContext<ActorClient | null>(null);
+export function createActorContext<
+  TView = unknown,
+  TEvent extends { type: string } = { type: string; [key: string]: unknown },
+>(): ActorContext<TView, TEvent> {
+  const ClientContext = createContext<ActorClient<TView, TEvent> | null>(null);
 
-  function useClient(): ActorClient {
+  function useClient(): ActorClient<TView, TEvent> {
     const client = useContext(ClientContext);
     if (client === null) {
-      throw new Error(`useView/useSend/useRole must be used inside <${actorType}.Provider>`);
+      throw new Error("useView/useSend/useRole must be used inside <Provider>");
     }
     return client;
   }
 
-  function Provider({
-    actorId,
-    host,
-    accessToken,
-    children,
-    viewSchema,
-    roleNames,
-    onRedirect,
-    onError,
-  }: ProviderProps): ReactNode {
-    const [client, setClient] = useState<ActorClient | null>(null);
-
-    useEffect(() => {
-      const c = createActorClient({
-        actorType,
-        actorId,
-        host,
-        accessToken,
-        viewSchema,
-        roleNames,
-        onRedirect,
-        onError,
-      });
-      setClient(c);
-
-      return () => {
-        c.disconnect();
-      };
-    }, [actorId, host, accessToken, onRedirect]);
-
-    if (client === null) {
-      return null;
-    }
-
+  function Provider({ client, children }: ProviderProps<TView, TEvent>): ReactNode {
     return createElement(ClientContext.Provider, { value: client }, children);
   }
 
-  function useView(): unknown {
+  function useView(): TView | undefined {
     const client = useClient();
-    const [view, setView] = useState<unknown>(client.view);
+    const [view, setView] = useState<TView | undefined>(client.view);
 
     useEffect(() => {
-      // Set initial view if available
       if (client.view !== undefined) {
         setView(client.view);
       }
-      return client.subscribe((newView) => {
+      return client.subscribe((newView: TView) => {
         setView(newView);
       });
     }, [client]);
@@ -108,9 +73,8 @@ export function createActorContext(actorType: string): ActorContext {
     return view;
   }
 
-  function useSend(): (event: { type: string; [key: string]: unknown }) => void {
+  function useSend(): (event: TEvent) => void {
     const client = useClient();
-    // Return a stable reference
     const sendRef = useRef(client.send.bind(client));
     sendRef.current = client.send.bind(client);
     return sendRef.current;
@@ -136,7 +100,6 @@ export function createActorContext(actorType: string): ActorContext {
     const [state, setState] = useState<ConnectionState>(client.connectionState);
 
     useEffect(() => {
-      // Use onStateChange for real connection events (not just snapshot-driven)
       return client.onStateChange((newState) => {
         setState(newState);
       });
@@ -145,12 +108,15 @@ export function createActorContext(actorType: string): ActorContext {
     return state;
   }
 
-  function useSelector<T>(selector: (view: unknown) => T, equalityFn: (a: T, b: T) => boolean = Object.is): T {
+  function useSelector<T>(
+    selector: (view: TView | undefined) => T,
+    equalityFn: (a: T, b: T) => boolean = Object.is,
+  ): T {
     const client = useClient();
     const [selected, setSelected] = useState<T>(() => selector(client.view));
 
     useEffect(() => {
-      return client.subscribe((view) => {
+      return client.subscribe((view: TView) => {
         const next = selector(view);
         setSelected((prev) => (equalityFn(prev, next) ? prev : next));
       });
