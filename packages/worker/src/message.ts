@@ -21,8 +21,8 @@
  *   );
  */
 
-import type { z } from "zod";
 import type { MessageContext, MessageDef } from "@actor-kit/core";
+import type { z } from "zod";
 
 // --- Message handler types ---
 

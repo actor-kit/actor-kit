@@ -6,13 +6,8 @@
  * Browser-safe: no CF deps.
  */
 
-import {
-  FrameType,
-  applyDelta,
-  decode,
-  parseFrame,
-} from "@actor-kit/core";
 import type { FieldDescriptor, Infer, SchemaDefinition } from "@actor-kit/core";
+import { applyDelta, decode, FrameType, parseFrame } from "@actor-kit/core";
 
 export type ConnectionState = "connecting" | "connected" | "disconnected" | "reconnecting";
 

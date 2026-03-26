@@ -5,11 +5,10 @@
  * without CF runtime. Pure TypeScript.
  */
 
-import type { z } from "zod";
 import type { Effect, MessageContext, NormalizedRequestConfig, RequestConfig } from "@actor-kit/core";
 import { normalizeRequest } from "@actor-kit/core";
-import { routeMessage } from "@actor-kit/worker/testing";
-import { type RolePredicate, resolveRole } from "@actor-kit/worker/testing";
+import { type RolePredicate, resolveRole, routeMessage } from "@actor-kit/worker/testing";
+import type { z } from "zod";
 
 // --- Actor definition shape (minimal for testing) ---
 

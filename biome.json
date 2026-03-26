@@ -23,7 +23,15 @@
     "lineWidth": 120
   },
   "files": {
-    "includes": ["packages/actor-kit/src/**/*.ts", "tests/**/*.ts"],
+    "includes": [
+      "packages/actor-kit/src/**/*.ts",
+      "packages/core/src/**/*.ts",
+      "packages/worker/src/**/*.ts",
+      "packages/client/src/**/*.ts",
+      "packages/react/src/**/*.ts",
+      "packages/test/src/**/*.ts",
+      "tests/**/*.ts"
+    ],
     "ignoreUnknown": true
   },
   "assist": {

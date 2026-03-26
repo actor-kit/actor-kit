@@ -17,8 +17,8 @@
  *   );
  */
 
-import type { z } from "zod";
 import type { CallbackDef } from "@actor-kit/core";
+import type { z } from "zod";
 
 // --- callback() function ---
 

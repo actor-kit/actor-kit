@@ -18,8 +18,8 @@
  *   }
  */
 
-import { createContext, createElement, type ReactNode, useContext, useEffect, useRef, useState } from "react";
 import type { ActorClient, ConnectionState } from "@actor-kit/client";
+import { createContext, createElement, type ReactNode, useContext, useEffect, useRef, useState } from "react";
 
 // --- Types ---
 
