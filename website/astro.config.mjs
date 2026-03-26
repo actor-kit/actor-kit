@@ -37,10 +37,10 @@ export default defineConfig({
         {
           label: "Examples",
           items: [
-            { slug: "guides/counter" },
-            { slug: "guides/todo-list" },
-            { slug: "guides/chat-room" },
-            { slug: "guides/auction" },
+            { slug: "examples/counter" },
+            { slug: "examples/todo-list" },
+            { slug: "examples/chat-room" },
+            { slug: "examples/auction" },
           ],
         },
         {

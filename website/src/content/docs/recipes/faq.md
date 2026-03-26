@@ -84,13 +84,13 @@ From the JWT. The `sub` claim becomes the caller identity. The `act` claim becom
 Both record side effects in the transactional outbox. The difference:
 
 - **`emit()`** — fire-and-forget. No response.
-- **`request()`** — adds `onDone` and `onError` callback message names. When the effect completes or fails, the framework delivers a callback message to the actor's `on` block.
+- **`request()`** — takes typed `callback()` definitions for `onDone` and `onError`. When the effect completes or fails, the framework delivers the result to the actor's `callbacks` block with Zod-validated payloads.
 
 ### What if an emitted effect fails?
 
 Effects retry up to 3 times with backoff (1s, 5s, 25s). After 3 failures, the effect moves to the `emission_failures` SQLite table. It won't retry again automatically — you'd need to handle it manually or build a cleanup process.
 
-### Can I emit from `on.connect` or `on.disconnect`?
+### Can I emit from `lifecycle.connect` or `lifecycle.disconnect`?
 
 Yes. Lifecycle handlers receive the same `ctx` as message handlers, including `emit()` and `request()`.
 

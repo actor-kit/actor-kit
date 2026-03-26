@@ -24,23 +24,59 @@ const notify = message(z.object({}), (state, _payload, { emit }) => {
 
 ### `request()` — Async with Callbacks
 
+Define typed callbacks with `callback()`, then reference them in `request()`:
+
 ```typescript
+import { callback, message } from "actor-kit";
+import { z } from "zod";
+
+const FetchSucceeded = callback("FETCH_SUCCEEDED", z.object({ data: z.string() }));
+const FetchFailed = callback("FETCH_FAILED", z.object({ message: z.string() }));
+
 const fetchData = message(z.object({ url: z.string() }), (state, { url }, { request }) => {
   request({
     fetch: url,
-    onDone: "FETCH_SUCCEEDED",
-    onError: "FETCH_FAILED",
+    onDone: FetchSucceeded,
+    onError: FetchFailed,
   });
   return { ...state, status: "loading" };
 });
 ```
 
-`request()` is like `emit()` but with callback message names. When the effect completes, the framework delivers `onDone` or `onError` to the actor's `on` block:
+`request()` is like `emit()` but with typed callback definitions. When the effect completes, the framework delivers the result to the actor's `callbacks` block:
 
 ```typescript
-on: {
-  FETCH_SUCCEEDED: (state, result) => ({ ...state, data: result, status: "loaded" }),
-  FETCH_FAILED: (state, error) => ({ ...state, error: error.message, status: "failed" }),
+callbacks: {
+  FETCH_SUCCEEDED: (state, { result }, ctx) => ({ ...state, data: result.data, status: "loaded" }),
+  FETCH_FAILED: (state, { error }, ctx) => ({ ...state, error: error.message, status: "failed" }),
+},
+```
+
+#### Per-request context with `meta`
+
+Use the third argument to `callback()` to attach per-request context that gets passed back to the handler:
+
+```typescript
+const FetchSucceeded = callback(
+  "FETCH_SUCCEEDED",
+  z.object({ data: z.string() }),
+  z.object({ itemId: z.string() }),  // meta schema
+);
+
+// In the message handler:
+request({
+  fetch: `https://api.example.com/items/${itemId}`,
+  onDone: FetchSucceeded,
+  onError: FetchFailed,
+  meta: { itemId },  // passed through to the callback handler
+});
+
+// In the callbacks block:
+callbacks: {
+  FETCH_SUCCEEDED: (state, { result, meta }, ctx) => ({
+    ...state,
+    items: { ...state.items, [meta.itemId]: result.data },
+  }),
 },
 ```
 

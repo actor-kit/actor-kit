@@ -113,3 +113,8 @@ pnpm dev
 # Open http://localhost:8787?user=bob
 # Both see messages in real-time + online count
 ```
+
+## Related
+
+- [Side Effects](/concepts/side-effects/) — lifecycle hooks like `on.connect` and `on.disconnect` are part of the side effects system
+- [Actors & State](/concepts/actors-and-state/) — how actor state is defined, persisted, and mutated

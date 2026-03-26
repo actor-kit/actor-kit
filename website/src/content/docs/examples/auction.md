@@ -129,3 +129,8 @@ pnpm dev
 # Open http://localhost:8787?user=bob
 # Both bid — highest bid wins
 ```
+
+## Related
+
+- [Messages & Guards](/concepts/messages-and-guards/) — how guards validate messages before the handler runs
+- [Testing](/concepts/testing/) — test actors with `testActor()` to verify guard and handler behavior

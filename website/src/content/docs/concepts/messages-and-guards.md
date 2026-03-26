@@ -94,3 +94,22 @@ messages: {
 ```
 
 No duplication. The same `addTodo` object is used for both roles.
+
+## Error Handling
+
+When a message is rejected, the client receives an `__error` JSON message with the reason:
+
+| Step | Failure | Client receives |
+|------|---------|----------------|
+| Role resolution | No role matches | Connection rejected (403) |
+| Message lookup | Message not found for role | `{ type: "__error", error: "message_not_found" }` |
+| Zod validation | Payload doesn't match schema | `{ type: "__error", error: "validation_failed", detail: "..." }` |
+| Guard | Guard returns false | `{ type: "__error", error: "guard_failed" }` |
+| Handler | Handler throws | Error logged server-side; state unchanged |
+
+The actor's state is never modified when a message is rejected. The rejection happens before the handler runs (for validation/guard failures) or the state change is rolled back (for handler exceptions).
+
+## Related
+
+- [Side Effects](/concepts/side-effects/) — `emit()` and `request()` for triggering effects from message handlers
+- [Testing](/concepts/testing/) — verify message validation, guards, and handler behavior with `testActor()`

@@ -21,7 +21,7 @@ const { state: next, emissions, requests } = await t.sendWithEffects(
 );
 ```
 
-`emissions` contains every `emit()` call. `requests` contains every `request()` call — including the `onDone` and `onError` callback names.
+`emissions` contains every `emit()` call. `requests` contains every `request()` call as `NormalizedRequestConfig` objects with `{ effect, onDone, onError, meta }`.
 
 ## Asserting fire-and-forget effects
 
@@ -53,20 +53,19 @@ expect(emissions).toContainEqual(
 
 ## Asserting async requests
 
-`requests` captures `request()` calls with their callback names:
+`requests` captures `request()` calls as `NormalizedRequestConfig` objects:
 
 ```typescript
 const { requests } = await t.sendWithEffects(
   state, "alice", { type: "FETCH_PRICE" }
 );
 
-expect(requests).toContainEqual(
-  expect.objectContaining({
-    fetch: "https://api.example.com/price",
-    onDone: "PRICE_RECEIVED",
-    onError: "PRICE_FAILED",
-  })
-);
+expect(requests[0]).toMatchObject({
+  effect: { fetch: "https://api.example.com/price" },
+  onDone: "PRICE_RECEIVED",
+  onError: "PRICE_FAILED",
+  meta: { itemId: "widget" },
+});
 ```
 
 To test the callback handlers themselves, send the callback message directly:

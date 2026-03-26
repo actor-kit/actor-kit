@@ -47,7 +47,7 @@ Key points:
 
 ## The Client
 
-The example uses raw WebSocket for simplicity. Since the example actors use `view(schema, fn)`, the server sends binary frames by default. The raw WebSocket client below handles JSON snapshots (for actors without a schema). The Worker serves inline HTML that connects, subscribes, and sends messages:
+The example uses raw WebSocket with JSON for simplicity. When a client doesn't provide a `viewSchema`, the server falls back to JSON snapshots. The Worker serves inline HTML that connects, subscribes, and sends messages:
 
 ```javascript
 // Get a token

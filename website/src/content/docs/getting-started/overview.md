@@ -19,6 +19,16 @@ Not a good fit:
 - Batch processing or data pipelines
 - Applications that don't need WebSocket connections
 
+## Key terms
+
+- **Actor** — a Durable Object instance with state, roles, messages, and views
+- **Message** — a named action defined on the actor (server-side). Example: `INCREMENT`, `ADD_TODO`
+- **Event** — the object sent from the client to trigger a message. Example: `{ type: "INCREMENT", amount: 5 }`
+- **View** — a role-scoped projection of the actor's state, sent to connected clients
+- **Role** — a predicate that determines what a caller can see and do
+- **Lifecycle** — `connect` and `disconnect` handlers that fire on WebSocket open/close
+- **Callback** — a typed handler for async request results (`onDone`/`onError`)
+
 ## How it works
 
 ```
@@ -62,4 +72,4 @@ Actor Kit embraces Cloudflare's infrastructure:
 
 - [Installation](/getting-started/installation/) — set up your project
 - [Quick Start](/getting-started/quick-start/) — build a counter in 5 minutes
-- [Counter Guide](/guides/counter/) — full walkthrough with UI
+- [Counter Guide](/examples/counter/) — full walkthrough with UI

@@ -160,7 +160,7 @@ npx wrangler deploy
 
 ## Next Steps
 
-- [Counter Example](/guides/counter/) — full source with UI
-- [Todo List Example](/guides/todo-list/) — multiple roles, guards, shared handlers
+- [Counter Example](/examples/counter/) — full source with UI
+- [Todo List Example](/examples/todo-list/) — multiple roles, guards, shared handlers
 - [Concepts](/concepts/actors-and-state/) — deep dive into the actor model
 - [Recipes](/recipes/actor-to-actor/) — focused how-to guides for specific tasks

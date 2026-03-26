@@ -61,14 +61,9 @@ type PlayerViewType = Infer<typeof PlayerView>;
 
 ## Binary Sync
 
-When a view uses `schema()`, the framework automatically encodes it as binary frames:
+Views defined with `view(schema, fn)` are automatically encoded as compact binary frames with delta encoding — only changed fields are sent. A position update (3 float32 fields) is 15 bytes as a binary delta vs ~100 bytes as JSON.
 
-1. **First connect**: full SNAPSHOT frame (all fields encoded)
-2. **Subsequent updates**: DELTA frame (bitmask + only changed fields)
-
-A position update (3 float32 fields) = 13 bytes as a delta (1 byte bitmask + 12 bytes data), vs ~100 bytes as JSON.
-
-Binary sync is automatic — any view defined with `view(mySchema, fn)` gets binary encoding. Views without a schema fall back to JSON.
+See [Binary State Sync](/concepts/binary-sync/) for the full wire protocol, frame format, and reconnection details.
 
 ## View Computation
 

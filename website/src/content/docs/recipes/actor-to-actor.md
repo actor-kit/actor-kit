@@ -34,16 +34,22 @@ The source actor removes the player from its state immediately. The target actor
 
 ## Async with callbacks using `request()`
 
-Use `request()` when you need to know whether a side effect succeeded or failed. The framework delivers `onDone` or `onError` back to your actor's `on` block. This works best with `fetch` effects where the response body is returned.
+Use `request()` when you need to know whether a side effect succeeded or failed. Define typed callbacks with `callback()`, then reference them in `request()`. The framework delivers the result to your actor's `callbacks` block.
 
 ```typescript
+import { callback, message } from "actor-kit";
+import { z } from "zod";
+
+const PriceReceived = callback("PRICE_RECEIVED", z.object({ price: z.number() }));
+const PriceFailed = callback("PRICE_FAILED", z.object({ message: z.string() }));
+
 const fetchPrice = message(
   z.object({ itemId: z.string() }),
   (state, { itemId }, { request }) => {
     request({
       fetch: `https://api.example.com/prices/${itemId}`,
-      onDone: "PRICE_RECEIVED",
-      onError: "PRICE_FAILED",
+      onDone: PriceReceived,
+      onError: PriceFailed,
     });
 
     return { ...state, priceStatus: "loading" };
@@ -51,16 +57,16 @@ const fetchPrice = message(
 );
 ```
 
-Handle the callbacks in the `on` block:
+Handle the callbacks in the `callbacks` block:
 
 ```typescript
-on: {
-  PRICE_RECEIVED: (state, result) => ({
+callbacks: {
+  PRICE_RECEIVED: (state, { result }, ctx) => ({
     ...state,
     priceStatus: "loaded",
     price: result.price,
   }),
-  PRICE_FAILED: (state, error) => ({
+  PRICE_FAILED: (state, { error }, ctx) => ({
     ...state,
     priceStatus: "failed",
     error: error.message,

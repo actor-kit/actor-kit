@@ -42,7 +42,7 @@ Pure function tests with Vitest. No Actor Kit APIs, no Cloudflare runtime — ju
 
 ```typescript
 import { describe, expect, it } from "vitest";
-import { encode, decode } from "actor-kit/schema";
+import { encode, decode } from "actor-kit";
 import { PlayerView } from "./schemas";
 
 describe("binary encoding", () => {
@@ -107,6 +107,21 @@ const { state: next, emissions, requests } = await t.sendWithEffects(
 expect(emissions).toContainEqual(
   expect.objectContaining({ queue: "notifications" })
 );
+```
+
+Requests are returned as `NormalizedRequestConfig` objects with `{ effect, onDone, onError, meta }`:
+
+```typescript
+const { requests } = await t.sendWithEffects(
+  state, "alice", { type: "FETCH_PRICE" }
+);
+
+expect(requests[0]).toMatchObject({
+  effect: { fetch: "https://api.example.com/price" },
+  onDone: "PRICE_RECEIVED",
+  onError: "PRICE_FAILED",
+  meta: { itemId: "widget" },
+});
 ```
 
 Actor tests are fast (pure TypeScript, no I/O) and cover the most important behavior: does this message, from this caller, in this state, produce the right result?

@@ -39,7 +39,8 @@ export const Counter = actor("counter", {
 | `states` | No | Sequential or parallel state definitions |
 | `after` | No | Durable timers (DO Alarms) |
 | `tick` | No | Game loop (setInterval) |
-| `on` | No | Lifecycle handlers + request callbacks |
+| `lifecycle` | No | Connection handlers (`connect`, `disconnect`) |
+| `callbacks` | No | Request callback handlers (from `request()`) |
 | `observe` | No | `{ onTransition }` hook |
 | `migrate` | No | `(persisted, fromVersion) => newState` |
 | `serialize` | No | Custom state serializer |
@@ -69,6 +70,38 @@ Pairs a Zod validation schema with a message handler.
 ```typescript
 const increment = message(z.object({ amount: z.number() }), (state, { amount }) => ...);
 const guarded = message(z.object({}), { guard: (s) => !s.closed, handler: (s) => ... });
+```
+
+## `callback(name, resultSchema)` / `callback(name, resultSchema, metaSchema)`
+
+Creates a typed callback definition for use with `request()`. Pairs a callback name with Zod schemas for the result and optional per-request meta.
+
+```typescript
+import { callback } from "actor-kit";
+
+// Without meta
+const PriceReceived = callback("PRICE_RECEIVED", z.object({ total: z.number() }));
+const PriceFailed = callback("PRICE_FAILED", z.object({ message: z.string() }));
+
+// With meta (per-request context passed through to the handler)
+const PriceReceived = callback(
+  "PRICE_RECEIVED",
+  z.object({ total: z.number() }),
+  z.object({ itemId: z.string() }),
+);
+```
+
+Use callback definitions as `onDone`/`onError` in `request()`, and handle them in the actor's `callbacks` block:
+
+```typescript
+// In a message handler:
+request({ fetch: url, onDone: PriceReceived, onError: PriceFailed, meta: { itemId } });
+
+// In the actor definition:
+callbacks: {
+  PRICE_RECEIVED: (state, { result, meta }, ctx) => ({ ...state, price: result.total }),
+  PRICE_FAILED: (state, { error }, ctx) => ({ ...state, error: error.message }),
+},
 ```
 
 ## `createRef(env, actorType, actorId)`
@@ -101,9 +134,9 @@ const token = await createAccessToken({
 | `callerId` | `string` | Caller identity (JWT `sub` claim) |
 | `callerType` | `"user" \| "service"` | Caller type (JWT `act` claim) |
 | `secret` | `string` | HS256 signing secret |
-| `expiresIn` | `string` | Optional expiry (default: `"1h"`) |
+| `expiresIn` | `string` | Optional expiry (default: `"30d"`) |
 
-## `getCallerFromToken(token, secret, actorType, actorId)`
+## `getCallerFromToken(token, actorType, actorId, secret)`
 
 Validates a JWT and extracts the caller identity. Returns `Promise<{ caller: string; callerType: "user" | "service" }>`. Throws on invalid/expired tokens or audience/ID mismatch.
 

@@ -67,3 +67,8 @@ If a tick handler is async and takes longer than the frequency, the next tick is
 | Game loop (AI, physics) | `tick: { frequency: 100, handler }` |
 | Scheduled cleanup | `after: { "24 hours": handler }` |
 | Real-time position sync | `tick: { frequency: 50, handler }` |
+
+## Related
+
+- [Side Effects](/concepts/side-effects/) — `emit()` and `request()` for fire-and-forget and async effects alongside timers
+- [Sequential & Parallel States](/recipes/sequential-and-parallel-states/) — combine timers with state machines for timed transitions

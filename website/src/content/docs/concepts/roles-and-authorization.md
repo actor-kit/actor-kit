@@ -79,3 +79,8 @@ views: {
 ```
 
 The viewer never receives the actual todo items — only the count.
+
+## Related
+
+- [Messages & Guards](/concepts/messages-and-guards/) — how per-role messages are validated and guarded
+- [FAQ](/recipes/faq/) — common questions about role resolution and authorization

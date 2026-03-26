@@ -90,23 +90,22 @@ await stub.spawn({
 
 ## Lifecycle Events
 
-The `on` block handles connection lifecycle and async request callbacks:
+The `lifecycle` block handles WebSocket connection events:
 
 ```typescript
-on: {
-  connect: (state, caller, ctx) => {
+lifecycle: {
+  connect: (state, { caller, callerType }, ctx) => {
     return { ...state, onlineUsers: [...state.onlineUsers, caller] };
   },
-  disconnect: (state, caller, ctx) => {
+  disconnect: (state, { caller, callerType }, ctx) => {
     return { ...state, onlineUsers: state.onlineUsers.filter(u => u !== caller) };
   },
-  // Callbacks from request() — see Side Effects
-  FETCH_SUCCEEDED: (state, result) => ({ ...state, data: result }),
-  FETCH_FAILED: (state, error) => ({ ...state, error: error.message }),
 },
 ```
 
-`connect` and `disconnect` fire when WebSocket connections open and close. Both are full transitions — they persist state and broadcast views. The `ctx` parameter provides `emit()` and `request()` for triggering side effects from lifecycle events.
+`connect` and `disconnect` fire when WebSocket connections open and close. Both are full transitions — they persist state and broadcast views. Lifecycle handlers receive `{ caller, callerType }` as a typed event object, plus `ctx` with `emit()` and `request()` for triggering side effects.
+
+Request callbacks are handled separately in the `callbacks` block — see [Side Effects](/concepts/side-effects/).
 
 ## Observability
 
