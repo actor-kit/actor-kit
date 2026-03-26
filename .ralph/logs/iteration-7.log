@@ -1,0 +1,7 @@
+Task 8 complete. Summary:
+
+- **Updated 9 files** (1 worker + 8 test files) to import from `@actor-kit/core` and `@actor-kit/worker` instead of relative paths
+- **Fixed Codex P1**: Added `pnpm build` to `test:integration` script since wrangler/esbuild resolves packages via `dist/`
+- **Fixed pre-existing config issue**: Added 3 WebSocket test files to the correct vitest config (isolated vs non-isolated storage)
+- **Verification**: typecheck passes, 277 unit tests pass, 42/42 isolated integration tests pass, lint passes
+- The ws config has 15 pre-existing auth failures (confirmed identical with original imports)

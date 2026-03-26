@@ -1,0 +1,1 @@
+Task 4 complete. Committed as `6389fac`. Typecheck passes, all 277 unit tests pass. Codex review found 2 P1 findings (stale hook state on client swap) — both are pre-existing bugs in the original code, not regressions from the split.

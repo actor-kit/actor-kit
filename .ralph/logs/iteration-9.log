@@ -1,0 +1,8 @@
+Task 10 complete. Updated all 25+ docs pages across the website and project docs to use `@actor-kit/*` split package imports. Key changes:
+
+- **Website docs**: All API reference, examples, concepts, getting started, and recipe pages updated
+- **Project docs**: testing-strategy.md, 5 spec files, 2 ADR files updated  
+- **Installation page**: Fixed to include `@actor-kit/client` for React users and `@actor-kit/test` for testing
+- **ADR 006**: Marked as superseded by the package split
+- **Codex review**: 2 P2 findings caught and fixed (missing install instructions for client and test packages)
+- **Verification**: Docs site builds (25 pages), typecheck passes, 277/277 tests pass

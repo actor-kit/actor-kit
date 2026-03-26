@@ -1,0 +1,8 @@
+Task 9 complete. Updated all 4 examples (counter, todo-list, chat-room, auction):
+
+- **Actor definitions**: `schema`, `view`, `uint32`, `string`, `boolean`, `array` → `@actor-kit/core`; `actor`, `message` → `@actor-kit/worker`
+- **Worker files**: `createAccessToken` → `@actor-kit/worker`
+- **package.json**: replaced `actor-kit` dep with `@actor-kit/core` + `@actor-kit/worker`
+- Typecheck, lint, 277 unit tests all pass
+- Codex review: no findings
+- Committed as `220eaf0`

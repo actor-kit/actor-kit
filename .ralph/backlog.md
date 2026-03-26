@@ -49,10 +49,10 @@ deps: @actor-kit/core,  deps: @actor-kit/client,
 
 - [x] **7. Update unit test imports** — Update all files in `tests/unit/` to import from `@actor-kit/core`, `@actor-kit/worker`, `@actor-kit/client`, `@actor-kit/react`, `@actor-kit/test` instead of relative paths. Run `pnpm test:unit` — all 277 tests must pass.
 
-- [ ] **8. Update integration test imports** — Update `tests/integration/src/worker.ts` and all integration test files to import from `@actor-kit/worker` and `@actor-kit/core`. Run `pnpm test:integration`.
+- [x] **8. Update integration test imports** — Update `tests/integration/src/worker.ts` and all integration test files to import from `@actor-kit/worker` and `@actor-kit/core`. Run `pnpm test:integration`.
 
-- [ ] **9. Update examples** — Update all 4 example workers (counter, todo-list, chat-room, auction) to import from `@actor-kit/core` + `@actor-kit/worker`. Update their package.json deps.
+- [x] **9. Update examples** — Update all 4 example workers (counter, todo-list, chat-room, auction) to import from `@actor-kit/core` + `@actor-kit/worker`. Update their package.json deps.
 
-- [ ] **10. Update docs site** — Update all 25 docs pages: change `import from "actor-kit"` to `import from "@actor-kit/worker"`, `"actor-kit/client"` to `"@actor-kit/client"`, etc. Update installation page with new package names. Build docs to verify.
+- [x] **10. Update docs site** — Update all 25 docs pages: change `import from "actor-kit"` to `import from "@actor-kit/worker"`, `"actor-kit/client"` to `"@actor-kit/client"`, etc. Update installation page with new package names. Build docs to verify.
 
-- [ ] **11. Final verification** — Run full suite: `pnpm typecheck`, `pnpm test:unit` (277 tests), `pnpm test:integration` (45 tests), `pnpm lint`, docs build. Commit with detailed message.
+- [x] **11. Final verification** — Run full suite: `pnpm typecheck`, `pnpm test:unit` (277 tests), `pnpm test:integration` (45 tests), `pnpm lint`, docs build. Commit with detailed message.

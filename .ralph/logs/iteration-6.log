@@ -1,0 +1,6 @@
+Commit succeeded — pre-commit hooks ran typecheck, lint, and all 277 unit tests, all passing.
+
+**Task 7 complete.** Updated all 40 unit test files to import from `@actor-kit/*` split packages:
+- Expanded `@actor-kit/worker/testing` subpath with all pure-logic exports (message, callback, createRef, auth, timers, outbox, cdc, states, route-to-actor)
+- Added `resolve.alias` in `vitest.config.ts` for source-level resolution (no build step needed)
+- All 277 tests pass, typecheck clean, codex review found no issues

@@ -1,0 +1,3 @@
+Task 6 complete. 
+
+**Summary:** Updated biome.json and root package.json lint scripts to include all 5 new `@actor-kit/*` package source directories. Ran `lint:fix` to auto-fix import ordering in new packages. Physical removal of `packages/actor-kit/` is deferred to after tasks 7-9 migrate the 49 test files and 4 example projects that still reference it. Codex review found 1 P3 (lint scope dropping old package) — fixed. All 277 tests pass, typecheck clean, lint clean.

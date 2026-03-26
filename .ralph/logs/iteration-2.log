@@ -1,0 +1,9 @@
+Task 3 complete. Created `@actor-kit/client` package with:
+- `packages/client/` — package.json, tsconfig.json, tsdown.config.ts
+- `src/client.ts` — WebSocket client with binary frames, JSON fallback, reconnection
+- `src/builder.ts` — typed `actorClient()` factory builder
+- `src/index.ts` — public API exports
+- All imports updated from `../schema/*` to `@actor-kit/core`
+- Full workspace typecheck passes, all 277 unit tests pass
+- Codex review: 1 P1 (missing dist/) — by-design, same pattern as core/worker
+- Committed as `d0f140e`
