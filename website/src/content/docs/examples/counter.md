@@ -14,7 +14,7 @@ The counter is the simplest actor — it demonstrates roles, messages, views, an
 - `schema()` and `view()` for typed view projections
 - Real-time sync: two browsers sharing the same counter
 - Admin vs user roles via `callerType`
-- Client connection: raw WebSocket, `createActorClient()`, and React hooks
+- Client connection: typed `actorClient()` SDK and React hooks
 
 ## The Actor
 
@@ -47,31 +47,9 @@ Key points:
 
 ## The Client
 
-The example uses raw WebSocket with JSON for simplicity. When a client doesn't provide a `viewSchema`, the server falls back to JSON snapshots. The Worker serves inline HTML that connects, subscribes, and sends messages:
+### Vanilla TypeScript
 
-```javascript
-// Get a token
-const { token } = await fetch("/api/token?actorId=default").then(r => r.json());
-
-// Connect via WebSocket (token passed as subprotocol)
-const ws = new WebSocket(`ws://${location.host}/api/counter/default`, [`token.${token}`]);
-
-// Receive view updates
-ws.addEventListener("message", (event) => {
-  const msg = JSON.parse(event.data);
-  if (msg.type === "snapshot") {
-    document.getElementById("count").textContent = msg.data.count;
-  }
-});
-
-// Send messages
-document.getElementById("increment").onclick = () =>
-  ws.send(JSON.stringify({ type: "INCREMENT" }));
-```
-
-### With the client SDK
-
-A real app would use `actorClient()` for typed views, automatic reconnection, and binary delta decoding. The `subscribe` callback always receives the full, merged view — you never see raw deltas:
+Use `actorClient()` for typed views, automatic reconnection, and binary delta decoding. The `subscribe` callback always receives the full, merged view — you never see raw deltas:
 
 ```typescript
 import { actorClient } from "@actor-kit/client";
@@ -82,21 +60,24 @@ type CounterEvent = { type: "INCREMENT" } | { type: "DECREMENT" };
 // Define once (co-locate with actor definition)
 const CounterClient = actorClient(CounterView).events<CounterEvent>();
 
+// Get a token
+const { token } = await fetch("/api/token?actorId=default").then(r => r.json());
+
 // Create a runtime connection
 const client = CounterClient.create({
-  url: `wss://${location.host}/api/counter/default`,
+  url: `ws://localhost:8787/api/counter/default`,
   accessToken: token,
 });
 
+// view is typed: { count: number; lastUpdatedBy: string }
 client.subscribe((view) => {
-  // view is typed: { count: number; lastUpdatedBy: string }
   document.getElementById("count")!.textContent = String(view.count);
 });
 
 client.send({ type: "INCREMENT" });
 ```
 
-### With React
+### React
 
 ```tsx
 import { actorClient } from "@actor-kit/client";

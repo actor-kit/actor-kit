@@ -67,36 +67,52 @@ The owner sees the full todo list. The viewer sees only counts — the individua
 
 ## The Client
 
-The example uses raw WebSocket. Each snapshot includes the caller's `role`, so the UI adapts:
+### Vanilla TypeScript
 
-```javascript
-ws.addEventListener("message", (event) => {
-  const msg = JSON.parse(event.data);
-  if (msg.type === "snapshot") {
-    const { role, data } = msg;
+Use `actorClient()` for typed views and events. Binary delta decoding is handled transparently — the `subscribe` callback always receives the full, merged view:
 
-    if (role === "owner" || role === "member") {
-      // Show full todo list
-      renderTodos(data.todos);
-    } else {
-      // Viewer — show counts only (individual todos are never sent)
-      renderSummary(data.todoCount, data.doneCount);
-    }
-  }
+```typescript
+import { actorClient } from "@actor-kit/client";
+
+type TodoEvent =
+  | { type: "ADD_TODO"; text: string }
+  | { type: "TOGGLE"; todoId: string }
+  | { type: "DELETE_TODO"; todoId: string }
+  | { type: "INVITE"; userId: string };
+
+// Use the owner schema — viewers will receive JSON fallback snapshots
+// since their view shape differs from the binary schema
+const TodoClient = actorClient(OwnerViewSchema).events<TodoEvent>();
+
+// Get a token
+const { token } = await fetch("/api/token?actorId=my-list").then(r => r.json());
+
+// Create a runtime connection
+const client = TodoClient.create({
+  url: `ws://localhost:8787/api/todo-list/my-list`,
+  accessToken: token,
 });
 
-// Send a message
-ws.send(JSON.stringify({ type: "ADD_TODO", text: "Buy milk" }));
+// view is typed from OwnerViewSchema
+client.subscribe((view) => {
+  renderTodos(view.todos);
+});
+
+client.send({ type: "ADD_TODO", text: "Buy milk" });
 ```
 
-### With React
+### React
 
 ```tsx
 import { actorClient } from "@actor-kit/client";
 import { actorContext } from "@actor-kit/react";
 
-// Use the owner schema — viewers will receive JSON fallback snapshots
-// since their view shape differs from the binary schema
+type TodoEvent =
+  | { type: "ADD_TODO"; text: string }
+  | { type: "TOGGLE"; todoId: string }
+  | { type: "DELETE_TODO"; todoId: string }
+  | { type: "INVITE"; userId: string };
+
 const TodoClient = actorClient(OwnerViewSchema).events<TodoEvent>();
 const TodoCtx = actorContext<typeof TodoClient>();
 
@@ -131,9 +147,11 @@ function TodoList() {
           </li>
         ))}
       </ul>
-      <button onClick={() => send({ type: "ADD_TODO", text: "New item" })}>
-        Add
-      </button>
+      {role !== "viewer" && (
+        <button onClick={() => send({ type: "ADD_TODO", text: "New item" })}>
+          Add
+        </button>
+      )}
     </div>
   );
 }

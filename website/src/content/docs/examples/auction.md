@@ -63,36 +63,63 @@ Only the `auctioneer` role (determined by `callerType === "service"`) can close 
 
 ## The Client
 
-The client renders bid status and adapts when the auction closes:
+### Vanilla TypeScript
 
-```javascript
-ws.addEventListener("message", (event) => {
-  const msg = JSON.parse(event.data);
-  if (msg.type === "snapshot") {
-    const { highestBid, bidCount, closed, winner } = msg.data;
+Use `actorClient()` for typed views and events. Binary delta decoding is handled transparently — the `subscribe` callback always receives the full, merged view:
 
-    document.getElementById("highest").textContent = highestBid;
-    document.getElementById("count").textContent = `${bidCount} bids`;
+```typescript
+import { actorClient } from "@actor-kit/client";
 
-    if (closed) {
-      document.getElementById("bid-form").hidden = true;
-      document.getElementById("winner").textContent = `Winner: ${winner}`;
-    }
+type AuctionEvent = { type: "BID"; amount: number };
+
+const AuctionClient = actorClient(AuctionViewSchema).events<AuctionEvent>();
+
+// Get a token
+const { token } = await fetch("/api/token?actorId=my-auction").then(r => r.json());
+
+// Create a runtime connection
+const client = AuctionClient.create({
+  url: `ws://localhost:8787/api/auction/my-auction`,
+  accessToken: token,
+});
+
+// view is typed from AuctionViewSchema
+client.subscribe((view) => {
+  document.getElementById("highest")!.textContent = String(view.highestBid);
+  document.getElementById("count")!.textContent = `${view.bidCount} bids`;
+
+  if (view.closed) {
+    document.getElementById("bid-form")!.hidden = true;
+    document.getElementById("winner")!.textContent = `Winner: ${view.winner}`;
   }
 });
 
-// Place a bid
-ws.send(JSON.stringify({ type: "BID", amount: 100 }));
+client.send({ type: "BID", amount: 100 });
 ```
 
-### With React
+### React
 
 ```tsx
 import { actorClient } from "@actor-kit/client";
 import { actorContext } from "@actor-kit/react";
 
+type AuctionEvent = { type: "BID"; amount: number };
+
 const AuctionClient = actorClient(AuctionViewSchema).events<AuctionEvent>();
 const AuctionCtx = actorContext<typeof AuctionClient>();
+
+function AuctionApp({ auctionId, token }: { auctionId: string; token: string }) {
+  const client = AuctionClient.create({
+    url: `wss://${location.host}/api/auction/${encodeURIComponent(auctionId)}`,
+    accessToken: token,
+  });
+
+  return (
+    <AuctionCtx.Provider client={client}>
+      <Auction />
+    </AuctionCtx.Provider>
+  );
+}
 
 function Auction() {
   const view = AuctionCtx.useView();   // typed from AuctionViewSchema

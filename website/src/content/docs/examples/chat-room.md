@@ -51,33 +51,60 @@ The `.slice(-49)` keeps the last 50 messages — old messages are discarded to b
 
 ## The Client
 
-Each snapshot contains the full message history and online user list. The client re-renders on every update:
+### Vanilla TypeScript
 
-```javascript
-ws.addEventListener("message", (event) => {
-  const msg = JSON.parse(event.data);
-  if (msg.type === "snapshot") {
-    const { messages, onlineCount } = msg.data;
+Use `actorClient()` for typed views and events. Binary delta decoding is handled transparently — the `subscribe` callback always receives the full, merged view:
 
-    document.getElementById("online").textContent = `${onlineCount} online`;
-    document.getElementById("messages").innerHTML = messages
-      .map(m => `<div><b>${m.author}</b>: ${m.text}</div>`)
-      .join("");
-  }
+```typescript
+import { actorClient } from "@actor-kit/client";
+
+type ChatEvent = { type: "SEND_MESSAGE"; text: string };
+
+const ChatClient = actorClient(ChatViewSchema).events<ChatEvent>();
+
+// Get a token
+const { token } = await fetch("/api/token?actorId=general").then(r => r.json());
+
+// Create a runtime connection
+const client = ChatClient.create({
+  url: `ws://localhost:8787/api/chat-room/general`,
+  accessToken: token,
 });
 
-// Send a chat message
-ws.send(JSON.stringify({ type: "SEND_MESSAGE", text: "Hello!" }));
+// view is typed from ChatViewSchema
+client.subscribe((view) => {
+  document.getElementById("online")!.textContent = `${view.onlineCount} online`;
+  document.getElementById("messages")!.innerHTML = view.messages
+    .map(m => `<div><b>${m.author}</b>: ${m.text}</div>`)
+    .join("");
+});
+
+client.send({ type: "SEND_MESSAGE", text: "Hello!" });
 ```
 
-### With React
+### React
 
 ```tsx
 import { actorClient } from "@actor-kit/client";
 import { actorContext } from "@actor-kit/react";
 
+type ChatEvent = { type: "SEND_MESSAGE"; text: string };
+
 const ChatClient = actorClient(ChatViewSchema).events<ChatEvent>();
 const ChatCtx = actorContext<typeof ChatClient>();
+
+function ChatApp({ roomId, token }: { roomId: string; token: string }) {
+  const client = ChatClient.create({
+    url: `wss://${location.host}/api/chat-room/${encodeURIComponent(roomId)}`,
+    accessToken: token,
+  });
+
+  return (
+    <ChatCtx.Provider client={client}>
+      <ChatRoom />
+    </ChatCtx.Provider>
+  );
+}
 
 function ChatRoom() {
   const view = ChatCtx.useView();   // typed from ChatViewSchema

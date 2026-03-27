@@ -110,47 +110,73 @@ export default {
 
 ## 3. Connect from the Browser
 
-```javascript
-// Get a token
-const { token } = await fetch("/api/token?id=my-counter").then(r => r.json());
-
-// Connect via WebSocket
-const ws = new WebSocket(
-  `wss://${location.host}/api/counter/my-counter`,
-  [`token.${token}`]
-);
-
-ws.addEventListener("message", (event) => {
-  const msg = JSON.parse(event.data);
-  if (msg.type === "snapshot") {
-    console.log("Count:", msg.data.count);
-    console.log("Role:", msg.role);
-  }
-});
-
-// Send a message
-ws.send(JSON.stringify({ type: "INCREMENT" }));
-```
-
-Or use the typed client SDK:
+### Vanilla TypeScript
 
 ```typescript
 import { actorClient } from "@actor-kit/client";
 import { CounterView } from "./counter";
 
-const CounterClient = actorClient(CounterView);
+type CounterEvent = { type: "INCREMENT" } | { type: "DECREMENT" };
 
+// Define the client factory (co-locate with your actor definition)
+const CounterClient = actorClient(CounterView).events<CounterEvent>();
+
+// Get a token
+const { token } = await fetch("/api/token?id=my-counter").then(r => r.json());
+
+// Create a runtime connection
 const client = CounterClient.create({
   url: `wss://${location.host}/api/counter/my-counter`,
   accessToken: token,
 });
 
-// view is typed from CounterView — no casting needed
+// Subscribe to typed views — binary delta decoding is handled transparently
 client.subscribe((view) => {
+  // view is typed: { count: number; lastUpdatedBy: string }
   console.log("Count:", view.count);
 });
 
+// Send typed events
 client.send({ type: "INCREMENT" });
+```
+
+### React
+
+```tsx
+import { actorClient } from "@actor-kit/client";
+import { actorContext } from "@actor-kit/react";
+import { CounterView } from "./counter";
+
+type CounterEvent = { type: "INCREMENT" } | { type: "DECREMENT" };
+
+const CounterClient = actorClient(CounterView).events<CounterEvent>();
+const CounterCtx = actorContext<typeof CounterClient>();
+
+function App({ token }: { token: string }) {
+  const client = CounterClient.create({
+    url: `wss://${location.host}/api/counter/my-counter`,
+    accessToken: token,
+  });
+
+  return (
+    <CounterCtx.Provider client={client}>
+      <Counter />
+    </CounterCtx.Provider>
+  );
+}
+
+function Counter() {
+  const view = CounterCtx.useView();   // { count: number; lastUpdatedBy: string } | undefined
+  const send = CounterCtx.useSend();   // (event: CounterEvent) => void
+
+  return (
+    <div>
+      <span>{view?.count ?? "..."}</span>
+      <button onClick={() => send({ type: "INCREMENT" })}>+</button>
+      <button onClick={() => send({ type: "DECREMENT" })}>-</button>
+    </div>
+  );
+}
 ```
 
 ## 4. Deploy
