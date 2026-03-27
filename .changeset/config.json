@@ -1,0 +1,18 @@
+{
+  "$schema": "https://unpkg.com/@changesets/config@3.1.1/schema.json",
+  "changelog": "@changesets/cli/changelog",
+  "commit": false,
+  "fixed": [],
+  "linked": [
+    ["@actor-kit/core", "@actor-kit/worker", "@actor-kit/client", "@actor-kit/react", "@actor-kit/test"]
+  ],
+  "access": "public",
+  "baseBranch": "main",
+  "updateInternalDependencies": "patch",
+  "ignore": [
+    "actor-kit-counter-example",
+    "actor-kit-todo-example",
+    "actor-kit-chat-example",
+    "actor-kit-auction-example"
+  ]
+}

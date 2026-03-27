@@ -17,5 +17,20 @@
   },
   "peerDependencies": {
     "react": ">=18"
-  }
+  },
+  "license": "MIT",
+  "author": "Jonathan Mumm",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/actor-kit/actor-kit.git",
+    "directory": "packages/react"
+  },
+  "homepage": "https://actorkit.dev",
+  "keywords": [
+    "actor",
+    "cloudflare",
+    "durable-objects",
+    "real-time",
+    "websocket"
+  ]
 }

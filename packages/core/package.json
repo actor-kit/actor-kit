@@ -14,5 +14,20 @@
   },
   "dependencies": {
     "zod": "^3.24.0"
-  }
+  },
+  "license": "MIT",
+  "author": "Jonathan Mumm",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/actor-kit/actor-kit.git",
+    "directory": "packages/core"
+  },
+  "homepage": "https://actorkit.dev",
+  "keywords": [
+    "actor",
+    "cloudflare",
+    "durable-objects",
+    "real-time",
+    "websocket"
+  ]
 }

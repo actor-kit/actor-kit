@@ -23,5 +23,20 @@
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20250310.0"
-  }
+  },
+  "license": "MIT",
+  "author": "Jonathan Mumm",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/actor-kit/actor-kit.git",
+    "directory": "packages/worker"
+  },
+  "homepage": "https://actorkit.dev",
+  "keywords": [
+    "actor",
+    "cloudflare",
+    "durable-objects",
+    "real-time",
+    "websocket"
+  ]
 }
