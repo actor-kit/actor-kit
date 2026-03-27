@@ -53,7 +53,7 @@ function computeChecksum(json: string): string {
 
 describe("Reconnection with checksum (integration)", () => {
   it("reconnect with matching checksum gets ack (no data resent)", async () => {
-    const actorId = "reconnect-1";
+    const actorId = `reconnect-1-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
     const id = env.COUNTER.idFromName(actorId);
     const stub = env.COUNTER.get(id);
     await stub.spawn({ actorId, caller: "u1", callerType: "user", input: {} });
@@ -92,7 +92,7 @@ describe("Reconnection with checksum (integration)", () => {
   });
 
   it("reconnect with stale checksum gets new snapshot", async () => {
-    const actorId = "reconnect-2";
+    const actorId = `reconnect-2-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
     const id = env.COUNTER.idFromName(actorId);
     const stub = env.COUNTER.get(id);
     await stub.spawn({ actorId, caller: "u1", callerType: "user", input: {} });

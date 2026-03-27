@@ -6,7 +6,7 @@ const SECRET = "test-secret-for-integration-tests-only";
 
 describe("Error feedback via WebSocket (integration)", () => {
   it("sends __error frame when message is rejected (wrong role)", async () => {
-    const actorId = "error-fb-1";
+    const actorId = `error-fb-1-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
     const id = env.COUNTER.idFromName(actorId);
     const stub = env.COUNTER.get(id);
     await stub.spawn({ actorId, caller: "u1", callerType: "user", input: {} });
@@ -58,7 +58,7 @@ describe("Error feedback via WebSocket (integration)", () => {
   });
 
   it("sends __error frame for invalid payload", async () => {
-    const actorId = "error-fb-2";
+    const actorId = `error-fb-2-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
     const id = env.COUNTER.idFromName(actorId);
     const stub = env.COUNTER.get(id);
     await stub.spawn({ actorId, caller: "u1", callerType: "user", input: {} });

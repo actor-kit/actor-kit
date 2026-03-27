@@ -48,7 +48,7 @@ function waitForFrame(ws: WebSocket): Promise<{ type: number; payload: Uint8Arra
 
 describe("Delta sync end-to-end (integration)", () => {
   it("first message after connect is a SNAPSHOT, second is a DELTA", async () => {
-    const actorId = "delta-sync-1";
+    const actorId = `delta-sync-1-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
     const id = env.COUNTER.idFromName(actorId);
     const stub = env.COUNTER.get(id);
     await stub.spawn({ actorId, caller: "u1", callerType: "user", input: {} });
@@ -78,7 +78,7 @@ describe("Delta sync end-to-end (integration)", () => {
   });
 
   it("second update is a DELTA frame, not a SNAPSHOT", async () => {
-    const actorId = "delta-sync-type";
+    const actorId = `delta-sync-type-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
     const id = env.COUNTER.idFromName(actorId);
     const stub = env.COUNTER.get(id);
     await stub.spawn({ actorId, caller: "u1", callerType: "user", input: {} });
@@ -109,7 +109,7 @@ describe("Delta sync end-to-end (integration)", () => {
   });
 
   it("multiple deltas accumulate correctly", async () => {
-    const actorId = "delta-sync-multi";
+    const actorId = `delta-sync-multi-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
     const id = env.COUNTER.idFromName(actorId);
     const stub = env.COUNTER.get(id);
     await stub.spawn({ actorId, caller: "u1", callerType: "user", input: {} });

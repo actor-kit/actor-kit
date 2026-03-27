@@ -49,7 +49,7 @@ function waitForBinaryMessage(ws: WebSocket): Promise<ArrayBuffer> {
 
 describe("Counter DO WebSocket (binary)", () => {
   it("connects and receives binary snapshot frame", async () => {
-    const actorId = "ws-binary-test";
+    const actorId = `ws-binary-test-${Date.now()}`;
     const id = env.COUNTER.idFromName(actorId);
     const stub = env.COUNTER.get(id);
 
@@ -77,7 +77,7 @@ describe("Counter DO WebSocket (binary)", () => {
   });
 
   it("receives binary delta after send", async () => {
-    const actorId = "ws-binary-update";
+    const actorId = `ws-binary-update-${Date.now()}`;
     const id = env.COUNTER.idFromName(actorId);
     const stub = env.COUNTER.get(id);
 
@@ -110,7 +110,7 @@ describe("Counter DO WebSocket (binary)", () => {
   });
 
   it("rejects WebSocket without auth token", async () => {
-    const actorId = "ws-noauth-binary";
+    const actorId = `ws-noauth-${Date.now()}`;
     const id = env.COUNTER.idFromName(actorId);
     const stub = env.COUNTER.get(id);
 

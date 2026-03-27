@@ -6,7 +6,7 @@ const SECRET = "test-secret-for-integration-tests-only";
 
 describe("Tick game loop (integration)", () => {
   it("tick increments count while WebSocket is connected", async () => {
-    const actorId = "tick-1";
+    const actorId = `tick-1-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
     const id = env.TIMER_ACTOR.idFromName(actorId);
     const stub = env.TIMER_ACTOR.get(id);
     await stub.spawn({ actorId, caller: "u1", callerType: "user", input: {} });
