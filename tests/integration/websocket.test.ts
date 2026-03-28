@@ -1,31 +1,21 @@
 import { env } from "cloudflare:test";
 import { applyDelta, decode, FrameType, parseFrame, schema, string, uint32 } from "@actor-kit/core";
-import { createAccessToken } from "@actor-kit/worker/token";
 import { describe, expect, it } from "vitest";
-
-const SECRET = "test-secret-for-integration-tests-only";
 
 // Must match the CounterView from the test worker
 const CounterView = schema({ count: uint32, lastCaller: string });
 
-async function connectWs(
+function connectWs(
   stub: DurableObjectStub,
   actorId: string,
   callerId: string,
   callerType: "user" | "service" = "user",
 ) {
-  const token = await createAccessToken({
-    actorType: "counter",
-    actorId,
-    callerId,
-    callerType,
-    secret: SECRET,
-  });
-
   return stub.fetch(`http://localhost/api/counter/${actorId}`, {
     headers: {
       Upgrade: "websocket",
-      "Sec-WebSocket-Protocol": `token.${token}`,
+      "X-Actor-Kit-Caller-Id": callerId,
+      "X-Actor-Kit-Caller-Type": callerType,
     },
   });
 }
@@ -109,7 +99,7 @@ describe("Counter DO WebSocket (binary)", () => {
     await new Promise((r) => setTimeout(r, 50));
   });
 
-  it("rejects WebSocket without auth token", async () => {
+  it("rejects WebSocket without identity headers or token", async () => {
     const actorId = `ws-noauth-${Date.now()}`;
     const id = env.COUNTER.idFromName(actorId);
     const stub = env.COUNTER.get(id);

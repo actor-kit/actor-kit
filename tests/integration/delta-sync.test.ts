@@ -1,24 +1,15 @@
 import { env } from "cloudflare:test";
 import { applyDelta, decode, FrameType, parseFrame, schema, string, uint32 } from "@actor-kit/core";
-import { createAccessToken } from "@actor-kit/worker/token";
 import { describe, expect, it } from "vitest";
 
-const SECRET = "test-secret-for-integration-tests-only";
 const CounterView = schema({ count: uint32, lastCaller: string });
 
 async function connectWs(stub: DurableObjectStub, actorId: string, callerId: string) {
-  const token = await createAccessToken({
-    actorType: "counter",
-    actorId,
-    callerId,
-    callerType: "user",
-    secret: SECRET,
-  });
-
   const response = await stub.fetch(`http://localhost/api/counter/${actorId}`, {
     headers: {
       Upgrade: "websocket",
-      "Sec-WebSocket-Protocol": `token.${token}`,
+      "X-Actor-Kit-Caller-Id": callerId,
+      "X-Actor-Kit-Caller-Type": "user",
     },
   });
 

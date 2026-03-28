@@ -1,8 +1,5 @@
 import { env } from "cloudflare:test";
-import { createAccessToken } from "@actor-kit/worker/token";
 import { describe, expect, it } from "vitest";
-
-const SECRET = "test-secret-for-integration-tests-only";
 
 describe("Error feedback via WebSocket (integration)", () => {
   it("sends __error frame when message is rejected (wrong role)", async () => {
@@ -11,18 +8,11 @@ describe("Error feedback via WebSocket (integration)", () => {
     const stub = env.COUNTER.get(id);
     await stub.spawn({ actorId, caller: "u1", callerType: "user", input: {} });
 
-    const token = await createAccessToken({
-      actorType: "counter",
-      actorId,
-      callerId: "u1",
-      callerType: "user",
-      secret: SECRET,
-    });
-
     const response = await stub.fetch(`http://localhost/api/counter/${actorId}`, {
       headers: {
         Upgrade: "websocket",
-        "Sec-WebSocket-Protocol": `token.${token}`,
+        "X-Actor-Kit-Caller-Id": "u1",
+        "X-Actor-Kit-Caller-Type": "user",
       },
     });
 
@@ -63,18 +53,11 @@ describe("Error feedback via WebSocket (integration)", () => {
     const stub = env.COUNTER.get(id);
     await stub.spawn({ actorId, caller: "u1", callerType: "user", input: {} });
 
-    const token = await createAccessToken({
-      actorType: "counter",
-      actorId,
-      callerId: "u1",
-      callerType: "user",
-      secret: SECRET,
-    });
-
     const response = await stub.fetch(`http://localhost/api/counter/${actorId}`, {
       headers: {
         Upgrade: "websocket",
-        "Sec-WebSocket-Protocol": `token.${token}`,
+        "X-Actor-Kit-Caller-Id": "u1",
+        "X-Actor-Kit-Caller-Type": "user",
       },
     });
 

@@ -1,8 +1,5 @@
 import { env } from "cloudflare:test";
-import { createAccessToken } from "@actor-kit/worker/token";
 import { describe, expect, it } from "vitest";
-
-const SECRET = "test-secret-for-integration-tests-only";
 
 describe("Tick game loop (integration)", () => {
   it("tick increments count while WebSocket is connected", async () => {
@@ -15,19 +12,12 @@ describe("Tick game loop (integration)", () => {
     const before = await stub.getSnapshot("u1", "user");
     expect((before.snapshot as { count: number }).count).toBe(0);
 
-    // Connect via WebSocket (this starts the tick)
-    const token = await createAccessToken({
-      actorType: "timer",
-      actorId,
-      callerId: "u1",
-      callerType: "user",
-      secret: SECRET,
-    });
-
+    // Connect via WebSocket using identity headers (this starts the tick)
     const response = await stub.fetch(`http://localhost/api/timer/${actorId}`, {
       headers: {
         Upgrade: "websocket",
-        "Sec-WebSocket-Protocol": `token.${token}`,
+        "X-Actor-Kit-Caller-Id": "u1",
+        "X-Actor-Kit-Caller-Type": "user",
       },
     });
 
