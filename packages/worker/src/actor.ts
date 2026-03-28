@@ -1105,3 +1105,36 @@ export function actor(
     }
   };
 }
+
+// --- createActorClass() ---
+
+/**
+ * Runtime type guard for ActorDef.
+ * Validates that a definition has the required shape for the actor runtime.
+ * This bridges the gap between the fully-typed contract (with concrete state types)
+ * and the runtime interface (which uses bivariant unknown-typed signatures).
+ */
+function isActorDef(def: unknown): def is ActorDef {
+  if (typeof def !== "object" || def === null) return false;
+  if (!("input" in def) || typeof def.input !== "object" || def.input === null) return false;
+  if (!("init" in def) || typeof def.init !== "function") return false;
+  if (!("roles" in def) || typeof def.roles !== "object" || def.roles === null) return false;
+  if (!("views" in def) || typeof def.views !== "object" || def.views === null) return false;
+  return true;
+}
+
+/**
+ * Convert a typed contract (from defineActor) into a Durable Object class.
+ *
+ * Usage:
+ *   const Counter = defineActor("counter", { init, roles, messages, views });
+ *   export const CounterDO = createActorClass(Counter);
+ */
+export function createActorClass(contract: { readonly name: string; readonly def: unknown }): {
+  new (ctx: DurableObjectState, env: Record<string, unknown>): DurableObject;
+} {
+  if (!isActorDef(contract.def)) {
+    throw new Error("createActorClass: contract.def must have init, roles, and views");
+  }
+  return actor(contract.name, contract.def);
+}

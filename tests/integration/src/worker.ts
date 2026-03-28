@@ -1,5 +1,5 @@
 import { boolean, schema, string, uint32, view } from "@actor-kit/core";
-import { actor, message } from "@actor-kit/worker";
+import { actor, createActorClass, defineActor, message } from "@actor-kit/worker";
 import { z } from "zod";
 
 // --- Counter actor ---
@@ -134,6 +134,54 @@ export const Auction = actor("auction", {
     })),
   },
 });
+
+// --- Counter via defineActor + createActorClass ---
+
+type CounterV3State = { count: number; lastCaller: string | null };
+
+const CounterV3View = schema({ count: uint32, lastCaller: string });
+
+const v3Increment = message(
+  z.object({ amount: z.number().int().positive() }),
+  (state: CounterV3State, { amount }, { caller }) => ({
+    count: state.count + amount,
+    lastCaller: caller,
+  }),
+);
+
+const v3Decrement = message(
+  z.object({ amount: z.number().int().positive() }),
+  (state: CounterV3State, { amount }, { caller }) => ({
+    count: state.count - amount,
+    lastCaller: caller,
+  }),
+);
+
+const CounterV3Contract = defineActor("counter-v3", {
+  input: z.object({}),
+  init: (): CounterV3State => ({ count: 0, lastCaller: null }),
+  roles: {
+    admin: (_state: CounterV3State, _caller: string, { callerType }: { callerType: "user" | "service" }) =>
+      callerType === "service",
+    user: () => true,
+  },
+  messages: {
+    admin: { INCREMENT: v3Increment, DECREMENT: v3Decrement },
+    user: { INCREMENT: v3Increment },
+  },
+  views: {
+    admin: view(CounterV3View, (state: CounterV3State) => ({
+      count: state.count,
+      lastCaller: state.lastCaller ?? "",
+    })),
+    user: view(CounterV3View, (state: CounterV3State) => ({
+      count: state.count,
+      lastCaller: state.lastCaller ?? "",
+    })),
+  },
+});
+
+export const CounterV3 = createActorClass(CounterV3Contract);
 
 // --- Worker entrypoint ---
 

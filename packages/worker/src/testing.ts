@@ -5,6 +5,9 @@
 export { createAccessToken, getCallerFromToken } from "./auth";
 // Callback builder
 export { callback } from "./callback";
+// Contract builder
+export type { ActorContract } from "./define";
+export { defineActor } from "./define";
 // Message builder
 export { message } from "./message";
 // Actor references
