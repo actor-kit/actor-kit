@@ -21,7 +21,7 @@ import { type ActorClient, createActorClient } from "./client";
 /** Runtime options for creating a client connection. */
 export interface CreateOptions {
   url: string;
-  accessToken: string;
+  accessToken?: string | undefined;
   roleNames?: string[];
   WebSocketImpl?: typeof WebSocket;
   onRedirect?: (target: { actorType: string; actorId: string }) => void;

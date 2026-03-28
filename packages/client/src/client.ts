@@ -28,7 +28,7 @@ export interface ActorClient<
 interface ClientOptions {
   /** Full WebSocket URL (e.g., "wss://example.com/game/zones/forest") */
   url: string;
-  accessToken: string;
+  accessToken?: string | undefined;
   /** Schema for decoding binary frames. If not provided, falls back to JSON. */
   viewSchema?: SchemaDefinition<Record<string, FieldDescriptor>> | undefined;
   /** Per-role schemas for binary decoding (contract-derived). Takes precedence over viewSchema. */
@@ -199,7 +199,7 @@ export function createActorClient(options: ClientOptions): ActorClient<unknown> 
   }
 
   function connect() {
-    ws = new WebSocketImpl(url, [`token.${accessToken}`]);
+    ws = accessToken ? new WebSocketImpl(url, [`token.${accessToken}`]) : new WebSocketImpl(url);
 
     // Request ArrayBuffer for binary frames (browsers default to Blob)
     if ("binaryType" in ws) {
