@@ -65,7 +65,7 @@ function clientHTML(env: Env): string {
   </style>
 </head>
 <body>
-  <h1>Actor Kit v2 Counter</h1>
+  <h1>Actor Kit Counter</h1>
   <div id="count">—</div>
   <div id="last-updated"></div>
   <div>

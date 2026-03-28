@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { array, schema, string, uint32, view } from "@actor-kit/core";
-import { actor, message } from "@actor-kit/worker";
+import { createActorClass, defineActor, message } from "@actor-kit/worker";
 
 type ChatMessage = { id: string; author: string; text: string; timestamp: number };
 type ChatState = {
@@ -14,18 +14,7 @@ const ChatViewSchema = schema({
   onlineCount: uint32,
 });
 
-const sendMessage = message(
-  z.object({ text: z.string().min(1).max(500) }),
-  (state: ChatState, { text }, { caller }) => ({
-    ...state,
-    messages: [
-      ...state.messages.slice(-49), // Keep last 50 messages
-      { id: crypto.randomUUID(), author: caller, text, timestamp: Date.now() },
-    ],
-  }),
-);
-
-export const ChatRoom = actor("chat-room", {
+export const ChatRoomContract = defineActor("chat-room", {
   input: z.object({}),
   init: (): ChatState => ({ messages: [], onlineUsers: [] }),
 
@@ -34,7 +23,16 @@ export const ChatRoom = actor("chat-room", {
   },
 
   messages: {
-    user: { SEND_MESSAGE: sendMessage },
+    SEND_MESSAGE: message(
+      z.object({ text: z.string().min(1).max(500) }),
+      (state: ChatState, { text }, { caller }) => ({
+        ...state,
+        messages: [
+          ...state.messages.slice(-49), // Keep last 50 messages
+          { id: crypto.randomUUID(), author: caller, text, timestamp: Date.now() },
+        ],
+      }),
+    ),
   },
 
   views: {
@@ -48,17 +46,22 @@ export const ChatRoom = actor("chat-room", {
     })),
   },
 
-  on: {
-    connect: (state: unknown, caller: unknown) => {
-      const s = state as ChatState;
-      const c = caller as string;
-      if (s.onlineUsers.includes(c)) return s;
-      return { ...s, onlineUsers: [...s.onlineUsers, c] };
+  lifecycle: {
+    connect: (
+      state: ChatState,
+      { caller }: { caller: string; callerType: "user" | "service" },
+    ) => {
+      if (state.onlineUsers.includes(caller)) return state;
+      return { ...state, onlineUsers: [...state.onlineUsers, caller] };
     },
-    disconnect: (state: unknown, caller: unknown) => {
-      const s = state as ChatState;
-      const c = caller as string;
-      return { ...s, onlineUsers: s.onlineUsers.filter((u) => u !== c) };
-    },
+    disconnect: (
+      state: ChatState,
+      { caller }: { caller: string; callerType: "user" | "service" },
+    ) => ({
+      ...state,
+      onlineUsers: state.onlineUsers.filter((u) => u !== caller),
+    }),
   },
 });
+
+export const ChatRoom = createActorClass(ChatRoomContract);

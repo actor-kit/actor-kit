@@ -3,7 +3,7 @@ import { expect, test } from "@playwright/test";
 test.describe("Counter Example", () => {
   test("page loads with title and initial state", async ({ page }) => {
     await page.goto("/");
-    await expect(page.locator("h1")).toHaveText("Actor Kit v2 Counter");
+    await expect(page.locator("h1")).toHaveText("Actor Kit Counter");
     await expect(page.locator("#count")).toBeVisible();
     await expect(page.locator("#increment")).toBeVisible();
     await expect(page.locator("#decrement")).toBeVisible();
