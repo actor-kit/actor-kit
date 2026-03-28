@@ -1,10 +1,9 @@
-import { createAccessToken } from "@actor-kit/worker/token";
+import { withCallerIdentity } from "@actor-kit/worker";
 import { ChatRoom } from "./chat";
 
 export { ChatRoom };
 
 interface Env {
-  ACTOR_KIT_SECRET: string;
   CHAT_ROOM: DurableObjectNamespace;
 }
 
@@ -16,25 +15,21 @@ export default {
       return new Response(clientHTML(), { headers: { "Content-Type": "text/html" } });
     }
 
-    if (url.pathname === "/api/token") {
-      const roomId = url.searchParams.get("room") ?? "general";
-      const callerId = url.searchParams.get("user") ?? `anon-${crypto.randomUUID().slice(0, 6)}`;
-      const token = await createAccessToken({
-        actorType: "chat-room",
-        actorId: roomId,
-        callerId,
-        callerType: "user",
-        secret: env.ACTOR_KIT_SECRET,
-      });
-      return Response.json({ token, callerId, roomId });
-    }
-
     if (url.pathname.startsWith("/api/chat-room/")) {
       const roomId = url.pathname.split("/")[3] ?? "general";
+
+      // Authenticate the caller.
+      // PRODUCTION: validate a session cookie, OAuth token, or similar credential here.
+      // This demo uses a query param for simplicity — NOT safe for production.
+      // Origin validation (DO-level) provides CSRF defense for deployed apps.
+      const callerId = url.searchParams.get("user") ?? `anon-${crypto.randomUUID().slice(0, 6)}`;
+
       const id = env.CHAT_ROOM.idFromName(roomId);
       const stub = env.CHAT_ROOM.get(id);
       await stub.spawn({ actorId: roomId, caller: "system", callerType: "service", input: {} });
-      return stub.fetch(request);
+
+      const stamped = withCallerIdentity(request, { callerId, callerType: "user" });
+      return stub.fetch(stamped);
     }
 
     return new Response("Not found", { status: 404 });
@@ -73,17 +68,14 @@ function clientHTML(): string {
     async function init() {
       const params = new URLSearchParams(location.search);
       const room = params.get('room') || 'general';
-      const user = params.get('user') || undefined;
+      const callerId = params.get('user') || 'anon-' + crypto.randomUUID().slice(0, 6);
 
-      const tokenUrl = '/api/token?room=' + room + (user ? '&user=' + user : '');
-      const res = await fetch(tokenUrl);
-      const { token, callerId, roomId } = await res.json();
-
+      // Connect WebSocket — Worker stamps identity via withCallerIdentity
       const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
-      ws = new WebSocket(protocol + '//' + location.host + '/api/chat-room/' + roomId, ['token.' + token]);
+      ws = new WebSocket(protocol + '//' + location.host + '/api/chat-room/' + room + '?user=' + encodeURIComponent(callerId));
 
       ws.addEventListener('open', () => {
-        document.getElementById('info').textContent = callerId + ' in #' + roomId;
+        document.getElementById('info').textContent = callerId + ' in #' + room;
       });
 
       ws.addEventListener('message', (event) => {
@@ -92,7 +84,7 @@ function clientHTML(): string {
             const msg = JSON.parse(event.data);
             if (msg.type === 'snapshot') {
               renderMessages(msg.data.messages || []);
-              document.getElementById('info').textContent = callerId + ' in #' + roomId + ' (' + (msg.data.onlineCount || 0) + ' online)';
+              document.getElementById('info').textContent = callerId + ' in #' + room + ' (' + (msg.data.onlineCount || 0) + ' online)';
             }
           } catch {}
         }

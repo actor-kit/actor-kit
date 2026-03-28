@@ -1,10 +1,9 @@
-import { createAccessToken } from "@actor-kit/worker/token";
+import { withCallerIdentity } from "@actor-kit/worker";
 import { TodoList } from "./todo";
 
 export { TodoList };
 
 interface Env {
-  ACTOR_KIT_SECRET: string;
   TODO_LIST: DurableObjectNamespace;
 }
 
@@ -16,29 +15,24 @@ export default {
       return new Response(clientHTML(), { headers: { "Content-Type": "text/html" } });
     }
 
-    if (url.pathname === "/api/token") {
-      const listId = url.searchParams.get("listId") ?? "default";
-      const callerId = url.searchParams.get("callerId") ?? `user-${crypto.randomUUID().slice(0, 8)}`;
-      const token = await createAccessToken({
-        actorType: "todo-list",
-        actorId: listId,
-        callerId,
-        callerType: "user",
-        secret: env.ACTOR_KIT_SECRET,
-      });
-      return Response.json({ token, callerId, listId });
-    }
-
     if (url.pathname.startsWith("/api/todo-list/")) {
       const listId = url.pathname.split("/")[3] ?? "default";
+
+      // Authenticate the caller.
+      // PRODUCTION: validate a session cookie, OAuth token, or similar credential here.
+      // This demo uses a query param for simplicity — NOT safe for production.
+      // Origin validation (DO-level) provides CSRF defense for deployed apps.
+      const callerId = url.searchParams.get("callerId") ?? `user-${crypto.randomUUID().slice(0, 8)}`;
+
       const id = env.TODO_LIST.idFromName(listId);
       const stub = env.TODO_LIST.get(id);
 
       // Spawn with creator from query param (or first caller)
-      const creator = url.searchParams.get("creator") ?? "system";
+      const creator = url.searchParams.get("creator") ?? callerId;
       await stub.spawn({ actorId: listId, caller: creator, callerType: "user", input: { creator } });
 
-      return stub.fetch(request);
+      const stamped = withCallerIdentity(request, { callerId, callerType: "user" });
+      return stub.fetch(stamped);
     }
 
     return new Response("Not found", { status: 404 });
@@ -83,20 +77,17 @@ function clientHTML(): string {
     async function init() {
       const params = new URLSearchParams(location.search);
       const listId = params.get('list') || 'default';
-      const callerId = params.get('user') || undefined;
+      const callerId = params.get('user') || 'user-' + crypto.randomUUID().slice(0, 8);
 
-      const tokenUrl = '/api/token?listId=' + listId + (callerId ? '&callerId=' + callerId : '');
-      const res = await fetch(tokenUrl);
-      const { token, callerId: actualCallerId } = await res.json();
+      document.getElementById('status').textContent = 'Connecting as ' + callerId + '...';
 
-      document.getElementById('status').textContent = 'Connecting as ' + actualCallerId + '...';
-
+      // Connect WebSocket — Worker stamps identity via withCallerIdentity
       const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
-      const wsUrl = protocol + '//' + location.host + '/api/todo-list/' + listId + '?creator=' + actualCallerId;
-      ws = new WebSocket(wsUrl, ['token.' + token]);
+      const wsUrl = protocol + '//' + location.host + '/api/todo-list/' + listId + '?callerId=' + encodeURIComponent(callerId) + '&creator=' + encodeURIComponent(callerId);
+      ws = new WebSocket(wsUrl);
 
       ws.addEventListener('open', () => {
-        document.getElementById('status').textContent = 'Connected as ' + actualCallerId;
+        document.getElementById('status').textContent = 'Connected as ' + callerId;
       });
 
       ws.addEventListener('message', (event) => {

@@ -1,10 +1,9 @@
-import { createAccessToken } from "@actor-kit/worker/token";
+import { withCallerIdentity } from "@actor-kit/worker";
 import { Counter } from "./counter";
 
 export { Counter };
 
 interface Env {
-  ACTOR_KIT_SECRET: string;
   COUNTER: DurableObjectNamespace;
 }
 
@@ -14,43 +13,37 @@ export default {
 
     // Serve the client page
     if (url.pathname === "/" || url.pathname === "/index.html") {
-      return new Response(clientHTML(env), {
+      return new Response(clientHTML(), {
         headers: { "Content-Type": "text/html" },
       });
-    }
-
-    // Create access token for WebSocket auth
-    if (url.pathname === "/api/token") {
-      const actorId = url.searchParams.get("actorId") ?? "default";
-      const callerId = url.searchParams.get("callerId") ?? `user-${crypto.randomUUID().slice(0, 8)}`;
-      const token = await createAccessToken({
-        actorType: "counter",
-        actorId,
-        callerId,
-        callerType: "user",
-        secret: env.ACTOR_KIT_SECRET,
-      });
-      return Response.json({ token, callerId, actorId });
     }
 
     // Route WebSocket connections to the Counter DO
     if (url.pathname.startsWith("/api/counter/")) {
       const actorId = url.pathname.split("/")[3] ?? "default";
+
+      // Authenticate the caller.
+      // PRODUCTION: validate a session cookie, OAuth token, or similar credential here.
+      // This demo uses a query param for simplicity — NOT safe for production.
+      // Origin validation (DO-level) provides CSRF defense for deployed apps.
+      const callerId = url.searchParams.get("callerId") ?? `user-${crypto.randomUUID().slice(0, 8)}`;
+
       const id = env.COUNTER.idFromName(actorId);
       const stub = env.COUNTER.get(id);
 
       // Spawn idempotently
       await stub.spawn({ actorId, caller: "system", callerType: "service", input: {} });
 
-      // Forward the request to the DO
-      return stub.fetch(request);
+      // Stamp verified identity and forward to DO
+      const stamped = withCallerIdentity(request, { callerId, callerType: "user" });
+      return stub.fetch(stamped);
     }
 
     return new Response("Not found", { status: 404 });
   },
 };
 
-function clientHTML(env: Env): string {
+function clientHTML(): string {
   return `<!DOCTYPE html>
 <html>
 <head>
@@ -79,15 +72,14 @@ function clientHTML(env: Env): string {
     let currentView;
 
     async function init() {
-      // Get access token
-      const actorId = new URLSearchParams(location.search).get('id') || 'default';
-      const res = await fetch('/api/token?actorId=' + actorId);
-      const { token, callerId } = await res.json();
+      const params = new URLSearchParams(location.search);
+      const actorId = params.get('id') || 'default';
+      const callerId = params.get('user') || 'user-' + crypto.randomUUID().slice(0, 8);
       document.getElementById('status').textContent = 'Connecting as ' + callerId + '...';
 
-      // Connect WebSocket
+      // Connect WebSocket — Worker stamps identity via withCallerIdentity
       const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
-      ws = new WebSocket(protocol + '//' + location.host + '/api/counter/' + actorId, ['token.' + token]);
+      ws = new WebSocket(protocol + '//' + location.host + '/api/counter/' + actorId + '?callerId=' + encodeURIComponent(callerId));
 
       ws.addEventListener('open', () => {
         document.getElementById('status').textContent = 'Connected as ' + callerId;

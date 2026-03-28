@@ -1,10 +1,9 @@
-import { createAccessToken } from "@actor-kit/worker/token";
+import { withCallerIdentity } from "@actor-kit/worker";
 import { Auction } from "./auction";
 
 export { Auction };
 
 interface Env {
-  ACTOR_KIT_SECRET: string;
   AUCTION: DurableObjectNamespace;
 }
 
@@ -16,26 +15,22 @@ export default {
       return new Response(clientHTML(), { headers: { "Content-Type": "text/html" } });
     }
 
-    if (url.pathname === "/api/token") {
-      const auctionId = url.searchParams.get("auction") ?? "default";
-      const callerId = url.searchParams.get("user") ?? `bidder-${crypto.randomUUID().slice(0, 6)}`;
-      const token = await createAccessToken({
-        actorType: "auction",
-        actorId: auctionId,
-        callerId,
-        callerType: "user",
-        secret: env.ACTOR_KIT_SECRET,
-      });
-      return Response.json({ token, callerId, auctionId });
-    }
-
     if (url.pathname.startsWith("/api/auction/")) {
       const auctionId = url.pathname.split("/")[3] ?? "default";
       const item = url.searchParams.get("item") ?? "Mystery Item";
+
+      // Authenticate the caller.
+      // PRODUCTION: validate a session cookie, OAuth token, or similar credential here.
+      // This demo uses a query param for simplicity — NOT safe for production.
+      // Origin validation (DO-level) provides CSRF defense for deployed apps.
+      const callerId = url.searchParams.get("user") ?? `bidder-${crypto.randomUUID().slice(0, 6)}`;
+
       const id = env.AUCTION.idFromName(auctionId);
       const stub = env.AUCTION.get(id);
       await stub.spawn({ actorId: auctionId, caller: "system", callerType: "service", input: { item } });
-      return stub.fetch(request);
+
+      const stamped = withCallerIdentity(request, { callerId, callerType: "user" });
+      return stub.fetch(stamped);
     }
 
     return new Response("Not found", { status: 404 });
@@ -80,17 +75,13 @@ function clientHTML(): string {
     async function init() {
       const params = new URLSearchParams(location.search);
       const auction = params.get('auction') || 'default';
-      const user = params.get('user') || undefined;
+      const callerId = params.get('user') || 'bidder-' + crypto.randomUUID().slice(0, 6);
       const item = params.get('item') || 'Mystery Item';
 
-      const tokenUrl = '/api/token?auction=' + auction + (user ? '&user=' + user : '');
-      const res = await fetch(tokenUrl);
-      const { token, callerId } = await res.json();
-
+      // Connect WebSocket — Worker stamps identity via withCallerIdentity
       const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
       ws = new WebSocket(
-        protocol + '//' + location.host + '/api/auction/' + auction + '?item=' + encodeURIComponent(item),
-        ['token.' + token]
+        protocol + '//' + location.host + '/api/auction/' + auction + '?item=' + encodeURIComponent(item) + '&user=' + encodeURIComponent(callerId)
       );
 
       ws.addEventListener('open', () => {
