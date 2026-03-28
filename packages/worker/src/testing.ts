@@ -6,6 +6,8 @@ export { createAccessToken, getCallerFromToken } from "./auth";
 // Contract builder
 export type { ActorContract } from "./define";
 export { defineActor } from "./define";
+// Identity (Worker-trust model)
+export { withCallerIdentity } from "./identity";
 // Message builder
 export { message } from "./message";
 // Actor references
