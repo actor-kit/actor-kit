@@ -37,7 +37,7 @@ import type { Effect, MessageContext, RequestConfig } from "./message";
 interface ActorMessageSlot {
   readonly schema: z.ZodType;
   handler(state: unknown, payload: unknown, ctx: unknown): unknown;
-  guard?(state: unknown): boolean; // bivariant method signature
+  guard?(state: unknown, payload: unknown, ctx: unknown): boolean; // bivariant method signature
 }
 
 interface ActorDef {

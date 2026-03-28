@@ -29,7 +29,7 @@ interface RoutableMessage<TState> {
   readonly schema: z.ZodType;
   // Method signature (bivariant in --strict) instead of property signature (contravariant)
   handler(state: TState, payload: unknown, ctx: MessageContext): unknown;
-  guard?(state: TState): boolean;
+  guard?(state: TState, payload: unknown, ctx: MessageContext): boolean;
 }
 
 // --- Router ---
@@ -66,16 +66,16 @@ export async function routeMessage<TState>(
     };
   }
 
-  // 5. Evaluate guard
-  if (messageDef.guard !== undefined && !messageDef.guard(state)) {
-    return { ok: false, error: "guard_failed" };
-  }
-
-  // 6. Build full context
+  // 5. Build full context (before guard so guards get ctx)
   const ctx: MessageContext = {
     ...ctxBase,
     role,
   };
+
+  // 6. Evaluate guard with (state, payload, ctx)
+  if (messageDef.guard !== undefined && !messageDef.guard(state, parseResult.data, ctx)) {
+    return { ok: false, error: "guard_failed" };
+  }
 
   // 7. Call handler — payload is Zod-validated, handler is correctly typed at definition site
   const nextState = await (messageDef.handler(state, parseResult.data, ctx) as TState | Promise<TState>);

@@ -63,10 +63,21 @@ export interface MessageContext<TEnv = unknown> {
   readonly request: RequestFn;
 }
 
+// --- Guard context ---
+
+/** Context available to guards — same as MessageContext but without request (guards are pure predicates). */
+export interface GuardContext<TEnv = unknown> {
+  readonly role: string;
+  readonly caller: string;
+  readonly callerType: "user" | "service";
+  readonly env: TEnv;
+  readonly emit: EmitFn;
+}
+
 // --- MessageDef ---
 
 export interface MessageDef<TState = unknown, TPayload = unknown, TEnv = unknown> {
   readonly schema: z.ZodType<TPayload>;
   readonly handler: (state: TState, payload: TPayload, ctx: MessageContext<TEnv>) => TState | Promise<TState>;
-  readonly guard?: (state: TState) => boolean;
+  readonly guard?: (state: TState, payload: TPayload, ctx: GuardContext<TEnv>) => boolean;
 }

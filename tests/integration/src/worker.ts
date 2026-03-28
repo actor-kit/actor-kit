@@ -183,6 +183,55 @@ const CounterV3Contract = defineActor("counter-v3", {
 
 export const CounterV3 = createActorClass(CounterV3Contract);
 
+// --- Flat-message counter via defineActor + createActorClass (v3 flat messages) ---
+
+type FlatCounterState = { count: number; ownerId: string };
+
+const FlatCounterView = schema({ count: uint32 });
+
+const flatIncrement = message(
+  z.object({ amount: z.number().int().positive() }),
+  (state: FlatCounterState, { amount }) => ({
+    ...state,
+    count: state.count + amount,
+  }),
+);
+
+const flatAdminReset = message(z.object({}), {
+  guard: (_state: FlatCounterState, _payload: Record<string, never>, ctx: { role: string }) => ctx.role === "admin",
+  handler: (_state: FlatCounterState) => ({ count: 0, ownerId: "" }),
+});
+
+const flatLimitedAdd = message(z.object({ amount: z.number().int().positive() }), {
+  guard: (state: FlatCounterState, { amount }: { amount: number }, _ctx: { role: string }) =>
+    state.count + amount <= 100,
+  handler: (state: FlatCounterState, { amount }) => ({
+    ...state,
+    count: state.count + amount,
+  }),
+});
+
+const FlatCounterContract = defineActor("flat-counter", {
+  input: z.object({ ownerId: z.string().optional() }),
+  init: (input: { ownerId?: string }): FlatCounterState => ({ count: 0, ownerId: input.ownerId ?? "" }),
+  roles: {
+    admin: (_state: FlatCounterState, _caller: string, { callerType }: { callerType: "user" | "service" }) =>
+      callerType === "service",
+    user: () => true,
+  },
+  messages: {
+    INCREMENT: flatIncrement,
+    ADMIN_RESET: flatAdminReset,
+    LIMITED_ADD: flatLimitedAdd,
+  },
+  views: {
+    admin: view(FlatCounterView, (state: FlatCounterState) => ({ count: state.count })),
+    user: view(FlatCounterView, (state: FlatCounterState) => ({ count: state.count })),
+  },
+});
+
+export const FlatCounter = createActorClass(FlatCounterContract);
+
 // --- Worker entrypoint ---
 
 export default {

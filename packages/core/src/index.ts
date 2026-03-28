@@ -23,6 +23,7 @@ export type {
   CallbackDef,
   Effect,
   EmitFn,
+  GuardContext,
   MessageContext,
   MessageDef,
   NormalizedRequestConfig,

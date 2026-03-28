@@ -34,7 +34,7 @@ import { parseDuration } from "./runtime/timers";
 interface ActorMessageSlot {
   readonly schema: z.ZodType;
   handler(state: unknown, payload: unknown, ctx: unknown): unknown;
-  guard?(state: unknown): boolean; // bivariant method signature
+  guard?(state: unknown, payload: unknown, ctx: unknown): boolean; // bivariant method signature
 }
 
 interface ActorDef {
@@ -1124,7 +1124,41 @@ function isActorDef(def: unknown): def is ActorDef {
 }
 
 /**
+ * Detect whether messages are flat (v3: Record<name, MessageDef>) or
+ * role-nested (v2: Record<role, Record<name, MessageDef>>).
+ *
+ * A flat MessageDef has both `schema` and `handler` as direct properties.
+ * A role-nested Record's values are Records (no `handler`).
+ * We check all entries to avoid false positives from role names like "schema".
+ */
+function isFlatMessages(messages: Record<string, unknown>): boolean {
+  const values = Object.values(messages);
+  if (values.length === 0) return false;
+  return values.every((v) => typeof v === "object" && v !== null && "schema" in v && "handler" in v);
+}
+
+/**
+ * Wrap flat messages into role-nested format: every role gets all messages.
+ * Guards handle authorization instead of structural role-scoping.
+ */
+function wrapFlatMessages(
+  flatMessages: Record<string, ActorMessageSlot>,
+  roles: Record<string, unknown>,
+): Record<string, Record<string, ActorMessageSlot>> {
+  const roleNames = Object.keys(roles);
+  const result: Record<string, Record<string, ActorMessageSlot>> = {};
+  for (const role of roleNames) {
+    result[role] = flatMessages;
+  }
+  return result;
+}
+
+/**
  * Convert a typed contract (from defineActor) into a Durable Object class.
+ *
+ * Handles both v2 (role-nested) and v3 (flat) message formats.
+ * For v3 flat messages, wraps them so every role has access to all messages.
+ * Guards on individual messages handle authorization.
  *
  * Usage:
  *   const Counter = defineActor("counter", { init, roles, messages, views });
@@ -1136,5 +1170,15 @@ export function createActorClass(contract: { readonly name: string; readonly def
   if (!isActorDef(contract.def)) {
     throw new Error("createActorClass: contract.def must have init, roles, and views");
   }
-  return actor(contract.name, contract.def);
+
+  const def = contract.def;
+
+  // Detect flat messages and wrap into role-nested format
+  if (def.messages && isFlatMessages(def.messages)) {
+    const wrapped = wrapFlatMessages(def.messages as unknown as Record<string, ActorMessageSlot>, def.roles);
+    const adaptedDef: ActorDef = { ...def, messages: wrapped };
+    return actor(contract.name, adaptedDef);
+  }
+
+  return actor(contract.name, def);
 }

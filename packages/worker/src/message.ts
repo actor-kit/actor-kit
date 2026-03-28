@@ -21,7 +21,7 @@
  *   );
  */
 
-import type { MessageContext, MessageDef } from "@actor-kit/core";
+import type { GuardContext, MessageContext, MessageDef } from "@actor-kit/core";
 import type { z } from "zod";
 
 // --- Message handler types ---
@@ -32,10 +32,14 @@ type MessageHandler<TState, TPayload, TEnv = unknown> = (
   ctx: MessageContext<TEnv>,
 ) => TState | Promise<TState>;
 
-type GuardFn<TState> = (state: TState) => boolean;
+type GuardFn<TState, TPayload = unknown, TEnv = unknown> = (
+  state: TState,
+  payload: TPayload,
+  ctx: GuardContext<TEnv>,
+) => boolean;
 
 interface GuardedHandler<TState, TPayload, TEnv = unknown> {
-  guard: GuardFn<TState>;
+  guard: GuardFn<TState, TPayload, TEnv>;
   handler: MessageHandler<TState, TPayload, TEnv>;
 }
 
