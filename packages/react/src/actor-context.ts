@@ -1,32 +1,44 @@
 /**
- * actorContext() — create a typed React context from an ActorClientFactory.
+ * actorContext() — create a typed React context from a contract or ActorClientFactory.
  *
- * Usage:
+ * Usage (v3 — contract-derived):
+ *   import { defineActor, message } from "@actor-kit/worker";
+ *   import { actorContext } from "@actor-kit/react";
+ *
+ *   const Counter = defineActor("counter", { init, messages, views });
+ *   const CounterCtx = actorContext(Counter);
+ *
+ * Usage (legacy — factory-derived):
  *   import { actorClient } from "@actor-kit/client";
  *   import { actorContext } from "@actor-kit/react";
  *
  *   const CounterClient = actorClient(CounterView).events<CounterEvent>();
  *   const CounterCtx = actorContext<typeof CounterClient>();
- *
- *   <CounterCtx.Provider client={client}>
- *     <Counter />
- *   </CounterCtx.Provider>
  */
 
-import type { ActorClientFactory, InferEvent, InferView } from "@actor-kit/client";
+import type { ActorClientFactory, ContractEvents, ContractView, InferEvent, InferView } from "@actor-kit/client";
 import { createActorContext } from "./context";
 
 /**
- * Create a typed React context from an ActorClientFactory type.
- *
+ * Create a typed React context from a contract (v3).
+ * TView and TEvent are inferred from the contract's views and messages.
+ */
+export function actorContext<TContract extends { readonly name: string; readonly def: Record<string, unknown> }>(
+  contract: TContract,
+): ReturnType<typeof createActorContext<ContractView<TContract>, ContractEvents<TContract>>>;
+
+/**
+ * Create a typed React context from an ActorClientFactory type (legacy).
  * TView and TEvent are extracted from the factory type — no manual generics needed.
- *
- * @example
- * const CounterClient = actorClient(CounterView).events<CounterEvent>();
- * const CounterCtx = actorContext<typeof CounterClient>();
  */
 export function actorContext<TFactory extends ActorClientFactory<unknown, { type: string }>>(): ReturnType<
   typeof createActorContext<InferView<TFactory>, InferEvent<TFactory>>
-> {
-  return createActorContext<InferView<TFactory>, InferEvent<TFactory>>();
+>;
+
+// Implementation
+export function actorContext(_contract?: {
+  readonly name: string;
+  readonly def: Record<string, unknown>;
+}): ReturnType<typeof createActorContext> {
+  return createActorContext();
 }
