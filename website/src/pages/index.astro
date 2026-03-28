@@ -1,0 +1,453 @@
+---
+import StarlightPage from "@astrojs/starlight/components/StarlightPage.astro";
+
+const tabs = [
+  {
+    id: "actor",
+    label: "Actor",
+    file: "counter.ts",
+    code: `<span class="ck">import</span> { z } <span class="ck">from</span> <span class="cs">"zod"</span>;
+<span class="ck">import</span> { schema, view, uint32, string } <span class="ck">from</span> <span class="cs">"@actor-kit/core"</span>;
+<span class="ck">import</span> { actor, message } <span class="ck">from</span> <span class="cs">"@actor-kit/worker"</span>;
+
+<span class="ck">const</span> CounterView = <span class="cf">schema</span>({ count: uint32, lastUpdatedBy: string });
+
+<span class="ck">const</span> increment = <span class="cf">message</span>(
+  z.<span class="cf">object</span>({}),
+  (state, _payload, { caller }) =&gt; ({
+    ...state,
+    count: state.count + 1,
+    lastUpdatedBy: caller,
+  }),
+);
+
+<span class="ck">export const</span> Counter = <span class="cf">actor</span>(<span class="cs">"counter"</span>, {
+  <span class="cp">input</span>: z.<span class="cf">object</span>({}),
+  <span class="cp">init</span>: () =&gt; ({ count: <span class="cb">0</span>, lastUpdatedBy: <span class="cb">null</span> }),
+  <span class="cp">roles</span>: {
+    <span class="cp">admin</span>: (_s, _c, { callerType }) =&gt; callerType === <span class="cs">"service"</span>,
+    <span class="cp">user</span>: () =&gt; <span class="cb">true</span>,
+  },
+  <span class="cp">messages</span>: {
+    <span class="cp">admin</span>: { INCREMENT: increment, RESET: reset },
+    <span class="cp">user</span>: { INCREMENT: increment },
+  },
+  <span class="cp">views</span>: {
+    <span class="cp">admin</span>: <span class="cf">view</span>(CounterView, (s) =&gt; ({ count: s.count, lastUpdatedBy: s.lastUpdatedBy ?? <span class="cs">""</span> })),
+    <span class="cp">user</span>: <span class="cf">view</span>(CounterView, (s) =&gt; ({ count: s.count, lastUpdatedBy: s.lastUpdatedBy ?? <span class="cs">""</span> })),
+  },
+});`,
+  },
+  {
+    id: "worker",
+    label: "Worker",
+    file: "worker.ts",
+    code: `<span class="ck">import</span> { <span class="cf">createAccessToken</span> } <span class="ck">from</span> <span class="cs">"@actor-kit/worker"</span>;
+<span class="ck">import</span> { Counter } <span class="ck">from</span> <span class="cs">"./counter"</span>;
+
+<span class="ck">export</span> { Counter };
+
+<span class="ck">export default</span> {
+  <span class="ck">async</span> <span class="cf">fetch</span>(request: Request, env: Env) {
+    <span class="ck">const</span> url = <span class="ck">new</span> <span class="cf">URL</span>(request.url);
+
+    <span class="cm">// Issue JWT for client auth</span>
+    <span class="ck">if</span> (url.pathname === <span class="cs">"/api/token"</span>) {
+      <span class="ck">const</span> token = <span class="ck">await</span> <span class="cf">createAccessToken</span>({
+        <span class="cp">actorType</span>: <span class="cs">"counter"</span>,
+        <span class="cp">actorId</span>: <span class="cs">"default"</span>,
+        <span class="cp">callerId</span>: <span class="cs">"user-1"</span>,
+        <span class="cp">callerType</span>: <span class="cs">"user"</span>,
+        <span class="cp">secret</span>: env.ACTOR_KIT_SECRET,
+      });
+      <span class="ck">return</span> Response.<span class="cf">json</span>({ token });
+    }
+
+    <span class="cm">// Route to Durable Object</span>
+    <span class="ck">const</span> id = env.COUNTER.<span class="cf">idFromName</span>(<span class="cs">"default"</span>);
+    <span class="ck">const</span> stub = env.COUNTER.<span class="cf">get</span>(id);
+    <span class="ck">await</span> stub.<span class="cf">spawn</span>({ actorId: <span class="cs">"default"</span>, caller: <span class="cs">"system"</span>, callerType: <span class="cs">"service"</span>, input: {} });
+    <span class="ck">return</span> stub.<span class="cf">fetch</span>(request);
+  },
+};`,
+  },
+  {
+    id: "client",
+    label: "Client",
+    file: "client.ts",
+    code: `<span class="ck">import</span> { <span class="cf">actorClient</span> } <span class="ck">from</span> <span class="cs">"@actor-kit/client"</span>;
+<span class="ck">import</span> { CounterView } <span class="ck">from</span> <span class="cs">"./counter"</span>;
+
+<span class="cm">// Define event types</span>
+<span class="ck">type</span> CounterEvent =
+  | { <span class="cp">type</span>: <span class="cs">"INCREMENT"</span> }
+  | { <span class="cp">type</span>: <span class="cs">"DECREMENT"</span> };
+
+<span class="cm">// Create typed client factory</span>
+<span class="ck">const</span> CounterClient = <span class="cf">actorClient</span>(CounterView)
+  .<span class="cf">events</span>&lt;CounterEvent&gt;();
+
+<span class="cm">// Connect — binary delta sync handled automatically</span>
+<span class="ck">const</span> client = CounterClient.<span class="cf">create</span>({
+  <span class="cp">url</span>: <span class="cs">\`wss://\${location.host}/api/counter/default\`</span>,
+  <span class="cp">accessToken</span>: token,
+});
+
+<span class="cm">// Subscribe — view is fully typed from schema</span>
+client.<span class="cf">subscribe</span>((view) =&gt; {
+  console.<span class="cf">log</span>(<span class="cs">"Count:"</span>, view.count);
+  <span class="cm">// view: { count: number; lastUpdatedBy: string }</span>
+});
+
+<span class="cm">// Send — events are type-checked</span>
+client.<span class="cf">send</span>({ <span class="cp">type</span>: <span class="cs">"INCREMENT"</span> });`,
+  },
+  {
+    id: "react",
+    label: "React",
+    file: "App.tsx",
+    code: `<span class="ck">import</span> { <span class="cf">actorContext</span> } <span class="ck">from</span> <span class="cs">"@actor-kit/react"</span>;
+<span class="ck">import</span> { CounterClient } <span class="ck">from</span> <span class="cs">"./client"</span>;
+
+<span class="ck">const</span> CounterCtx = <span class="cf">actorContext</span>&lt;<span class="ck">typeof</span> CounterClient&gt;();
+
+<span class="ck">function</span> <span class="cf">Counter</span>() {
+  <span class="ck">const</span> view = CounterCtx.<span class="cf">useView</span>();   <span class="cm">// typed from schema</span>
+  <span class="ck">const</span> send = CounterCtx.<span class="cf">useSend</span>();   <span class="cm">// typed events</span>
+
+  <span class="ck">return</span> (
+    &lt;div&gt;
+      &lt;span&gt;{view?.count ?? <span class="cs">"..."</span>}&lt;/span&gt;
+      &lt;button onClick={() =&gt; <span class="cf">send</span>({ <span class="cp">type</span>: <span class="cs">"INCREMENT"</span> })}&gt;+&lt;/button&gt;
+    &lt;/div&gt;
+  );
+}
+
+<span class="ck">function</span> <span class="cf">App</span>({ token }: { token: <span class="ct">string</span> }) {
+  <span class="ck">const</span> [client, setClient] = <span class="cf">useState</span>(<span class="cb">null</span>);
+
+  <span class="cf">useEffect</span>(() =&gt; {
+    <span class="ck">const</span> c = CounterClient.<span class="cf">create</span>({
+      <span class="cp">url</span>: <span class="cs">\`wss://\${location.host}/api/counter/default\`</span>,
+      <span class="cp">accessToken</span>: token,
+    });
+    <span class="cf">setClient</span>(c);
+    <span class="ck">return</span> () =&gt; c.<span class="cf">disconnect</span>();
+  }, [token]);
+
+  <span class="ck">if</span> (!client) <span class="ck">return</span> <span class="cb">null</span>;
+  <span class="ck">return</span> &lt;CounterCtx.Provider client={client}&gt;&lt;Counter /&gt;&lt;/CounterCtx.Provider&gt;;
+}`,
+  },
+];
+---
+
+<StarlightPage frontmatter={{ title: "Actor Kit — Actors on the Edge", template: "splash" }}>
+  <div class="landing">
+    <section class="landing-hero">
+      <h1 class="landing-hero-title">
+        <span class="landing-hero-gradient">Actors on the Edge</span>
+      </h1>
+      <p class="landing-hero-sub">
+        Real-time state sync with Cloudflare Durable Objects. Define actors with
+        roles, binary views, and type-safe messages. One function &mdash;
+        <code>actor()</code> &mdash; handles everything.
+      </p>
+      <div class="landing-hero-actions">
+        <a href="/getting-started/overview/" class="btn btn-primary">
+          Get Started
+          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m9 18 6-6-6-6"/></svg>
+        </a>
+        <a href="https://github.com/actor-kit/actor-kit" class="btn btn-ghost">
+          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg>
+          GitHub
+        </a>
+      </div>
+    </section>
+
+    <section class="features">
+      <div class="features-grid">
+        <div class="feature">
+          <div class="feature-icon icon-cf">
+            <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z"/></svg>
+          </div>
+          <h3>Durable Object Runtime</h3>
+          <p>Each actor is a Cloudflare Durable Object &mdash; single-threaded, globally addressable, with SQLite persistence.</p>
+        </div>
+        <div class="feature">
+          <div class="feature-icon icon-sync">
+            <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M13 2 3 14h9l-1 8 10-12h-9l1-8z"/></svg>
+          </div>
+          <h3>Binary Delta Sync</h3>
+          <p>Schema-defined views with bitmask delta encoding. Only changed fields go over the wire.</p>
+        </div>
+        <div class="feature">
+          <div class="feature-icon icon-type">
+            <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+          </div>
+          <h3>Role-Based Access</h3>
+          <p>Roles derived from state. Per-role messages and views. Authorization is structural, not coded.</p>
+        </div>
+        <div class="feature">
+          <div class="feature-icon icon-ctx">
+            <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 12h18"/></svg>
+          </div>
+          <h3>End-to-End Type Safety</h3>
+          <p>View types inferred from <code>schema()</code>. Events typed via <code>.events&lt;E&gt;()</code>. Zero <code>any</code>, zero casts.</p>
+        </div>
+        <div class="feature">
+          <div class="feature-icon icon-xs">
+            <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="10"/><path d="m8 12 3 3 5-5"/></svg>
+          </div>
+          <h3>Timers &amp; Game Loops</h3>
+          <p>DO Alarms for durable timers. <code>tick</code> for game loops. Both survive hibernation.</p>
+        </div>
+        <div class="feature">
+          <div class="feature-icon icon-fw">
+            <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8"/><path d="M12 17v4"/></svg>
+          </div>
+          <h3>React Integration</h3>
+          <p>Typed hooks: <code>useView()</code>, <code>useSend()</code>, <code>useRole()</code>. SSR-ready with providers.</p>
+        </div>
+      </div>
+    </section>
+
+    <section class="code-section">
+      <div class="code-section-header">
+        <h2>From actor to UI in four files</h2>
+        <p>Define your state, wrap as a Durable Object, connect a typed client, and add React hooks.</p>
+      </div>
+      <div class="code-tabs">
+        <div class="tab-bar">
+          {tabs.map((tab, i) => (
+            <button
+              class:list={["tab-btn", { active: i === 0 }]}
+              data-tab={tab.id}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </div>
+        {tabs.map((tab, i) => (
+          <div
+            class:list={["tab-panel", { active: i === 0 }]}
+            data-panel={tab.id}
+          >
+            <div class="code-block">
+              <div class="code-header">
+                <span class="code-dot red"></span>
+                <span class="code-dot yellow"></span>
+                <span class="code-dot green"></span>
+                <span class="code-filename">{tab.file}</span>
+              </div>
+              <pre><code set:html={tab.code} /></pre>
+            </div>
+          </div>
+        ))}
+      </div>
+    </section>
+
+    <section class="cf-section">
+      <div class="cf-layout">
+        <div class="cf-text">
+          <p class="cf-eyebrow">Built for Cloudflare</p>
+          <h2>Native edge infrastructure</h2>
+          <div class="cf-features">
+            <div class="cf-feat"><strong>SQLite Persistence</strong><span>State persisted to DO SQLite. Survives restarts and deploys.</span></div>
+            <div class="cf-feat"><strong>Binary Wire Protocol</strong><span>Schema-aware encoding with bitmask deltas. 10x smaller than JSON.</span></div>
+            <div class="cf-feat"><strong>WebSocket Hibernation</strong><span>Caller metadata stored as DO tags. Zero-cost when idle.</span></div>
+            <div class="cf-feat"><strong>Transactional Outbox</strong><span>Side effects persisted atomically with state. At-least-once delivery.</span></div>
+          </div>
+          <a href="https://developers.cloudflare.com/durable-objects/" class="btn btn-cf">
+            Cloudflare Durable Objects
+            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M7 17 17 7"/><path d="M7 7h10v10"/></svg>
+          </a>
+        </div>
+        <div class="cf-diagram">
+          <div class="diagram-card">
+            <div class="diagram-title">Data Flow</div>
+            <div class="diagram-flow">
+              <div class="flow-step"><div class="flow-num">1</div><div class="flow-content"><span class="flow-label">Worker</span><span class="flow-detail">Routes request, issues JWT, spawns actor</span></div></div>
+              <div class="flow-arrow">&darr;</div>
+              <div class="flow-step"><div class="flow-num">2</div><div class="flow-content"><span class="flow-label">Durable Object</span><span class="flow-detail">Validates JWT, resolves role, processes message</span></div></div>
+              <div class="flow-arrow">&darr;</div>
+              <div class="flow-step"><div class="flow-num">3</div><div class="flow-content"><span class="flow-label">Binary Sync</span><span class="flow-detail">Schema-encoded delta broadcast to all clients</span></div></div>
+              <div class="flow-arrow">&darr;</div>
+              <div class="flow-step"><div class="flow-num">4</div><div class="flow-content"><span class="flow-label">Client SDK</span><span class="flow-detail">Decodes binary, applies delta, fires typed callbacks</span></div></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="use-cases">
+      <h2>What you can build</h2>
+      <div class="uc-grid">
+        <div class="uc">
+          <div class="uc-icon"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 8V4H8"/><rect width="16" height="12" x="4" y="8" rx="2"/><path d="M2 14h2"/><path d="M20 14h2"/><path d="M15 13v2"/><path d="M9 13v2"/></svg></div>
+          <strong>AI Agents</strong>
+          <span>Orchestrate and persist state for autonomous agents in real time.</span>
+        </div>
+        <div class="uc">
+          <div class="uc-icon"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6"/><path d="M18 9h1.5a2.5 2.5 0 0 0 0-5H18"/><path d="M4 22h16"/><path d="M10 14.66V17c0 .55-.47.98-.97 1.21C7.85 18.75 7 20.24 7 22"/><path d="M14 14.66V17c0 .55.47.98.97 1.21C16.15 18.75 17 20.24 17 22"/><path d="M18 2H6v7a6 6 0 0 0 12 0V2Z"/></svg></div>
+          <strong>Multiplayer Games</strong>
+          <span>Shared game state with per-player views, tick loops, and zone transfers.</span>
+        </div>
+        <div class="uc">
+          <div class="uc-icon"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M17 6.1H3"/><path d="M21 12.1H3"/><path d="M15.1 18H3"/></svg></div>
+          <strong>Collaborative Tools</strong>
+          <span>Real-time editing, whiteboards, and shared documents with role-based access.</span>
+        </div>
+        <div class="uc">
+          <div class="uc-icon"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M20 16V7a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v9m16 0H4m16 0 1.28 2.55a1 1 0 0 1-.9 1.45H3.62a1 1 0 0 1-.9-1.45L4 16"/></svg></div>
+          <strong>IoT &amp; Edge Apps</strong>
+          <span>Device state management at the edge, close to your users worldwide.</span>
+        </div>
+      </div>
+    </section>
+
+    <section class="packages">
+      <h2>Focused packages</h2>
+      <p class="packages-sub">Import only what you need.</p>
+      <div class="pkg-grid">
+        <a href="/api/core/" class="pkg"><strong>@actor-kit/core</strong><span>schema(), view(), binary codec, frame format</span></a>
+        <a href="/api/core/" class="pkg"><strong>@actor-kit/worker</strong><span>actor(), message(), createAccessToken()</span></a>
+        <a href="/api/client/" class="pkg"><strong>@actor-kit/client</strong><span>actorClient(), typed views &amp; events</span></a>
+        <a href="/api/react/" class="pkg"><strong>@actor-kit/react</strong><span>actorContext(), useView(), useSend()</span></a>
+        <a href="/api/test/" class="pkg"><strong>@actor-kit/test</strong><span>testActor(), emission capture</span></a>
+      </div>
+    </section>
+
+    <section class="cta">
+      <h2>Start building</h2>
+      <p>Build a real-time counter in under 5 minutes.</p>
+      <div class="landing-hero-actions">
+        <a href="/getting-started/quick-start/" class="btn btn-primary">
+          Quick Start Guide
+          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m9 18 6-6-6-6"/></svg>
+        </a>
+        <a href="/getting-started/overview/" class="btn btn-secondary">Read the Docs</a>
+      </div>
+    </section>
+  </div>
+
+  <style>
+    :global(.page-title-row) { display: none !important; }
+    :global([data-has-hero] .content-panel:first-child) { display: none !important; }
+    .landing { max-width: 68rem; margin: 0 auto; padding: 0 1.5rem; }
+    @keyframes fadeUp { from { opacity: 0; transform: translateY(1.5rem); } to { opacity: 1; transform: translateY(0); } }
+    @keyframes shimmer { 0% { background-position: -200% center; } 100% { background-position: 200% center; } }
+    .landing-hero { text-align: center; padding: 4rem 0 3.5rem; max-width: 50rem; margin: 0 auto; animation: fadeUp 0.6s ease-out both; }
+    .landing-hero-title { font-size: clamp(2.5rem, 5vw, 3.5rem); line-height: 1.12; letter-spacing: -0.035em; font-weight: 800; margin: 0 0 1.5rem; color: var(--sl-color-white); }
+    .landing-hero-gradient { background: linear-gradient(135deg, #f6821f 0%, #faad3f 40%, #f6821f 70%, #faad3f 100%); background-size: 200% auto; -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; animation: shimmer 6s linear infinite; }
+    .landing-hero-sub { font-size: 1.15rem; line-height: 1.6; color: var(--sl-color-gray-2); margin: 0 auto 2.5rem; max-width: 36rem; animation: fadeUp 0.6s 0.15s ease-out both; }
+    .landing-hero-actions { display: flex; gap: 1rem; justify-content: center; flex-wrap: wrap; animation: fadeUp 0.6s 0.25s ease-out both; }
+    .btn { display: inline-flex; align-items: center; gap: 0.4rem; padding: 0.7rem 1.5rem; border-radius: 0.5rem; font-size: 0.9rem; font-weight: 600; text-decoration: none; transition: all 0.15s ease; }
+    .btn-primary { background: linear-gradient(135deg, #f6821f, #e8720a); color: #fff; box-shadow: 0 2px 8px rgba(246, 130, 31, 0.3); }
+    .btn-primary:hover { box-shadow: 0 4px 16px rgba(246, 130, 31, 0.45); transform: translateY(-1px); }
+    .btn-secondary { border: 1px solid var(--sl-color-gray-5); color: var(--sl-color-text); background: transparent; }
+    .btn-secondary:hover { border-color: var(--sl-color-gray-3); }
+    .btn-ghost { color: var(--sl-color-gray-2); background: transparent; border: 1px solid var(--sl-color-gray-5); border-radius: 2rem; padding: 0.55rem 1.25rem; }
+    .btn-ghost:hover { border-color: var(--sl-color-gray-3); color: var(--sl-color-white); }
+    .btn-cf { background: rgba(246, 130, 31, 0.1); color: #f6821f; border: 1px solid rgba(246, 130, 31, 0.3); }
+    .btn-cf:hover { background: rgba(246, 130, 31, 0.15); }
+    .features { padding: 4rem 0; border-top: 1px solid var(--sl-color-hairline); }
+    .features-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1.5rem; align-items: start; }
+    .feature-icon { width: 2.75rem; height: 2.75rem; display: flex; align-items: center; justify-content: center; border-radius: 0.625rem; margin-bottom: 0.75rem; transition: transform 0.2s ease; }
+    .icon-cf { background: rgba(246, 130, 31, 0.1); color: #f6821f; }
+    .icon-sync { background: rgba(99, 179, 237, 0.1); color: #63b3ed; }
+    .icon-type { background: rgba(72, 187, 120, 0.1); color: #48bb78; }
+    .icon-ctx { background: rgba(159, 122, 234, 0.1); color: #9f7aea; }
+    .icon-xs { background: rgba(237, 137, 54, 0.1); color: #ed8936; }
+    .icon-fw { background: rgba(66, 153, 225, 0.1); color: #4299e1; }
+    .feature { padding: 1.25rem; border-radius: 0.625rem; border: 1px solid transparent; transition: all 0.2s ease; }
+    .feature:hover { border-color: var(--sl-color-gray-5); background: rgba(255, 255, 255, 0.02); }
+    .feature:hover .feature-icon { transform: scale(1.05); }
+    .feature h3 { font-size: 1rem; font-weight: 600; margin: 0 0 0.35rem; color: var(--sl-color-white); }
+    .feature p { font-size: 0.85rem; line-height: 1.55; color: var(--sl-color-gray-2); margin: 0; }
+    .feature code { font-size: 0.78em; padding: 0.1em 0.3em; border-radius: 0.2rem; background: rgba(255,255,255,0.06); }
+    .code-section { padding: 4rem 0; border-top: 1px solid var(--sl-color-hairline); }
+    .code-section-header { text-align: center; margin-bottom: 2rem; }
+    .code-section-header h2 { font-size: 1.75rem; font-weight: 700; letter-spacing: -0.02em; margin: 0 0 0.5rem; color: var(--sl-color-white); }
+    .code-section-header p { color: var(--sl-color-gray-2); margin: 0; font-size: 1rem; }
+    .code-tabs { max-width: 52rem; margin: 0 auto; }
+    .tab-bar { display: flex; gap: 0; border-bottom: 1px solid var(--sl-color-gray-5); margin-bottom: 0; }
+    .tab-btn { padding: 0.6rem 1.25rem; background: none; border: none; color: var(--sl-color-gray-3); font-size: 0.875rem; font-weight: 500; cursor: pointer; border-bottom: 2px solid transparent; transition: all 0.15s ease; font-family: inherit; }
+    .tab-btn:hover { color: var(--sl-color-gray-1); }
+    .tab-btn.active { color: #f6821f; border-bottom-color: #f6821f; }
+    .tab-panel { display: none; }
+    .tab-panel.active { display: block; }
+    .code-block { border-radius: 0 0 0.75rem 0.75rem; overflow: hidden; border: 1px solid var(--sl-color-gray-5); border-top: none; background: #0d1117; }
+    .code-header { display: flex; align-items: center; gap: 0.4rem; padding: 0.6rem 1rem; background: rgba(255, 255, 255, 0.02); border-bottom: 1px solid rgba(255,255,255,0.05); }
+    .code-dot { width: 0.5rem; height: 0.5rem; border-radius: 50%; }
+    .code-dot.red { background: #ff5f57; }
+    .code-dot.yellow { background: #febc2e; }
+    .code-dot.green { background: #28c840; }
+    .code-filename { margin-left: 0.5rem; font-size: 0.75rem; color: var(--sl-color-gray-3); font-family: var(--sl-font-mono); }
+    .code-block pre { margin: 0; padding: 1.25rem; overflow-x: auto; font-size: 0.78rem; line-height: 1.7; }
+    .code-block code { font-family: var(--sl-font-mono); color: #c9d1d9; }
+    :global(.ck) { color: #ff7b72; }
+    :global(.cs) { color: #a5d6ff; }
+    :global(.cf) { color: #d2a8ff; }
+    :global(.cp) { color: #79c0ff; }
+    :global(.ct) { color: #ffa657; }
+    :global(.cb) { color: #ff7b72; }
+    :global(.cm) { color: #8b949e; font-style: italic; }
+    .cf-section { padding: 4rem 0; border-top: 1px solid var(--sl-color-hairline); }
+    .cf-layout { display: grid; grid-template-columns: 1fr 1fr; gap: 3rem; align-items: start; }
+    .cf-eyebrow { font-size: 0.78rem; color: #f6821f; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; margin: 0 0 0.75rem; }
+    .cf-text h2 { font-size: 1.65rem; font-weight: 700; letter-spacing: -0.02em; margin: 0 0 1.5rem; color: var(--sl-color-white); }
+    .cf-features { display: flex; flex-direction: column; gap: 1rem; margin-bottom: 1.5rem; }
+    .cf-feat { display: flex; flex-direction: column; gap: 0.1rem; }
+    .cf-feat strong { font-size: 0.875rem; color: var(--sl-color-white); }
+    .cf-feat span { font-size: 0.8rem; color: var(--sl-color-gray-3); }
+    .diagram-card { border-radius: 0.75rem; border: 1px solid var(--sl-color-gray-5); background: rgba(255,255,255,0.02); overflow: hidden; }
+    .diagram-title { padding: 0.75rem 1.25rem; border-bottom: 1px solid var(--sl-color-gray-5); font-size: 0.8rem; font-weight: 600; color: var(--sl-color-gray-2); }
+    .diagram-flow { padding: 1.25rem; display: flex; flex-direction: column; align-items: stretch; }
+    .flow-step { display: flex; align-items: center; gap: 0.75rem; padding: 0.35rem 0; }
+    .flow-num { width: 1.5rem; height: 1.5rem; flex-shrink: 0; display: flex; align-items: center; justify-content: center; border-radius: 50%; background: rgba(246, 130, 31, 0.15); color: #f6821f; font-size: 0.7rem; font-weight: 700; }
+    .flow-content { display: flex; flex-direction: column; gap: 0.1rem; }
+    .flow-label { font-size: 0.8rem; font-weight: 600; color: var(--sl-color-white); }
+    .flow-detail { font-size: 0.72rem; color: var(--sl-color-gray-3); }
+    .flow-arrow { color: var(--sl-color-gray-4); font-size: 0.75rem; line-height: 1; width: 1.5rem; text-align: center; padding: 0.15rem 0; }
+    .use-cases { padding: 4rem 0; border-top: 1px solid var(--sl-color-hairline); text-align: center; }
+    .use-cases h2 { font-size: 1.75rem; font-weight: 700; letter-spacing: -0.02em; margin: 0 0 2rem; color: var(--sl-color-white); }
+    .uc-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1.25rem; text-align: left; align-items: stretch; }
+    .uc { padding: 1.25rem; border-radius: 0.625rem; border: 1px solid var(--sl-color-gray-5); display: flex; flex-direction: column; gap: 0.4rem; transition: border-color 0.15s ease; height: 100%; }
+    .uc:hover { border-color: var(--sl-color-gray-3); }
+    .uc-icon { color: var(--sl-color-gray-2); margin-bottom: 0.25rem; }
+    .uc strong { font-size: 0.9rem; color: var(--sl-color-white); }
+    .uc span { font-size: 0.8rem; color: var(--sl-color-gray-3); line-height: 1.5; }
+    .packages { padding: 4rem 0; border-top: 1px solid var(--sl-color-hairline); text-align: center; }
+    .packages h2 { font-size: 1.75rem; font-weight: 700; letter-spacing: -0.02em; margin: 0 0 0.5rem; color: var(--sl-color-white); }
+    .packages-sub { color: var(--sl-color-gray-2); margin: 0 0 2rem; font-size: 0.95rem; }
+    .pkg-grid { display: flex; flex-wrap: wrap; gap: 0.75rem; justify-content: center; }
+    .pkg { display: flex; flex-direction: column; gap: 0.2rem; padding: 1rem 1.25rem; border-radius: 0.5rem; border: 1px solid var(--sl-color-gray-5); text-decoration: none; color: var(--sl-color-text); transition: all 0.15s ease; width: calc(20% - 0.75rem); min-width: 12rem; text-align: left; }
+    .pkg:hover { border-color: var(--sl-color-gray-3); background: rgba(255,255,255,0.02); }
+    .pkg strong { font-size: 0.85rem; font-family: var(--sl-font-mono); color: var(--sl-color-white); }
+    .pkg span { font-size: 0.78rem; color: var(--sl-color-gray-3); }
+    .cta { padding: 4rem 0 5rem; border-top: 1px solid var(--sl-color-hairline); text-align: center; }
+    .cta h2 { font-size: 1.75rem; font-weight: 700; letter-spacing: -0.02em; margin: 0 0 0.5rem; color: var(--sl-color-white); }
+    .cta p { color: var(--sl-color-gray-2); margin: 0 0 2rem; font-size: 0.95rem; }
+    @media (max-width: 60rem) { .landing-hero { padding: 3rem 0 2rem; } .features-grid { grid-template-columns: 1fr 1fr; } .cf-layout { grid-template-columns: 1fr; gap: 2rem; } .uc-grid { grid-template-columns: 1fr 1fr; } .pkg-grid { grid-template-columns: 1fr 1fr; } }
+    @media (max-width: 40rem) { .features-grid { grid-template-columns: 1fr; } .uc-grid { grid-template-columns: 1fr; } .pkg-grid { grid-template-columns: 1fr; } }
+  </style>
+
+  <script>
+    function setupTabs() {
+      const buttons = document.querySelectorAll('.tab-btn');
+      const panels = document.querySelectorAll('.tab-panel');
+      buttons.forEach(btn => {
+        btn.addEventListener('click', () => {
+          const tabId = btn.getAttribute('data-tab');
+          buttons.forEach(b => b.classList.remove('active'));
+          panels.forEach(p => p.classList.remove('active'));
+          btn.classList.add('active');
+          document.querySelector(`[data-panel="${tabId}"]`)?.classList.add('active');
+        });
+      });
+    }
+    setupTabs();
+    document.addEventListener('astro:after-swap', setupTabs);
+  </script>
+</StarlightPage>
