@@ -202,6 +202,37 @@ export function actor(
 
         // Drain any pending outbox entries from before crash/restart
         this.drainOutbox();
+      } else {
+        // No persisted state — try auto-spawn with empty input
+        const emptyParsed = def.input.safeParse({});
+        if (emptyParsed.success) {
+          this.actorId = this.ctx.id.toString();
+          this.state = def.init(emptyParsed.data);
+          this.initialized = true;
+
+          // Initialize state tracker if using states
+          if (def.states) {
+            const statesDef = def.states;
+            if ("parallel" in statesDef && statesDef.parallel === true) {
+              const tracker: Record<string, string> = {};
+              for (const [regionName, regionDef] of Object.entries(statesDef.regions)) {
+                tracker[regionName] = regionDef.initial;
+              }
+              this.stateTracker = tracker;
+            } else if (def.initial) {
+              this.stateTracker = { current: def.initial };
+            } else {
+              const firstState = Object.keys(statesDef)[0];
+              if (firstState !== undefined) {
+                this.stateTracker = { current: firstState };
+              }
+            }
+          }
+
+          this.persistState();
+          this.scheduleAfterTimers();
+        }
+        // If input requires fields, stay uninitialized — spawn() must be called explicitly
       }
     }
 
@@ -501,7 +532,7 @@ export function actor(
     ): Promise<{ checksum: string; snapshot: unknown; role: string }> {
       await this.loadState();
       if (!this.initialized) {
-        throw new Error("Actor not initialized — call spawn() first");
+        throw new Error("Actor requires input — call spawn({ input }) before connecting");
       }
 
       const role = resolveRole(def.roles, this.state, caller, { callerType });
@@ -623,7 +654,7 @@ export function actor(
       // (otherwise after hibernation, actorId is undefined and JWT check fails)
       await this.loadState();
       if (!this.initialized) {
-        return new Response("Actor not initialized", { status: 404 });
+        return new Response("Actor requires input — call spawn({ input }) before connecting", { status: 404 });
       }
 
       // Validate token against the stored actor identity.
@@ -1082,20 +1113,68 @@ function wrapFlatMessages(
   return result;
 }
 
+// --- Type helpers for createActorClass return type ---
+
+/** Extract event union from a contract's flat messages. */
+type ContractEvents<T> = T extends {
+  def: { messages: Record<string, { schema: { _output: unknown } }> };
+}
+  ? {
+      [K in keyof T["def"]["messages"] & string]: T["def"]["messages"][K] extends {
+        schema: { _output: infer P };
+      }
+        ? { type: K } & P
+        : { type: K };
+    }[keyof T["def"]["messages"] & string]
+  : { type: string; [key: string]: unknown };
+
+/** Extract input type from a contract's Zod schema. */
+type ContractInput<T> = T extends { def: { input: { _input: infer I } } } ? I : unknown;
+
+/** Typed Durable Object class returned by createActorClass. */
+export interface TypedActorClass<TContract> {
+  new (
+    ctx: DurableObjectState,
+    env: Record<string, unknown>,
+  ): DurableObject & {
+    spawn(input: {
+      actorId?: string;
+      caller: string;
+      callerType: "user" | "service";
+      input: ContractInput<TContract>;
+    }): Promise<void>;
+    send(
+      caller: string,
+      callerType: "user" | "service",
+      event: ContractEvents<TContract>,
+    ): Promise<{ ok: boolean; error?: string }>;
+    getSnapshot(
+      caller: string,
+      callerType: "user" | "service",
+    ): Promise<{ checksum: string; snapshot: unknown; role: string }>;
+    fetch(request: Request): Promise<Response>;
+  };
+}
+
 /**
  * Convert a typed contract (from defineActor) into a Durable Object class.
  *
- * Handles both v2 (role-nested) and v3 (flat) message formats.
- * For v3 flat messages, wraps them so every role has access to all messages.
- * Guards on individual messages handle authorization.
+ * The returned class has typed RPC methods:
+ * - spawn({ input }) — input type from the contract's Zod schema
+ * - send(caller, callerType, event) — event union from the contract's messages
+ * - getSnapshot(caller, callerType) — returns snapshot + role
+ * - fetch(request) — WebSocket upgrade handler
+ *
+ * Use with `wrangler types` to get typed bindings in your Worker's env:
+ *   DurableObjectNamespace<CounterDO> → env.COUNTER.get(id).send() is typed
  *
  * Usage:
  *   const Counter = defineActor("counter", { init, roles, messages, views });
  *   export const CounterDO = createActorClass(Counter);
  */
-export function createActorClass(contract: { readonly name: string; readonly def: unknown }): {
-  new (ctx: DurableObjectState, env: Record<string, unknown>): DurableObject;
-} {
+export function createActorClass<TContract extends { readonly name: string; readonly def: unknown }>(
+  contract: TContract,
+): TypedActorClass<TContract> {
   if (!isActorDef(contract.def)) {
     throw new Error("createActorClass: contract.def must have init, roles, and views");
   }
@@ -1106,8 +1185,10 @@ export function createActorClass(contract: { readonly name: string; readonly def
   if (def.messages && isFlatMessages(def.messages)) {
     const wrapped = wrapFlatMessages(def.messages as unknown as Record<string, ActorMessageSlot>, def.roles);
     const adaptedDef: ActorDef = { ...def, messages: wrapped };
-    return actor(contract.name, adaptedDef);
+    // Internal boundary cast: actor() returns an untyped class, but the runtime class
+    // implements spawn/send/getSnapshot/fetch. TypedActorClass exposes these to consumers.
+    return actor(contract.name, adaptedDef) as unknown as TypedActorClass<TContract>;
   }
 
-  return actor(contract.name, def);
+  return actor(contract.name, def) as unknown as TypedActorClass<TContract>;
 }

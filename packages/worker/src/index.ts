@@ -1,6 +1,7 @@
-// @actor-kit/worker — actor, message, ref, runtime, auth
+// @actor-kit/worker — actor, message, runtime, auth
 
-// Core actor builder
+export type { TypedActorClass } from "./actor";
+// Core actor builder + typed DO class
 export { actor, createActorClass } from "./actor";
 // Auth
 export { createAccessToken, getCallerFromToken } from "./auth";
@@ -9,9 +10,6 @@ export type { ActorContract } from "./define";
 export { defineActor } from "./define";
 // Message helpers
 export { message } from "./message";
-// Actor references (DO-to-DO RPC)
-export type { ActorRef } from "./ref";
-export { createRef } from "./ref";
 export type { ActorRoute } from "./runtime/route-to-actor";
 // Runtime utilities
 export { parseActorRoute } from "./runtime/route-to-actor";
