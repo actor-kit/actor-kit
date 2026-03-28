@@ -43,25 +43,6 @@ describe("outbox", () => {
       outbox.emit({ fetch: "https://api.example.com", body: {} });
 
       expect(outbox.getEmissions()).toHaveLength(2);
-      expect(outbox.getRequests()).toHaveLength(0);
-    });
-
-    it("collects request() calls", () => {
-      const outbox = createOutbox();
-      outbox.request({
-        fetch: "https://api.example.com",
-        onDone: "FETCH_DONE",
-        onError: "FETCH_ERROR",
-      });
-
-      expect(outbox.getEmissions()).toHaveLength(0);
-      expect(outbox.getRequests()).toHaveLength(1);
-      expect(outbox.getRequests()[0]).toEqual({
-        effect: { fetch: "https://api.example.com" },
-        onDone: "FETCH_DONE",
-        onError: "FETCH_ERROR",
-        meta: undefined,
-      });
     });
 
     it("generates unique IDs for each entry", () => {
@@ -77,25 +58,17 @@ describe("outbox", () => {
     it("toEntries() produces OutboxEntry objects", () => {
       const outbox = createOutbox();
       outbox.emit({ queue: "EMAIL", body: { hello: true } });
-      outbox.request({
-        actor: "inventory",
-        id: "inv-1",
-        message: "RESERVE",
-        payload: { itemId: "sword" },
-        onDone: "RESERVED",
-        onError: "RESERVE_FAILED",
-      });
+      outbox.emit({ queue: "EFFECTS", body: { type: "RESERVE", itemId: "sword" } });
 
       const entries = outbox.toEntries();
       expect(entries).toHaveLength(2);
 
-      expect(entries[0]?.type).toBe("emit");
       expect(entries[0]?.status).toBe("pending");
       expect(entries[0]?.attempts).toBe(0);
+      expect(entries[0]?.payload).toEqual({ queue: "EMAIL", body: { hello: true } });
 
-      expect(entries[1]?.type).toBe("request");
-      expect(entries[1]?.onDone).toBe("RESERVED");
-      expect(entries[1]?.onError).toBe("RESERVE_FAILED");
+      expect(entries[1]?.status).toBe("pending");
+      expect(entries[1]?.payload).toEqual({ queue: "EFFECTS", body: { type: "RESERVE", itemId: "sword" } });
     });
   });
 

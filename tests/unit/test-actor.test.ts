@@ -211,36 +211,5 @@ describe("testActor()", () => {
       expect(emissions).toHaveLength(1);
       expect(emissions[0]).toEqual({ queue: "EMAIL", body: { to: [] } });
     });
-
-    it("captures request() calls with onDone/onError", async () => {
-      const fetchMsg = message(z.object({}), (state: State, _payload, ctx) => {
-        ctx.request({
-          fetch: "https://api.example.com",
-          onDone: "FETCH_DONE",
-          onError: "FETCH_ERROR",
-        });
-        return state;
-      });
-
-      const defWithFetch = {
-        ...todoActorDef,
-        messages: {
-          ...todoActorDef.messages,
-          owner: { ...todoActorDef.messages.owner, FETCH: fetchMsg },
-        },
-      };
-
-      const tw = testActor(defWithFetch);
-      const state = tw.init({ creator: "alice" });
-      const { requests } = await tw.sendWithEffects(state, "alice", { type: "FETCH" });
-
-      expect(requests).toHaveLength(1);
-      expect(requests[0]).toEqual({
-        effect: { fetch: "https://api.example.com" },
-        onDone: "FETCH_DONE",
-        onError: "FETCH_ERROR",
-        meta: undefined,
-      });
-    });
   });
 });

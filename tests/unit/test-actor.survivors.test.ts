@@ -101,7 +101,6 @@ describe("testActor — kill survivors", () => {
     const state = t.init({ ownerId: "alice" });
     const result = await t.sendWithEffects(state, "alice", { type: "INCREMENT", amount: 5 });
     expect(result.emissions).toHaveLength(0);
-    expect(result.requests).toHaveLength(0);
     expect(result.state.count).toBe(5);
   });
 });

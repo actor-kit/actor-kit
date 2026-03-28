@@ -12,7 +12,7 @@
  */
 
 import { DurableObject } from "cloudflare:workers";
-import type { Effect, FieldDescriptor, MessageContext, RequestConfig, SchemaDefinition } from "@actor-kit/core";
+import type { Effect, FieldDescriptor, MessageContext, SchemaDefinition } from "@actor-kit/core";
 import { createDeltaFrame, createSnapshotFrame, encode, encodeDelta } from "@actor-kit/core";
 import type { z } from "zod";
 import { getCallerFromToken } from "./auth";
@@ -97,12 +97,6 @@ interface ActorDef {
       ctx: unknown,
     ): unknown | Promise<unknown>;
   };
-  callbacks?: Record<
-    string,
-    {
-      (state: unknown, payload: unknown, ctx: unknown): unknown | Promise<unknown>; // bivariant
-    }
-  >;
   after?: Record<string, (state: unknown) => unknown | Promise<unknown>>;
   tick?: {
     frequency: number;
@@ -143,9 +137,6 @@ const CREATE_TABLES_SQL = `
     payload TEXT,
     status TEXT DEFAULT 'pending',
     attempts INTEGER DEFAULT 0,
-    on_done TEXT,
-    on_error TEXT,
-    meta TEXT,
     created_at INTEGER
   );
   CREATE TABLE IF NOT EXISTS emission_failures (
@@ -248,15 +239,12 @@ export function actor(
     persistOutbox(entries: OutboxEntry[]): void {
       for (const entry of entries) {
         this.ctx.storage.sql.exec(
-          "INSERT INTO outbox (id, type, payload, status, attempts, on_done, on_error, meta, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+          "INSERT INTO outbox (id, type, payload, status, attempts, created_at) VALUES (?, ?, ?, ?, ?, ?)",
           entry.id,
-          entry.type,
+          "emit",
           JSON.stringify(entry.payload),
           entry.status,
           entry.attempts,
-          entry.onDone ?? null,
-          entry.onError ?? null,
-          entry.meta !== undefined ? JSON.stringify(entry.meta) : null,
           entry.createdAt,
         );
       }
@@ -352,7 +340,6 @@ export function actor(
         callerType,
         env: this.env,
         emit: (effect: Effect) => outbox.emit(effect),
-        request: (config: RequestConfig) => outbox.request(config),
       };
 
       // Route message
@@ -419,50 +406,22 @@ export function actor(
     async drainOutboxInner(): Promise<void> {
       const MAX_ATTEMPTS = 3;
       const rows = this.ctx.storage.sql
-        .exec(
-          "SELECT id, type, payload, attempts, on_done, on_error, meta FROM outbox WHERE status = 'pending' ORDER BY created_at",
-        )
+        .exec("SELECT id, payload, attempts FROM outbox WHERE status = 'pending' ORDER BY created_at")
         .toArray();
 
       for (const row of rows) {
         const entry = row as {
           id: string;
-          type: string;
           payload: string;
           attempts: number;
-          on_done: string | null;
-          on_error: string | null;
-          meta: string | null;
         };
         const payload: unknown = JSON.parse(entry.payload);
 
         try {
-          const effectResult = await this.executeEffect(payload);
+          await this.executeEffect(payload);
 
           // Mark as sent
           this.ctx.storage.sql.exec("UPDATE outbox SET status = 'sent' WHERE id = ?", entry.id);
-
-          // If this was a request with onDone, deliver the callback with the result
-          if (entry.on_done && entry.type === "request") {
-            const callbackHandler = def.callbacks?.[entry.on_done] ?? def.on?.[entry.on_done];
-            if (typeof callbackHandler === "function") {
-              // Build payload: callbacks get { result, meta }, legacy on gets raw result
-              const parsedMeta = entry.meta !== null ? JSON.parse(entry.meta) : undefined;
-              const callbackPayload = def.callbacks?.[entry.on_done]
-                ? { result: effectResult ?? {}, meta: parsedMeta }
-                : (effectResult ?? {});
-              const nextState = await callbackHandler(this.state, callbackPayload, {
-                caller: "system",
-                callerType: "service" as const,
-                env: this.env,
-              });
-              if (nextState !== this.state) {
-                this.state = nextState;
-                this.persistState();
-                this.broadcastViews();
-              }
-            }
-          }
         } catch (error) {
           const newAttempts = entry.attempts + 1;
           if (newAttempts >= MAX_ATTEMPTS) {
@@ -470,34 +429,12 @@ export function actor(
             this.ctx.storage.sql.exec(
               "INSERT INTO emission_failures (id, type, payload, error, failed_at) VALUES (?, ?, ?, ?, ?)",
               entry.id,
-              entry.type,
+              "emit",
               entry.payload,
               error instanceof Error ? error.message : String(error),
               Date.now(),
             );
             this.ctx.storage.sql.exec("DELETE FROM outbox WHERE id = ?", entry.id);
-
-            // Deliver onError callback if this was a request
-            if (entry.on_error && entry.type === "request") {
-              const errorHandler = def.callbacks?.[entry.on_error] ?? def.on?.[entry.on_error];
-              if (typeof errorHandler === "function") {
-                const errorResult = { message: error instanceof Error ? error.message : String(error) };
-                const parsedErrorMeta = entry.meta !== null ? JSON.parse(entry.meta) : undefined;
-                const errorPayload = def.callbacks?.[entry.on_error]
-                  ? { error: errorResult, meta: parsedErrorMeta }
-                  : errorResult;
-                const nextState = await errorHandler(this.state, errorPayload, {
-                  caller: "system",
-                  callerType: "service" as const,
-                  env: this.env,
-                });
-                if (nextState !== this.state) {
-                  this.state = nextState;
-                  this.persistState();
-                  this.broadcastViews();
-                }
-              }
-            }
           } else {
             this.ctx.storage.sql.exec("UPDATE outbox SET attempts = ? WHERE id = ?", newAttempts, entry.id);
             // Schedule retry — store desired time, then use unified alarm scheduler
@@ -536,7 +473,7 @@ export function actor(
         if (!response.ok) {
           throw new Error(`Fetch failed: ${response.status} ${response.statusText}`);
         }
-        // Return parsed response body for request() onDone callbacks
+        // Return parsed response body
         try {
           return await response.json();
         } catch {
@@ -759,7 +696,6 @@ export function actor(
           callerType: callerInfo.callerType,
           env: this.env,
           emit: (effect: Effect) => connectOutbox.emit(effect),
-          request: (config: RequestConfig) => connectOutbox.request(config),
         };
         const nextState = def.lifecycle?.connect
           ? await def.lifecycle.connect(
@@ -885,7 +821,6 @@ export function actor(
           callerType: info.callerType,
           env: this.env,
           emit: (effect: Effect) => disconnectOutbox.emit(effect),
-          request: (config: RequestConfig) => disconnectOutbox.request(config),
         };
         const nextState = def.lifecycle?.disconnect
           ? await def.lifecycle.disconnect(this.state, { caller, callerType: info.callerType }, disconnectCtx)

@@ -1,27 +1,20 @@
 /**
- * Transactional outbox — collects emit() and request() calls during transitions.
- *
- * emit() = fire-and-forget side effect
- * request() = async with onDone/onError callback message names
+ * Transactional outbox — collects emit() calls during transitions.
  *
  * After transition, entries are persisted atomically with state (same SQLite tx).
- * Outbox is drained asynchronously. Failed entries retry with backoff.
+ * Outbox is drained asynchronously — only Queue effects are delivered.
+ * Failed entries retry with backoff.
  */
 
-import type { Effect, NormalizedRequestConfig, RequestConfig } from "@actor-kit/core";
-import { normalizeRequest } from "@actor-kit/core";
+import type { Effect } from "@actor-kit/core";
 
 // --- Outbox entry ---
 
 export interface OutboxEntry {
   id: string;
-  type: "emit" | "request";
   payload: Effect;
   status: "pending" | "sent";
   attempts: number;
-  onDone?: string;
-  onError?: string;
-  meta?: unknown;
   createdAt: number;
 }
 
@@ -39,9 +32,7 @@ export interface OutboxStorage {
 
 interface OutboxCollector {
   emit(effect: Effect): void;
-  request(config: RequestConfig): void;
   getEmissions(): Effect[];
-  getRequests(): NormalizedRequestConfig[];
   toEntries(): OutboxEntry[];
 }
 
@@ -54,56 +45,25 @@ function generateId(): string {
 
 export function createOutbox(): OutboxCollector {
   const emissions: Effect[] = [];
-  const requests: RequestConfig[] = [];
 
   return {
     emit(effect: Effect): void {
       emissions.push(effect);
     },
 
-    request(config: RequestConfig): void {
-      requests.push(config);
-    },
-
     getEmissions(): Effect[] {
       return [...emissions];
     },
 
-    getRequests(): NormalizedRequestConfig[] {
-      return requests.map(normalizeRequest);
-    },
-
     toEntries(): OutboxEntry[] {
       const now = Date.now();
-      const entries: OutboxEntry[] = [];
-
-      for (const effect of emissions) {
-        entries.push({
-          id: generateId(),
-          type: "emit",
-          payload: effect,
-          status: "pending",
-          attempts: 0,
-          createdAt: now,
-        });
-      }
-
-      for (const config of requests) {
-        const normalized = normalizeRequest(config);
-        entries.push({
-          id: generateId(),
-          type: "request",
-          payload: normalized.effect,
-          status: "pending",
-          attempts: 0,
-          onDone: normalized.onDone,
-          onError: normalized.onError,
-          meta: normalized.meta,
-          createdAt: now,
-        });
-      }
-
-      return entries;
+      return emissions.map((effect) => ({
+        id: generateId(),
+        payload: effect,
+        status: "pending" as const,
+        attempts: 0,
+        createdAt: now,
+      }));
     },
   };
 }

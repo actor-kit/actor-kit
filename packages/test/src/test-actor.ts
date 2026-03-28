@@ -5,8 +5,7 @@
  * without CF runtime. Pure TypeScript.
  */
 
-import type { Effect, MessageContext, NormalizedRequestConfig, RequestConfig } from "@actor-kit/core";
-import { normalizeRequest } from "@actor-kit/core";
+import type { Effect, MessageContext } from "@actor-kit/core";
 import { type RolePredicate, resolveRole, routeMessage } from "@actor-kit/worker/testing";
 import type { z } from "zod";
 
@@ -45,13 +44,6 @@ interface TestableActorDef<TState, TInput> {
       ctx: unknown,
     ): TState | Promise<TState>;
   };
-  callbacks?: Record<
-    string,
-    {
-      // bivariant method signature so typed callbacks are assignable
-      (state: TState, payload: unknown, ctx: unknown): TState | Promise<TState>;
-    }
-  >;
   on?: Record<string, (state: TState, ...args: unknown[]) => TState | Promise<TState>>;
   observe?: {
     onTransition?(
@@ -82,7 +74,6 @@ interface TestHarness<TState, TInput> {
   ): Promise<{
     state: TState;
     emissions: Effect[];
-    requests: NormalizedRequestConfig[];
   }>;
   view(state: TState, caller: string, opts?: { callerType?: "user" | "service" }): { role: string; data: unknown };
 }
@@ -100,7 +91,6 @@ export function testActor<TState, TInput>(def: TestableActorDef<TState, TInput>)
   ): Promise<{
     state: TState;
     emissions: Effect[];
-    requests: NormalizedRequestConfig[];
   }> {
     const callerType = opts?.callerType ?? "user";
     const role = resolveRole(def.roles, state, caller, { callerType });
@@ -109,9 +99,8 @@ export function testActor<TState, TInput>(def: TestableActorDef<TState, TInput>)
       throw new Error(`No role matched for caller "${caller}"`);
     }
 
-    // Collect emissions and requests
+    // Collect emissions
     const emissions: Effect[] = [];
-    const requests: RequestConfig[] = [];
 
     const ctx: Omit<MessageContext, "role"> = {
       caller,
@@ -119,9 +108,6 @@ export function testActor<TState, TInput>(def: TestableActorDef<TState, TInput>)
       env: {},
       emit: (effect: Effect) => {
         emissions.push(effect);
-      },
-      request: (config: RequestConfig) => {
-        requests.push(config);
       },
     };
 
@@ -143,7 +129,7 @@ export function testActor<TState, TInput>(def: TestableActorDef<TState, TInput>)
       def.observe.onTransition(state, result.state, event, { caller, role });
     }
 
-    return { state: result.state, emissions, requests: requests.map(normalizeRequest) };
+    return { state: result.state, emissions };
   }
 
   return {

@@ -1,27 +1,17 @@
 # Lessons
 Patterns and mistakes. Review at start of each iteration.
 ---
-- Bivariant method signatures (`handler(state: unknown)` not `handler: (state: unknown) =>`) are required for ActorDef to accept typed handlers. Don't convert to arrow function types.
-- `cloudflare:workers` is a virtual module — it only resolves inside the CF runtime. Don't add it as a package dep.
-- `pnpm-workspace.yaml` must list all packages or lockfile gets inconsistent.
-- Schema types (CallbackDef, Effect, RequestConfig, NormalizedRequestConfig) are used by multiple packages — they go in @actor-kit/core.
-- message() and callback() implementations are worker-only — they stay in @actor-kit/worker.
-- view() is used in both worker definitions and client (actorClient takes the schema from view) — it goes in @actor-kit/core.
-- No re-exports between packages. Explicit imports only.
-- @actor-kit/core must be built (`pnpm --filter @actor-kit/core build`) before @actor-kit/worker can typecheck, because worker resolves core via `dist/index.d.ts`.
-- Add `cloudflare:workers` to tsdown external list for worker package — it's a virtual module.
-- Worker package needs `@cloudflare/workers-types` in devDependencies AND `types` in tsconfig.json for DO/WebSocket/WebSocketPair types.
-- Client package needs `"DOM"` in tsconfig lib array for browser APIs (WebSocket, TextDecoder, ArrayBuffer, MessageEvent).
-- Codex P1 about missing dist/ is expected for workspace packages — dist/ is built by `pnpm build`, not committed.
-- React package needs `"jsx": "react-jsx"` in tsconfig.json even though source uses createElement (not JSX) — required for type resolution of React types.
-- React package uses `react` as peerDependency, `@actor-kit/client` as regular dependency. Both must be externalized in tsdown.
-- Codex findings about stale hook state on client swap (useView, useSelector) are pre-existing bugs from the original code — not regressions from the split.
-- Importing from `@actor-kit/worker` root pulls in actor.ts which imports `cloudflare:workers`. Use `@actor-kit/worker/testing` subpath for pure-logic runtime utilities (routeMessage, resolveRole) that need to run outside CF runtime.
-- When returning a plain object with methods that call each other, avoid `this` binding — extract shared logic as a closed-over function so destructuring works (`const { send } = testActor(def)`).
-- Cannot remove `packages/actor-kit/` until all consumers (49 test files, 4 examples, website) are migrated to import from `@actor-kit/*` packages. Tests use relative paths (`../../packages/actor-kit/src/...`), examples use package name (`"actor-kit"`). Pre-commit hook runs vitest, so broken imports = blocked commit.
-- When adding new packages to lint scope, keep the old package in the lint targets until it's fully retired — otherwise regressions in the published entrypoint won't be caught by CI.
-- Unit tests need `resolve.alias` in vitest.config.ts to map `@actor-kit/*` packages to source files. Without this, vitest resolves via package.json exports → dist/, which may not be built. Subpath aliases (e.g., `@actor-kit/worker/testing`) must be listed before parent package aliases.
-- `@actor-kit/worker/testing` subpath should include ALL pure-logic exports (message, callback, createRef, auth, all runtime utilities) — not just routeMessage and resolveRole. Unit tests need the full set without pulling in cloudflare:workers.
-- Integration tests (vitest-pool-workers) resolve `@actor-kit/*` imports via dist/ (wrangler/esbuild bundler), not Vite's resolver. The `test:integration` script must run `pnpm build` first. Unit tests use `resolve.alias` in vitest.config.ts instead.
-- WebSocket-based integration tests need `isolatedStorage: false` in vitest-pool-workers config due to SQLite WAL/SHM files. Any test that opens a WebSocket should be excluded from vitest.config.ts (isolated) and included in vitest.ws.config.ts (non-isolated).
-- The ws config for integration tests has pre-existing auth failures (401 on valid JWT, null webSocket). This is NOT related to import changes — confirmed by running with original imports. Root cause is unresolved.
+- The old site (~/src/actor-kit/website/src/pages/index.astro) used a CUSTOM StarlightPage, not the default splash template. The custom page has hand-crafted HTML/CSS for hero, features, and tabbed code.
+- Starlight's built-in splash template uses CardGrid which looks generic. For a compelling homepage, use a custom page component.
+- The v1 site's orange color scheme (#f6821f) with dark background looks professional. Keep the same palette.
+- Tabbed code examples are the killer feature of the v1 homepage — they show the full stack in one glance.
+- The docs dev server runs at http://localhost:4321
+- Use mcp__claude-in-chrome tools to take screenshots and interact with the page
+- Function parameter contravariance (strict mode) prevents typed role predicates from being assignable to ActorDef's bivariant interface. Use a type guard (`isActorDef`) instead of `as` cast to bridge the gap in createActorClass.
+- `@actor-kit/worker/testing` entrypoint avoids cloudflare:workers — use it for unit-testable exports like defineActor.
+- New files default to tabs; biome wants spaces. Run `biome check --fix` on new files before committing.
+- Integration tests need `pnpm build` in packages/worker before they pick up new exports (wrangler resolves from dist/).
+- Guard type change from `(state) => boolean` to `(state, payload, ctx) => boolean` is backward compatible: TS allows fewer-param functions to be assigned to more-param types, and JS ignores extra args. But ActorMessageSlot/RoutableMessage bivariant method signatures MUST also be updated — a 3-param function is NOT assignable to a 1-param function type (even with bivariance).
+- When detecting flat vs role-nested messages, check ALL entries for both `schema` AND `handler` properties. Checking only the first entry or only `schema` creates false positives when role names collide with MessageDef property names.
+- When removing a feature that spans multiple packages with dual actor.ts files (actor-kit + worker), remember to update BOTH copies — and also the test harness packages (packages/test, packages/actor-kit/src/test). The codex review catches stale references in test files.
+- CREATE_TABLES_SQL must be kept in sync with persistOutbox() — unused columns in the schema are a migration hazard flagged by codex.

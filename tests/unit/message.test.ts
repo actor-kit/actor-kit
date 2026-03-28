@@ -24,7 +24,6 @@ describe("message() helper", () => {
       expect(ctx.callerType).toBe("user");
       expect(ctx.role).toBe("owner");
       expect(typeof ctx.emit).toBe("function");
-      expect(typeof ctx.request).toBe("function");
       return { ...state, count: state.count + amount };
     });
 
@@ -35,9 +34,6 @@ describe("message() helper", () => {
       env: { ACTOR_KIT_SECRET: "test" },
       emit: (effect: unknown) => {
         emissions.push(effect);
-      },
-      request: (config: unknown) => {
-        emissions.push(config);
       },
     };
 
@@ -91,12 +87,8 @@ describe("message() helper", () => {
   });
 
   it("supports async handlers", () => {
-    const fetchData = message(z.object({}), async (state: State, _, { request }) => {
-      request({
-        fetch: "https://api.example.com/data",
-        onDone: "FETCH_DONE",
-        onError: "FETCH_ERROR",
-      });
+    const fetchData = message(z.object({}), async (state: State, _, { emit }) => {
+      emit({ queue: "EFFECTS", body: { type: "FETCH", url: "https://api.example.com/data" } });
       return state;
     });
 

@@ -20,17 +20,12 @@ export { array, boolean, float32, float64, schema, string, uint8, uint16, uint32
 
 // Shared types
 export type {
-  CallbackDef,
   Effect,
   EmitFn,
   GuardContext,
   MessageContext,
   MessageDef,
-  NormalizedRequestConfig,
-  RequestConfig,
-  RequestFn,
 } from "./types";
-export { normalizeRequest } from "./types";
 
 // View
 export type { ViewDef } from "./view";
