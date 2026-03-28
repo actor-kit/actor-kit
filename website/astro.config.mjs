@@ -62,6 +62,7 @@ export default defineConfig({
             { slug: "recipes/actor-to-actor" },
             { slug: "recipes/sequential-and-parallel-states" },
             { slug: "recipes/testing-side-effects" },
+            { slug: "recipes/storybook" },
             { slug: "recipes/faq" },
           ],
         },
