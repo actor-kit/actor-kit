@@ -19,9 +19,9 @@ Messages are flat. Guards handle authorization.
 
 - [x] **4. Sync-only handlers** — Change handler return type from `TState | Promise<TState>` to `TState`. Remove `await` from handler invocation in actor.ts. Remove async from lifecycle handlers. Update all test handlers to be sync. Add @ts-expect-error test verifying async handlers are rejected at type level. Run `pnpm typecheck && pnpm test:unit`.
 
-- [ ] **5. Delete legacy on block** — Remove `on` from ActorDef interface. Remove on-related code from actor.ts (the fallback paths in connect/disconnect/outbox drain). lifecycle is the only connection handler. Remove request-callbacks.test.ts (tests the old on-based callback delivery). Run `pnpm typecheck && pnpm test:unit`.
+- [x] **5. Delete legacy on block** — Remove `on` from ActorDef interface. Remove on-related code from actor.ts (the fallback paths in connect/disconnect/outbox drain). lifecycle is the only connection handler. Remove request-callbacks.test.ts (tests the old on-based callback delivery). Run `pnpm typecheck && pnpm test:unit`.
 
-- [ ] **6. Contract-derived client** — Update `actorClient()` in `@actor-kit/client` to accept a contract (from defineActor) instead of a raw schema. Infer TView from contract.views and TEvent from keyof contract.messages. Remove `.events<E>()` — events are inferred. Remove manual viewSchema option. Update builder.ts and client.ts. Write type tests. Run `pnpm typecheck && pnpm test:unit`.
+- [x] **6. Contract-derived client** — Update `actorClient()` in `@actor-kit/client` to accept a contract (from defineActor) instead of a raw schema. Infer TView from contract.views and TEvent from keyof contract.messages. Remove `.events<E>()` — events are inferred. Remove manual viewSchema option. Update builder.ts and client.ts. Write type tests. Run `pnpm typecheck && pnpm test:unit`.
 
 - [ ] **7. Contract-derived React context** — Update `actorContext()` to accept a contract. Infer types from it. Remove manual generics. Write type tests. Run `pnpm typecheck && pnpm test:unit`.
 

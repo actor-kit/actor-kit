@@ -33,6 +33,8 @@ interface ClientOptions {
   accessToken: string;
   /** Schema for decoding binary frames. If not provided, falls back to JSON. */
   viewSchema?: SchemaDefinition<Record<string, FieldDescriptor>> | undefined;
+  /** Per-role schemas for binary decoding (contract-derived). Takes precedence over viewSchema. */
+  viewSchemas?: Record<string, SchemaDefinition<Record<string, FieldDescriptor>>> | undefined;
   /** Role names in definition order (for mapping roleIndex to role name) */
   roleNames?: string[] | undefined;
   WebSocketImpl?: typeof WebSocket;
@@ -58,6 +60,7 @@ export function createActorClient(options: ClientOptions): ActorClient<unknown> 
     url,
     accessToken,
     viewSchema,
+    viewSchemas,
     roleNames,
     WebSocketImpl = WebSocket,
     onRedirect,
@@ -76,6 +79,7 @@ export function createActorClient(options: ClientOptions): ActorClient<unknown> 
   let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
   let lastChecksum: string | undefined;
   let isReconnecting = false;
+  let activeSchema: SchemaDefinition<Record<string, FieldDescriptor>> | undefined = viewSchema;
 
   function computeChecksum(json: string): string {
     let h = 0;
@@ -99,14 +103,27 @@ export function createActorClient(options: ClientOptions): ActorClient<unknown> 
     }
   }
 
+  /** Resolve the binary schema for a given roleIndex. Per-role schemas take precedence. */
+  function resolveSchema(roleIndex: number | undefined): SchemaDefinition<Record<string, FieldDescriptor>> | undefined {
+    if (viewSchemas && roleNames && roleIndex !== undefined) {
+      const roleName = roleNames[roleIndex];
+      if (roleName !== undefined && roleName in viewSchemas) {
+        return viewSchemas[roleName];
+      }
+    }
+    return viewSchema;
+  }
+
   function handleBinaryMessage(data: ArrayBuffer) {
     try {
       const bytes = new Uint8Array(data);
       const frame = parseFrame(bytes);
 
       if (frame.type === FrameType.SNAPSHOT) {
-        if (viewSchema) {
-          currentView = decode(viewSchema, frame.payload);
+        const resolved = resolveSchema(frame.roleIndex);
+        if (resolved) {
+          activeSchema = resolved;
+          currentView = decode(resolved, frame.payload);
         } else {
           return;
         }
@@ -118,9 +135,9 @@ export function createActorClient(options: ClientOptions): ActorClient<unknown> 
         setConnectionState("connected");
         notifyListeners();
       } else if (frame.type === FrameType.DELTA) {
-        // Apply delta to current view — only changed fields
-        if (viewSchema && currentView) {
-          currentView = applyDelta(viewSchema, currentView as Record<string, unknown>, frame.payload);
+        // Apply delta to current view using the schema from the last snapshot
+        if (activeSchema && currentView) {
+          currentView = applyDelta(activeSchema, currentView as Record<string, unknown>, frame.payload);
           lastChecksum = computeChecksum(JSON.stringify(currentView));
           notifyListeners();
         }

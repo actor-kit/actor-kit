@@ -75,3 +75,23 @@ Working memory for v3 API redesign. Delete after run.
 ### Codex findings addressed
 - [P1] Added `instanceof Promise` runtime guard in routeMessage — prevents async handlers that slip past the type system (JS consumers, structural typing via `actor()`) from silently storing Promise objects as actor state
 - [P2] Added `instanceof Promise` runtime guards in all lifecycle/after/tick handler invocation sites in both actor.ts copies — same defense against async functions assignable to `(...) => unknown`
+
+## Task 6: Contract-derived client — DONE
+
+### What was done
+- Added contract overload to `actorClient()` in both `@actor-kit/client` and `actor-kit/client`
+- `actorClient(contract)` infers TEvent from flat messages (Zod schema `_output`) and TView from view schemas (`SchemaDefinition<TShape>` via `Infer`)
+- Kept legacy `actorClient(viewSchema).events<E>()` path for backward compatibility
+- Added `ContractEvents<T>` and `ContractView<T>` type helpers — exported from both client packages
+- Added per-role `viewSchemas: Record<string, SchemaDefinition>` to `createActorClient` options (P1 fix)
+- Client resolves binary schema per role using `roleIndex` from snapshot frame + `activeSchema` tracking for delta frames
+- Role names extracted from `Object.keys(contract.def.roles)` to match worker's roleIndex order (P2 fix)
+- `ContractEvents` only matches flat messages (values with `schema` property); nested role-based message maps fall through to loose event typing (P2 fix)
+
+### Tests written
+- **Unit** (6): contract-client.test.ts — event type inference from flat messages, view type inference, payload validation via @ts-expect-error, subscribe callback typing, multi-view union type, runtime factory behavior
+
+### Codex findings addressed
+- [P1] Per-role schemas: `buildContractFactory` extracts ALL view schemas and passes them as `viewSchemas` map to `createActorClient`. Client resolves the correct schema via `roleIndex` → `roleNames` → `viewSchemas[roleName]`. Tracks `activeSchema` for delta frames.
+- [P2] Role index alignment: `roleNames` derived from `Object.keys(contract.def.roles)` instead of `Object.keys(contract.def.views)` — matches the worker's `Object.keys(def.roles)` used to compute `roleIndex` in snapshot frames.
+- [P2] Nested message safety: `ContractEvents` constraint tightened to `Record<string, { schema: { _output: unknown } }>` — only flat messages (MessageDef with schema) match. Role-nested message maps don't match, so they fall through to loose `{ type: string; [key: string]: unknown }` instead of inferring wrong event names.
