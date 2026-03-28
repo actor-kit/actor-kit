@@ -1,8 +1,6 @@
 // Pure-logic runtime utilities — separate entrypoint to avoid cloudflare:workers via actor.ts
 // Used by @actor-kit/test and unit tests that run outside CF runtime
 
-// Auth
-export { createAccessToken, getCallerFromToken } from "./auth";
 // Contract builder
 export type { ActorContract } from "./define";
 export { defineActor } from "./define";

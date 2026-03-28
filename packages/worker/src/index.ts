@@ -1,10 +1,8 @@
-// @actor-kit/worker — actor, message, runtime, auth
+// @actor-kit/worker — actor, message, runtime, identity
 
 export type { TypedActorClass } from "./actor";
 // Core actor builder + typed DO class
 export { actor, createActorClass } from "./actor";
-// Auth
-export { createAccessToken, getCallerFromToken } from "./auth";
 // Contract builder
 export type { ActorContract } from "./define";
 export { defineActor } from "./define";

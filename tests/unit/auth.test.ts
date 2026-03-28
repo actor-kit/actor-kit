@@ -1,4 +1,4 @@
-import { createAccessToken, getCallerFromToken } from "@actor-kit/worker/testing";
+import { createAccessToken, getCallerFromToken } from "@actor-kit/worker/token";
 import { describe, expect, it } from "vitest";
 
 const SECRET = "test-secret-at-least-32-chars-long!!";

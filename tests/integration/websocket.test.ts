@@ -1,6 +1,6 @@
 import { env } from "cloudflare:test";
 import { applyDelta, decode, FrameType, parseFrame, schema, string, uint32 } from "@actor-kit/core";
-import { createAccessToken } from "@actor-kit/worker";
+import { createAccessToken } from "@actor-kit/worker/token";
 import { describe, expect, it } from "vitest";
 
 const SECRET = "test-secret-for-integration-tests-only";

@@ -9,6 +9,7 @@ export default defineConfig({
     alias: {
       // Resolve workspace packages to source for unit tests.
       // Order matters: subpath exports must come before their parent.
+      "@actor-kit/worker/token": resolve(__dirname, "packages/worker/src/token.ts"),
       "@actor-kit/worker/testing": resolve(__dirname, "packages/worker/src/testing.ts"),
       "@actor-kit/core": resolve(__dirname, "packages/core/src/index.ts"),
       "@actor-kit/client": resolve(__dirname, "packages/client/src/index.ts"),

@@ -1,4 +1,4 @@
-import { createAccessToken } from "@actor-kit/worker";
+import { createAccessToken } from "@actor-kit/worker/token";
 import { Counter } from "./counter";
 
 export { Counter };
