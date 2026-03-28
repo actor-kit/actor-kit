@@ -29,10 +29,10 @@ Messages are flat. Guards handle authorization.
 
 - [x] **9. Contract-derived ref** — Update `createRef()` to accept contract + env + id. ref.send() is typed to the contract's messages. Write type tests. Run `pnpm typecheck && pnpm test:unit`.
 
-- [ ] **10. Update integration tests** — Update tests/integration/ for new API: flat messages, defineActor + createActorClass, sync handlers, no request/callbacks. Run `pnpm test:integration`.
+- [x] **10. Update integration tests** — Update tests/integration/ for new API: flat messages, defineActor + createActorClass, sync handlers, no request/callbacks. Run `pnpm test:integration`.
 
-- [ ] **11. Update examples** — Update all 4 examples (counter, todo-list, chat-room, auction) for v3 API. Counter should be minimal: init + messages only. Run examples to verify.
+- [x] **11. Update examples** — Update all 4 examples (counter, todo-list, chat-room, auction) for v3 API. Counter should be minimal: init + messages only. Run examples to verify.
 
-- [ ] **12. Update docs** — Update all 25 docs pages for v3 API. Update installation (simpler), quick-start (minimal counter), concepts (flat messages, guards, emit-only), API reference, examples, recipes. Build docs site.
+- [x] **12. Update docs** — Update all 25 docs pages for v3 API. Update installation (simpler), quick-start (minimal counter), concepts (flat messages, guards, emit-only), API reference, examples, recipes. Build docs site.
 
-- [ ] **13. Final verification + commit** — Run full suite: pnpm typecheck, pnpm test:unit, pnpm test:integration, pnpm lint, docs build. Commit with detailed message.
+- [x] **13. Final verification + commit** — Run full suite: pnpm typecheck, pnpm test:unit, pnpm test:integration, pnpm lint, docs build. Commit with detailed message.

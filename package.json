@@ -13,6 +13,7 @@
   },
   "devDependencies": {
     "@biomejs/biome": "^2.4.8",
+    "@changesets/cli": "^2.30.0",
     "@cloudflare/vitest-pool-workers": "^0.8.0",
     "@cloudflare/workers-types": "^4.20250310.0",
     "@playwright/test": "^1.58.2",

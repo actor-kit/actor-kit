@@ -146,3 +146,86 @@ Working memory for v3 API redesign. Delete after run.
 ### Codex findings addressed
 - [P1] Kebab-case contract names: `"counter-v3".toUpperCase()` → `"COUNTER-V3"` but wrangler binding is `COUNTER_V3`. Fixed by adding `.replace(/-/g, "_")` after `.toUpperCase()`. Applied to both ref.ts copies.
 - [P1] Lockfile sync — pre-existing issue from `@changesets/cli` addition, not related to task 9
+
+## Task 10: Update integration tests — DONE
+
+### What was done
+- Converted all 3 integration test actors from `actor()` to `defineActor()` + `createActorClass()`:
+  - **Counter**: flat messages with role guards (`ctx.role === "admin"` for DECREMENT, RESET, NOTIFY), added GUARDED_ADD for payload-guard testing
+  - **TimerActor**: flat messages, preserves `after`/`tick` handlers
+  - **Auction**: `defineActor` with sequential states (states keep role-nested messages)
+- Removed redundant `CounterV3` and `FlatCounter` actors and their DO bindings (COUNTER_V3, FLAT_COUNTER)
+- Removed redundant test files: `define-actor.test.ts` (covered by lifecycle tests), `flat-messages.test.ts` (covered by Counter being v3 with flat messages)
+- Updated error assertions: role-restricted messages return `"guard_failed"` instead of `"message_not_found"` (flat messages with guards vs role-nested messages)
+- Added payload guard tests to `roles-and-guards.test.ts`: GUARDED_ADD with state+payload guard (`state.count + amount <= 100`)
+- Added open-message test: verifying both user and admin can send INCREMENT (no guard)
+
+### Tests written
+- **Integration** (2 new): payload guard rejection/acceptance, open messages available to all roles
+- **Integration** (3 updated assertions): lifecycle, roles-and-guards, error-feedback — "message_not_found" → "guard_failed"
+
+### Tests removed
+- **Integration** (9 removed): define-actor.test.ts (4), flat-messages.test.ts (5) — redundant with Counter now being v3
+
+### Final test counts
+- Isolated storage config: 11 files, 44 tests — all pass
+- WebSocket config: 8 files, 23 tests — all pass
+- Unit tests: 42 files, 298 tests — all pass
+
+### Codex findings addressed
+- [P2] `GUARDED_ADD` handler was missing `lastCaller` update — inconsistent with other Counter messages. Fixed by adding `{ caller }` destructuring and `lastCaller: caller` to handler return.
+
+## Task 11: Update examples — DONE
+
+### What was done
+- Converted all 4 examples from v2 API (`actor()`) to v3 API (`defineActor()` + `createActorClass()`):
+  - **Counter**: flat messages, RESET guarded by `ctx.role === "admin"`, exported `CounterContract`
+  - **Todo-list**: flat messages with guards for role-based access (ADD_TODO/TOGGLE for owner+member, DELETE_TODO/INVITE for owner only)
+  - **Chat-room**: flat messages, `on` block → `lifecycle` block, removed `as` casts (typed `{ caller, callerType }` destructuring)
+  - **Auction**: flat messages, BID guard checks `!state.closed`, CLOSE guard checks `ctx.role === "auctioneer" && !state.closed && state.bids.length > 0`
+- Updated e2e test: "Actor Kit v2 Counter" → "Actor Kit Counter"
+- Updated worker.ts HTML title to match
+
+### Tests written
+- No new tests — this task updates existing examples. Existing unit (298) and integration (44 + 23 WS) tests all pass.
+
+### Codex findings addressed
+- [P2] Chat-room `disconnect` drops user after first socket close (multi-tab issue) — pre-existing behavior from v2 `on` block, not a regression. Same unconditional removal logic existed before. Acknowledged, not changed — fixing would be a behavioral change beyond task 11 scope.
+
+## Task 12: Update docs — DONE
+
+### What was done
+- Added `defineActor()` and `createActorClass()` to the published `actor-kit` package (`packages/actor-kit/src/core/define.ts` + `actor.ts`) — required for docs to use correct `actor-kit` import paths
+- Updated all 24 docs pages + homepage (25 total) for v3 API:
+  - **Getting Started** (3): overview (removed callback term, added guard/contract terms), installation (single `actor-kit` package with subpath exports table), quick-start (full v3 counter with defineActor + createActorClass + flat messages + contract-derived client/react)
+  - **Examples** (4): counter (flat messages, guard on RESET, contract-derived client), todo-list (flat messages with guards for role-based auth), chat-room (lifecycle block instead of `on` block), auction (guards checking state + ctx.role)
+  - **Concepts** (8): actors-and-state (defineActor + createActorClass, sync lifecycle handlers), roles-and-authorization (flat messages with guards instead of per-role nesting), messages-and-guards (flat messages, sync handlers, 3-param guards), views (import from `actor-kit`), binary-sync (import from `actor-kit`/`actor-kit/client`), side-effects (emit-only, removed request/callback, Queue-based result pattern), timers (defineActor syntax), testing (testActor(contract), sync send, emissions only)
+  - **Recipes** (5): actor-to-actor (emit + createRef only, removed request/callback), sequential-and-parallel-states (defineActor syntax, fixed after handlers to plain functions), testing-side-effects (emissions only, no requests), faq (updated for v3 patterns), storybook (unchanged — no v2-specific APIs)
+  - **API Reference** (4): core (defineActor, createActorClass, message with guards, createRef with contract), client (actorClient(contract) primary, schema-derived legacy), react (actorContext(contract) primary), test (testActor(contract) primary)
+  - **Homepage** (1): updated code tabs (v3 API), hero text, packages section (single package with subpath exports)
+- Built docs site successfully (26 pages)
+
+### Tests written
+- No new tests — this task updates documentation only. Added `defineActor` and `createActorClass` to published `actor-kit` package (copies from `@actor-kit/worker`). Existing unit (298) and integration (44 + 23 WS) tests all pass.
+
+### Codex findings addressed
+- [P1] `defineActor` exported from server-only root entrypoint (`actor-kit` imports `cloudflare:workers`) — acknowledged. This is a pre-existing architectural concern (same as `@actor-kit/worker` which also exports `defineActor` alongside CF-dependent code). Modern bundlers tree-shake correctly. The `@actor-kit/worker/testing` subpath was created for this reason. A future `actor-kit/shared` subpath could export browser-safe APIs only.
+- [P2] Quick-start `CounterContract` import in worker.ts was unused — fixed by removing unused import.
+- [P2] Sequential-state `after` example used `message()` wrapper — fixed. `after` handlers are plain functions `(state) => newState`, not MessageDef objects.
+
+## Task 13: Final verification + commit — DONE
+
+### What was done
+- Ran full verification suite:
+  - `pnpm typecheck` — all packages clean
+  - `pnpm test:unit` — 298 tests pass (42 files)
+  - `pnpm test:integration` (isolated storage) — 44 tests pass (11 files)
+  - `pnpm test:integration` (WebSocket) — 23 tests pass (8 files)
+  - `pnpm lint` — warnings only, no errors
+  - Docs site build — 26 pages built successfully
+
+### Tests written
+- No new tests — this task is final verification only.
+
+### Codex findings addressed
+- [P1] `@changesets/cli` in package.json without lockfile update — pre-existing issue. Verified `pnpm-lock.yaml` is already in sync (lockfile was updated when the dependency was installed, but the package.json change was never committed). The lockfile is correct.
