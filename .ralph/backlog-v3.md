@@ -23,11 +23,11 @@ Messages are flat. Guards handle authorization.
 
 - [x] **6. Contract-derived client** — Update `actorClient()` in `@actor-kit/client` to accept a contract (from defineActor) instead of a raw schema. Infer TView from contract.views and TEvent from keyof contract.messages. Remove `.events<E>()` — events are inferred. Remove manual viewSchema option. Update builder.ts and client.ts. Write type tests. Run `pnpm typecheck && pnpm test:unit`.
 
-- [ ] **7. Contract-derived React context** — Update `actorContext()` to accept a contract. Infer types from it. Remove manual generics. Write type tests. Run `pnpm typecheck && pnpm test:unit`.
+- [x] **7. Contract-derived React context** — Update `actorContext()` to accept a contract. Infer types from it. Remove manual generics. Write type tests. Run `pnpm typecheck && pnpm test:unit`.
 
-- [ ] **8. Contract-derived test harness** — Update `testActor()` to accept a contract. init/send/view/role all typed from contract. No more raw def objects. Write type tests. Run `pnpm typecheck && pnpm test:unit`.
+- [x] **8. Contract-derived test harness** — Update `testActor()` to accept a contract. init/send/view/role all typed from contract. No more raw def objects. Write type tests. Run `pnpm typecheck && pnpm test:unit`.
 
-- [ ] **9. Contract-derived ref** — Update `createRef()` to accept contract + env + id. ref.send() is typed to the contract's messages. Write type tests. Run `pnpm typecheck && pnpm test:unit`.
+- [x] **9. Contract-derived ref** — Update `createRef()` to accept contract + env + id. ref.send() is typed to the contract's messages. Write type tests. Run `pnpm typecheck && pnpm test:unit`.
 
 - [ ] **10. Update integration tests** — Update tests/integration/ for new API: flat messages, defineActor + createActorClass, sync handlers, no request/callbacks. Run `pnpm test:integration`.
 

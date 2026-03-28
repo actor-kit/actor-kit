@@ -95,3 +95,54 @@ Working memory for v3 API redesign. Delete after run.
 - [P1] Per-role schemas: `buildContractFactory` extracts ALL view schemas and passes them as `viewSchemas` map to `createActorClient`. Client resolves the correct schema via `roleIndex` → `roleNames` → `viewSchemas[roleName]`. Tracks `activeSchema` for delta frames.
 - [P2] Role index alignment: `roleNames` derived from `Object.keys(contract.def.roles)` instead of `Object.keys(contract.def.views)` — matches the worker's `Object.keys(def.roles)` used to compute `roleIndex` in snapshot frames.
 - [P2] Nested message safety: `ContractEvents` constraint tightened to `Record<string, { schema: { _output: unknown } }>` — only flat messages (MessageDef with schema) match. Role-nested message maps don't match, so they fall through to loose `{ type: string; [key: string]: unknown }` instead of inferring wrong event names.
+
+## Task 7: Contract-derived React context — DONE
+
+### What was done
+- Added contract overload to `actorContext()` in both `@actor-kit/react` and `actor-kit/react`
+- `actorContext(contract)` infers TView from `ContractView<T>` and TEvent from `ContractEvents<T>` — same type helpers used by `actorClient(contract)`
+- Kept legacy `actorContext<typeof Factory>()` path for backward compatibility
+- Implementation delegates to `createActorContext()` — the contract is only used for type inference, not runtime behavior
+
+### Tests written
+- **Unit** (5): contract-react.test.ts — view type inference, event type inference from flat messages, useSelector typed view, all hooks returned, multi-view union type
+
+### Codex findings addressed
+- [P1] Lockfile sync — pre-existing issue from `@changesets/cli` addition in package.json, not related to task 7 changes
+- [P2] Role-scoped message fallback — by design, same as task 6. `ContractEvents` intentionally only handles flat messages (v3 API). Role-nested messages are v2 legacy and fall through to loose typing
+
+## Task 8: Contract-derived test harness — DONE
+
+### What was done
+- Added contract overload to `testActor()` in both `@actor-kit/test` and `actor-kit/test`
+- `testActor(contract)` returns `ContractTestHarness` with typed `init()`, `send()`, `sendWithEffects()`, `view()`
+- Added `ContractState<T>`, `ContractInput<T>`, `ContractEvents<T>`, `ContractView<T>` type helpers locally in each test package
+- Contract overload constrained to require `input`, `init`, `roles`, `messages`, `views` — incomplete contracts are rejected
+- Detects flat messages (v3) and wraps to role-nested format (same as `createActorClass`)
+- Kept legacy `testActor(def)` path for backward compatibility
+
+### Tests written
+- **Unit** (10): contract-test-harness.test.ts — input type inference, state type inference, send event typing, sendWithEffects event typing, view data typing, runtime init/send/view flow, guard rejection, emission capture, role resolution, viewer view
+
+### Codex findings addressed
+- [P2] Narrowed contract overload constraint to require `roles`, `messages`, `views` (not just `{ name, def }`) — prevents runtime crash on incomplete contracts
+- [P2] Changed `ContractInput<T>` to use `_input` instead of `_output` — aligns with `safeParse()` accepting raw values, correct for coercing/transforming Zod schemas
+- [P2] Lockfile sync — pre-existing issue from `@changesets/cli` addition, not related to task 8
+
+## Task 9: Contract-derived ref — DONE
+
+### What was done
+- Added contract overload to `createRef()` in both `@actor-kit/worker` and `actor-kit/core`
+- `createRef(contract, env, id)` returns `ActorRef<ContractEvents<T>>` — `ref.send()` only accepts events from the contract's flat messages
+- Added `ContractEvents<T>` type helper locally in each ref module (same pattern as client/react/test)
+- `ActorRef` interface now has a generic `TEvent` parameter (defaults to loose `{ type: string; [key: string]: unknown }` for backward compatibility)
+- Contract name normalized to UPPER_SNAKE_CASE for env lookup: `"my-actor"` → `"MY_ACTOR"` (hyphens replaced with underscores)
+- Detection uses type guards (`isActorContract`, `isDONamespace`) — no `as` casts
+- Kept legacy `createRef(env, actorType, actorId)` path for backward compatibility
+
+### Tests written
+- **Unit** (8): contract-ref.test.ts — event type inference from flat messages, payload validation via @ts-expect-error, actorType inferred from contract name, send/spawn/getSnapshot delegation, kebab-case name normalization, legacy overload still works
+
+### Codex findings addressed
+- [P1] Kebab-case contract names: `"counter-v3".toUpperCase()` → `"COUNTER-V3"` but wrangler binding is `COUNTER_V3`. Fixed by adding `.replace(/-/g, "_")` after `.toUpperCase()`. Applied to both ref.ts copies.
+- [P1] Lockfile sync — pre-existing issue from `@changesets/cli` addition, not related to task 9
