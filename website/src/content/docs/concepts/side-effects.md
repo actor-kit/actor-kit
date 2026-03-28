@@ -66,5 +66,5 @@ emit({ actor: "AUDIT_LOG", id: "global", message: "LOG", payload: { action: "del
 
 ## Related
 
-- [Actor-to-Actor Communication](/recipes/actor-to-actor/) — `emit()` and `createRef()` patterns for DO-to-DO messaging
+- [Actor-to-Actor Communication](/recipes/actor-to-actor/) — `emit()` and typed DO stub patterns for DO-to-DO messaging
 - [Testing Side Effects](/recipes/testing-side-effects/) — how to capture and assert `emit()` calls in tests

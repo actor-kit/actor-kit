@@ -102,20 +102,6 @@ Pairs a schema with a projection function.
 const ownerView = view(OwnerSchema, (state, caller) => ({ ... }));
 ```
 
-## `createRef(contract, env, id)` / `createRef(env, actorType, actorId)`
-
-Creates a typed reference to another actor for DO-to-DO communication.
-
-```typescript
-// Contract-derived — send() typed to contract's messages
-const zone = createRef(ZoneContract, env, "forest-north");
-
-// Legacy — untyped send()
-const zone = createRef(env, "ZONE", "forest-north");
-```
-
-Contract name is normalized to UPPER_SNAKE_CASE for env lookup: `"my-actor"` → `"MY_ACTOR"`.
-
 ## `createAccessToken(params)`
 
 Creates a JWT for WebSocket authentication. Returns `Promise<string>`.

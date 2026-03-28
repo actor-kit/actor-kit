@@ -164,8 +164,8 @@ client.<span class="cf">send</span>({ <span class="cp">type</span>: <span class=
           <div class="feature-icon icon-cf">
             <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z"/></svg>
           </div>
-          <h3>Durable Object Runtime</h3>
-          <p>Each actor is a Cloudflare Durable Object &mdash; single-threaded, globally addressable, with SQLite persistence.</p>
+          <h3>Event-Driven Actors</h3>
+          <p>State changes through typed messages and pure handlers &mdash; not arbitrary mutations. Each actor is a Cloudflare Durable Object with SQLite persistence.</p>
         </div>
         <div class="feature">
           <div class="feature-icon icon-sync">
@@ -200,7 +200,7 @@ client.<span class="cf">send</span>({ <span class="cp">type</span>: <span class=
             <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8"/><path d="M12 17v4"/></svg>
           </div>
           <h3>React Integration</h3>
-          <p>Typed hooks: <code>useView()</code>, <code>useSend()</code>, <code>useRole()</code>. SSR-ready with providers.</p>
+          <p>Typed hooks: <code>useView()</code>, <code>useSend()</code>, <code>useSelector()</code>, <code>useRole()</code>. Selector-based subscriptions minimize re-renders.</p>
         </div>
       </div>
     </section>

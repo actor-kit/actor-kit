@@ -136,12 +136,13 @@ function App({ counterId, token }: { counterId: string; token: string }) {
 }
 
 function Counter() {
-  const view = CounterCtx.useView();   // { count: number; lastUpdatedBy: string } | undefined
+  // useSelector — only re-renders when count changes, not on every view update
+  const count = CounterCtx.useSelector((view) => view?.count ?? 0);
   const send = CounterCtx.useSend();   // (event: CounterEvent) => void — inferred from contract
 
   return (
     <div>
-      <span>{view?.count ?? "..."}</span>
+      <span>{count}</span>
       <button onClick={() => send({ type: "INCREMENT" })}>+</button>
       <button onClick={() => send({ type: "DECREMENT" })}>-</button>
     </div>

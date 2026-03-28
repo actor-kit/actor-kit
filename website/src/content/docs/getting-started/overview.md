@@ -50,12 +50,14 @@ Browser → WebSocket → CF Worker → Durable Object (Actor)
 
 | | Actor Kit | PartyKit | Liveblocks | Socket.IO |
 |---|---|---|---|---|
+| Programming model | Event-driven (typed messages) | Imperative | Document mutations | Imperative |
 | Runtime | CF Durable Objects | CF Durable Objects | Managed cloud | Self-hosted |
 | State model | Actor per entity | Room per party | Document per room | No built-in state |
+| State changes | Typed messages → pure handlers | Arbitrary mutations | CRDT operations | Arbitrary emissions |
 | Authorization | Role-based, derived from state | Custom middleware | Custom middleware | Custom middleware |
 | Sync protocol | Binary delta or JSON | JSON | CRDT | JSON |
 | Persistence | Automatic (DO SQLite) | Manual | Managed | Manual |
-| TypeScript | Full inference from definition | Partial | SDK types | Partial |
+| TypeScript | Full inference from contract | Partial | SDK types | Partial |
 
 ## Architecture
 

@@ -5,18 +5,25 @@ description: Install Actor Kit and set up your project.
 
 ## Install
 
+Server (Cloudflare Worker):
+
 ```bash
-pnpm add actor-kit zod
+pnpm add @actor-kit/core @actor-kit/worker zod
 ```
 
-Actor Kit is a single package with subpath exports:
+Client (browser):
 
-| Import | Usage |
-|--------|-------|
-| `actor-kit` | Core: `defineActor`, `createActorClass`, `message`, `view`, `schema`, `createRef`, `createAccessToken` |
-| `actor-kit/client` | Browser: `actorClient` — WebSocket connection with binary decoding |
-| `actor-kit/react` | React: `actorContext` — hooks for view, send, role |
-| `actor-kit/test` | Testing: `testActor` — pure transitions without CF runtime |
+```bash
+pnpm add @actor-kit/core @actor-kit/client
+```
+
+| Package | Usage |
+|---------|-------|
+| `@actor-kit/core` | Shared: `defineActor`, `message`, `view`, `schema`, type primitives |
+| `@actor-kit/worker` | Server: `createActorClass`, `createAccessToken` |
+| `@actor-kit/client` | Browser: `actorClient` — WebSocket connection with binary decoding |
+| `@actor-kit/react` | React: `actorContext` — hooks for view, send, role |
+| `@actor-kit/test` | Testing: `testActor` — pure transitions without CF runtime |
 
 Actor Kit uses [Zod](https://zod.dev) for message payload validation at runtime boundaries.
 
@@ -34,7 +41,7 @@ Actor Kit uses [Zod](https://zod.dev) for message payload validation at runtime 
 ```bash
 pnpm create cloudflare@latest my-actor-app
 cd my-actor-app
-pnpm add actor-kit zod
+pnpm add @actor-kit/core @actor-kit/worker zod
 ```
 
 ### 2. Configure wrangler.toml
@@ -90,21 +97,20 @@ pnpm add -D @cloudflare/workers-types
 
 ## Testing
 
-For unit tests with `testActor()`:
+`@actor-kit/test` provides `testActor()` — a typed test harness that runs your actor without a Cloudflare runtime:
 
 ```bash
-pnpm add -D vitest
+pnpm add -D @actor-kit/test vitest
 ```
 
-For integration tests with real Durable Objects:
+```typescript
+import { testActor } from "@actor-kit/test";
+import { Counter } from "./counter";
 
-```bash
-pnpm add -D @cloudflare/vitest-pool-workers
+const t = testActor(Counter);
+const state = t.init({});
+const next = await t.send(state, "alice", { type: "INCREMENT" });
+// next.count === 1 — fully typed from the contract
 ```
 
-For E2E tests:
-
-```bash
-pnpm add -D @playwright/test
-npx playwright install chromium
-```
+`testActor()` covers role evaluation, message routing, Zod validation, guards, view projection, and emission capture. See [Testing](/concepts/testing/) for the full guide.

@@ -118,23 +118,39 @@ function AdminPanel() {
 
 ## `useSelector(selector, equalityFn?)`
 
-Derives a value from the typed view. Only re-renders when the derived value changes.
+Derives a value from the typed view. **Only re-renders when the derived value changes** — use this instead of `useView()` when your component only needs a slice of the view. This is the primary tool for render performance.
 
 ```tsx
+// ✅ Good — only re-renders when count changes, ignores other view fields
 function TodoCount() {
   const count = TodoCtx.useSelector((view) => view?.todos?.length ?? 0);
   return <span>{count} todos</span>;
 }
+
+// ❌ Avoid — re-renders on every view update, even if count didn't change
+function TodoCount() {
+  const view = TodoCtx.useView();
+  return <span>{view?.todos?.length ?? 0} todos</span>;
+}
 ```
 
-The default equality function is `Object.is`. Pass a custom one for object comparisons:
+The default equality function is `Object.is`. Pass a custom one for derived objects/arrays:
 
 ```tsx
 const todos = TodoCtx.useSelector(
   (view) => view?.todos ?? [],
-  (a, b) => JSON.stringify(a) === JSON.stringify(b),
+  (a, b) => a.length === b.length && a.every((t, i) => t.id === b[i]?.id && t.done === b[i]?.done),
 );
 ```
+
+**When to use which hook:**
+
+| Hook | Re-renders on | Use for |
+|------|--------------|---------|
+| `useView()` | Every view update | Small views, debugging |
+| `useSelector(fn)` | Only when derived value changes | Production components, lists, computed values |
+| `useSend()` | Never | Action buttons, forms |
+| `useRole()` | Role changes only | Conditional UI by permission |
 
 ## `useConnectionState()`
 

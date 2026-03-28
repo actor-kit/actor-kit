@@ -1,6 +1,6 @@
 ---
 title: Actor-to-Actor Communication
-description: How actors send messages to each other using emit and createRef.
+description: How actors send messages to each other using emit and native DO stubs.
 ---
 
 Actors are always separate Durable Objects. They communicate by sending messages to each other — never by sharing memory or state. There are two ways to do this, depending on context.
@@ -52,21 +52,22 @@ messages: {
 },
 ```
 
-## Direct RPC with `createRef()`
+## Direct RPC with typed DO stubs
 
-Use `createRef()` inside your Worker's `fetch` handler (not inside an actor) when you need to interact with actors from request-handling code — spawning, sending messages, or reading snapshots.
+Use Cloudflare's native typed DO bindings inside your Worker's `fetch` handler (not inside an actor) when you need to interact with actors from request-handling code — spawning, sending messages, or reading snapshots.
+
+Run `npx wrangler types` to generate typed bindings for your `Env`. This gives you `DurableObjectNamespace<ZoneActor>` on `env.ZONE`, with full type safety for `spawn()`, `send()`, and `getSnapshot()`.
 
 ```typescript
-import { createRef } from "actor-kit";
-import { ZoneContract } from "./zone";
+import type { ZoneActor } from "./zone";
 
 export default {
   async fetch(request: Request, env: Env) {
-    // Contract-derived ref — send() is typed to the contract's messages
-    const zone = createRef(ZoneContract, env, "forest-north");
+    // Use wrangler types to get typed bindings: DurableObjectNamespace<ZoneActor>
+    const stub = env.ZONE.get(env.ZONE.idFromName("forest-north"));
 
     // Spawn the actor if it doesn't exist
-    await zone.spawn({
+    await stub.spawn({
       actorId: "forest-north",
       caller: "system",
       callerType: "service",
@@ -74,31 +75,31 @@ export default {
     });
 
     // Send a typed message
-    await zone.send("system", "service", {
+    await stub.send("system", "service", {
       type: "SPAWN_NPC",
       npcType: "merchant",
     });
 
     // Read its current state
-    const { snapshot, role } = await zone.getSnapshot("system", "service");
+    const { snapshot, role } = await stub.getSnapshot("system", "service");
 
     return Response.json(snapshot);
   },
 };
 ```
 
-`createRef(contract, env, id)` creates a typed stub backed by the Durable Object namespace from your Worker env bindings. The contract name is normalized to `UPPER_SNAKE_CASE` for the env lookup (e.g., `"forest-zone"` → `"FOREST_ZONE"`).
+`wrangler types` generates an `Env` interface with typed DO namespace bindings derived from your `wrangler.jsonc`. The binding name (e.g., `"ZONE"`) must match the key in your `Env` type.
 
 ## Which to use
 
 | Method | Where | Response? | Delivery |
 |--------|-------|-----------|----------|
 | `emit({ actor })` | Inside a message handler | No | At-least-once via outbox |
-| `createRef()` | Worker fetch handler | Direct RPC return | Immediate |
+| DO stub (`env.BINDING.get(...)`) | Worker fetch handler | Direct RPC return | Immediate |
 
 **Inside actors**, use `emit()` — it participates in the transactional outbox, so if the DO crashes after the state change commits, pending messages will be retried on restart.
 
-**Outside actors** (Worker fetch handler, scheduled handler), use `createRef()` for direct RPC.
+**Outside actors** (Worker fetch handler, scheduled handler), use typed DO stubs directly via `env.BINDING.get()`.
 
 ## Wrangler bindings
 
@@ -115,4 +116,4 @@ Both actors must be declared as Durable Object bindings in your `wrangler.jsonc`
 }
 ```
 
-The binding name (e.g. `"ZONE"`) is what you pass as the `actor` field in `emit()` and what `createRef()` derives from the contract name. It must match the key in your Worker's `Env` type.
+The binding name (e.g. `"ZONE"`) is what you pass as the `actor` field in `emit()` and what you use as the key on `env` for direct DO stubs. It must match the key in your Worker's `Env` type.

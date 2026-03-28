@@ -149,4 +149,4 @@ npx wrangler secret put ACTOR_KIT_SECRET
 
 ### Can actors communicate across different Workers?
 
-Not directly. Actor-to-actor communication via `emit({ actor: ... })` and `createRef()` requires both actors to be Durable Object bindings in the same Worker. For cross-Worker communication, use `emit({ fetch: ... })` to call an HTTP endpoint on the other Worker.
+Not directly. Actor-to-actor communication via `emit({ actor: ... })` and typed DO stubs requires both actors to be Durable Object bindings in the same Worker. For cross-Worker communication, use `emit({ fetch: ... })` to call an HTTP endpoint on the other Worker.

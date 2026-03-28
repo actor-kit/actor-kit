@@ -109,6 +109,7 @@ client.send({ type: "BID", amount: 100 });
 ### React
 
 ```tsx
+import { useState, useEffect } from "react";
 import { actorClient } from "actor-kit/client";
 import { actorContext } from "actor-kit/react";
 import { AuctionContract } from "./auction";
@@ -117,10 +118,18 @@ const AuctionClient = actorClient(AuctionContract);
 const AuctionCtx = actorContext(AuctionContract);
 
 function AuctionApp({ auctionId, token }: { auctionId: string; token: string }) {
-  const client = AuctionClient.create({
-    url: `wss://${location.host}/api/auction/${encodeURIComponent(auctionId)}`,
-    accessToken: token,
-  });
+  const [client, setClient] = useState<ReturnType<typeof AuctionClient.create> | null>(null);
+
+  useEffect(() => {
+    const c = AuctionClient.create({
+      url: `wss://${location.host}/api/auction/${encodeURIComponent(auctionId)}`,
+      accessToken: token,
+    });
+    setClient(c);
+    return () => c.disconnect();
+  }, [auctionId, token]);
+
+  if (!client) return null;
 
   return (
     <AuctionCtx.Provider client={client}>

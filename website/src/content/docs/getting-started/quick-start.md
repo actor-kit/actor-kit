@@ -13,41 +13,33 @@ import { z } from "zod";
 import { schema, view, uint32, string } from "actor-kit";
 import { defineActor, createActorClass, message } from "actor-kit";
 
-type CounterState = { count: number; lastUpdatedBy: string | null };
-
 const CounterView = schema({ count: uint32, lastUpdatedBy: string });
 
 export const CounterContract = defineActor("counter", {
   input: z.object({}),
-  init: (): CounterState => ({ count: 0, lastUpdatedBy: null }),
+  init: () => ({ count: 0, lastUpdatedBy: "" }),
 
   roles: {
     user: () => true,
   },
 
   messages: {
-    INCREMENT: message(
-      z.object({}),
-      (state: CounterState, _payload, { caller }) => ({
-        ...state,
-        count: state.count + 1,
-        lastUpdatedBy: caller,
-      }),
-    ),
-    DECREMENT: message(
-      z.object({}),
-      (state: CounterState, _payload, { caller }) => ({
-        ...state,
-        count: Math.max(0, state.count - 1),
-        lastUpdatedBy: caller,
-      }),
-    ),
+    INCREMENT: message(z.object({}), (state, _payload, { caller }) => ({
+      ...state,
+      count: state.count + 1,
+      lastUpdatedBy: caller,
+    })),
+    DECREMENT: message(z.object({}), (state, _payload, { caller }) => ({
+      ...state,
+      count: Math.max(0, state.count - 1),
+      lastUpdatedBy: caller,
+    })),
   },
 
   views: {
-    user: view(CounterView, (state: CounterState) => ({
+    user: view(CounterView, (state) => ({
       count: state.count,
-      lastUpdatedBy: state.lastUpdatedBy ?? "",
+      lastUpdatedBy: state.lastUpdatedBy,
     })),
   },
 });
@@ -95,12 +87,11 @@ export default {
     }
 
     // Route WebSocket connections to the Counter DO
+    // No spawn() needed — actors with no required input auto-initialize on first connection
     if (url.pathname.startsWith("/api/counter/")) {
       const actorId = url.pathname.split("/")[3] ?? "default";
       const id = env.COUNTER.idFromName(actorId);
-      const stub = env.COUNTER.get(id);
-      await stub.spawn({ actorId, caller: "system", callerType: "service", input: {} });
-      return stub.fetch(request);
+      return env.COUNTER.get(id).fetch(request);
     }
 
     return new Response("Not found", { status: 404 });
@@ -141,6 +132,7 @@ client.send({ type: "INCREMENT" });
 ### React
 
 ```tsx
+import { useState, useEffect } from "react";
 import { actorClient } from "actor-kit/client";
 import { actorContext } from "actor-kit/react";
 import { CounterContract } from "./counter";
@@ -149,10 +141,18 @@ const CounterClient = actorClient(CounterContract);
 const CounterCtx = actorContext(CounterContract);
 
 function App({ token }: { token: string }) {
-  const client = CounterClient.create({
-    url: `wss://${location.host}/api/counter/my-counter`,
-    accessToken: token,
-  });
+  const [client, setClient] = useState<ReturnType<typeof CounterClient.create> | null>(null);
+
+  useEffect(() => {
+    const c = CounterClient.create({
+      url: `wss://${location.host}/api/counter/my-counter`,
+      accessToken: token,
+    });
+    setClient(c);
+    return () => c.disconnect();
+  }, [token]);
+
+  if (!client) return null;
 
   return (
     <CounterCtx.Provider client={client}>

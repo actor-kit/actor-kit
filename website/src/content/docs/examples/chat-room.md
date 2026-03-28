@@ -103,6 +103,7 @@ client.send({ type: "SEND_MESSAGE", text: "Hello!" });
 ### React
 
 ```tsx
+import { useState, useEffect } from "react";
 import { actorClient } from "actor-kit/client";
 import { actorContext } from "actor-kit/react";
 import { ChatRoomContract } from "./chat";
@@ -111,10 +112,18 @@ const ChatClient = actorClient(ChatRoomContract);
 const ChatCtx = actorContext(ChatRoomContract);
 
 function ChatApp({ roomId, token }: { roomId: string; token: string }) {
-  const client = ChatClient.create({
-    url: `wss://${location.host}/api/chat-room/${encodeURIComponent(roomId)}`,
-    accessToken: token,
-  });
+  const [client, setClient] = useState<ReturnType<typeof ChatClient.create> | null>(null);
+
+  useEffect(() => {
+    const c = ChatClient.create({
+      url: `wss://${location.host}/api/chat-room/${encodeURIComponent(roomId)}`,
+      accessToken: token,
+    });
+    setClient(c);
+    return () => c.disconnect();
+  }, [roomId, token]);
+
+  if (!client) return null;
 
   return (
     <ChatCtx.Provider client={client}>
