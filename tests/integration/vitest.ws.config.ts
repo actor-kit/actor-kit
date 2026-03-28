@@ -18,6 +18,7 @@ export default defineWorkersConfig({
       "tick.test.ts",
       "reconnect.test.ts",
       "views.test.ts",
+      "origin-validation.test.ts",
     ],
   },
 });

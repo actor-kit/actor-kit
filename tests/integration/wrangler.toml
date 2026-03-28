@@ -18,6 +18,14 @@ class_name = "TimerActor"
 name = "AUCTION"
 class_name = "Auction"
 
+[[durable_objects.bindings]]
+name = "ORIGIN_COUNTER"
+class_name = "OriginCounter"
+
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["Counter", "TimerActor", "Auction"]
+
+[[migrations]]
+tag = "v2"
+new_sqlite_classes = ["OriginCounter"]

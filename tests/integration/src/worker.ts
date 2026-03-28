@@ -163,6 +163,34 @@ const AuctionContract = defineActor("auction", {
 
 export const Auction = createActorClass(AuctionContract);
 
+// --- Origin-validated counter (for Origin validation tests) ---
+
+const OriginCounterContract = defineActor("origin-counter", {
+  input: z.object({}),
+  init: (): CounterState => ({ count: 0, lastCaller: null }),
+  roles: {
+    admin: (_state: CounterState, _caller: string, { callerType }: { callerType: "user" | "service" }) =>
+      callerType === "service",
+    user: () => true,
+  },
+  messages: {
+    INCREMENT: increment,
+  },
+  views: {
+    admin: view(CounterView, (state: CounterState) => ({
+      count: state.count,
+      lastCaller: state.lastCaller ?? "",
+    })),
+    user: view(CounterView, (state: CounterState) => ({
+      count: state.count,
+      lastCaller: state.lastCaller ?? "",
+    })),
+  },
+  allowedOrigins: ["https://example.com", "https://staging.example.com"],
+});
+
+export const OriginCounter = createActorClass(OriginCounterContract);
+
 // --- Worker entrypoint ---
 
 export default {
