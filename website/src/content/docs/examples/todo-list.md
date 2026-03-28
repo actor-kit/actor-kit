@@ -137,13 +137,9 @@ import { TodoListContract } from "./todo";
 // Events and views inferred from the contract
 const TodoClient = actorClient(TodoListContract);
 
-// Get a token
-const { token } = await fetch("/api/token?actorId=my-list").then(r => r.json());
-
-// Create a runtime connection
+// Create a runtime connection — Worker stamps identity via withCallerIdentity
 const client = TodoClient.create({
-  url: `ws://localhost:8787/api/todo-list/my-list`,
-  accessToken: token,
+  url: `ws://localhost:8787/api/todo-list/my-list?callerId=alice`,
 });
 
 // view is typed from the contract's view schemas
@@ -165,17 +161,16 @@ import { TodoListContract } from "./todo";
 const TodoClient = actorClient(TodoListContract);
 const TodoCtx = actorContext(TodoListContract);
 
-function TodoApp({ listId, token }: { listId: string; token: string }) {
+function TodoApp({ listId, callerId }: { listId: string; callerId: string }) {
   const [client, setClient] = useState<ReturnType<typeof TodoClient.create> | null>(null);
 
   useEffect(() => {
     const c = TodoClient.create({
-      url: `wss://${location.host}/api/todo-list/${encodeURIComponent(listId)}`,
-      accessToken: token,
+      url: `wss://${location.host}/api/todo-list/${encodeURIComponent(listId)}?callerId=${encodeURIComponent(callerId)}`,
     });
     setClient(c);
     return () => c.disconnect();
-  }, [listId, token]);
+  }, [listId, callerId]);
 
   if (!client) return null;
 

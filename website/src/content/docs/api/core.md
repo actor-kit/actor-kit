@@ -29,7 +29,7 @@ export const CounterContract = defineActor("counter", {
 ```
 
 **Parameters:**
-- `name: string` — actor type name (used in JWT `aud` claim, normalized to UPPER_SNAKE_CASE for env binding)
+- `name: string` — actor type name (normalized to UPPER_SNAKE_CASE for env binding lookup)
 - `def` — the actor definition object (must have `input` and `init`)
 
 **Returns:** `ActorContract<TName, TDef>` — a typed contract with `{ name, def }`.
@@ -102,7 +102,39 @@ Pairs a schema with a projection function.
 const ownerView = view(OwnerSchema, (state, caller) => ({ ... }));
 ```
 
-## `createAccessToken(params)`
+## `withCallerIdentity(request, identity)`
+
+Stamps a verified caller identity onto a request for Worker→DO forwarding. This is the primary auth mechanism.
+
+```typescript
+import { withCallerIdentity } from "@actor-kit/worker";
+
+const stamped = withCallerIdentity(request, {
+  callerId: "user-123",
+  callerType: "user",
+});
+return stub.fetch(stamped);
+```
+
+| Param | Type | Description |
+|-------|------|-------------|
+| `request` | `Request` | The incoming request to stamp |
+| `identity.callerId` | `string` | Verified caller identity |
+| `identity.callerType` | `"user" \| "service"` | Caller type |
+
+**Security:** Scrubs any existing `X-Actor-Kit-Caller-Id` / `X-Actor-Kit-Caller-Type` headers before setting verified values. Always use this instead of forwarding raw client requests.
+
+**Returns:** A new `Request` with identity headers set. The original request's body stream is transferred (standard fetch spec behavior).
+
+## Token Auth (Opt-in)
+
+For external clients, invite links, or cross-Worker communication, JWT-based auth is available via a separate import:
+
+```typescript
+import { createAccessToken, getCallerFromToken } from "@actor-kit/worker/token";
+```
+
+### `createAccessToken(params)`
 
 Creates a JWT for WebSocket authentication. Returns `Promise<string>`.
 
@@ -125,7 +157,7 @@ const token = await createAccessToken({
 | `secret` | `string` | HS256 signing secret |
 | `expiresIn` | `string` | Optional expiry (default: `"30d"`) |
 
-## `getCallerFromToken(token, actorType, actorId, secret)`
+### `getCallerFromToken(token, actorType, actorId, secret)`
 
 Validates a JWT and extracts the caller identity. Returns `Promise<{ caller: string; callerType: "user" | "service" }>`. Throws on invalid/expired tokens or audience/ID mismatch.
 

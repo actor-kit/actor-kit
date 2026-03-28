@@ -73,7 +73,9 @@ Yes. Roles are re-evaluated on every state change. If a state change causes a di
 
 ### How is the caller identity determined?
 
-From the JWT. The `sub` claim becomes the caller identity. The `act` claim becomes the `callerType` (`"user"` or `"service"`). Tokens are validated on WebSocket connect and on every HTTP request.
+The Worker authenticates the caller and stamps identity using `withCallerIdentity(request, { callerId, callerType })`. The DO reads `callerId` from the `X-Actor-Kit-Caller-Id` header and `callerType` from `X-Actor-Kit-Caller-Type`. The DO trusts the Worker.
+
+For external clients or cross-Worker communication, JWT-based auth is available as a fallback via `@actor-kit/worker/token`. The `sub` claim becomes the caller identity and `act` becomes the `callerType`.
 
 ## Side Effects
 
@@ -126,7 +128,7 @@ expect(emissions).toContainEqual(
 
 ### What do I need in `wrangler.jsonc`?
 
-At minimum, your Durable Object bindings and the `ACTOR_KIT_SECRET` secret:
+At minimum, your Durable Object bindings:
 
 ```json
 {
@@ -141,7 +143,7 @@ At minimum, your Durable Object bindings and the `ACTOR_KIT_SECRET` secret:
 }
 ```
 
-Set the secret separately:
+No secrets are required for the default `withCallerIdentity` auth model. If you use JWT-based auth (via `@actor-kit/worker/token`), you'll also need:
 
 ```bash
 npx wrangler secret put ACTOR_KIT_SECRET

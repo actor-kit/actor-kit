@@ -20,7 +20,8 @@ pnpm add @actor-kit/core @actor-kit/client
 | Package | Usage |
 |---------|-------|
 | `@actor-kit/core` | Shared: `defineActor`, `message`, `view`, `schema`, type primitives |
-| `@actor-kit/worker` | Server: `createActorClass`, `createAccessToken` |
+| `@actor-kit/worker` | Server: `createActorClass`, `withCallerIdentity` |
+| `@actor-kit/worker/token` | Opt-in: `createAccessToken`, `getCallerFromToken` (JWT auth for external clients) |
 | `@actor-kit/client` | Browser: `actorClient` — WebSocket connection with binary decoding |
 | `@actor-kit/react` | React: `actorContext` — hooks for view, send, role |
 | `@actor-kit/test` | Testing: `testActor` — pure transitions without CF runtime |
@@ -62,26 +63,10 @@ new_sqlite_classes = ["MyActor"]
 ```
 
 Key points:
-- `nodejs_compat` is required for the `jose` JWT library
+- `nodejs_compat` is required for crypto APIs used by the binary encoder
 - `new_sqlite_classes` enables DO SQLite storage for your actor
 
-### 3. Set up secrets
-
-**Never put secrets in `wrangler.toml`** — they get committed to git.
-
-For local development, create a `.dev.vars` file (gitignored):
-
-```
-ACTOR_KIT_SECRET = "dev-secret-do-not-use-in-production"
-```
-
-For production, use `wrangler secret`:
-
-```bash
-npx wrangler secret put ACTOR_KIT_SECRET
-```
-
-### 4. Define your actor
+### 3. Define your actor
 
 See the [Quick Start](/getting-started/quick-start/) for a complete example.
 

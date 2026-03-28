@@ -131,8 +131,7 @@ import { actorClient } from "actor-kit/client";
 const GameClient = actorClient(PlayerView);  // Same schema used on server
 
 const client = GameClient.create({
-  url: `wss://${location.host}/game/rooms/room-42`,
-  accessToken: token,
+  url: `wss://${location.host}/game/rooms/room-42?callerId=player-1`,
 });
 
 client.subscribe((view) => {

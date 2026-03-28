@@ -40,8 +40,8 @@ Browser → WebSocket → CF Worker → Durable Object (Actor)
                                     └── Views (what each role sees)
 ```
 
-1. A Worker routes the WebSocket connection to the right Durable Object
-2. The DO validates the JWT and resolves the caller's role
+1. A Worker authenticates the caller and routes the request to the right Durable Object
+2. The DO reads the caller identity from headers and resolves the caller's role
 3. Messages from the client are validated (Zod) and routed to the role's handler
 4. State changes are persisted to SQLite and broadcast as view updates
 5. Each connected client gets a role-specific projection of the state
@@ -69,7 +69,7 @@ Actor Kit embraces Cloudflare's infrastructure:
 | DO SQLite | State persistence, transactional outbox |
 | DO Alarms | Durable timers (`after`) that survive hibernation |
 | DO WebSocket Hibernation | Caller metadata stored as tags, survives restarts |
-| Workers | Route requests, serve UI, issue JWT tokens |
+| Workers | Route requests, serve UI, stamp caller identity |
 
 ## Next steps
 

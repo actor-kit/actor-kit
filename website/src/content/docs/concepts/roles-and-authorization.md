@@ -45,7 +45,7 @@ After adding a todo, the caller's role changes from `viewer` to `member` on the 
 
 ## callerType
 
-The JWT token carries a `callerType` field — either `"user"` or `"service"`. This is stable identity metadata, not dynamic authorization.
+The caller identity includes a `callerType` field — either `"user"` or `"service"`. This is stable identity metadata set by the Worker via `withCallerIdentity()`, not dynamic authorization.
 
 ```typescript
 roles: {

@@ -33,19 +33,18 @@ export const CounterClient = actorClient(CounterView).events<CounterEvent>();
 
 ### `.create(options)`
 
-Creates a runtime WebSocket connection:
+Creates a runtime WebSocket connection. The client SDK does not handle authentication — your Worker is responsible for reading the caller identity and stamping it via `withCallerIdentity()` before forwarding to the DO. See [Quick Start](/getting-started/quick-start/) for the full pattern.
 
 ```typescript
 const client = CounterClient.create({
   url: `wss://${location.host}/api/counter/${encodeURIComponent(counterId)}`,
-  accessToken: token,
 });
 ```
 
 | Option | Type | Required | Description |
 |--------|------|----------|-------------|
-| `url` | `string` | Yes | Full WebSocket URL |
-| `accessToken` | `string` | Yes | JWT from `createAccessToken()` |
+| `url` | `string` | Yes | Full WebSocket URL (routed through your Worker) |
+| `accessToken` | `string` | No | JWT from `createAccessToken()` (only needed for token-based auth via `@actor-kit/worker/token`) |
 | `roleNames` | `string[]` | No | Role names for binary role index mapping |
 | `maxReconnectAttempts` | `number` | No | Max reconnect attempts (default: 10) |
 | `onRedirect` | `(target: { actorType: string; actorId: string }) => void` | No | Called on redirect |
@@ -114,7 +113,6 @@ import { createActorClient } from "actor-kit/client";
 
 const client = createActorClient({
   url: "wss://example.com/counter/test",
-  accessToken: token,
   viewSchema: CounterView,  // optional — enables binary decoding + typed view
 });
 ```

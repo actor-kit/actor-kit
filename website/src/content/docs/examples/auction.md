@@ -83,13 +83,9 @@ import { AuctionContract } from "./auction";
 // Events and views inferred from the contract
 const AuctionClient = actorClient(AuctionContract);
 
-// Get a token
-const { token } = await fetch("/api/token?actorId=my-auction").then(r => r.json());
-
-// Create a runtime connection
+// Create a runtime connection — Worker stamps identity via withCallerIdentity
 const client = AuctionClient.create({
-  url: `ws://localhost:8787/api/auction/my-auction`,
-  accessToken: token,
+  url: `ws://localhost:8787/api/auction/my-auction?user=alice`,
 });
 
 // view is typed from the contract's view schemas
@@ -117,17 +113,16 @@ import { AuctionContract } from "./auction";
 const AuctionClient = actorClient(AuctionContract);
 const AuctionCtx = actorContext(AuctionContract);
 
-function AuctionApp({ auctionId, token }: { auctionId: string; token: string }) {
+function AuctionApp({ auctionId, callerId }: { auctionId: string; callerId: string }) {
   const [client, setClient] = useState<ReturnType<typeof AuctionClient.create> | null>(null);
 
   useEffect(() => {
     const c = AuctionClient.create({
-      url: `wss://${location.host}/api/auction/${encodeURIComponent(auctionId)}`,
-      accessToken: token,
+      url: `wss://${location.host}/api/auction/${encodeURIComponent(auctionId)}?user=${encodeURIComponent(callerId)}`,
     });
     setClient(c);
     return () => c.disconnect();
-  }, [auctionId, token]);
+  }, [auctionId, callerId]);
 
   if (!client) return null;
 

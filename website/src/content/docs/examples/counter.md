@@ -87,13 +87,9 @@ import { CounterContract } from "./counter";
 // Events and views inferred from the contract
 const CounterClient = actorClient(CounterContract);
 
-// Get a token
-const { token } = await fetch("/api/token?actorId=default").then(r => r.json());
-
-// Create a runtime connection
+// Create a runtime connection — Worker stamps identity via withCallerIdentity
 const client = CounterClient.create({
-  url: `ws://localhost:8787/api/counter/default`,
-  accessToken: token,
+  url: `ws://localhost:8787/api/counter/default?callerId=user-1`,
 });
 
 // view is typed: { count: number; lastUpdatedBy: string }
@@ -114,17 +110,16 @@ import { CounterContract } from "./counter";
 const CounterClient = actorClient(CounterContract);
 const CounterCtx = actorContext(CounterContract);
 
-function App({ counterId, token }: { counterId: string; token: string }) {
+function App({ counterId, callerId }: { counterId: string; callerId: string }) {
   const [client, setClient] = useState<ReturnType<typeof CounterClient.create> | null>(null);
 
   useEffect(() => {
     const c = CounterClient.create({
-      url: `wss://${location.host}/api/counter/${encodeURIComponent(counterId)}`,
-      accessToken: token,
+      url: `wss://${location.host}/api/counter/${encodeURIComponent(counterId)}?callerId=${encodeURIComponent(callerId)}`,
     });
     setClient(c);
     return () => c.disconnect();
-  }, [counterId, token]);
+  }, [counterId, callerId]);
 
   if (!client) return null;
 

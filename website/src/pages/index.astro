@@ -40,7 +40,7 @@ const tabs = [
     id: "worker",
     label: "Worker",
     file: "worker.ts",
-    code: `<span class="ck">import</span> { <span class="cf">createAccessToken</span> } <span class="ck">from</span> <span class="cs">"actor-kit"</span>;
+    code: `<span class="ck">import</span> { <span class="cf">withCallerIdentity</span> } <span class="ck">from</span> <span class="cs">"@actor-kit/worker"</span>;
 <span class="ck">import</span> { Counter } <span class="ck">from</span> <span class="cs">"./counter"</span>;
 
 <span class="ck">export</span> { Counter };
@@ -49,23 +49,18 @@ const tabs = [
   <span class="ck">async</span> <span class="cf">fetch</span>(request: Request, env: Env) {
     <span class="ck">const</span> url = <span class="ck">new</span> <span class="cf">URL</span>(request.url);
 
-    <span class="cm">// Issue JWT for client auth</span>
-    <span class="ck">if</span> (url.pathname === <span class="cs">"/api/token"</span>) {
-      <span class="ck">const</span> token = <span class="ck">await</span> <span class="cf">createAccessToken</span>({
-        <span class="cp">actorType</span>: <span class="cs">"counter"</span>,
-        <span class="cp">actorId</span>: <span class="cs">"default"</span>,
-        <span class="cp">callerId</span>: <span class="cs">"user-1"</span>,
-        <span class="cp">callerType</span>: <span class="cs">"user"</span>,
-        <span class="cp">secret</span>: env.ACTOR_KIT_SECRET,
-      });
-      <span class="ck">return</span> Response.<span class="cf">json</span>({ token });
-    }
+    <span class="cm">// Authenticate caller (session cookie, OAuth, etc.)</span>
+    <span class="ck">const</span> callerId = url.searchParams.<span class="cf">get</span>(<span class="cs">"callerId"</span>) ?? <span class="cs">"anon"</span>;
 
     <span class="cm">// Route to Durable Object</span>
     <span class="ck">const</span> id = env.COUNTER.<span class="cf">idFromName</span>(<span class="cs">"default"</span>);
     <span class="ck">const</span> stub = env.COUNTER.<span class="cf">get</span>(id);
-    <span class="ck">await</span> stub.<span class="cf">spawn</span>({ actorId: <span class="cs">"default"</span>, caller: <span class="cs">"system"</span>, callerType: <span class="cs">"service"</span>, input: {} });
-    <span class="ck">return</span> stub.<span class="cf">fetch</span>(request);
+
+    <span class="cm">// Stamp verified identity and forward</span>
+    <span class="ck">const</span> stamped = <span class="cf">withCallerIdentity</span>(request, {
+      <span class="cp">callerId</span>, <span class="cp">callerType</span>: <span class="cs">"user"</span>,
+    });
+    <span class="ck">return</span> stub.<span class="cf">fetch</span>(stamped);
   },
 };`,
   },
@@ -79,10 +74,9 @@ const tabs = [
 <span class="cm">// Events &amp; views inferred from contract — no manual types</span>
 <span class="ck">const</span> CounterClient = <span class="cf">actorClient</span>(CounterContract);
 
-<span class="cm">// Connect — binary delta sync handled automatically</span>
+<span class="cm">// Connect — no token needed, Worker stamps identity</span>
 <span class="ck">const</span> client = CounterClient.<span class="cf">create</span>({
-  <span class="cp">url</span>: <span class="cs">\`wss://\${location.host}/api/counter/default\`</span>,
-  <span class="cp">accessToken</span>: token,
+  <span class="cp">url</span>: <span class="cs">\`wss://\${location.host}/api/counter/default?callerId=user-1\`</span>,
 });
 
 <span class="cm">// Subscribe — view is fully typed from schema</span>
@@ -116,17 +110,16 @@ client.<span class="cf">send</span>({ <span class="cp">type</span>: <span class=
   );
 }
 
-<span class="ck">function</span> <span class="cf">App</span>({ token }: { token: <span class="ct">string</span> }) {
+<span class="ck">function</span> <span class="cf">App</span>({ callerId }: { callerId: <span class="ct">string</span> }) {
   <span class="ck">const</span> [client, setClient] = <span class="cf">useState</span>(<span class="cb">null</span>);
 
   <span class="cf">useEffect</span>(() =&gt; {
     <span class="ck">const</span> c = CounterClient.<span class="cf">create</span>({
-      <span class="cp">url</span>: <span class="cs">\`wss://\${location.host}/api/counter/default\`</span>,
-      <span class="cp">accessToken</span>: token,
+      <span class="cp">url</span>: <span class="cs">\`wss://\${location.host}/api/counter/default?callerId=\${callerId}\`</span>,
     });
     <span class="cf">setClient</span>(c);
     <span class="ck">return</span> () =&gt; c.<span class="cf">disconnect</span>();
-  }, [token]);
+  }, [callerId]);
 
   <span class="ck">if</span> (!client) <span class="ck">return</span> <span class="cb">null</span>;
   <span class="ck">return</span> &lt;CounterCtx.Provider client={client}&gt;&lt;Counter /&gt;&lt;/CounterCtx.Provider&gt;;
@@ -260,9 +253,9 @@ client.<span class="cf">send</span>({ <span class="cp">type</span>: <span class=
           <div class="diagram-card">
             <div class="diagram-title">Data Flow</div>
             <div class="diagram-flow">
-              <div class="flow-step"><div class="flow-num">1</div><div class="flow-content"><span class="flow-label">Worker</span><span class="flow-detail">Routes request, issues JWT, spawns actor</span></div></div>
+              <div class="flow-step"><div class="flow-num">1</div><div class="flow-content"><span class="flow-label">Worker</span><span class="flow-detail">Authenticates caller, stamps identity, routes to DO</span></div></div>
               <div class="flow-arrow">&darr;</div>
-              <div class="flow-step"><div class="flow-num">2</div><div class="flow-content"><span class="flow-label">Durable Object</span><span class="flow-detail">Validates JWT, resolves role, processes message</span></div></div>
+              <div class="flow-step"><div class="flow-num">2</div><div class="flow-content"><span class="flow-label">Durable Object</span><span class="flow-detail">Reads identity headers, resolves role, processes message</span></div></div>
               <div class="flow-arrow">&darr;</div>
               <div class="flow-step"><div class="flow-num">3</div><div class="flow-content"><span class="flow-label">Binary Sync</span><span class="flow-detail">Schema-encoded delta broadcast to all clients</span></div></div>
               <div class="flow-arrow">&darr;</div>

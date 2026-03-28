@@ -80,13 +80,9 @@ import { ChatRoomContract } from "./chat";
 // Events and views inferred from the contract
 const ChatClient = actorClient(ChatRoomContract);
 
-// Get a token
-const { token } = await fetch("/api/token?actorId=general").then(r => r.json());
-
-// Create a runtime connection
+// Create a runtime connection — Worker stamps identity via withCallerIdentity
 const client = ChatClient.create({
-  url: `ws://localhost:8787/api/chat-room/general`,
-  accessToken: token,
+  url: `ws://localhost:8787/api/chat-room/general?user=alice`,
 });
 
 // view is typed from the contract's view schemas
@@ -111,17 +107,16 @@ import { ChatRoomContract } from "./chat";
 const ChatClient = actorClient(ChatRoomContract);
 const ChatCtx = actorContext(ChatRoomContract);
 
-function ChatApp({ roomId, token }: { roomId: string; token: string }) {
+function ChatApp({ roomId, callerId }: { roomId: string; callerId: string }) {
   const [client, setClient] = useState<ReturnType<typeof ChatClient.create> | null>(null);
 
   useEffect(() => {
     const c = ChatClient.create({
-      url: `wss://${location.host}/api/chat-room/${encodeURIComponent(roomId)}`,
-      accessToken: token,
+      url: `wss://${location.host}/api/chat-room/${encodeURIComponent(roomId)}?user=${encodeURIComponent(callerId)}`,
     });
     setClient(c);
     return () => c.disconnect();
-  }, [roomId, token]);
+  }, [roomId, callerId]);
 
   if (!client) return null;
 

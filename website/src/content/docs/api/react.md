@@ -48,17 +48,16 @@ const CounterCtx = actorContext<typeof CounterClient>();
 Provides the actor client to all child hooks. Takes a pre-created client instance — you control how and when the connection is created.
 
 ```tsx
-function App({ counterId, token }: { counterId: string; token: string }) {
+function App({ counterId, callerId }: { counterId: string; callerId: string }) {
   const [client, setClient] = useState<ActorClient | null>(null);
 
   useEffect(() => {
     const c = CounterClient.create({
-      url: `wss://${location.host}/api/counter/${encodeURIComponent(counterId)}`,
-      accessToken: token,
+      url: `wss://${location.host}/api/counter/${encodeURIComponent(counterId)}?callerId=${encodeURIComponent(callerId)}`,
     });
     setClient(c);
     return () => c.disconnect();  // Clean up on unmount or prop change
-  }, [counterId, token]);
+  }, [counterId, callerId]);
 
   if (!client) return null;
 

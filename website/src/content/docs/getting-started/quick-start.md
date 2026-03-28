@@ -57,15 +57,16 @@ Key things happening:
 
 ## 2. Create the Worker
 
+The Worker is the auth boundary. It authenticates the caller and stamps verified identity onto the request. The DO trusts the Worker.
+
 ```typescript
 // src/worker.ts
-import { createAccessToken } from "actor-kit";
+import { withCallerIdentity } from "@actor-kit/worker";
 import { Counter } from "./counter";
 
 export { Counter };
 
 interface Env {
-  ACTOR_KIT_SECRET: string;
   COUNTER: DurableObjectNamespace;
 }
 
@@ -73,31 +74,34 @@ export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
 
-    // Create access token for WebSocket auth
-    if (url.pathname === "/api/token") {
-      const actorId = url.searchParams.get("id") ?? "default";
-      const token = await createAccessToken({
-        actorType: "counter",
-        actorId,
-        callerId: `user-${crypto.randomUUID().slice(0, 8)}`,
-        callerType: "user",
-        secret: env.ACTOR_KIT_SECRET,
-      });
-      return Response.json({ token, actorId });
-    }
-
     // Route WebSocket connections to the Counter DO
-    // No spawn() needed — actors with no required input auto-initialize on first connection
     if (url.pathname.startsWith("/api/counter/")) {
       const actorId = url.pathname.split("/")[3] ?? "default";
+
+      // Authenticate the caller.
+      // PRODUCTION: validate a session cookie, OAuth token, or similar credential here.
+      // This demo uses a query param for simplicity — NOT safe for production.
+      const callerId = url.searchParams.get("callerId")
+        ?? `user-${crypto.randomUUID().slice(0, 8)}`;
+
       const id = env.COUNTER.idFromName(actorId);
-      return env.COUNTER.get(id).fetch(request);
+      const stub = env.COUNTER.get(id);
+
+      // Stamp verified identity and forward to DO
+      const stamped = withCallerIdentity(request, { callerId, callerType: "user" });
+      return stub.fetch(stamped);
     }
 
     return new Response("Not found", { status: 404 });
   },
 };
 ```
+
+Key things happening:
+- **`withCallerIdentity()`** scrubs any inbound identity headers, then stamps verified `callerId` and `callerType`
+- **No secrets needed** — the Worker authenticates via your own auth system (session cookies, OAuth, etc.)
+- **No token endpoint** — the Worker stamps identity directly, no JWT minting required
+- **Demo only** — the query param approach above is for simplicity. In production, derive `callerId` from a verified session
 
 ## 3. Connect from the Browser
 
@@ -110,13 +114,9 @@ import { CounterContract } from "./counter";
 // Create a typed client factory — events and views inferred from the contract
 const CounterClient = actorClient(CounterContract);
 
-// Get a token
-const { token } = await fetch("/api/token?id=my-counter").then(r => r.json());
-
-// Create a runtime connection
+// Create a runtime connection — no token needed, Worker stamps identity
 const client = CounterClient.create({
-  url: `wss://${location.host}/api/counter/my-counter`,
-  accessToken: token,
+  url: `wss://${location.host}/api/counter/my-counter?callerId=user-1`,
 });
 
 // Subscribe to typed views — binary delta decoding is handled transparently
@@ -140,17 +140,16 @@ import { CounterContract } from "./counter";
 const CounterClient = actorClient(CounterContract);
 const CounterCtx = actorContext(CounterContract);
 
-function App({ token }: { token: string }) {
+function App({ callerId }: { callerId: string }) {
   const [client, setClient] = useState<ReturnType<typeof CounterClient.create> | null>(null);
 
   useEffect(() => {
     const c = CounterClient.create({
-      url: `wss://${location.host}/api/counter/my-counter`,
-      accessToken: token,
+      url: `wss://${location.host}/api/counter/my-counter?callerId=${encodeURIComponent(callerId)}`,
     });
     setClient(c);
     return () => c.disconnect();
-  }, [token]);
+  }, [callerId]);
 
   if (!client) return null;
 
