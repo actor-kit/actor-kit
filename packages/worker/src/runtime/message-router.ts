@@ -28,19 +28,19 @@ export type RouteResult<TState> =
 interface RoutableMessage<TState> {
   readonly schema: z.ZodType;
   // Method signature (bivariant in --strict) instead of property signature (contravariant)
-  handler(state: TState, payload: unknown, ctx: MessageContext): unknown;
+  handler(state: TState, payload: unknown, ctx: MessageContext): TState;
   guard?(state: TState, payload: unknown, ctx: MessageContext): boolean;
 }
 
 // --- Router ---
 
-export async function routeMessage<TState>(
+export function routeMessage<TState>(
   roleMessages: Record<string, Record<string, RoutableMessage<TState>>>,
   role: string,
   state: TState,
   event: { type: string; [key: string]: unknown },
   ctxBase: Omit<MessageContext, "role">,
-): Promise<RouteResult<TState>> {
+): RouteResult<TState> {
   // 1. Look up messages for this role
   const messagesForRole = roleMessages[role];
   if (messagesForRole === undefined) {
@@ -78,7 +78,14 @@ export async function routeMessage<TState>(
   }
 
   // 7. Call handler — payload is Zod-validated, handler is correctly typed at definition site
-  const nextState = await (messageDef.handler(state, parseResult.data, ctx) as TState | Promise<TState>);
+  const nextState = messageDef.handler(state, parseResult.data, ctx);
+
+  // Runtime guard: reject async handlers that slip past the type system (JS consumers, structural typing)
+  if (nextState instanceof Promise) {
+    throw new Error(
+      `Message handler for "${event.type}" returned a Promise. Handlers must be synchronous — use emit() for async side effects.`,
+    );
+  }
 
   return { ok: true, state: nextState, emissions: [] };
 }

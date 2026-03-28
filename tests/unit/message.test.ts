@@ -86,12 +86,14 @@ describe("message() helper", () => {
     expect(wrongTypeResult.success).toBe(false);
   });
 
-  it("supports async handlers", () => {
+  it("rejects async handlers at type level", () => {
+    // @ts-expect-error — async handlers return Promise<State>, not State
     const fetchData = message(z.object({}), async (state: State, _, { emit }) => {
       emit({ queue: "EFFECTS", body: { type: "FETCH", url: "https://api.example.com/data" } });
       return state;
     });
 
+    // Runtime: the object is still created (JS doesn't care), but TS rejects it
     expect(typeof fetchData.handler).toBe("function");
   });
 

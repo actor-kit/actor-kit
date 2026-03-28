@@ -59,7 +59,7 @@ type MessageHandler<TState, TPayload, TEnv = unknown> = (
   state: TState,
   payload: TPayload,
   ctx: MessageContext<TEnv>,
-) => TState | Promise<TState>;
+) => TState;
 
 type GuardFn<TState, TPayload = unknown, TEnv = unknown> = (
   state: TState,
@@ -76,7 +76,7 @@ interface GuardedHandler<TState, TPayload, TEnv = unknown> {
 
 export interface MessageDef<TState = unknown, TPayload = unknown, TEnv = unknown> {
   readonly schema: z.ZodType<TPayload>;
-  readonly handler: MessageHandler<TState, TPayload, TEnv>;
+  readonly handler: (state: TState, payload: TPayload, ctx: MessageContext<TEnv>) => TState;
   readonly guard?: GuardFn<TState, TPayload, TEnv>;
 }
 

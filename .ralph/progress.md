@@ -57,3 +57,21 @@ Working memory for v3 API redesign. Delete after run.
 ### Codex findings addressed
 - [P1] Cleaned up CREATE_TABLES_SQL to remove unused on_done/on_error/meta columns from outbox table
 - [P2] Acknowledged: Effect type intentionally keeps fetch/actor variants for the transition period — actors can use emit({fetch:...}) for fire-and-forget HTTP. Queue-only enforcement is a future concern, not task 3 scope
+
+## Task 4: Sync-only handlers — DONE
+
+### What was done
+- Changed handler return type from `TState | Promise<TState>` to `TState` in `MessageDef`, `MessageHandler`, `MessageContext` across `@actor-kit/core`, `@actor-kit/worker`, `@actor-kit/actor-kit`
+- Made `routeMessage()` synchronous in both message-router.ts copies (removed `async`, removed `await`)
+- Removed `await` from handler invocations in both actor.ts copies: lifecycle.connect, lifecycle.disconnect, after handlers, tick.handler
+- Updated `ActorDef` interface in both actor.ts copies: lifecycle/on/after/tick return `unknown` (not `unknown | Promise<unknown>`)
+- Updated `TestableActorDef` in both test harness copies: lifecycle/on return `TState` (not `TState | Promise<TState>`)
+- Updated `RoutableMessage.handler` return type from `unknown` to `TState` (eliminates cast)
+- Added runtime `instanceof Promise` guards in routeMessage and all handler invocation sites (connect, disconnect, after, tick) — prevents async handlers from silently corrupting state even when bypassing the type system (JS consumers, structural typing)
+
+### Tests written
+- **Unit** (message.test.ts): `@ts-expect-error` test verifying async handlers are rejected at type level via `message()` helper
+
+### Codex findings addressed
+- [P1] Added `instanceof Promise` runtime guard in routeMessage — prevents async handlers that slip past the type system (JS consumers, structural typing via `actor()`) from silently storing Promise objects as actor state
+- [P2] Added `instanceof Promise` runtime guards in all lifecycle/after/tick handler invocation sites in both actor.ts copies — same defense against async functions assignable to `(...) => unknown`

@@ -30,7 +30,7 @@ type MessageHandler<TState, TPayload, TEnv = unknown> = (
   state: TState,
   payload: TPayload,
   ctx: MessageContext<TEnv>,
-) => TState | Promise<TState>;
+) => TState;
 
 type GuardFn<TState, TPayload = unknown, TEnv = unknown> = (
   state: TState,

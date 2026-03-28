@@ -82,25 +82,17 @@ interface ActorDef {
   on?: Record<
     string,
     {
-      (state: unknown, ...args: unknown[]): unknown | Promise<unknown>; // bivariant
+      (state: unknown, ...args: unknown[]): unknown; // bivariant
     }
   >;
   lifecycle?: {
-    connect?(
-      state: unknown,
-      event: { caller: string; callerType: "user" | "service" },
-      ctx: unknown,
-    ): unknown | Promise<unknown>;
-    disconnect?(
-      state: unknown,
-      event: { caller: string; callerType: "user" | "service" },
-      ctx: unknown,
-    ): unknown | Promise<unknown>;
+    connect?(state: unknown, event: { caller: string; callerType: "user" | "service" }, ctx: unknown): unknown;
+    disconnect?(state: unknown, event: { caller: string; callerType: "user" | "service" }, ctx: unknown): unknown;
   };
-  after?: Record<string, (state: unknown) => unknown | Promise<unknown>>;
+  after?: Record<string, (state: unknown) => unknown>;
   tick?: {
     frequency: number;
-    handler(state: unknown): unknown | Promise<unknown>;
+    handler(state: unknown): unknown;
   };
   observe?: {
     onTransition?(
@@ -343,7 +335,7 @@ export function actor(
       };
 
       // Route message
-      const result = await routeMessage(messages, role, this.state, event, ctx);
+      const result = routeMessage(messages, role, this.state, event, ctx);
 
       if (!result.ok) {
         return { ok: false, error: result.error };
@@ -698,12 +690,15 @@ export function actor(
           emit: (effect: Effect) => connectOutbox.emit(effect),
         };
         const nextState = def.lifecycle?.connect
-          ? await def.lifecycle.connect(
+          ? def.lifecycle.connect(
               this.state,
               { caller: callerInfo.caller, callerType: callerInfo.callerType },
               connectCtx,
             )
-          : await def.on!["connect"]!(this.state, callerInfo.caller, connectCtx);
+          : def.on!["connect"]!(this.state, callerInfo.caller, connectCtx);
+        if (nextState instanceof Promise) {
+          throw new Error("lifecycle.connect returned a Promise. Handlers must be synchronous.");
+        }
         if (nextState !== this.state) {
           this.state = nextState;
           const outboxEntries = connectOutbox.toEntries();
@@ -823,8 +818,11 @@ export function actor(
           emit: (effect: Effect) => disconnectOutbox.emit(effect),
         };
         const nextState = def.lifecycle?.disconnect
-          ? await def.lifecycle.disconnect(this.state, { caller, callerType: info.callerType }, disconnectCtx)
-          : await def.on!["disconnect"]!(this.state, caller, disconnectCtx);
+          ? def.lifecycle.disconnect(this.state, { caller, callerType: info.callerType }, disconnectCtx)
+          : def.on!["disconnect"]!(this.state, caller, disconnectCtx);
+        if (nextState instanceof Promise) {
+          throw new Error("lifecycle.disconnect returned a Promise. Handlers must be synchronous.");
+        }
         if (nextState !== this.state) {
           this.state = nextState;
           const outboxEntries = disconnectOutbox.toEntries();
@@ -898,7 +896,10 @@ export function actor(
       if (scheduledKey && def.after) {
         const handler = def.after[scheduledKey];
         if (typeof handler === "function") {
-          const nextState = await handler(this.state);
+          const nextState = handler(this.state);
+          if (nextState instanceof Promise) {
+            throw new Error(`after["${scheduledKey}"] returned a Promise. Handlers must be synchronous.`);
+          }
           if (nextState !== this.state) {
             this.state = nextState;
             this.persistState();
@@ -1008,7 +1009,10 @@ export function actor(
           const handler = def.tick?.handler;
           if (typeof handler !== "function") return;
 
-          const nextState = await handler(this.state);
+          const nextState = handler(this.state);
+          if (nextState instanceof Promise) {
+            throw new Error("tick.handler returned a Promise. Handlers must be synchronous.");
+          }
           if (nextState !== this.state) {
             this.state = nextState;
 

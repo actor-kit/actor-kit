@@ -21,7 +21,7 @@ interface TestableActorDef<TState, TInput> {
       string,
       {
         readonly schema: z.ZodType;
-        handler(state: TState, payload: unknown, ctx: unknown): unknown;
+        handler(state: TState, payload: unknown, ctx: unknown): TState;
         guard?(state: TState): boolean;
       }
     >
@@ -33,18 +33,10 @@ interface TestableActorDef<TState, TInput> {
     }
   >;
   lifecycle?: {
-    connect?(
-      state: TState,
-      event: { caller: string; callerType: "user" | "service" },
-      ctx: unknown,
-    ): TState | Promise<TState>;
-    disconnect?(
-      state: TState,
-      event: { caller: string; callerType: "user" | "service" },
-      ctx: unknown,
-    ): TState | Promise<TState>;
+    connect?(state: TState, event: { caller: string; callerType: "user" | "service" }, ctx: unknown): TState;
+    disconnect?(state: TState, event: { caller: string; callerType: "user" | "service" }, ctx: unknown): TState;
   };
-  on?: Record<string, (state: TState, ...args: unknown[]) => TState | Promise<TState>>;
+  on?: Record<string, (state: TState, ...args: unknown[]) => TState>;
   observe?: {
     onTransition?(
       prevState: TState,
@@ -111,7 +103,7 @@ export function testActor<TState, TInput>(def: TestableActorDef<TState, TInput>)
       },
     };
 
-    const result = await routeMessage(def.messages, role, state, event, ctx);
+    const result = routeMessage(def.messages, role, state, event, ctx);
 
     if (!result.ok) {
       switch (result.error) {

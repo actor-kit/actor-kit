@@ -17,7 +17,7 @@ Messages are flat. Guards handle authorization.
 
 - [x] **3. Remove request/callback/callbacks** — Delete from `@actor-kit/core`: CallbackDef, NormalizedRequestConfig, normalizeRequest. Delete from `@actor-kit/worker`: callback(), request() on MessageContext, callbacks block on ActorDef. Simplify outbox: entries are just Effect (queue/fetch/actor emit). Remove outbox drain effect execution — outbox only delivers to Queues. Delete test files: callback.test.ts, request-typed.test.ts. Update lifecycle-callbacks.test.ts → lifecycle.test.ts. Run `pnpm typecheck && pnpm test:unit`.
 
-- [ ] **4. Sync-only handlers** — Change handler return type from `TState | Promise<TState>` to `TState`. Remove `await` from handler invocation in actor.ts. Remove async from lifecycle handlers. Update all test handlers to be sync. Add @ts-expect-error test verifying async handlers are rejected at type level. Run `pnpm typecheck && pnpm test:unit`.
+- [x] **4. Sync-only handlers** — Change handler return type from `TState | Promise<TState>` to `TState`. Remove `await` from handler invocation in actor.ts. Remove async from lifecycle handlers. Update all test handlers to be sync. Add @ts-expect-error test verifying async handlers are rejected at type level. Run `pnpm typecheck && pnpm test:unit`.
 
 - [ ] **5. Delete legacy on block** — Remove `on` from ActorDef interface. Remove on-related code from actor.ts (the fallback paths in connect/disconnect/outbox drain). lifecycle is the only connection handler. Remove request-callbacks.test.ts (tests the old on-based callback delivery). Run `pnpm typecheck && pnpm test:unit`.
 
