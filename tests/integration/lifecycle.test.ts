@@ -37,13 +37,13 @@ describe("Counter DO lifecycle", () => {
     expect(result.snapshot).toEqual({ count: 5, lastCaller: "user-1" });
   });
 
-  it("rejects unauthorized messages", async () => {
+  it("rejects unauthorized messages (guard_failed)", async () => {
     const { stub, actorId } = getStub("test-auth");
     await stub.spawn({ actorId, caller: "user-1", callerType: "user", input: {} });
 
     const sendResult = await stub.send("user-1", "user", { type: "RESET" });
     expect(sendResult.ok).toBe(false);
-    expect(sendResult.error).toBe("message_not_found");
+    expect(sendResult.error).toBe("guard_failed");
   });
 
   it("admin can reset", async () => {

@@ -7,7 +7,7 @@ function getStub(name: string) {
 }
 
 describe("Roles and authorization (integration)", () => {
-  it("user role can INCREMENT but not RESET", async () => {
+  it("user role can INCREMENT but not RESET (guard rejects)", async () => {
     const { stub, actorId } = getStub("role-user-1");
     await stub.spawn({ actorId, caller: "user-1", callerType: "user", input: {} });
 
@@ -16,7 +16,7 @@ describe("Roles and authorization (integration)", () => {
 
     const resetResult = await stub.send("user-1", "user", { type: "RESET" });
     expect(resetResult.ok).toBe(false);
-    expect(resetResult.error).toBe("message_not_found");
+    expect(resetResult.error).toBe("guard_failed");
   });
 
   it("service caller gets admin role with full access", async () => {
@@ -89,6 +89,44 @@ describe("Payload validation (integration)", () => {
     const result = await stub.send("user-1", "user", { type: "NONEXISTENT" });
     expect(result.ok).toBe(false);
     expect(result.error).toBe("message_not_found");
+  });
+});
+
+describe("Payload guards (integration)", () => {
+  it("guard rejects based on state + payload", async () => {
+    const { stub, actorId } = getStub("guard-payload-1");
+    await stub.spawn({ actorId, caller: "user-1", callerType: "user", input: {} });
+
+    // Add 90 — within limit (0 + 90 <= 100)
+    const r1 = await stub.send("user-1", "user", { type: "GUARDED_ADD", amount: 90 });
+    expect(r1.ok).toBe(true);
+
+    // Add 20 — exceeds limit (90 + 20 > 100)
+    const r2 = await stub.send("user-1", "user", { type: "GUARDED_ADD", amount: 20 });
+    expect(r2.ok).toBe(false);
+    expect(r2.error).toBe("guard_failed");
+
+    // Add 10 — exactly at limit (90 + 10 = 100)
+    const r3 = await stub.send("user-1", "user", { type: "GUARDED_ADD", amount: 10 });
+    expect(r3.ok).toBe(true);
+
+    const snap = await stub.getSnapshot("user-1", "user");
+    expect((snap.snapshot as { count: number }).count).toBe(100);
+  });
+
+  it("open messages (no guard) are available to all roles", async () => {
+    const { stub, actorId } = getStub("guard-open-1");
+    await stub.spawn({ actorId, caller: "user-1", callerType: "user", input: {} });
+
+    // Both user and admin can INCREMENT (no guard)
+    const r1 = await stub.send("user-1", "user", { type: "INCREMENT", amount: 1 });
+    expect(r1.ok).toBe(true);
+
+    const r2 = await stub.send("svc-1", "service", { type: "INCREMENT", amount: 2 });
+    expect(r2.ok).toBe(true);
+
+    const snap = await stub.getSnapshot("user-1", "user");
+    expect((snap.snapshot as { count: number }).count).toBe(3);
   });
 });
 

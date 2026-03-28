@@ -1,8 +1,8 @@
 import { boolean, schema, string, uint32, view } from "@actor-kit/core";
-import { actor, createActorClass, defineActor, message } from "@actor-kit/worker";
+import { createActorClass, defineActor, message } from "@actor-kit/worker";
 import { z } from "zod";
 
-// --- Counter actor ---
+// --- Counter actor (v3: defineActor + flat messages + guards) ---
 
 type CounterState = { count: number; lastCaller: string | null };
 
@@ -16,32 +16,54 @@ const increment = message(
   }),
 );
 
-const decrement = message(
-  z.object({ amount: z.number().int().positive() }),
-  (state: CounterState, { amount }, { caller }) => ({
+const decrement = message(z.object({ amount: z.number().int().positive() }), {
+  guard: (_state: CounterState, _payload: { amount: number }, ctx: { role: string }) => ctx.role === "admin",
+  handler: (state: CounterState, { amount }, { caller }) => ({
     count: state.count - amount,
     lastCaller: caller,
   }),
-);
-
-const reset = message(z.object({}), (_state: CounterState) => ({ count: 0, lastCaller: null }));
-
-const notify = message(z.object({}), (state: CounterState, _payload, ctx) => {
-  ctx.emit({ queue: "ANALYTICS", body: { count: state.count } });
-  return state;
 });
 
-export const Counter = actor("counter", {
+const reset = message(z.object({}), {
+  guard: (_state: CounterState, _payload: Record<string, never>, ctx: { role: string }) => ctx.role === "admin",
+  handler: (_state: CounterState) => ({ count: 0, lastCaller: null }),
+});
+
+const notify = message(z.object({}), {
+  guard: (_state: CounterState, _payload: Record<string, never>, ctx: { role: string }) => ctx.role === "admin",
+  handler: (
+    state: CounterState,
+    _payload: Record<string, never>,
+    ctx: { emit: (effect: { queue: string; body: unknown }) => void },
+  ) => {
+    ctx.emit({ queue: "ANALYTICS", body: { count: state.count } });
+    return state;
+  },
+});
+
+const guardedAdd = message(z.object({ amount: z.number().int().positive() }), {
+  guard: (state: CounterState, { amount }: { amount: number }) => state.count + amount <= 100,
+  handler: (state: CounterState, { amount }, { caller }) => ({
+    ...state,
+    count: state.count + amount,
+    lastCaller: caller,
+  }),
+});
+
+const CounterContract = defineActor("counter", {
   input: z.object({}),
-  init: () => ({ count: 0, lastCaller: null }),
+  init: (): CounterState => ({ count: 0, lastCaller: null }),
   roles: {
     admin: (_state: CounterState, _caller: string, { callerType }: { callerType: "user" | "service" }) =>
       callerType === "service",
     user: () => true,
   },
   messages: {
-    admin: { INCREMENT: increment, DECREMENT: decrement, RESET: reset, NOTIFY: notify },
-    user: { INCREMENT: increment },
+    INCREMENT: increment,
+    DECREMENT: decrement,
+    RESET: reset,
+    NOTIFY: notify,
+    GUARDED_ADD: guardedAdd,
   },
   views: {
     admin: view(CounterView, (state: CounterState) => ({
@@ -55,7 +77,9 @@ export const Counter = actor("counter", {
   },
 });
 
-// --- Timer actor (for testing after/alarm) ---
+export const Counter = createActorClass(CounterContract);
+
+// --- Timer actor (v3: defineActor + flat messages, after/tick) ---
 
 type TimerState = { expired: boolean; count: number };
 
@@ -66,14 +90,14 @@ const timerIncrement = message(z.object({}), (state: TimerState) => ({
   count: state.count + 1,
 }));
 
-export const TimerActor = actor("timer", {
+const TimerContract = defineActor("timer", {
   input: z.object({}),
   init: (): TimerState => ({ expired: false, count: 0 }),
   roles: {
     user: () => true,
   },
   messages: {
-    user: { INCREMENT: timerIncrement },
+    INCREMENT: timerIncrement,
   },
   views: {
     user: view(TimerView, (state: TimerState) => ({
@@ -82,18 +106,20 @@ export const TimerActor = actor("timer", {
     })),
   },
   after: {
-    "1 second": (state: unknown) => ({ ...(state as TimerState), expired: true }),
+    "1 second": (state: TimerState) => ({ ...state, expired: true }),
   },
   tick: {
-    frequency: 50, // 50ms tick
-    handler: (state: unknown) => ({
-      ...(state as TimerState),
-      count: (state as TimerState).count + 1,
+    frequency: 50,
+    handler: (state: TimerState) => ({
+      ...state,
+      count: state.count + 1,
     }),
   },
 });
 
-// --- Auction actor (for testing sequential states) ---
+export const TimerActor = createActorClass(TimerContract);
+
+// --- Auction actor (v3: defineActor + sequential states) ---
 
 type AuctionState = { bids: number[]; winner: number | null };
 
@@ -109,7 +135,7 @@ const closeAuction = message(z.object({}), (state: AuctionState) => ({
   winner: Math.max(...state.bids, 0),
 }));
 
-export const Auction = actor("auction", {
+const AuctionContract = defineActor("auction", {
   input: z.object({}),
   initial: "bidding",
   init: (): AuctionState => ({ bids: [], winner: null }),
@@ -135,102 +161,7 @@ export const Auction = actor("auction", {
   },
 });
 
-// --- Counter via defineActor + createActorClass ---
-
-type CounterV3State = { count: number; lastCaller: string | null };
-
-const CounterV3View = schema({ count: uint32, lastCaller: string });
-
-const v3Increment = message(
-  z.object({ amount: z.number().int().positive() }),
-  (state: CounterV3State, { amount }, { caller }) => ({
-    count: state.count + amount,
-    lastCaller: caller,
-  }),
-);
-
-const v3Decrement = message(
-  z.object({ amount: z.number().int().positive() }),
-  (state: CounterV3State, { amount }, { caller }) => ({
-    count: state.count - amount,
-    lastCaller: caller,
-  }),
-);
-
-const CounterV3Contract = defineActor("counter-v3", {
-  input: z.object({}),
-  init: (): CounterV3State => ({ count: 0, lastCaller: null }),
-  roles: {
-    admin: (_state: CounterV3State, _caller: string, { callerType }: { callerType: "user" | "service" }) =>
-      callerType === "service",
-    user: () => true,
-  },
-  messages: {
-    admin: { INCREMENT: v3Increment, DECREMENT: v3Decrement },
-    user: { INCREMENT: v3Increment },
-  },
-  views: {
-    admin: view(CounterV3View, (state: CounterV3State) => ({
-      count: state.count,
-      lastCaller: state.lastCaller ?? "",
-    })),
-    user: view(CounterV3View, (state: CounterV3State) => ({
-      count: state.count,
-      lastCaller: state.lastCaller ?? "",
-    })),
-  },
-});
-
-export const CounterV3 = createActorClass(CounterV3Contract);
-
-// --- Flat-message counter via defineActor + createActorClass (v3 flat messages) ---
-
-type FlatCounterState = { count: number; ownerId: string };
-
-const FlatCounterView = schema({ count: uint32 });
-
-const flatIncrement = message(
-  z.object({ amount: z.number().int().positive() }),
-  (state: FlatCounterState, { amount }) => ({
-    ...state,
-    count: state.count + amount,
-  }),
-);
-
-const flatAdminReset = message(z.object({}), {
-  guard: (_state: FlatCounterState, _payload: Record<string, never>, ctx: { role: string }) => ctx.role === "admin",
-  handler: (_state: FlatCounterState) => ({ count: 0, ownerId: "" }),
-});
-
-const flatLimitedAdd = message(z.object({ amount: z.number().int().positive() }), {
-  guard: (state: FlatCounterState, { amount }: { amount: number }, _ctx: { role: string }) =>
-    state.count + amount <= 100,
-  handler: (state: FlatCounterState, { amount }) => ({
-    ...state,
-    count: state.count + amount,
-  }),
-});
-
-const FlatCounterContract = defineActor("flat-counter", {
-  input: z.object({ ownerId: z.string().optional() }),
-  init: (input: { ownerId?: string }): FlatCounterState => ({ count: 0, ownerId: input.ownerId ?? "" }),
-  roles: {
-    admin: (_state: FlatCounterState, _caller: string, { callerType }: { callerType: "user" | "service" }) =>
-      callerType === "service",
-    user: () => true,
-  },
-  messages: {
-    INCREMENT: flatIncrement,
-    ADMIN_RESET: flatAdminReset,
-    LIMITED_ADD: flatLimitedAdd,
-  },
-  views: {
-    admin: view(FlatCounterView, (state: FlatCounterState) => ({ count: state.count })),
-    user: view(FlatCounterView, (state: FlatCounterState) => ({ count: state.count })),
-  },
-});
-
-export const FlatCounter = createActorClass(FlatCounterContract);
+export const Auction = createActorClass(AuctionContract);
 
 // --- Worker entrypoint ---
 
@@ -240,6 +171,6 @@ export default {
     if (url.pathname === "/health") {
       return new Response("ok");
     }
-    return new Response("Actor Kit v2 test worker", { status: 200 });
+    return new Response("Actor Kit v3 test worker", { status: 200 });
   },
 };

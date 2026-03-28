@@ -34,7 +34,7 @@ describe("Error feedback via WebSocket (integration)", () => {
       ws.addEventListener("message", () => resolve(), { once: true });
     });
 
-    // Send RESET — user role can't do this (admin only)
+    // Send RESET — user role can't do this (guard rejects non-admin)
     ws.send(JSON.stringify({ type: "RESET" }));
 
     // Should receive __error frame
@@ -51,7 +51,7 @@ describe("Error feedback via WebSocket (integration)", () => {
 
     const parsed = JSON.parse(errorMsg);
     expect(parsed.type).toBe("__error");
-    expect(parsed.error).toBe("message_not_found");
+    expect(parsed.error).toBe("guard_failed");
 
     ws.close(1000);
     await new Promise((r) => setTimeout(r, 50));
