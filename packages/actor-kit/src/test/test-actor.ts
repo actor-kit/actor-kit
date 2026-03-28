@@ -37,7 +37,6 @@ interface TestableActorDef<TState, TInput> {
     connect?(state: TState, event: { caller: string; callerType: "user" | "service" }, ctx: unknown): TState;
     disconnect?(state: TState, event: { caller: string; callerType: "user" | "service" }, ctx: unknown): TState;
   };
-  on?: Record<string, (state: TState, ...args: unknown[]) => TState>;
   observe?: {
     onTransition?(
       prevState: TState,

@@ -82,12 +82,6 @@ interface ActorDef {
       schema?: { fields: readonly { name: string; type: string }[] }; // optional schema for binary encoding
     }
   >;
-  on?: Record<
-    string,
-    {
-      (state: unknown, ...args: unknown[]): unknown; // bivariant
-    }
-  >;
   lifecycle?: {
     connect?(state: unknown, event: { caller: string; callerType: "user" | "service" }, ctx: unknown): unknown;
     disconnect?(state: unknown, event: { caller: string; callerType: "user" | "service" }, ctx: unknown): unknown;
@@ -683,8 +677,8 @@ export function actor(
         }
       }
 
-      // Run lifecycle.connect (or legacy on.connect) if defined
-      if (def.lifecycle?.connect || def.on?.["connect"]) {
+      // Run lifecycle.connect if defined
+      if (def.lifecycle?.connect) {
         const connectOutbox = createOutbox();
         const connectCtx = {
           caller: callerInfo.caller,
@@ -692,13 +686,11 @@ export function actor(
           env: this.env,
           emit: (effect: Effect) => connectOutbox.emit(effect),
         };
-        const nextState = def.lifecycle?.connect
-          ? def.lifecycle.connect(
-              this.state,
-              { caller: callerInfo.caller, callerType: callerInfo.callerType },
-              connectCtx,
-            )
-          : def.on!["connect"]!(this.state, callerInfo.caller, connectCtx);
+        const nextState = def.lifecycle.connect(
+          this.state,
+          { caller: callerInfo.caller, callerType: callerInfo.callerType },
+          connectCtx,
+        );
         if (nextState instanceof Promise) {
           throw new Error("lifecycle.connect returned a Promise. Handlers must be synchronous.");
         }
@@ -812,7 +804,7 @@ export function actor(
       this.connectionChecksums.delete(ws);
 
       // Run lifecycle.disconnect (or legacy on.disconnect) if defined
-      if (def.lifecycle?.disconnect || def.on?.["disconnect"]) {
+      if (def.lifecycle?.disconnect) {
         const disconnectOutbox = createOutbox();
         const disconnectCtx = {
           caller,
@@ -820,9 +812,7 @@ export function actor(
           env: this.env,
           emit: (effect: Effect) => disconnectOutbox.emit(effect),
         };
-        const nextState = def.lifecycle?.disconnect
-          ? def.lifecycle.disconnect(this.state, { caller, callerType: info.callerType }, disconnectCtx)
-          : def.on!["disconnect"]!(this.state, caller, disconnectCtx);
+        const nextState = def.lifecycle.disconnect(this.state, { caller, callerType: info.callerType }, disconnectCtx);
         if (nextState instanceof Promise) {
           throw new Error("lifecycle.disconnect returned a Promise. Handlers must be synchronous.");
         }
