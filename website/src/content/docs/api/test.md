@@ -1,34 +1,37 @@
 ---
-title: "@actor-kit/test"
+title: "actor-kit/test"
 description: Test helper reference.
 ---
 
-The test export (`import from "@actor-kit/test"`) provides a test harness that runs actor transitions without a Cloudflare runtime.
+The test export (`import from "actor-kit/test"`) provides a test harness that runs actor transitions without a Cloudflare runtime.
 
-## `testActor(def)`
+## `testActor(contract)` / `testActor(def)`
 
-Creates a test harness for an actor definition.
+Creates a test harness for an actor. Accepts either a contract (from `defineActor()`) or a raw definition object.
+
+### Contract-derived (recommended)
+
+Types for `init()`, `send()`, `view()`, and `role()` are all inferred from the contract:
 
 ```typescript
-import { testActor } from "@actor-kit/test";
-import { todoActorDef } from "./todo";
+import { testActor } from "actor-kit/test";
+import { CounterContract } from "./counter";
 
-const t = testActor(todoActorDef);
+const t = testActor(CounterContract);
 ```
 
-`testActor()` takes the raw actor definition object (the `{ input, init, roles, messages, views }` object), not the DO class returned by `actor()`. Export the definition separately from the `actor()` call:
+### Raw definition (legacy)
 
 ```typescript
-// todo.ts
-export const todoActorDef = {
+import { testActor } from "actor-kit/test";
+
+const t = testActor({
   input: z.object({ creator: z.string() }),
   init: (input) => ({ todos: [], ownerId: input.creator, memberIds: [] }),
   roles: { /* ... */ },
   messages: { /* ... */ },
   views: { /* ... */ },
-};
-
-export const TodoList = actor<Env>("todo-list", todoActorDef);
+});
 ```
 
 ### `t.init(input)`
@@ -36,8 +39,8 @@ export const TodoList = actor<Env>("todo-list", todoActorDef);
 Validates input with Zod and returns the initial state.
 
 ```typescript
-const state = t.init({ creator: "alice" });
-// state: { todos: [], ownerId: "alice", memberIds: [] }
+const state = t.init({});
+// state: { count: 0, lastUpdatedBy: null }
 ```
 
 Throws if input is invalid.
@@ -47,13 +50,12 @@ Throws if input is invalid.
 Resolves the caller's role, validates the message, runs the handler. Returns the new state.
 
 ```typescript
-let state = t.init({ creator: "alice" });
-state = await t.send(state, "alice", { type: "ADD_TODO", text: "Buy milk" });
+let state = t.init({});
+state = t.send(state, "alice", { type: "INCREMENT" });
 ```
 
 Throws if:
 - No role matches the caller
-- Message type not found for the role
 - Zod validation fails
 - Guard returns false
 
@@ -61,10 +63,10 @@ Options: `{ callerType: "service" }` to override the default "user".
 
 ### `t.sendWithEffects(state, caller, event, opts?)`
 
-Same as `send()` but also returns captured `emit()` and `request()` calls.
+Same as `send()` but also returns captured `emit()` calls.
 
 ```typescript
-const { state, emissions, requests } = await t.sendWithEffects(
+const { state, emissions } = t.sendWithEffects(
   state, "alice", { type: "NOTIFY" }
 );
 
@@ -78,12 +80,8 @@ Resolves the caller's role and returns `{ role, data }`.
 
 ```typescript
 const view = t.view(state, "alice");
-expect(view.role).toBe("owner");
-expect(view.data.todos).toHaveLength(1);
-
-const viewerView = t.view(state, "stranger");
-expect(viewerView.role).toBe("viewer");
-expect(viewerView.data.todoCount).toBe(1);
+expect(view.role).toBe("user");
+expect(view.data.count).toBe(0);
 ```
 
 ### `t.role(state, caller, opts?)`
@@ -91,9 +89,8 @@ expect(viewerView.data.todoCount).toBe(1);
 Returns the role name or `null`.
 
 ```typescript
-expect(t.role(state, "alice")).toBe("owner");
-expect(t.role(state, "stranger")).toBe("viewer");
-expect(t.role(state, "unknown", { callerType: "service" })).toBe("service");
+expect(t.role(state, "alice")).toBe("user");
+expect(t.role(state, "admin", { callerType: "service" })).toBe("admin");
 ```
 
 ## Observability

@@ -3,23 +3,31 @@ title: Counter
 description: A minimal shared counter with real-time sync.
 ---
 
-The counter is the simplest actor — it demonstrates roles, messages, views, and real-time sync between multiple users.
+The counter is the simplest actor — it demonstrates the contract-first API, flat messages, guards, views, and real-time sync between multiple users.
 
 **Source**: [`examples/counter/`](https://github.com/actor-kit/actor-kit/tree/main/examples/counter)
 
 ## What it demonstrates
 
-- `actor()` with `init`, `roles`, `messages`, `views`
+- `defineActor()` + `createActorClass()` — contract-first API
+- Flat messages with optional guards
 - `message()` with Zod validation
 - `schema()` and `view()` for typed view projections
 - Real-time sync: two browsers sharing the same counter
 - Admin vs user roles via `callerType`
-- Client connection: typed `actorClient()` SDK and React hooks
+- Contract-derived client: typed `actorClient(contract)` — no manual event unions
 
 ## The Actor
 
 ```typescript
-export const Counter = actor("counter", {
+import { z } from "zod";
+import { schema, view, uint32, string, defineActor, createActorClass, message } from "actor-kit";
+
+type CounterState = { count: number; lastUpdatedBy: string | null };
+
+const CounterView = schema({ count: uint32, lastUpdatedBy: string });
+
+export const CounterContract = defineActor("counter", {
   input: z.object({}),
   init: (): CounterState => ({ count: 0, lastUpdatedBy: null }),
 
@@ -29,8 +37,26 @@ export const Counter = actor("counter", {
   },
 
   messages: {
-    admin: { INCREMENT: increment, DECREMENT: decrement, RESET: reset },
-    user: { INCREMENT: increment, DECREMENT: decrement },
+    INCREMENT: message(
+      z.object({}),
+      (state: CounterState, _payload, { caller }) => ({
+        ...state,
+        count: state.count + 1,
+        lastUpdatedBy: caller,
+      }),
+    ),
+    DECREMENT: message(
+      z.object({}),
+      (state: CounterState, _payload, { caller }) => ({
+        ...state,
+        count: Math.max(0, state.count - 1),
+        lastUpdatedBy: caller,
+      }),
+    ),
+    RESET: message(z.object({}), {
+      guard: (_state, _payload, ctx) => ctx.role === "admin",
+      handler: () => ({ count: 0, lastUpdatedBy: null }),
+    }),
   },
 
   views: {
@@ -38,27 +64,28 @@ export const Counter = actor("counter", {
     user: view(CounterView, (state) => ({ count: state.count, lastUpdatedBy: state.lastUpdatedBy ?? "" })),
   },
 });
+
+export const Counter = createActorClass(CounterContract);
 ```
 
 Key points:
-- **Admin** role gets `RESET` — regular users can't reset
-- **Both roles** share `increment` and `decrement` handlers (same `message()` object referenced twice)
+- **Messages are flat** — not nested by role. `RESET` uses a guard to restrict to admin
+- **`defineActor()`** returns a typed contract — `createActorClass()` converts it to a DO class
+- **Both roles** can see `INCREMENT` and `DECREMENT` — guards are only needed for restricted actions
 - **Views** are the same shape for both roles — in more complex actors, roles would see different projections
 
 ## The Client
 
 ### Vanilla TypeScript
 
-Use `actorClient()` for typed views, automatic reconnection, and binary delta decoding. The `subscribe` callback always receives the full, merged view — you never see raw deltas:
+Use `actorClient(contract)` for typed views, automatic reconnection, and binary delta decoding. Event types are inferred from the contract — no manual union needed:
 
 ```typescript
-import { actorClient } from "@actor-kit/client";
-import { CounterView } from "./counter";
+import { actorClient } from "actor-kit/client";
+import { CounterContract } from "./counter";
 
-type CounterEvent = { type: "INCREMENT" } | { type: "DECREMENT" };
-
-// Define once (co-locate with actor definition)
-const CounterClient = actorClient(CounterView).events<CounterEvent>();
+// Events and views inferred from the contract
+const CounterClient = actorClient(CounterContract);
 
 // Get a token
 const { token } = await fetch("/api/token?actorId=default").then(r => r.json());
@@ -80,14 +107,12 @@ client.send({ type: "INCREMENT" });
 ### React
 
 ```tsx
-import { actorClient } from "@actor-kit/client";
-import { actorContext } from "@actor-kit/react";
-import { CounterView } from "./counter";
+import { actorClient } from "actor-kit/client";
+import { actorContext } from "actor-kit/react";
+import { CounterContract } from "./counter";
 
-type CounterEvent = { type: "INCREMENT" } | { type: "DECREMENT" };
-
-const CounterClient = actorClient(CounterView).events<CounterEvent>();
-const CounterCtx = actorContext<typeof CounterClient>();
+const CounterClient = actorClient(CounterContract);
+const CounterCtx = actorContext(CounterContract);
 
 function App({ counterId, token }: { counterId: string; token: string }) {
   const [client, setClient] = useState<ReturnType<typeof CounterClient.create> | null>(null);
@@ -112,7 +137,7 @@ function App({ counterId, token }: { counterId: string; token: string }) {
 
 function Counter() {
   const view = CounterCtx.useView();   // { count: number; lastUpdatedBy: string } | undefined
-  const send = CounterCtx.useSend();   // (event: CounterEvent) => void
+  const send = CounterCtx.useSend();   // (event: CounterEvent) => void — inferred from contract
 
   return (
     <div>

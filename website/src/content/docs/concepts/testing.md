@@ -42,7 +42,7 @@ Pure function tests with Vitest. No Actor Kit APIs, no Cloudflare runtime — ju
 
 ```typescript
 import { describe, expect, it } from "vitest";
-import { encode, decode } from "@actor-kit/core";
+import { encode, decode } from "actor-kit";
 import { PlayerView } from "./schemas";
 
 describe("binary encoding", () => {
@@ -62,66 +62,50 @@ Good for: schema encoding/decoding, JWT helpers, pure utility functions.
 `testActor()` is the workhorse of Actor Kit testing. It runs your full actor definition — role evaluation, message routing, Zod validation, guards, view projection, and side effect capture — without a Cloudflare runtime.
 
 ```typescript
-import { testActor } from "@actor-kit/test";
-import { todoActorDef } from "./todo";
+import { testActor } from "actor-kit/test";
+import { CounterContract } from "./counter";
 
-const t = testActor(todoActorDef);
+const t = testActor(CounterContract);
 ```
 
-`testActor()` takes the raw definition object (`{ input, init, roles, messages, views }`), not the DO class returned by `actor()`. Export your definition separately — see [@actor-kit/test API reference](/api/test/).
+`testActor()` accepts a contract (from `defineActor()`) — types for `init()`, `send()`, `view()`, and `role()` are all inferred from the contract.
 
 **Initialize state** from input:
 
 ```typescript
-const state = t.init({ creator: "alice" });
+const state = t.init({});
 ```
 
 **Send messages** and get back the new state:
 
 ```typescript
-const next = await t.send(state, "alice", { type: "ADD_TODO", text: "Buy milk" });
+const next = t.send(state, "alice", { type: "INCREMENT" });
 ```
 
 **Check which role** a caller resolves to:
 
 ```typescript
-expect(t.role(state, "alice")).toBe("owner");
-expect(t.role(state, "bob")).toBe("viewer");
+expect(t.role(state, "alice")).toBe("user");
 ```
 
 **Compute a view** for a caller and verify the projection:
 
 ```typescript
 const { role, data } = t.view(state, "alice");
-expect(role).toBe("owner");
-expect(data.todos).toHaveLength(1);
+expect(role).toBe("user");
+expect(data.count).toBe(0);
 ```
 
-**Capture side effects** (emissions and requests) without executing them:
+**Capture side effects** (emissions) without executing them:
 
 ```typescript
-const { state: next, emissions, requests } = await t.sendWithEffects(
+const { state: next, emissions } = t.sendWithEffects(
   state, "alice", { type: "NOTIFY_MEMBERS" }
 );
 
 expect(emissions).toContainEqual(
   expect.objectContaining({ queue: "notifications" })
 );
-```
-
-Requests are returned as `NormalizedRequestConfig` objects with `{ effect, onDone, onError, meta }`:
-
-```typescript
-const { requests } = await t.sendWithEffects(
-  state, "alice", { type: "FETCH_PRICE" }
-);
-
-expect(requests[0]).toMatchObject({
-  effect: { fetch: "https://api.example.com/price" },
-  onDone: "PRICE_RECEIVED",
-  onError: "PRICE_FAILED",
-  meta: { itemId: "widget" },
-});
 ```
 
 Actor tests are fast (pure TypeScript, no I/O) and cover the most important behavior: does this message, from this caller, in this state, produce the right result?
@@ -211,5 +195,5 @@ pnpm test               # all of the above
 
 ## Related
 
-- [Testing Side Effects](/recipes/testing-side-effects/) — how to capture and assert `emit()` and `request()` calls
-- [@actor-kit/test API Reference](/api/test/) — full `testActor()` API documentation
+- [Testing Side Effects](/recipes/testing-side-effects/) — how to capture and assert `emit()` calls
+- [actor-kit/test API Reference](/api/test/) — full `testActor()` API documentation

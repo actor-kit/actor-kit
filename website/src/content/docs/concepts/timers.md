@@ -8,7 +8,7 @@ description: Durable timers and game loops.
 `after` timers use DO Alarms. They survive hibernation and restarts.
 
 ```typescript
-export const Session = actor("session", {
+export const SessionContract = defineActor("session", {
   // ...
   after: {
     "30 minutes": (state) => ({ ...state, status: "idle" }),
@@ -35,7 +35,7 @@ DOs only have one alarm slot. The framework manages a unified scheduler that pic
 `tick` uses `setInterval` for high-frequency updates while WebSocket connections exist.
 
 ```typescript
-export const Zone = actor("zone", {
+export const ZoneContract = defineActor("zone", {
   // ...
   tick: {
     frequency: 100,  // ms
@@ -56,7 +56,7 @@ export const Zone = actor("zone", {
 
 ### Reentrancy Guard
 
-If a tick handler is async and takes longer than the frequency, the next tick is skipped (not queued). This prevents overlapping updates.
+If a tick handler takes longer than the frequency, the next tick is skipped (not queued). This prevents overlapping updates.
 
 ## When to use which
 
@@ -70,5 +70,5 @@ If a tick handler is async and takes longer than the frequency, the next tick is
 
 ## Related
 
-- [Side Effects](/concepts/side-effects/) — `emit()` and `request()` for fire-and-forget and async effects alongside timers
+- [Side Effects](/concepts/side-effects/) — `emit()` for fire-and-forget effects alongside timers
 - [Sequential & Parallel States](/recipes/sequential-and-parallel-states/) — combine timers with state machines for timed transitions

@@ -1,19 +1,19 @@
 ---
 title: Todo List
-description: Multiple roles, guards, and shared message handlers.
+description: Multiple roles, guards, and flat messages.
 ---
 
-The todo list demonstrates the role system in depth — different users see different views and have different permissions.
+The todo list demonstrates the role system in depth — different users see different views and have different permissions, all enforced through guards on flat messages.
 
 **Source**: [`examples/todo-list/`](https://github.com/actor-kit/actor-kit/tree/main/examples/todo-list)
 
 ## What it demonstrates
 
 - Three roles: `owner`, `member`, `viewer`
-- Role-specific messages: owner can delete, members can add/toggle, viewers are read-only
-- Shared message handlers across roles
+- Flat messages with guards for role-based authorization
 - Per-role views: owner/member see todos, viewer sees counts
 - State persistence across page reloads
+- Contract-derived client: no manual event unions
 - Client role detection: adapting UI based on `role` from the server
 
 ## Roles
@@ -28,31 +28,64 @@ roles: {
 
 Roles evaluate top-to-bottom. First match wins. If the caller is the owner, they get `owner` — even if they're also in `memberIds`.
 
-## Shared Handlers
+## Flat Messages with Guards
 
 ```typescript
-const addTodo = message(
-  z.object({ text: z.string().min(1).max(200) }),
-  (state, { text }) => ({
-    ...state,
-    todos: [...state.todos, { id: crypto.randomUUID(), text, done: false }],
-  }),
-);
-
 messages: {
-  owner: { ADD_TODO: addTodo, TOGGLE: toggleTodo, DELETE_TODO: deleteTodo, INVITE: invite },
-  member: { ADD_TODO: addTodo, TOGGLE: toggleTodo },
-  viewer: {},
+  ADD_TODO: message(
+    z.object({ text: z.string().min(1).max(200) }),
+    {
+      guard: (_state, _payload, ctx) => ctx.role === "owner" || ctx.role === "member",
+      handler: (state, { text }) => ({
+        ...state,
+        todos: [...state.todos, { id: crypto.randomUUID(), text, done: false }],
+      }),
+    },
+  ),
+  DELETE_TODO: message(
+    z.object({ id: z.string() }),
+    {
+      guard: (_state, _payload, ctx) => ctx.role === "owner",
+      handler: (state, { id }) => ({
+        ...state,
+        todos: state.todos.filter((t) => t.id !== id),
+      }),
+    },
+  ),
+  TOGGLE: message(
+    z.object({ id: z.string() }),
+    {
+      guard: (_state, _payload, ctx) => ctx.role === "owner" || ctx.role === "member",
+      handler: (state, { id }) => ({
+        ...state,
+        todos: state.todos.map((t) => (t.id === id ? { ...t, done: !t.done } : t)),
+      }),
+    },
+  ),
+  INVITE: message(
+    z.object({ userId: z.string() }),
+    {
+      guard: (_state, _payload, ctx) => ctx.role === "owner",
+      handler: (state, { userId }) => ({
+        ...state,
+        memberIds: [...state.memberIds, userId],
+      }),
+    },
+  ),
 },
 ```
 
-`addTodo` is the same `message()` object in both `owner` and `member`. No duplication.
+Messages are flat — all defined at the top level. Guards check `ctx.role` to enforce authorization. A viewer sending `DELETE_TODO` gets a `guard_failed` error without the handler running.
 
 ## Per-Role Views
 
 ```typescript
 views: {
   owner: view(OwnerViewSchema, (state) => ({
+    todos: state.todos,
+    memberCount: state.memberIds.length,
+  })),
+  member: view(OwnerViewSchema, (state) => ({
     todos: state.todos,
     memberCount: state.memberIds.length,
   })),
@@ -63,26 +96,20 @@ views: {
 },
 ```
 
-The owner sees the full todo list. The viewer sees only counts — the individual todo items are never sent.
+The owner and member see the full todo list. The viewer sees only counts — the individual todo items are never sent.
 
 ## The Client
 
 ### Vanilla TypeScript
 
-Use `actorClient()` for typed views and events. Binary delta decoding is handled transparently — the `subscribe` callback always receives the full, merged view:
+Use `actorClient(contract)` for typed views and events. Binary delta decoding is handled transparently — the `subscribe` callback always receives the full, merged view:
 
 ```typescript
-import { actorClient } from "@actor-kit/client";
+import { actorClient } from "actor-kit/client";
+import { TodoListContract } from "./todo";
 
-type TodoEvent =
-  | { type: "ADD_TODO"; text: string }
-  | { type: "TOGGLE"; todoId: string }
-  | { type: "DELETE_TODO"; todoId: string }
-  | { type: "INVITE"; userId: string };
-
-// Use the owner schema — viewers will receive JSON fallback snapshots
-// since their view shape differs from the binary schema
-const TodoClient = actorClient(OwnerViewSchema).events<TodoEvent>();
+// Events and views inferred from the contract
+const TodoClient = actorClient(TodoListContract);
 
 // Get a token
 const { token } = await fetch("/api/token?actorId=my-list").then(r => r.json());
@@ -93,7 +120,7 @@ const client = TodoClient.create({
   accessToken: token,
 });
 
-// view is typed from OwnerViewSchema
+// view is typed from the contract's view schemas
 client.subscribe((view) => {
   renderTodos(view.todos);
 });
@@ -104,17 +131,12 @@ client.send({ type: "ADD_TODO", text: "Buy milk" });
 ### React
 
 ```tsx
-import { actorClient } from "@actor-kit/client";
-import { actorContext } from "@actor-kit/react";
+import { actorClient } from "actor-kit/client";
+import { actorContext } from "actor-kit/react";
+import { TodoListContract } from "./todo";
 
-type TodoEvent =
-  | { type: "ADD_TODO"; text: string }
-  | { type: "TOGGLE"; todoId: string }
-  | { type: "DELETE_TODO"; todoId: string }
-  | { type: "INVITE"; userId: string };
-
-const TodoClient = actorClient(OwnerViewSchema).events<TodoEvent>();
-const TodoCtx = actorContext<typeof TodoClient>();
+const TodoClient = actorClient(TodoListContract);
+const TodoCtx = actorContext(TodoListContract);
 
 function TodoApp({ listId, token }: { listId: string; token: string }) {
   const client = TodoClient.create({
@@ -130,9 +152,9 @@ function TodoApp({ listId, token }: { listId: string; token: string }) {
 }
 
 function TodoList() {
-  const view = TodoCtx.useView();   // typed from OwnerViewSchema
+  const view = TodoCtx.useView();   // typed from contract view schemas
   const role = TodoCtx.useRole();
-  const send = TodoCtx.useSend();   // (event: TodoEvent) => void
+  const send = TodoCtx.useSend();   // event types inferred from contract
 
   if (!view) return <div>Loading...</div>;
 
@@ -141,7 +163,7 @@ function TodoList() {
       <ul>
         {view.todos.map(t => (
           <li key={t.id}>
-            <span onClick={() => send({ type: "TOGGLE", todoId: t.id })}>
+            <span onClick={() => send({ type: "TOGGLE", id: t.id })}>
               {t.done ? "done" : "todo"} {t.text}
             </span>
           </li>

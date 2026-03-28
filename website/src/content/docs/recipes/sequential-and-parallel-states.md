@@ -3,22 +3,25 @@ title: Sequential and Parallel States
 description: How to model multi-phase workflows and independent state regions.
 ---
 
-By default, all messages defined in the `messages` block are always valid (gated only by role and guard). For actors with distinct phases or independent concerns, Actor Kit supports two additional modes: sequential states and parallel states.
+By default, all messages defined in the `messages` block are always valid (gated only by guards). For actors with distinct phases or independent concerns, Actor Kit supports two additional modes: sequential states and parallel states.
 
 ## Mode 1: No states (default)
 
-The simplest mode. All messages are always available to their respective roles:
+The simplest mode. All messages are always available, gated by guards:
 
 ```typescript
-export const Counter = actor<Env>("counter", {
+export const CounterContract = defineActor("counter", {
   input: z.object({}),
   init: () => ({ count: 0 }),
   roles: { user: () => true },
   messages: {
-    user: { INCREMENT: increment, DECREMENT: decrement },
+    INCREMENT: message(z.object({}), (state) => ({ ...state, count: state.count + 1 })),
+    DECREMENT: message(z.object({}), (state) => ({ ...state, count: state.count - 1 })),
   },
   views: { user: view(CounterView, (state) => ({ count: state.count })) },
 });
+
+export const Counter = createActorClass(CounterContract);
 ```
 
 No `initial` or `states` field — messages are valid in any state.
@@ -30,7 +33,7 @@ One active state at a time. Each state defines its own messages per role. Use th
 **Example: an order that moves through phases**
 
 ```typescript
-export const Order = actor<Env>("order", {
+export const OrderContract = defineActor("order", {
   input: z.object({ items: z.array(z.string()) }),
   init: (input) => ({
     items: input.items,
@@ -97,12 +100,15 @@ export const Order = actor<Env>("order", {
     })),
   },
 });
+
+export const Order = createActorClass(OrderContract);
 ```
 
 Key points:
 - **`initial`** sets the starting state (`"pending"`)
 - **`states`** replaces the top-level `messages` — each state defines which messages each role can send
 - **Empty `{}`** means the role is read-only in that state
+- Sequential states use role-nested messages (not flat messages) since message availability varies by state × role
 
 ### State transitions
 
@@ -133,19 +139,28 @@ The `__actorState` field is consumed by the framework and does not persist in yo
 
 ### Timers with sequential states
 
-Durable timers (`after`) are defined at the **top level** of the actor, not inside individual states. Use a guard to restrict the timer to a specific state:
+Durable timers (`after`) are defined at the **top level** of the actor, not inside individual states. `after` handlers are plain functions (not `message()` wrappers):
 
 ```typescript
-export const Order = actor<Env>("order", {
+export const OrderContract = defineActor("order", {
   // ...states as above...
 
   after: {
-    "48 hours": message(z.object({}), {
-      guard: (state) => state.__actorState === "confirmed",  // Only fire in "confirmed"
-      handler: (state) => ({ ...state, __actorState: "cancelled" }),
-    }),
+    "48 hours": (state) => ({ ...state, __actorState: "cancelled" }),
   },
 });
+```
+
+To restrict the timer to a specific state, check the state tracker inside the handler and return unchanged state if the condition isn't met:
+
+```typescript
+after: {
+  "48 hours": (state) => {
+    // Only cancel if still in "confirmed" state
+    if (state.__actorState !== "confirmed") return state;
+    return { ...state, __actorState: "cancelled" };
+  },
+},
 ```
 
 ## Mode 3: Parallel states
@@ -157,7 +172,7 @@ Parallel states currently support **message routing only**. The framework merges
 **Example: a game lobby with independent message groups**
 
 ```typescript
-export const Lobby = actor<Env>("lobby", {
+export const LobbyContract = defineActor("lobby", {
   input: z.object({ hostId: z.string() }),
   init: (input) => ({
     hostId: input.hostId,
@@ -210,6 +225,8 @@ export const Lobby = actor<Env>("lobby", {
     player: view(PlayerView, (state) => ({ /* ... */ })),
   },
 });
+
+export const Lobby = createActorClass(LobbyContract);
 ```
 
 In this example, `READY` (from the `readiness` region) and `SET_MAP` (from the `settings` region) are both valid simultaneously because both regions are active. This lets you organize message handlers by concern without one blocking the other.

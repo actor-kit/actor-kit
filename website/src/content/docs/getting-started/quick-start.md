@@ -10,32 +10,14 @@ Build a shared counter that multiple users can increment in real-time. The full 
 ```typescript
 // src/counter.ts
 import { z } from "zod";
-import { schema, view, uint32, string } from "@actor-kit/core";
-import { actor, message } from "@actor-kit/worker";
+import { schema, view, uint32, string } from "actor-kit";
+import { defineActor, createActorClass, message } from "actor-kit";
 
 type CounterState = { count: number; lastUpdatedBy: string | null };
 
 const CounterView = schema({ count: uint32, lastUpdatedBy: string });
 
-const increment = message(
-  z.object({}),
-  (state: CounterState, _payload, { caller }) => ({
-    ...state,
-    count: state.count + 1,
-    lastUpdatedBy: caller,
-  }),
-);
-
-const decrement = message(
-  z.object({}),
-  (state: CounterState, _payload, { caller }) => ({
-    ...state,
-    count: Math.max(0, state.count - 1),
-    lastUpdatedBy: caller,
-  }),
-);
-
-export const Counter = actor("counter", {
+export const CounterContract = defineActor("counter", {
   input: z.object({}),
   init: (): CounterState => ({ count: 0, lastUpdatedBy: null }),
 
@@ -44,7 +26,22 @@ export const Counter = actor("counter", {
   },
 
   messages: {
-    user: { INCREMENT: increment, DECREMENT: decrement },
+    INCREMENT: message(
+      z.object({}),
+      (state: CounterState, _payload, { caller }) => ({
+        ...state,
+        count: state.count + 1,
+        lastUpdatedBy: caller,
+      }),
+    ),
+    DECREMENT: message(
+      z.object({}),
+      (state: CounterState, _payload, { caller }) => ({
+        ...state,
+        count: Math.max(0, state.count - 1),
+        lastUpdatedBy: caller,
+      }),
+    ),
   },
 
   views: {
@@ -54,20 +51,23 @@ export const Counter = actor("counter", {
     })),
   },
 });
+
+export const Counter = createActorClass(CounterContract);
 ```
 
 Key things happening:
-- **`schema()`** defines the view shape for binary encoding and TypeScript inference
+- **`defineActor()`** returns a typed contract — not a DO class. Everything derives from it.
+- **`createActorClass()`** converts the contract into a Durable Object class
 - **`message()`** pairs a Zod schema with a handler — payload is validated before the handler runs
-- **`actor()`** returns a Durable Object class — one function defines everything
-- **`roles`** determine who can do what — here everyone is a "user"
-- **`views`** define what each role sees — the framework handles sync
+- **Messages are flat** — no nesting by role. Guards handle authorization (see [Todo List](/examples/todo-list/))
+- **Handlers are synchronous** — they return new state, no `async`/`await`
+- **`schema()`** defines the view shape for binary encoding and TypeScript inference
 
 ## 2. Create the Worker
 
 ```typescript
 // src/worker.ts
-import { createAccessToken } from "@actor-kit/worker";
+import { createAccessToken } from "actor-kit";
 import { Counter } from "./counter";
 
 export { Counter };
@@ -113,13 +113,11 @@ export default {
 ### Vanilla TypeScript
 
 ```typescript
-import { actorClient } from "@actor-kit/client";
-import { CounterView } from "./counter";
+import { actorClient } from "actor-kit/client";
+import { CounterContract } from "./counter";
 
-type CounterEvent = { type: "INCREMENT" } | { type: "DECREMENT" };
-
-// Define the client factory (co-locate with your actor definition)
-const CounterClient = actorClient(CounterView).events<CounterEvent>();
+// Create a typed client factory — events and views inferred from the contract
+const CounterClient = actorClient(CounterContract);
 
 // Get a token
 const { token } = await fetch("/api/token?id=my-counter").then(r => r.json());
@@ -136,21 +134,19 @@ client.subscribe((view) => {
   console.log("Count:", view.count);
 });
 
-// Send typed events
+// Send typed events — inferred from contract messages
 client.send({ type: "INCREMENT" });
 ```
 
 ### React
 
 ```tsx
-import { actorClient } from "@actor-kit/client";
-import { actorContext } from "@actor-kit/react";
-import { CounterView } from "./counter";
+import { actorClient } from "actor-kit/client";
+import { actorContext } from "actor-kit/react";
+import { CounterContract } from "./counter";
 
-type CounterEvent = { type: "INCREMENT" } | { type: "DECREMENT" };
-
-const CounterClient = actorClient(CounterView).events<CounterEvent>();
-const CounterCtx = actorContext<typeof CounterClient>();
+const CounterClient = actorClient(CounterContract);
+const CounterCtx = actorContext(CounterContract);
 
 function App({ token }: { token: string }) {
   const client = CounterClient.create({
@@ -178,6 +174,8 @@ function Counter() {
   );
 }
 ```
+
+No manual event unions needed — `CounterCtx.useSend()` infers event types from the contract's messages.
 
 ## 4. Deploy
 

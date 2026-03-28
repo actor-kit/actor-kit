@@ -15,7 +15,9 @@ export {
 } from "../schema/frame";
 export type { FieldDescriptor, Infer, SchemaDefinition } from "../schema/schema";
 export { array, boolean, float32, float64, schema, string, uint8, uint16, uint32 } from "../schema/schema";
-export { actor } from "./actor";
+export { actor, createActorClass } from "./actor";
+export type { ActorContract } from "./define";
+export { defineActor } from "./define";
 export type {
   Effect,
   EmitFn,

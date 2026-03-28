@@ -9,58 +9,76 @@ The chat room demonstrates WebSocket lifecycle events and real-time broadcast to
 
 ## What it demonstrates
 
-- `on.connect` / `on.disconnect` lifecycle hooks
+- `lifecycle.connect` / `lifecycle.disconnect` handlers
 - Online user tracking
 - Real-time message broadcast to all connected users
 - Message history (last 50 messages)
-- Client rendering from snapshot data
+- Contract-derived client: no manual event unions
 
 ## Lifecycle Events
 
 ```typescript
-on: {
-  connect: (state, caller) => {
-    if (state.onlineUsers.includes(caller)) return state;
-    return { ...state, onlineUsers: [...state.onlineUsers, caller] };
+export const ChatRoomContract = defineActor("chat-room", {
+  input: z.object({}),
+  init: (): ChatState => ({ messages: [], onlineUsers: [] }),
+
+  roles: {
+    user: () => true,
   },
-  disconnect: (state, caller) => ({
-    ...state,
-    onlineUsers: state.onlineUsers.filter(u => u !== caller),
-  }),
-},
+
+  messages: {
+    SEND_MESSAGE: message(
+      z.object({ text: z.string().min(1).max(500) }),
+      (state: ChatState, { text }, { caller }) => ({
+        ...state,
+        messages: [
+          ...state.messages.slice(-49),
+          { id: crypto.randomUUID(), author: caller, text, timestamp: Date.now() },
+        ],
+      }),
+    ),
+  },
+
+  views: {
+    user: view(ChatViewSchema, (state) => ({
+      messages: state.messages.map((m) => ({ id: m.id, author: m.author, text: m.text })),
+      onlineCount: state.onlineUsers.length,
+    })),
+  },
+
+  lifecycle: {
+    connect: (state, { caller }) => {
+      if (state.onlineUsers.includes(caller)) return state;
+      return { ...state, onlineUsers: [...state.onlineUsers, caller] };
+    },
+    disconnect: (state, { caller }) => ({
+      ...state,
+      onlineUsers: state.onlineUsers.filter((u) => u !== caller),
+    }),
+  },
+});
+
+export const ChatRoom = createActorClass(ChatRoomContract);
 ```
 
-When a WebSocket connects, the framework calls `on.connect` with the caller identity. When it disconnects, `on.disconnect` fires. Both are transitions — they persist state and broadcast views.
+When a WebSocket connects, the framework calls `lifecycle.connect` with `{ caller, callerType }`. When it disconnects, `lifecycle.disconnect` fires. Both are transitions — they persist state and broadcast views.
 
 ## Message Handling
 
-```typescript
-const sendMessage = message(
-  z.object({ text: z.string().min(1).max(500) }),
-  (state, { text }, { caller }) => ({
-    ...state,
-    messages: [
-      ...state.messages.slice(-49),  // Keep last 50
-      { id: crypto.randomUUID(), author: caller, text, timestamp: Date.now() },
-    ],
-  }),
-);
-```
-
-The `.slice(-49)` keeps the last 50 messages — old messages are discarded to bound state size.
+The `.slice(-49)` keeps the last 50 messages — old messages are discarded to bound state size. Handlers are synchronous — no `async`/`await`.
 
 ## The Client
 
 ### Vanilla TypeScript
 
-Use `actorClient()` for typed views and events. Binary delta decoding is handled transparently — the `subscribe` callback always receives the full, merged view:
+Use `actorClient(contract)` for typed views and events. Binary delta decoding is handled transparently — the `subscribe` callback always receives the full, merged view:
 
 ```typescript
-import { actorClient } from "@actor-kit/client";
+import { actorClient } from "actor-kit/client";
+import { ChatRoomContract } from "./chat";
 
-type ChatEvent = { type: "SEND_MESSAGE"; text: string };
-
-const ChatClient = actorClient(ChatViewSchema).events<ChatEvent>();
+// Events and views inferred from the contract
+const ChatClient = actorClient(ChatRoomContract);
 
 // Get a token
 const { token } = await fetch("/api/token?actorId=general").then(r => r.json());
@@ -71,7 +89,7 @@ const client = ChatClient.create({
   accessToken: token,
 });
 
-// view is typed from ChatViewSchema
+// view is typed from the contract's view schemas
 client.subscribe((view) => {
   document.getElementById("online")!.textContent = `${view.onlineCount} online`;
   document.getElementById("messages")!.innerHTML = view.messages
@@ -85,13 +103,12 @@ client.send({ type: "SEND_MESSAGE", text: "Hello!" });
 ### React
 
 ```tsx
-import { actorClient } from "@actor-kit/client";
-import { actorContext } from "@actor-kit/react";
+import { actorClient } from "actor-kit/client";
+import { actorContext } from "actor-kit/react";
+import { ChatRoomContract } from "./chat";
 
-type ChatEvent = { type: "SEND_MESSAGE"; text: string };
-
-const ChatClient = actorClient(ChatViewSchema).events<ChatEvent>();
-const ChatCtx = actorContext<typeof ChatClient>();
+const ChatClient = actorClient(ChatRoomContract);
+const ChatCtx = actorContext(ChatRoomContract);
 
 function ChatApp({ roomId, token }: { roomId: string; token: string }) {
   const client = ChatClient.create({
@@ -107,8 +124,8 @@ function ChatApp({ roomId, token }: { roomId: string; token: string }) {
 }
 
 function ChatRoom() {
-  const view = ChatCtx.useView();   // typed from ChatViewSchema
-  const send = ChatCtx.useSend();   // (event: ChatEvent) => void
+  const view = ChatCtx.useView();   // typed from contract view schemas
+  const send = ChatCtx.useSend();   // event types inferred from contract
   const [text, setText] = useState("");
 
   return (
@@ -128,7 +145,7 @@ function ChatRoom() {
 }
 ```
 
-The `on.connect` and `on.disconnect` lifecycle hooks on the actor handle online tracking — the client doesn't need to do anything special. Opening a tab increments the count; closing it decrements.
+The `lifecycle.connect` and `lifecycle.disconnect` handlers on the actor handle online tracking — the client doesn't need to do anything special. Opening a tab increments the count; closing it decrements.
 
 ## Try it
 
@@ -143,5 +160,5 @@ pnpm dev
 
 ## Related
 
-- [Side Effects](/concepts/side-effects/) — lifecycle hooks like `on.connect` and `on.disconnect` are part of the side effects system
+- [Side Effects](/concepts/side-effects/) — lifecycle hooks are part of the side effects system
 - [Actors & State](/concepts/actors-and-state/) — how actor state is defined, persisted, and mutated

@@ -1,27 +1,27 @@
 ---
 title: Testing Side Effects
-description: How to verify emit() and request() calls without executing them.
+description: How to verify emit() calls without executing them.
 ---
 
-Side effects (`emit()` and `request()`) are recorded during transitions but not executed in `testActor()`. This lets you assert exactly what was emitted without hitting external services.
+Side effects (`emit()`) are recorded during transitions but not executed in `testActor()`. This lets you assert exactly what was emitted without hitting external services.
 
 ## Capturing emissions
 
 Use `sendWithEffects()` instead of `send()`:
 
 ```typescript
-import { testActor } from "@actor-kit/test";
-import { orderActorDef } from "./order";
+import { testActor } from "actor-kit/test";
+import { OrderContract } from "./order";
 
-const t = testActor(orderActorDef);
+const t = testActor(OrderContract);
 let state = t.init({ items: ["widget"] });
 
-const { state: next, emissions, requests } = await t.sendWithEffects(
+const { state: next, emissions } = t.sendWithEffects(
   state, "alice", { type: "PLACE_ORDER" }
 );
 ```
 
-`emissions` contains every `emit()` call. `requests` contains every `request()` call as `NormalizedRequestConfig` objects with `{ effect, onDone, onError, meta }`.
+`emissions` contains every `emit()` call made during the transition.
 
 ## Asserting fire-and-forget effects
 
@@ -51,56 +51,20 @@ expect(emissions).toContainEqual(
 );
 ```
 
-## Asserting async requests
-
-`requests` captures `request()` calls as `NormalizedRequestConfig` objects:
-
-```typescript
-const { requests } = await t.sendWithEffects(
-  state, "alice", { type: "FETCH_PRICE" }
-);
-
-expect(requests[0]).toMatchObject({
-  effect: { fetch: "https://api.example.com/price" },
-  onDone: "PRICE_RECEIVED",
-  onError: "PRICE_FAILED",
-  meta: { itemId: "widget" },
-});
-```
-
-To test the callback handlers themselves, send the callback message directly:
-
-```typescript
-// Simulate the onDone callback
-const afterSuccess = await t.send(
-  next, "system", { type: "PRICE_RECEIVED", price: 42 },
-  { callerType: "service" }
-);
-expect(afterSuccess.price).toBe(42);
-
-// Simulate the onError callback
-const afterFailure = await t.send(
-  next, "system", { type: "PRICE_FAILED", message: "timeout" },
-  { callerType: "service" }
-);
-expect(afterFailure.error).toBe("timeout");
-```
-
 ## Asserting no side effects
 
 ```typescript
-const { emissions, requests } = await t.sendWithEffects(
+const { emissions } = t.sendWithEffects(
   state, "alice", { type: "INCREMENT" }
 );
 
 expect(emissions).toHaveLength(0);
-expect(requests).toHaveLength(0);
 ```
 
 ## Asserting emission counts
 
 ```typescript
-const { emissions } = await t.sendWithEffects(
+const { emissions } = t.sendWithEffects(
   state, "alice", { type: "NOTIFY_ALL" }
 );
 

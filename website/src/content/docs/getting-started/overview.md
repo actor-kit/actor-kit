@@ -27,7 +27,8 @@ Not a good fit:
 - **View** — a role-scoped projection of the actor's state, sent to connected clients
 - **Role** — a predicate that determines what a caller can see and do
 - **Lifecycle** — `connect` and `disconnect` handlers that fire on WebSocket open/close
-- **Callback** — a typed handler for async request results (`onDone`/`onError`)
+- **Guard** — a predicate on a message that checks authorization or preconditions before the handler runs
+- **Contract** — the typed object returned by `defineActor()`, from which clients, tests, and refs derive types
 
 ## How it works
 

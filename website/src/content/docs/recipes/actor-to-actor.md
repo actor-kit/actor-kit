@@ -1,13 +1,13 @@
 ---
 title: Actor-to-Actor Communication
-description: How actors send messages to each other using emit, request, and createRef.
+description: How actors send messages to each other using emit and createRef.
 ---
 
-Actors are always separate Durable Objects. They communicate by sending messages to each other — never by sharing memory or state. There are three ways to do this, depending on whether you need a response.
+Actors are always separate Durable Objects. They communicate by sending messages to each other — never by sharing memory or state. There are two ways to do this, depending on context.
 
 ## Fire-and-forget with `emit()`
 
-Use `emit()` when you want to notify another actor but don't need a response. The message is recorded in the transactional outbox and delivered asynchronously after the state change commits.
+Use `emit()` inside message handlers when you want to notify another actor but don't need a response. The message is recorded in the transactional outbox and delivered asynchronously after the state change commits.
 
 ```typescript
 const transferPlayer = message(
@@ -32,60 +32,38 @@ const transferPlayer = message(
 
 The source actor removes the player from its state immediately. The target actor receives `PLAYER_ARRIVED` and adds the player. If the target actor is offline, the outbox retries delivery.
 
-## Async with callbacks using `request()`
+### Results come back as messages
 
-Use `request()` when you need to know whether a side effect succeeded or failed. Define typed callbacks with `callback()`, then reference them in `request()`. The framework delivers the result to your actor's `callbacks` block.
-
-```typescript
-import { callback, message } from "@actor-kit/worker";
-import { z } from "zod";
-
-const PriceReceived = callback("PRICE_RECEIVED", z.object({ price: z.number() }));
-const PriceFailed = callback("PRICE_FAILED", z.object({ message: z.string() }));
-
-const fetchPrice = message(
-  z.object({ itemId: z.string() }),
-  (state, { itemId }, { request }) => {
-    request({
-      fetch: `https://api.example.com/prices/${itemId}`,
-      onDone: PriceReceived,
-      onError: PriceFailed,
-    });
-
-    return { ...state, priceStatus: "loading" };
-  },
-);
-```
-
-Handle the callbacks in the `callbacks` block:
+When external I/O needs to inform state, the pattern is: emit an intent to a Queue, then the Queue consumer sends the result back as a normal message:
 
 ```typescript
-callbacks: {
-  PRICE_RECEIVED: (state, { result }, ctx) => ({
-    ...state,
-    priceStatus: "loaded",
-    price: result.price,
+messages: {
+  FETCH_PRICE: message(z.object({ itemId: z.string() }), (state, { itemId }, { emit }) => {
+    emit({ queue: "EFFECTS", body: { type: "FETCH_PRICE", itemId } });
+    return { ...state, status: "loading" };
   }),
-  PRICE_FAILED: (state, { error }, ctx) => ({
+
+  // Result comes back as a message from the Queue consumer
+  PRICE_RESULT: message(z.object({ itemId: z.string(), total: z.number() }), (state, { itemId, total }) => ({
     ...state,
-    priceStatus: "failed",
-    error: error.message,
-  }),
+    prices: { ...state.prices, [itemId]: total },
+    status: "loaded",
+  })),
 },
 ```
-
-For actor-to-actor effects, `request()` with `onDone` confirms that the message was delivered successfully, but `onDone` receives an empty object (not the target actor's state). Use `emit()` for fire-and-forget actor messages unless you need delivery confirmation.
 
 ## Direct RPC with `createRef()`
 
 Use `createRef()` inside your Worker's `fetch` handler (not inside an actor) when you need to interact with actors from request-handling code — spawning, sending messages, or reading snapshots.
 
 ```typescript
-import { createRef } from "@actor-kit/worker";
+import { createRef } from "actor-kit";
+import { ZoneContract } from "./zone";
 
 export default {
   async fetch(request: Request, env: Env) {
-    const zone = createRef(env, "ZONE", "forest-north");
+    // Contract-derived ref — send() is typed to the contract's messages
+    const zone = createRef(ZoneContract, env, "forest-north");
 
     // Spawn the actor if it doesn't exist
     await zone.spawn({
@@ -95,7 +73,7 @@ export default {
       input: { biome: "forest" },
     });
 
-    // Send a message
+    // Send a typed message
     await zone.send("system", "service", {
       type: "SPAWN_NPC",
       npcType: "merchant",
@@ -109,17 +87,16 @@ export default {
 };
 ```
 
-`createRef()` creates a typed stub backed by the Durable Object namespace from your Worker env bindings.
+`createRef(contract, env, id)` creates a typed stub backed by the Durable Object namespace from your Worker env bindings. The contract name is normalized to `UPPER_SNAKE_CASE` for the env lookup (e.g., `"forest-zone"` → `"FOREST_ZONE"`).
 
 ## Which to use
 
 | Method | Where | Response? | Delivery |
 |--------|-------|-----------|----------|
 | `emit({ actor })` | Inside a message handler | No | At-least-once via outbox |
-| `request({ actor })` | Inside a message handler | Yes (onDone/onError) | At-least-once via outbox |
 | `createRef()` | Worker fetch handler | Direct RPC return | Immediate |
 
-**Inside actors**, prefer `emit()` or `request()` — they participate in the transactional outbox, so if the DO crashes after the state change commits, pending messages will be retried on restart.
+**Inside actors**, use `emit()` — it participates in the transactional outbox, so if the DO crashes after the state change commits, pending messages will be retried on restart.
 
 **Outside actors** (Worker fetch handler, scheduled handler), use `createRef()` for direct RPC.
 
@@ -138,4 +115,4 @@ Both actors must be declared as Durable Object bindings in your `wrangler.jsonc`
 }
 ```
 
-The binding name (e.g. `"ZONE"`) is what you pass as the `actor` field in `emit()` / `request()` and as the `actorType` in `createRef()`. It must match the key in your Worker's `Env` type.
+The binding name (e.g. `"ZONE"`) is what you pass as the `actor` field in `emit()` and what `createRef()` derives from the contract name. It must match the key in your Worker's `Env` type.

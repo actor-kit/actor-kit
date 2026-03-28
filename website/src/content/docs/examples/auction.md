@@ -10,69 +10,78 @@ The auction demonstrates guards — conditions that reject messages before the h
 ## What it demonstrates
 
 - Guards on `message()` to enforce business rules
+- Guards checking both state and `ctx.role` for authorization
 - Competitive real-time bidding between users
-- Service-only actions (close auction) via `callerType`
-- View projections showing bid counts and highest bid
-- Client state-based UI: adapting when the auction closes
+- Service-only actions (close auction) via `callerType` role
+- Contract-derived client: no manual event unions
 
 ## Guards
 
 ```typescript
-const placeBid = message(
-  z.object({ amount: z.number().int().positive() }),
-  {
-    guard: (state) => !state.closed,
-    handler: (state, { amount }, { caller }) => {
-      const highest = state.bids.length > 0
-        ? Math.max(...state.bids.map(b => b.amount))
-        : 0;
-      if (amount <= highest) return state;  // Reject lower bids
-      return {
-        ...state,
-        bids: [...state.bids, { bidder: caller, amount, timestamp: Date.now() }],
-      };
-    },
+export const AuctionContract = defineActor("auction", {
+  input: z.object({ item: z.string() }),
+  init: (input) => ({
+    item: input.item, bids: [], closed: false, winner: null, winningBid: 0,
+  }),
+
+  roles: {
+    auctioneer: (_state, _caller, { callerType }) => callerType === "service",
+    bidder: () => true,
   },
-);
-```
 
-The guard `(state) => !state.closed` runs before the handler. If the auction is closed, the framework rejects the message with a `guard_failed` error — the handler never executes.
+  messages: {
+    BID: message(z.object({ amount: z.number().int().positive() }), {
+      guard: (state) => !state.closed,
+      handler: (state, { amount }, { caller }) => {
+        const highest = state.bids.length > 0
+          ? Math.max(...state.bids.map(b => b.amount))
+          : 0;
+        if (amount <= highest) return state;  // Reject lower bids silently
+        return {
+          ...state,
+          bids: [...state.bids, { bidder: caller, amount, timestamp: Date.now() }],
+        };
+      },
+    }),
+    CLOSE: message(z.object({}), {
+      guard: (state, _payload, ctx) =>
+        ctx.role === "auctioneer" && !state.closed && state.bids.length > 0,
+      handler: (state) => {
+        const winner = state.bids.reduce((best, b) =>
+          b.amount > best.amount ? b : best, state.bids[0]!
+        );
+        return { ...state, closed: true, winner: winner.bidder, winningBid: winner.amount };
+      },
+    }),
+  },
 
-Inside the handler, the bid amount check is business logic (not a guard) — it returns the unchanged state instead of throwing.
-
-## Service-Only Close
-
-```typescript
-const closeAuction = message(z.object({}), {
-  guard: (state) => !state.closed && state.bids.length > 0,
-  handler: (state) => {
-    const winner = state.bids.reduce((best, b) =>
-      b.amount > best.amount ? b : best, state.bids[0]!
-    );
-    return { ...state, closed: true, winner: winner.bidder, winningBid: winner.amount };
+  views: {
+    auctioneer: view(AuctionViewSchema, (state) => ({ ... })),
+    bidder: view(AuctionViewSchema, (state) => ({ ... })),
   },
 });
 
-messages: {
-  auctioneer: { BID: placeBid, CLOSE: closeAuction },  // service callerType
-  bidder: { BID: placeBid },                             // regular users
-},
+export const Auction = createActorClass(AuctionContract);
 ```
 
-Only the `auctioneer` role (determined by `callerType === "service"`) can close the auction.
+Key points:
+- **BID guard** checks state only: `!state.closed` — any role can bid when open
+- **CLOSE guard** checks both state and role: `ctx.role === "auctioneer" && !state.closed && state.bids.length > 0`
+- Guards run before the handler. If the guard returns `false`, the framework sends a `guard_failed` error — the handler never executes
+- Inside the BID handler, the amount check is business logic (not a guard) — it returns unchanged state instead of throwing
 
 ## The Client
 
 ### Vanilla TypeScript
 
-Use `actorClient()` for typed views and events. Binary delta decoding is handled transparently — the `subscribe` callback always receives the full, merged view:
+Use `actorClient(contract)` for typed views and events. Binary delta decoding is handled transparently — the `subscribe` callback always receives the full, merged view:
 
 ```typescript
-import { actorClient } from "@actor-kit/client";
+import { actorClient } from "actor-kit/client";
+import { AuctionContract } from "./auction";
 
-type AuctionEvent = { type: "BID"; amount: number };
-
-const AuctionClient = actorClient(AuctionViewSchema).events<AuctionEvent>();
+// Events and views inferred from the contract
+const AuctionClient = actorClient(AuctionContract);
 
 // Get a token
 const { token } = await fetch("/api/token?actorId=my-auction").then(r => r.json());
@@ -83,7 +92,7 @@ const client = AuctionClient.create({
   accessToken: token,
 });
 
-// view is typed from AuctionViewSchema
+// view is typed from the contract's view schemas
 client.subscribe((view) => {
   document.getElementById("highest")!.textContent = String(view.highestBid);
   document.getElementById("count")!.textContent = `${view.bidCount} bids`;
@@ -100,13 +109,12 @@ client.send({ type: "BID", amount: 100 });
 ### React
 
 ```tsx
-import { actorClient } from "@actor-kit/client";
-import { actorContext } from "@actor-kit/react";
+import { actorClient } from "actor-kit/client";
+import { actorContext } from "actor-kit/react";
+import { AuctionContract } from "./auction";
 
-type AuctionEvent = { type: "BID"; amount: number };
-
-const AuctionClient = actorClient(AuctionViewSchema).events<AuctionEvent>();
-const AuctionCtx = actorContext<typeof AuctionClient>();
+const AuctionClient = actorClient(AuctionContract);
+const AuctionCtx = actorContext(AuctionContract);
 
 function AuctionApp({ auctionId, token }: { auctionId: string; token: string }) {
   const client = AuctionClient.create({
@@ -122,8 +130,8 @@ function AuctionApp({ auctionId, token }: { auctionId: string; token: string }) 
 }
 
 function Auction() {
-  const view = AuctionCtx.useView();   // typed from AuctionViewSchema
-  const send = AuctionCtx.useSend();   // (event: AuctionEvent) => void
+  const view = AuctionCtx.useView();   // typed from contract view schemas
+  const send = AuctionCtx.useSend();   // event types inferred from contract
   const [amount, setAmount] = useState(0);
 
   if (!view) return <div>Loading...</div>;

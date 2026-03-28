@@ -15,10 +15,10 @@ In Actor Kit, each actor is a Cloudflare Durable Object. DOs are single-threaded
 ## Defining an Actor
 
 ```typescript
-import { actor } from "@actor-kit/worker";
 import { z } from "zod";
+import { defineActor, createActorClass, message } from "actor-kit";
 
-export const MyActor = actor("my-actor", {
+export const MyActorContract = defineActor("my-actor", {
   input: z.object({ name: z.string() }),
   init: (input) => ({
     name: input.name,
@@ -28,7 +28,11 @@ export const MyActor = actor("my-actor", {
   messages: { /* ... */ },
   views: { /* ... */ },
 });
+
+export const MyActor = createActorClass(MyActorContract);
 ```
+
+`defineActor()` returns a typed contract — not a DO class. The contract preserves all type information (state, messages, views, roles) for downstream consumers (`actorClient`, `actorContext`, `testActor`, `createRef`). `createActorClass()` converts the contract into a Durable Object class.
 
 ### `input`
 
@@ -94,18 +98,16 @@ The `lifecycle` block handles WebSocket connection events:
 
 ```typescript
 lifecycle: {
-  connect: (state, { caller, callerType }, ctx) => {
+  connect: (state, { caller, callerType }) => {
     return { ...state, onlineUsers: [...state.onlineUsers, caller] };
   },
-  disconnect: (state, { caller, callerType }, ctx) => {
+  disconnect: (state, { caller, callerType }) => {
     return { ...state, onlineUsers: state.onlineUsers.filter(u => u !== caller) };
   },
 },
 ```
 
-`connect` and `disconnect` fire when WebSocket connections open and close. Both are full transitions — they persist state and broadcast views. Lifecycle handlers receive `{ caller, callerType }` as a typed event object, plus `ctx` with `emit()` and `request()` for triggering side effects.
-
-Request callbacks are handled separately in the `callbacks` block — see [Side Effects](/concepts/side-effects/).
+`connect` and `disconnect` fire when WebSocket connections open and close. Both are full transitions — they persist state and broadcast views. Lifecycle handlers are synchronous — they return new state, not a Promise.
 
 ## Observability
 
@@ -124,4 +126,4 @@ This is useful for logging, metrics, or debugging. It also fires during `testAct
 ## Related
 
 - [Sequential and Parallel States](/recipes/sequential-and-parallel-states/) — multi-phase workflows and independent state regions
-- [Side Effects](/concepts/side-effects/) — `emit()` and `request()` for external communication
+- [Side Effects](/concepts/side-effects/) — `emit()` for fire-and-forget external communication

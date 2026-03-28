@@ -31,11 +31,14 @@ Roles are not cached. When the state changes, a caller's role can change too. Th
 
 ```typescript
 // A todo list where anyone who adds a todo becomes a member
-const addTodo = message(z.object({ text: z.string() }), (state, { text }, { caller }) => ({
-  ...state,
-  todos: [...state.todos, { text, done: false }],
-  memberIds: [...new Set([...state.memberIds, caller])],
-}));
+ADD_TODO: message(z.object({ text: z.string() }), {
+  guard: (_state, _payload, ctx) => ctx.role === "owner" || ctx.role === "member",
+  handler: (state, { text }, { caller }) => ({
+    ...state,
+    todos: [...state.todos, { text, done: false }],
+    memberIds: [...new Set([...state.memberIds, caller])],
+  }),
+}),
 ```
 
 After adding a todo, the caller's role changes from `viewer` to `member` on the next message.
@@ -53,19 +56,26 @@ roles: {
 
 Use `callerType` to distinguish backend services from browser users. Use roles for everything else.
 
-## Per-Role Messages
+## Flat Messages with Guards
 
-Each role defines which messages it can send:
+Messages are flat — not nested by role. Authorization is enforced through guards:
 
 ```typescript
 messages: {
-  owner: { ADD_TODO: addTodo, DELETE_TODO: deleteTodo },
-  member: { ADD_TODO: addTodo },
-  viewer: {},  // read-only
+  ADD_TODO: message(z.object({ text: z.string() }), {
+    guard: (_state, _payload, ctx) => ctx.role === "owner" || ctx.role === "member",
+    handler: (state, { text }) => ({ ...state, todos: [...state.todos, { text, done: false }] }),
+  }),
+  DELETE_TODO: message(z.object({ id: z.string() }), {
+    guard: (_state, _payload, ctx) => ctx.role === "owner",
+    handler: (state, { id }) => ({ ...state, todos: state.todos.filter(t => t.id !== id) }),
+  }),
+  // No guard = open to all roles
+  VIEW_COUNT: message(z.object({}), (state) => state),
 },
 ```
 
-If a `viewer` sends `DELETE_TODO`, the framework rejects it before the handler runs. Authorization is structural — no if-statements in handlers.
+If a `viewer` sends `DELETE_TODO`, the guard returns `false` and the framework rejects with `guard_failed` — the handler never runs. Messages without guards are open to all roles.
 
 ## Per-Role Views
 
@@ -82,5 +92,5 @@ The viewer never receives the actual todo items — only the count.
 
 ## Related
 
-- [Messages & Guards](/concepts/messages-and-guards/) — how per-role messages are validated and guarded
+- [Messages & Guards](/concepts/messages-and-guards/) — how messages are validated and guarded
 - [FAQ](/recipes/faq/) — common questions about role resolution and authorization

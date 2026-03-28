@@ -8,7 +8,7 @@ description: Schema-defined views with per-role projections.
 A view is a projection of the actor's state for a specific role. Different roles can see different data from the same actor.
 
 ```typescript
-import { view, schema, uint32, string, array } from "@actor-kit/core";
+import { view, schema, uint32, string, array } from "actor-kit";
 
 const OwnerView = schema({ todos: array(TodoItem), memberCount: uint32 });
 const ViewerView = schema({ todoCount: uint32, doneCount: uint32 });

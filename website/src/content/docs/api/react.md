@@ -1,17 +1,30 @@
 ---
-title: "@actor-kit/react"
+title: "actor-kit/react"
 description: React SDK reference.
 ---
 
-The React export (`import from "@actor-kit/react"`) provides typed context and hooks for React applications.
+The React export (`import from "actor-kit/react"`) provides typed context and hooks for React applications.
 
-## `actorContext<typeof Factory>()`
+## `actorContext(contract)` / `actorContext<typeof Factory>()`
 
-Creates a typed React context from an `actorClient()` factory. Types are inferred from the factory — no manual generics for view or events.
+Creates a typed React context. Accepts either a contract (from `defineActor()`) or a factory type parameter.
+
+### Contract-derived (recommended)
+
+Types are inferred from the contract — no manual generics:
 
 ```typescript
-import { actorClient } from "@actor-kit/client";
-import { actorContext } from "@actor-kit/react";
+import { actorContext } from "actor-kit/react";
+import { CounterContract } from "./counter";
+
+const CounterCtx = actorContext(CounterContract);
+```
+
+### Factory-derived (legacy)
+
+```typescript
+import { actorClient } from "actor-kit/client";
+import { actorContext } from "actor-kit/react";
 
 const CounterClient = actorClient(CounterView).events<CounterEvent>();
 const CounterCtx = actorContext<typeof CounterClient>();
@@ -40,7 +53,7 @@ function App({ counterId, token }: { counterId: string; token: string }) {
 
   useEffect(() => {
     const c = CounterClient.create({
-      url: `wss://${location.host}/counters/${encodeURIComponent(counterId)}`,
+      url: `wss://${location.host}/api/counter/${encodeURIComponent(counterId)}`,
       accessToken: token,
     });
     setClient(c);
@@ -68,7 +81,7 @@ Create the client in a `useEffect` to avoid WebSocket leaks — `createActorClie
 
 ## `useView()`
 
-Returns the current view, typed from the schema. Re-renders on every view update.
+Returns the current view, typed from the contract's view schemas. Re-renders on every view update.
 
 ```tsx
 function Counter() {
@@ -80,12 +93,12 @@ function Counter() {
 
 ## `useSend()`
 
-Returns a stable `send` function typed to the event union. Never causes re-renders.
+Returns a stable `send` function typed to the contract's message events. Never causes re-renders.
 
 ```tsx
 function IncrementButton() {
   const send = CounterCtx.useSend();
-  // send is (event: CounterEvent) => void
+  // send is (event: CounterEvent) => void — inferred from contract
   return <button onClick={() => send({ type: "INCREMENT" })}>+</button>;
 }
 ```
@@ -136,10 +149,10 @@ function Status() {
 
 ## Low-level: `createActorContext<TView, TEvent>()`
 
-If you prefer explicit generics over the factory pattern:
+If you prefer explicit generics over the contract pattern:
 
 ```typescript
-import { createActorContext } from "@actor-kit/react";
+import { createActorContext } from "actor-kit/react";
 
 type MyView = { count: number };
 type MyEvent = { type: "INCREMENT" } | { type: "DECREMENT" };
@@ -147,4 +160,4 @@ type MyEvent = { type: "INCREMENT" } | { type: "DECREMENT" };
 const MyCtx = createActorContext<MyView, MyEvent>();
 ```
 
-The `actorContext<typeof Factory>()` pattern is preferred — it infers types from the same schema used for binary encoding.
+The `actorContext(contract)` pattern is preferred — it infers types from the same schema used for binary encoding.

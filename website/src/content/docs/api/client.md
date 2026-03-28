@@ -1,36 +1,35 @@
 ---
-title: "@actor-kit/client"
+title: "actor-kit/client"
 description: Browser client SDK reference.
 ---
 
-The client export (`import from "@actor-kit/client"`) provides the browser-side SDK. No Cloudflare or React dependencies.
+The client export (`import from "actor-kit/client"`) provides the browser-side SDK. No Cloudflare or React dependencies.
 
-## `actorClient(viewSchema)`
+## `actorClient(contract)` / `actorClient(viewSchema)`
 
-Creates a typed client factory. The view type is **inferred from the schema** — no generics needed.
+Creates a typed client factory. Accepts either a contract (from `defineActor()`) or a raw view schema.
+
+### Contract-derived (recommended)
+
+Events and views are inferred from the contract — no manual type unions needed:
 
 ```typescript
-import { actorClient } from "@actor-kit/client";
-import { CounterView } from "./counter";
+import { actorClient } from "actor-kit/client";
+import { CounterContract } from "./counter";
 
-// Define the client contract (co-locate with your actor definition)
-export const CounterClient = actorClient(CounterView);
+export const CounterClient = actorClient(CounterContract);
 ```
 
-### `.events<TEvent>()`
-
-Narrows the event type for strict `send()` typing:
+### Schema-derived (legacy)
 
 ```typescript
-type CounterEvent =
-  | { type: "INCREMENT" }
-  | { type: "DECREMENT" }
-  | { type: "RESET" };
+import { actorClient } from "actor-kit/client";
+import { CounterView } from "./counter";
+
+type CounterEvent = { type: "INCREMENT" } | { type: "DECREMENT" };
 
 export const CounterClient = actorClient(CounterView).events<CounterEvent>();
 ```
-
-Without `.events()`, `send()` accepts any `{ type: string }`.
 
 ### `.create(options)`
 
@@ -38,7 +37,7 @@ Creates a runtime WebSocket connection:
 
 ```typescript
 const client = CounterClient.create({
-  url: `wss://${location.host}/counters/${encodeURIComponent(counterId)}`,
+  url: `wss://${location.host}/api/counter/${encodeURIComponent(counterId)}`,
   accessToken: token,
 });
 ```
@@ -71,7 +70,7 @@ interface ActorClient<TView, TEvent> {
 
 ### `subscribe(listener)`
 
-Called whenever the view updates. Returns an unsubscribe function. The view is fully typed from the schema:
+Called whenever the view updates. Returns an unsubscribe function. The view is fully typed:
 
 ```typescript
 client.subscribe((view) => {
@@ -82,11 +81,11 @@ client.subscribe((view) => {
 
 ### `send(event)`
 
-Sends a message to the actor. The event type is validated at compile time when `.events<E>()` was used:
+Sends a message to the actor. The event type is validated at compile time:
 
 ```typescript
 client.send({ type: "INCREMENT" });  // ✓ compiles
-client.send({ type: "INVALID" });    // ✗ compile error (with .events<>())
+client.send({ type: "INVALID" });    // ✗ compile error (with contract-derived client)
 ```
 
 ### `trigger(type, payload)`
@@ -111,7 +110,7 @@ On unexpected disconnect, the client auto-reconnects with exponential backoff (1
 For cases where you don't need the builder pattern, `createActorClient()` is the underlying function:
 
 ```typescript
-import { createActorClient } from "@actor-kit/client";
+import { createActorClient } from "actor-kit/client";
 
 const client = createActorClient({
   url: "wss://example.com/counter/test",

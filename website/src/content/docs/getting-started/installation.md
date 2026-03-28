@@ -6,20 +6,17 @@ description: Install Actor Kit and set up your project.
 ## Install
 
 ```bash
-pnpm add @actor-kit/core @actor-kit/worker zod
+pnpm add actor-kit zod
 ```
 
-For client-side usage, also install:
+Actor Kit is a single package with subpath exports:
 
-```bash
-pnpm add @actor-kit/client
-```
-
-For React bindings (requires `@actor-kit/client` as well):
-
-```bash
-pnpm add @actor-kit/client @actor-kit/react
-```
+| Import | Usage |
+|--------|-------|
+| `actor-kit` | Core: `defineActor`, `createActorClass`, `message`, `view`, `schema`, `createRef`, `createAccessToken` |
+| `actor-kit/client` | Browser: `actorClient` — WebSocket connection with binary decoding |
+| `actor-kit/react` | React: `actorContext` — hooks for view, send, role |
+| `actor-kit/test` | Testing: `testActor` — pure transitions without CF runtime |
 
 Actor Kit uses [Zod](https://zod.dev) for message payload validation at runtime boundaries.
 
@@ -37,7 +34,7 @@ Actor Kit uses [Zod](https://zod.dev) for message payload validation at runtime 
 ```bash
 pnpm create cloudflare@latest my-actor-app
 cd my-actor-app
-pnpm add @actor-kit/core @actor-kit/worker zod
+pnpm add actor-kit zod
 ```
 
 ### 2. Configure wrangler.toml
@@ -83,7 +80,7 @@ See the [Quick Start](/getting-started/quick-start/) for a complete example.
 
 ## TypeScript
 
-Actor Kit is written in TypeScript with strict mode. Types are inferred from your actor definition — no manual type annotations needed.
+Actor Kit is written in TypeScript with strict mode. Types are inferred from your actor definition — no manual type annotations needed. `defineActor()` returns a typed contract that preserves all generic information for downstream consumers.
 
 For editor support in Worker files, install the types:
 
@@ -96,7 +93,7 @@ pnpm add -D @cloudflare/workers-types
 For unit tests with `testActor()`:
 
 ```bash
-pnpm add -D vitest @actor-kit/test
+pnpm add -D vitest
 ```
 
 For integration tests with real Durable Objects:

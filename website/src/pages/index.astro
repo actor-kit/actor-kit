@@ -7,21 +7,12 @@ const tabs = [
     label: "Actor",
     file: "counter.ts",
     code: `<span class="ck">import</span> { z } <span class="ck">from</span> <span class="cs">"zod"</span>;
-<span class="ck">import</span> { schema, view, uint32, string } <span class="ck">from</span> <span class="cs">"@actor-kit/core"</span>;
-<span class="ck">import</span> { actor, message } <span class="ck">from</span> <span class="cs">"@actor-kit/worker"</span>;
+<span class="ck">import</span> { schema, view, uint32, string } <span class="ck">from</span> <span class="cs">"actor-kit"</span>;
+<span class="ck">import</span> { defineActor, createActorClass, message } <span class="ck">from</span> <span class="cs">"actor-kit"</span>;
 
 <span class="ck">const</span> CounterView = <span class="cf">schema</span>({ count: uint32, lastUpdatedBy: string });
 
-<span class="ck">const</span> increment = <span class="cf">message</span>(
-  z.<span class="cf">object</span>({}),
-  (state, _payload, { caller }) =&gt; ({
-    ...state,
-    count: state.count + 1,
-    lastUpdatedBy: caller,
-  }),
-);
-
-<span class="ck">export const</span> Counter = <span class="cf">actor</span>(<span class="cs">"counter"</span>, {
+<span class="ck">export const</span> CounterContract = <span class="cf">defineActor</span>(<span class="cs">"counter"</span>, {
   <span class="cp">input</span>: z.<span class="cf">object</span>({}),
   <span class="cp">init</span>: () =&gt; ({ count: <span class="cb">0</span>, lastUpdatedBy: <span class="cb">null</span> }),
   <span class="cp">roles</span>: {
@@ -29,20 +20,27 @@ const tabs = [
     <span class="cp">user</span>: () =&gt; <span class="cb">true</span>,
   },
   <span class="cp">messages</span>: {
-    <span class="cp">admin</span>: { INCREMENT: increment, RESET: reset },
-    <span class="cp">user</span>: { INCREMENT: increment },
+    INCREMENT: <span class="cf">message</span>(z.<span class="cf">object</span>({}), (s, _p, { caller }) =&gt; ({
+      ...s, count: s.count + 1, lastUpdatedBy: caller,
+    })),
+    RESET: <span class="cf">message</span>(z.<span class="cf">object</span>({}), {
+      <span class="cp">guard</span>: (_s, _p, ctx) =&gt; ctx.role === <span class="cs">"admin"</span>,
+      <span class="cp">handler</span>: () =&gt; ({ count: <span class="cb">0</span>, lastUpdatedBy: <span class="cb">null</span> }),
+    }),
   },
   <span class="cp">views</span>: {
     <span class="cp">admin</span>: <span class="cf">view</span>(CounterView, (s) =&gt; ({ count: s.count, lastUpdatedBy: s.lastUpdatedBy ?? <span class="cs">""</span> })),
     <span class="cp">user</span>: <span class="cf">view</span>(CounterView, (s) =&gt; ({ count: s.count, lastUpdatedBy: s.lastUpdatedBy ?? <span class="cs">""</span> })),
   },
-});`,
+});
+
+<span class="ck">export const</span> Counter = <span class="cf">createActorClass</span>(CounterContract);`,
   },
   {
     id: "worker",
     label: "Worker",
     file: "worker.ts",
-    code: `<span class="ck">import</span> { <span class="cf">createAccessToken</span> } <span class="ck">from</span> <span class="cs">"@actor-kit/worker"</span>;
+    code: `<span class="ck">import</span> { <span class="cf">createAccessToken</span> } <span class="ck">from</span> <span class="cs">"actor-kit"</span>;
 <span class="ck">import</span> { Counter } <span class="ck">from</span> <span class="cs">"./counter"</span>;
 
 <span class="ck">export</span> { Counter };
@@ -75,17 +73,11 @@ const tabs = [
     id: "client",
     label: "Client",
     file: "client.ts",
-    code: `<span class="ck">import</span> { <span class="cf">actorClient</span> } <span class="ck">from</span> <span class="cs">"@actor-kit/client"</span>;
-<span class="ck">import</span> { CounterView } <span class="ck">from</span> <span class="cs">"./counter"</span>;
+    code: `<span class="ck">import</span> { <span class="cf">actorClient</span> } <span class="ck">from</span> <span class="cs">"actor-kit/client"</span>;
+<span class="ck">import</span> { CounterContract } <span class="ck">from</span> <span class="cs">"./counter"</span>;
 
-<span class="cm">// Define event types</span>
-<span class="ck">type</span> CounterEvent =
-  | { <span class="cp">type</span>: <span class="cs">"INCREMENT"</span> }
-  | { <span class="cp">type</span>: <span class="cs">"DECREMENT"</span> };
-
-<span class="cm">// Create typed client factory</span>
-<span class="ck">const</span> CounterClient = <span class="cf">actorClient</span>(CounterView)
-  .<span class="cf">events</span>&lt;CounterEvent&gt;();
+<span class="cm">// Events &amp; views inferred from contract — no manual types</span>
+<span class="ck">const</span> CounterClient = <span class="cf">actorClient</span>(CounterContract);
 
 <span class="cm">// Connect — binary delta sync handled automatically</span>
 <span class="ck">const</span> client = CounterClient.<span class="cf">create</span>({
@@ -106,10 +98,11 @@ client.<span class="cf">send</span>({ <span class="cp">type</span>: <span class=
     id: "react",
     label: "React",
     file: "App.tsx",
-    code: `<span class="ck">import</span> { <span class="cf">actorContext</span> } <span class="ck">from</span> <span class="cs">"@actor-kit/react"</span>;
+    code: `<span class="ck">import</span> { <span class="cf">actorContext</span> } <span class="ck">from</span> <span class="cs">"actor-kit/react"</span>;
+<span class="ck">import</span> { CounterContract } <span class="ck">from</span> <span class="cs">"./counter"</span>;
 <span class="ck">import</span> { CounterClient } <span class="ck">from</span> <span class="cs">"./client"</span>;
 
-<span class="ck">const</span> CounterCtx = <span class="cf">actorContext</span>&lt;<span class="ck">typeof</span> CounterClient&gt;();
+<span class="ck">const</span> CounterCtx = <span class="cf">actorContext</span>(CounterContract);
 
 <span class="ck">function</span> <span class="cf">Counter</span>() {
   <span class="ck">const</span> view = CounterCtx.<span class="cf">useView</span>();   <span class="cm">// typed from schema</span>
@@ -150,8 +143,8 @@ client.<span class="cf">send</span>({ <span class="cp">type</span>: <span class=
       </h1>
       <p class="landing-hero-sub">
         Real-time state sync with Cloudflare Durable Objects. Define actors with
-        roles, binary views, and type-safe messages. One function &mdash;
-        <code>actor()</code> &mdash; handles everything.
+        roles, binary views, and type-safe messages. <code>defineActor()</code>
+        returns a typed contract &mdash; everything derives from it.
       </p>
       <div class="landing-hero-actions">
         <a href="/getting-started/overview/" class="btn btn-primary">
@@ -193,7 +186,7 @@ client.<span class="cf">send</span>({ <span class="cp">type</span>: <span class=
             <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 12h18"/></svg>
           </div>
           <h3>End-to-End Type Safety</h3>
-          <p>View types inferred from <code>schema()</code>. Events typed via <code>.events&lt;E&gt;()</code>. Zero <code>any</code>, zero casts.</p>
+          <p>One contract, everything typed. Events inferred from <code>defineActor()</code>. Zero <code>any</code>, zero casts.</p>
         </div>
         <div class="feature">
           <div class="feature-icon icon-xs">
@@ -307,14 +300,13 @@ client.<span class="cf">send</span>({ <span class="cp">type</span>: <span class=
     </section>
 
     <section class="packages">
-      <h2>Focused packages</h2>
-      <p class="packages-sub">Import only what you need.</p>
+      <h2>One package, focused exports</h2>
+      <p class="packages-sub">Import only what you need via subpath exports.</p>
       <div class="pkg-grid">
-        <a href="/api/core/" class="pkg"><strong>@actor-kit/core</strong><span>schema(), view(), binary codec, frame format</span></a>
-        <a href="/api/core/" class="pkg"><strong>@actor-kit/worker</strong><span>actor(), message(), createAccessToken()</span></a>
-        <a href="/api/client/" class="pkg"><strong>@actor-kit/client</strong><span>actorClient(), typed views &amp; events</span></a>
-        <a href="/api/react/" class="pkg"><strong>@actor-kit/react</strong><span>actorContext(), useView(), useSend()</span></a>
-        <a href="/api/test/" class="pkg"><strong>@actor-kit/test</strong><span>testActor(), emission capture</span></a>
+        <a href="/api/core/" class="pkg"><strong>actor-kit</strong><span>defineActor(), createActorClass(), message(), schema(), view()</span></a>
+        <a href="/api/client/" class="pkg"><strong>actor-kit/client</strong><span>actorClient(contract) — typed views &amp; events</span></a>
+        <a href="/api/react/" class="pkg"><strong>actor-kit/react</strong><span>actorContext(contract) — useView(), useSend()</span></a>
+        <a href="/api/test/" class="pkg"><strong>actor-kit/test</strong><span>testActor(contract) — emission capture</span></a>
       </div>
     </section>
 

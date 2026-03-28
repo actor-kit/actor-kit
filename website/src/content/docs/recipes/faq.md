@@ -7,7 +7,7 @@ description: Frequently asked questions about Actor Kit.
 
 ### Do I need to use React?
 
-No. The core library (`@actor-kit/core`, `@actor-kit/worker`) and the client SDK (`@actor-kit/client`) have no React dependency. You can use them with any frontend framework or vanilla JavaScript. The `@actor-kit/react` package is an optional convenience layer.
+No. The core library (`actor-kit`) and the client SDK (`actor-kit/client`) have no React dependency. You can use them with any frontend framework or vanilla JavaScript. The `actor-kit/react` package is an optional convenience layer.
 
 ### How does binary sync work?
 
@@ -19,7 +19,7 @@ Each actor is a Cloudflare Durable Object. Cloudflare's platform handles scaling
 
 ### What happens when a Durable Object restarts?
 
-State is automatically restored from SQLite. Any pending outbox entries (from `emit()` or `request()`) are retried. Connected WebSockets receive a fresh snapshot on reconnect. From the client's perspective, there's a brief disconnect and automatic reconnection.
+State is automatically restored from SQLite. Any pending outbox entries (from `emit()`) are retried. Connected WebSockets receive a fresh snapshot on reconnect. From the client's perspective, there's a brief disconnect and automatic reconnection.
 
 ## State
 
@@ -29,7 +29,7 @@ Common causes:
 
 1. **View function returns the same data** — the framework skips sending if the view hasn't changed. Make sure your view function actually reflects the state change.
 2. **Role mismatch** — the caller's role might not have a view defined, or the view for their role doesn't include the field you're looking at. Check `t.role(state, caller)` in a test.
-3. **Guard rejected the message** — if a guard returns `false`, the message is silently rejected and state doesn't change. Check your guard logic.
+3. **Guard rejected the message** — if a guard returns `false`, the message is rejected and state doesn't change. Check your guard logic.
 
 ### Can I store Maps, Sets, or Dates in state?
 
@@ -52,16 +52,14 @@ restore: (s) => ({
 
 ### How do I reset an actor's state?
 
-There's no built-in reset. Define a message that returns the initial state:
+Define a message with a guard to restrict access:
 
 ```typescript
-const reset = message(z.object({}), (_state) => ({
-  count: 0,
-  lastUpdatedBy: null,
-}));
+RESET: message(z.object({}), {
+  guard: (_state, _payload, ctx) => ctx.role === "admin",
+  handler: () => ({ count: 0, lastUpdatedBy: null }),
+}),
 ```
-
-Gate it behind a role so only admins can reset.
 
 ## Roles and Authorization
 
@@ -79,12 +77,9 @@ From the JWT. The `sub` claim becomes the caller identity. The `act` claim becom
 
 ## Side Effects
 
-### What's the difference between `emit()` and `request()`?
+### How do I handle async responses from emit()?
 
-Both record side effects in the transactional outbox. The difference:
-
-- **`emit()`** — fire-and-forget. No response.
-- **`request()`** — takes typed `callback()` definitions for `onDone` and `onError`. When the effect completes or fails, the framework delivers the result to the actor's `callbacks` block with Zod-validated payloads.
+`emit()` is fire-and-forget. For results, the pattern is: emit to a Queue → Queue consumer does the work → consumer sends a message back to the actor. See [Side Effects](/concepts/side-effects/) for the full pattern.
 
 ### What if an emitted effect fails?
 
@@ -92,7 +87,7 @@ Effects retry up to 3 times with backoff (1s, 5s, 25s). After 3 failures, the ef
 
 ### Can I emit from `lifecycle.connect` or `lifecycle.disconnect`?
 
-Yes. Lifecycle handlers receive the same `ctx` as message handlers, including `emit()` and `request()`.
+Yes. Lifecycle handlers receive the same `ctx` as message handlers, including `emit()`.
 
 ## Client
 
@@ -115,10 +110,10 @@ Use `testActor()` for most tests. It's fast (pure TypeScript, no I/O) and covers
 Use `sendWithEffects()` from the test harness:
 
 ```typescript
-const t = testActor(MyActor);
+const t = testActor(MyActorContract);
 const state = t.init({ /* ... */ });
 
-const { state: next, emissions } = await t.sendWithEffects(
+const { state: next, emissions } = t.sendWithEffects(
   state, "alice", { type: "NOTIFY" }
 );
 

@@ -1,27 +1,48 @@
 ---
-title: "@actor-kit/core & @actor-kit/worker"
+title: "actor-kit"
 description: Server-side API reference.
 ---
 
-The server-side API is split across two packages: `@actor-kit/core` (schema, view, types) and `@actor-kit/worker` (actor, message, callback, auth helpers). Use these in your Cloudflare Worker.
+The core package (`import from "actor-kit"`) provides the server-side API. Use in your Cloudflare Worker.
 
-## `actor(name, def)`
+## `defineActor(name, def)`
 
-Creates a Durable Object class from an actor definition.
+Creates a typed contract from an actor definition. The contract preserves all type information for downstream consumers.
 
 ```typescript
-export const Counter = actor("counter", {
+import { z } from "zod";
+import { defineActor, message, view, schema, uint32, string } from "actor-kit";
+
+const CounterView = schema({ count: uint32, lastUpdatedBy: string });
+
+export const CounterContract = defineActor("counter", {
   input: z.object({}),
-  init: () => ({ count: 0 }),
+  init: () => ({ count: 0, lastUpdatedBy: null as string | null }),
   roles: { user: () => true },
-  messages: { user: { INCREMENT: increment } },
-  views: { user: view(CounterView, (state) => ({ count: state.count })) },
+  messages: {
+    INCREMENT: message(z.object({}), (state, _payload, { caller }) => ({
+      ...state, count: state.count + 1, lastUpdatedBy: caller,
+    })),
+  },
+  views: { user: view(CounterView, (state) => ({ count: state.count, lastUpdatedBy: state.lastUpdatedBy ?? "" })) },
 });
 ```
 
 **Parameters:**
-- `name: string` — actor type name (used in JWT `aud` claim)
-- `def: ActorDef` — the actor definition object
+- `name: string` — actor type name (used in JWT `aud` claim, normalized to UPPER_SNAKE_CASE for env binding)
+- `def` — the actor definition object (must have `input` and `init`)
+
+**Returns:** `ActorContract<TName, TDef>` — a typed contract with `{ name, def }`.
+
+## `createActorClass(contract)`
+
+Converts a typed contract into a Durable Object class.
+
+```typescript
+export const Counter = createActorClass(CounterContract);
+```
+
+Handles both flat messages (v3) and role-nested messages (sequential/parallel states). For flat messages, wraps them so every role has access — guards handle authorization.
 
 **Returns:** A class extending `DurableObject` with `spawn()`, `send()`, `getSnapshot()`, `fetch()`, and `alarm()`.
 
@@ -32,7 +53,7 @@ export const Counter = actor("counter", {
 | `input` | Yes | Zod schema for spawn input |
 | `init(input)` | Yes | Returns initial state |
 | `roles` | Yes | `Record<string, (state, caller, claims) => boolean>` |
-| `messages` | Yes* | Per-role message handlers |
+| `messages` | Yes* | Flat message handlers (or per-role in `states`) |
 | `views` | Yes | Per-role view definitions |
 | `version` | No | Number for migration |
 | `initial` | No | Initial state name (sequential states) |
@@ -40,11 +61,29 @@ export const Counter = actor("counter", {
 | `after` | No | Durable timers (DO Alarms) |
 | `tick` | No | Game loop (setInterval) |
 | `lifecycle` | No | Connection handlers (`connect`, `disconnect`) |
-| `callbacks` | No | Request callback handlers (from `request()`) |
 | `observe` | No | `{ onTransition }` hook |
 | `migrate` | No | `(persisted, fromVersion) => newState` |
 | `serialize` | No | Custom state serializer |
 | `restore` | No | Custom state deserializer |
+
+## `message(zodSchema, handler | { guard, handler })`
+
+Pairs a Zod validation schema with a message handler. Handlers are synchronous.
+
+```typescript
+// Simple handler
+const increment = message(z.object({}), (state, _payload, { caller }) => ({
+  ...state, count: state.count + 1, lastUpdatedBy: caller,
+}));
+
+// With guard
+const reset = message(z.object({}), {
+  guard: (_state, _payload, ctx) => ctx.role === "admin",
+  handler: () => ({ count: 0, lastUpdatedBy: null }),
+});
+```
+
+Guard receives `(state, payload, ctx)` where ctx has `{ role, caller, callerType, env, emit }`.
 
 ## `schema(shape)`
 
@@ -63,55 +102,19 @@ Pairs a schema with a projection function.
 const ownerView = view(OwnerSchema, (state, caller) => ({ ... }));
 ```
 
-## `message(zodSchema, handler | { guard, handler })`
-
-Pairs a Zod validation schema with a message handler.
-
-```typescript
-const increment = message(z.object({ amount: z.number() }), (state, { amount }) => ...);
-const guarded = message(z.object({}), { guard: (s) => !s.closed, handler: (s) => ... });
-```
-
-## `callback(name, resultSchema)` / `callback(name, resultSchema, metaSchema)`
-
-Creates a typed callback definition for use with `request()`. Pairs a callback name with Zod schemas for the result and optional per-request meta.
-
-```typescript
-import { callback } from "@actor-kit/worker";
-
-// Without meta
-const PriceReceived = callback("PRICE_RECEIVED", z.object({ total: z.number() }));
-const PriceFailed = callback("PRICE_FAILED", z.object({ message: z.string() }));
-
-// With meta (per-request context passed through to the handler)
-const PriceReceived = callback(
-  "PRICE_RECEIVED",
-  z.object({ total: z.number() }),
-  z.object({ itemId: z.string() }),
-);
-```
-
-Use callback definitions as `onDone`/`onError` in `request()`, and handle them in the actor's `callbacks` block:
-
-```typescript
-// In a message handler:
-request({ fetch: url, onDone: PriceReceived, onError: PriceFailed, meta: { itemId } });
-
-// In the actor definition:
-callbacks: {
-  PRICE_RECEIVED: (state, { result, meta }, ctx) => ({ ...state, price: result.total }),
-  PRICE_FAILED: (state, { error }, ctx) => ({ ...state, error: error.message }),
-},
-```
-
-## `createRef(env, actorType, actorId)`
+## `createRef(contract, env, id)` / `createRef(env, actorType, actorId)`
 
 Creates a typed reference to another actor for DO-to-DO communication.
 
 ```typescript
+// Contract-derived — send() typed to contract's messages
+const zone = createRef(ZoneContract, env, "forest-north");
+
+// Legacy — untyped send()
 const zone = createRef(env, "ZONE", "forest-north");
-await zone.send("system", "service", { type: "ACCEPT_TRANSFER", ... });
 ```
+
+Contract name is normalized to UPPER_SNAKE_CASE for env lookup: `"my-actor"` → `"MY_ACTOR"`.
 
 ## `createAccessToken(params)`
 
@@ -144,14 +147,9 @@ Validates a JWT and extracts the caller identity. Returns `Promise<{ caller: str
 
 Parses `/api/:actorType/:actorId` from a URL pathname. Returns `{ actorType, actorId }` or `null`.
 
-```typescript
-const route = parseActorRoute("/api/counter/my-counter");
-// { actorType: "counter", actorId: "my-counter" }
-```
-
 ## `encode(schema, data)` / `decode(schema, bytes)`
 
-Binary encoder and decoder for schema-defined data. Used internally for binary sync, but exported for custom use.
+Binary encoder and decoder for schema-defined data.
 
 ```typescript
 const bytes = encode(PlayerView, { x: 1.5, y: 2.5, health: 100 });
