@@ -14,6 +14,7 @@ export default defineWorkersConfig({
       "websocket.test.ts",
       "binary-views.test.ts",
       "auth.test.ts",
+      "header-auth.test.ts",
       "delta-sync.test.ts",
       "error-feedback.test.ts",
       "tick.test.ts",

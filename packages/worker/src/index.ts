@@ -9,7 +9,7 @@ export { createAccessToken, getCallerFromToken } from "./auth";
 export type { ActorContract } from "./define";
 export { defineActor } from "./define";
 // Identity (Worker-trust model)
-export { withCallerIdentity } from "./identity";
+export { CALLER_ID_HEADER, CALLER_TYPE_HEADER, withCallerIdentity } from "./identity";
 // Message helpers
 export { message } from "./message";
 export type { ActorRoute } from "./runtime/route-to-actor";

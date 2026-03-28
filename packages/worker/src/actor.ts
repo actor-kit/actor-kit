@@ -16,6 +16,7 @@ import type { Effect, FieldDescriptor, MessageContext, SchemaDefinition } from "
 import { createDeltaFrame, createSnapshotFrame, encode, encodeDelta } from "@actor-kit/core";
 import type { z } from "zod";
 import { getCallerFromToken } from "./auth";
+import { CALLER_ID_HEADER, CALLER_TYPE_HEADER } from "./identity";
 import { routeMessage } from "./runtime/message-router";
 import { createOutbox, type OutboxEntry } from "./runtime/outbox";
 import { resolveRole } from "./runtime/roles";
@@ -634,37 +635,61 @@ export function actor(
         return new Response("Expected WebSocket", { status: 426 });
       }
 
-      // Extract JWT from Sec-WebSocket-Protocol
+      // --- Caller identity resolution ---
+      // Priority 1: Identity headers (Worker-trust model).
+      //   The Worker authenticates the caller and stamps identity via withCallerIdentity().
+      //   SECURITY: withCallerIdentity scrubs inbound headers before setting verified ones.
+      //   Workers MUST call withCallerIdentity() before forwarding to the DO — forwarding
+      //   raw client requests (stub.fetch(request)) allows header spoofing.
+      //   Task 8 (Origin validation) adds defense-in-depth for browser-based CSRF.
+      // Priority 2: JWT token in Sec-WebSocket-Protocol (backward compat / external clients).
+      const headerCallerId = request.headers.get(CALLER_ID_HEADER);
+      const headerCallerType = request.headers.get(CALLER_TYPE_HEADER);
+
+      // Extract token subprotocol (used as fallback if headers absent)
       const protocols = request.headers.get("Sec-WebSocket-Protocol") ?? "";
       const tokenProtocol = protocols
         .split(",")
         .map((p) => p.trim())
         .find((p) => p.startsWith("token."));
-      if (!tokenProtocol) {
-        return new Response("Missing auth token", { status: 401 });
+
+      let callerInfo: { caller: string; callerType: "user" | "service" };
+
+      if (headerCallerId && headerCallerType) {
+        // Header-based auth: Worker already authenticated the caller.
+        if (headerCallerType !== "user" && headerCallerType !== "service") {
+          return new Response("Invalid caller type", { status: 401 });
+        }
+        callerInfo = { caller: headerCallerId, callerType: headerCallerType };
+      } else if (tokenProtocol) {
+        // Token fallback: validate JWT from subprotocol.
+        const token = tokenProtocol.slice("token.".length);
+        const secret = (this.env as Record<string, unknown>)["ACTOR_KIT_SECRET"];
+        if (typeof secret !== "string") {
+          return new Response("Server misconfigured", { status: 500 });
+        }
+
+        // Load state to restore actorId for JWT validation
+        await this.loadState();
+        if (!this.initialized) {
+          return new Response("Actor requires input — call spawn({ input }) before connecting", { status: 404 });
+        }
+
+        const actorId = this.actorId ?? this.ctx.id.toString();
+
+        try {
+          callerInfo = await getCallerFromToken(token, actorName, actorId, secret);
+        } catch {
+          return new Response("Invalid token", { status: 401 });
+        }
+      } else {
+        return new Response("Missing caller identity", { status: 401 });
       }
 
-      const token = tokenProtocol.slice("token.".length);
-      const secret = (this.env as Record<string, unknown>)["ACTOR_KIT_SECRET"];
-      if (typeof secret !== "string") {
-        return new Response("Server misconfigured", { status: 500 });
-      }
-
-      // Load state FIRST so this.actorId is restored from SQLite
-      // (otherwise after hibernation, actorId is undefined and JWT check fails)
+      // Load state if not already loaded (header-based auth skips the token path)
       await this.loadState();
       if (!this.initialized) {
         return new Response("Actor requires input — call spawn({ input }) before connecting", { status: 404 });
-      }
-
-      // Validate token against the stored actor identity.
-      const actorId = this.actorId ?? this.ctx.id.toString();
-
-      let callerInfo: { caller: string; callerType: "user" | "service" };
-      try {
-        callerInfo = await getCallerFromToken(token, actorName, actorId, secret);
-      } catch {
-        return new Response("Invalid token", { status: 401 });
       }
 
       const role = resolveRole(def.roles, this.state, callerInfo.caller, { callerType: callerInfo.callerType });
@@ -737,13 +762,16 @@ export function actor(
       // Start tick if defined and not already running
       this.startTick();
 
+      const responseHeaders: HeadersInit = {};
+      if (tokenProtocol) {
+        // Echo back the selected subprotocol — required by WebSocket spec
+        responseHeaders["Sec-WebSocket-Protocol"] = tokenProtocol;
+      }
+
       return new Response(null, {
         status: 101,
         webSocket: client,
-        headers: {
-          // Echo back the selected subprotocol — required by WebSocket spec
-          "Sec-WebSocket-Protocol": tokenProtocol,
-        },
+        headers: responseHeaders,
       });
     }
 

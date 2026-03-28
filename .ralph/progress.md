@@ -229,3 +229,39 @@ Working memory for v3 API redesign. Delete after run.
 
 ### Codex findings addressed
 - [P1] `@changesets/cli` in package.json without lockfile update — pre-existing issue. Verified `pnpm-lock.yaml` is already in sync (lockfile was updated when the dependency was installed, but the package.json change was never committed). The lockfile is correct.
+
+## Auth Task 1: Add withCallerIdentity helper — DONE
+
+### What was done
+- Created `packages/worker/src/identity.ts` with `withCallerIdentity(request, { callerId, callerType })` function
+- Scrubs inbound `X-Actor-Kit-Caller-Id` / `X-Actor-Kit-Caller-Type` headers before setting verified identity
+- Uses `new Request(request)` copy constructor to clone request (handles body/duplex internally, no `as` casts)
+- Exported from both `@actor-kit/worker` and `@actor-kit/worker/testing`
+
+### Tests written
+- **Unit** (10): identity.test.ts — sets caller ID header, sets caller type header, scrubs existing caller ID, scrubs existing caller type, preserves method, preserves URL, preserves body, preserves other headers, returns new Request without mutating original headers, scrubs mixed-case headers
+
+### Codex findings addressed
+- [P2] `new Request(request)` transfers the body stream from the original, making `original.body` unusable. Updated JSDoc to document this as intended behavior for the Worker→DO forwarding pattern (original is not reused after stamping identity).
+
+## Auth Task 2: Update DO fetch to read from headers — DONE
+
+### What was done
+- Updated `packages/worker/src/actor.ts` fetch handler to support dual auth models:
+  - Priority 1: Identity headers (`X-Actor-Kit-Caller-Id` + `X-Actor-Kit-Caller-Type`) — Worker-trust model
+  - Priority 2: JWT token in `Sec-WebSocket-Protocol` subprotocol — backward compat / external clients
+  - If neither: 401 "Missing caller identity"
+- Validates `callerType` header is "user" or "service" (rejects invalid types with 401)
+- When using header-based auth (no token), omits `Sec-WebSocket-Protocol` from response headers
+- Exported `CALLER_ID_HEADER` and `CALLER_TYPE_HEADER` constants from `@actor-kit/worker` and `@actor-kit/worker/testing`
+- Imported constants in DO fetch handler (DRY — single source of truth for header names)
+
+### Tests written
+- **Integration** (9): header-auth.test.ts — accepts WebSocket with identity headers, rejects missing caller ID, rejects missing caller type, rejects invalid caller type, receives correct binary snapshot, resolves correct role from header identity (service→admin), prefers headers over token subprotocol, falls back to token (pre-existing JWT WS failure), returns 401 when neither provided
+
+### Pre-existing issues discovered
+- ALL JWT-based WebSocket integration tests fail (15/23 WS tests) — `getCallerFromToken` throws inside DO `fetch()` but works when called directly in test context. Likely a vitest-pool-workers / miniflare crypto context issue. Not caused by this change. The `auth.test.ts` "accepts connection with valid JWT" test also fails on clean `main` branch.
+- `edge-cases.test.ts` "send on unspawned actor returns error" also pre-existing failure.
+
+### Codex findings addressed
+- [P1] Header spoofing risk: DO trusts `X-Actor-Kit-Caller-*` headers at face value, so a client could spoof identity if a Worker forwards raw requests via `stub.fetch(request)`. Addressed with clear security comments in the code. Full mitigation path: task 5 (update examples to use `withCallerIdentity`) + task 8 (Origin validation). The Cloudflare architecture ensures only Workers can access DOs; `withCallerIdentity` scrubs client-set headers before stamping verified identity. The vulnerability only exists when Workers forward raw requests — documented as a MUST-NOT pattern.

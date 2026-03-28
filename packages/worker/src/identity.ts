@@ -7,8 +7,8 @@ interface CallerIdentity {
   callerType: "user" | "service";
 }
 
-const CALLER_ID_HEADER = "X-Actor-Kit-Caller-Id";
-const CALLER_TYPE_HEADER = "X-Actor-Kit-Caller-Type";
+export const CALLER_ID_HEADER = "X-Actor-Kit-Caller-Id";
+export const CALLER_TYPE_HEADER = "X-Actor-Kit-Caller-Type";
 
 /**
  * Stamps a verified caller identity onto a request.
@@ -16,6 +16,10 @@ const CALLER_TYPE_HEADER = "X-Actor-Kit-Caller-Type";
  * Returns a new Request with the body stream transferred from the original.
  * The original request's body becomes unusable (standard fetch spec behavior).
  * Designed for the Worker→DO forwarding pattern where the original is not reused.
+ *
+ * Security: Workers MUST call withCallerIdentity() before forwarding requests to DOs.
+ * Forwarding raw client requests (stub.fetch(request)) allows clients to spoof
+ * identity headers. withCallerIdentity scrubs inbound headers before stamping.
  */
 export function withCallerIdentity(request: Request, identity: CallerIdentity): Request {
   // Clone via Request copy constructor — handles body/duplex internally
