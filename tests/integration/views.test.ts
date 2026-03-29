@@ -52,6 +52,7 @@ describe("View computation through DO runtime", () => {
         Upgrade: "websocket",
         "X-Actor-Kit-Caller-Id": "u1",
         "X-Actor-Kit-Caller-Type": "user",
+        "X-Actor-Kit-Binary": "1",
       },
     });
 

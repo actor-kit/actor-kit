@@ -97,6 +97,7 @@ describe("Header-based auth (Worker-trust model)", () => {
         Upgrade: "websocket",
         "X-Actor-Kit-Caller-Id": "u1",
         "X-Actor-Kit-Caller-Type": "user",
+        "X-Actor-Kit-Binary": "1",
       },
     });
     expect(response.status).toBe(101);
@@ -125,6 +126,7 @@ describe("Header-based auth (Worker-trust model)", () => {
         Upgrade: "websocket",
         "X-Actor-Kit-Caller-Id": "svc1",
         "X-Actor-Kit-Caller-Type": "service",
+        "X-Actor-Kit-Binary": "1",
       },
     });
     expect(response.status).toBe(101);
@@ -164,6 +166,7 @@ describe("Header-based auth (Worker-trust model)", () => {
         Upgrade: "websocket",
         "X-Actor-Kit-Caller-Id": "u1",
         "X-Actor-Kit-Caller-Type": "user",
+        "X-Actor-Kit-Binary": "1",
         "Sec-WebSocket-Protocol": `token.${token}`,
       },
     });

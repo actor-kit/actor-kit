@@ -10,6 +10,7 @@ async function connectWs(stub: DurableObjectStub, actorId: string, callerId: str
       Upgrade: "websocket",
       "X-Actor-Kit-Caller-Id": callerId,
       "X-Actor-Kit-Caller-Type": "user",
+      "X-Actor-Kit-Binary": "1",
     },
   });
 

@@ -16,6 +16,7 @@ function connectWs(
       Upgrade: "websocket",
       "X-Actor-Kit-Caller-Id": callerId,
       "X-Actor-Kit-Caller-Type": callerType,
+      "X-Actor-Kit-Binary": "1",
     },
   });
 }
