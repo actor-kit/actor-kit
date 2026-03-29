@@ -62,7 +62,7 @@ emit({ actor: "AUDIT_LOG", id: "global", message: "LOG", payload: { action: "del
 
 - **At-least-once delivery**: if the DO crashes after commit, pending effects retry on restart
 - **Retry with backoff**: failed effects retry 3 times (1s, 5s, 25s) then move to a failures table
-- **Idempotency**: each emission gets a UUID — downstream services can deduplicate
+- **Idempotency is your responsibility**: at-least-once means duplicates are possible. If your downstream service can't handle replays, add an idempotency key to the message body (e.g., `emit({ queue: "PAYMENTS", body: { orderId, idempotencyKey: crypto.randomUUID() } })`)
 
 ## Related
 
