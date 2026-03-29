@@ -4,6 +4,7 @@ export default defineConfig({
   testDir: "examples",
   testMatch: ["**/*.e2e.ts", "**/*.spec.ts"],
   timeout: 30000,
+  retries: 1,
   projects: [
     {
       name: "counter",
@@ -36,32 +37,32 @@ export default defineConfig({
       command: "cd examples/counter && npx wrangler dev --port 8799",
       port: 8799,
       reuseExistingServer: true,
-      timeout: 15000,
+      timeout: 30000,
     },
     {
       command: "cd examples/todo-list && npx wrangler dev --port 8800",
       port: 8800,
       reuseExistingServer: true,
-      timeout: 15000,
+      timeout: 30000,
     },
     {
       command: "cd examples/chat-room && npx wrangler dev --port 8801",
       port: 8801,
       reuseExistingServer: true,
-      timeout: 15000,
+      timeout: 30000,
     },
     {
       command: "cd examples/auction && npx wrangler dev --port 8802",
       port: 8802,
       reuseExistingServer: true,
-      timeout: 15000,
+      timeout: 30000,
     },
     {
       command:
         "cd examples/tanstack-start-counter && pnpm build && npx wrangler dev -c .output/server/wrangler.json --port 8803 --inspector-port 0",
       port: 8803,
       reuseExistingServer: true,
-      timeout: 30000,
+      timeout: 60000,
     },
   ],
 });

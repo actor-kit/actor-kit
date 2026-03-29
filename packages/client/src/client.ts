@@ -78,6 +78,7 @@ export function createActorClient(options: ClientOptions): ActorClient<unknown> 
   let lastChecksum: string | undefined;
   let isReconnecting = false;
   let activeSchema: SchemaDefinition<Record<string, FieldDescriptor>> | undefined = viewSchema;
+  const messageQueue: Array<{ type: string; [key: string]: unknown }> = [];
 
   function computeChecksum(json: string): string {
     let h = 0;
@@ -213,6 +214,13 @@ export function createActorClient(options: ClientOptions): ActorClient<unknown> 
         ws?.send(JSON.stringify({ type: "__reconnect", lastChecksum }));
         isReconnecting = false;
       }
+      // Flush queued messages that were sent during reconnection
+      while (messageQueue.length > 0) {
+        const queued = messageQueue.shift();
+        if (queued && ws && ws.readyState === 1) {
+          ws.send(JSON.stringify(queued));
+        }
+      }
     });
 
     ws.addEventListener("message", (event: MessageEvent) => {
@@ -274,6 +282,8 @@ export function createActorClient(options: ClientOptions): ActorClient<unknown> 
     send(event: { type: string; [key: string]: unknown }) {
       if (ws && ws.readyState === 1) {
         ws.send(JSON.stringify(event));
+      } else if (connectionState === "reconnecting" || connectionState === "connecting") {
+        messageQueue.push(event);
       }
     },
     trigger(type: string, payload?: Record<string, unknown>) {
@@ -282,6 +292,7 @@ export function createActorClient(options: ClientOptions): ActorClient<unknown> 
     disconnect() {
       intentionalClose = true;
       connectionState = "disconnected";
+      messageQueue.length = 0;
       if (reconnectTimer !== undefined) {
         clearTimeout(reconnectTimer);
       }
