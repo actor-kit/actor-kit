@@ -8,3 +8,5 @@ dist/
 .codex-review-api-stress.md
 .stryker-tmp/
 test-results/
+.output/
+.tanstack/

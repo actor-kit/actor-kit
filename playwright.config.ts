@@ -2,7 +2,7 @@ import { defineConfig } from "@playwright/test";
 
 export default defineConfig({
   testDir: "examples",
-  testMatch: "**/*.e2e.ts",
+  testMatch: ["**/*.e2e.ts", "**/*.spec.ts"],
   timeout: 30000,
   projects: [
     {
@@ -24,6 +24,11 @@ export default defineConfig({
       name: "auction",
       testMatch: "auction/**/*.e2e.ts",
       use: { baseURL: "http://localhost:8802" },
+    },
+    {
+      name: "tanstack-start-counter",
+      testMatch: "tanstack-start-counter/**/*.spec.ts",
+      use: { baseURL: "http://localhost:8803" },
     },
   ],
   webServer: [
@@ -50,6 +55,13 @@ export default defineConfig({
       port: 8802,
       reuseExistingServer: true,
       timeout: 15000,
+    },
+    {
+      command:
+        "cd examples/tanstack-start-counter && pnpm build && npx wrangler dev -c .output/server/wrangler.json --port 8803 --inspector-port 0",
+      port: 8803,
+      reuseExistingServer: true,
+      timeout: 30000,
     },
   ],
 });

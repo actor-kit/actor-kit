@@ -1,0 +1,13 @@
+@import "tailwindcss";
+
+:root {
+  --sea-ink: #1a2a3a;
+  --sea-ink-soft: #5a7a8a;
+  --lagoon-deep: #1a8a7a;
+  --surface: #f8fafb;
+}
+
+body {
+  background: var(--surface);
+  color: var(--sea-ink);
+}
