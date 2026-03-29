@@ -7,8 +7,8 @@ const tabs = [
     label: "Actor",
     file: "counter.ts",
     code: `<span class="ck">import</span> { z } <span class="ck">from</span> <span class="cs">"zod"</span>;
-<span class="ck">import</span> { schema, view, uint32, string } <span class="ck">from</span> <span class="cs">"actor-kit"</span>;
-<span class="ck">import</span> { defineActor, createActorClass, message } <span class="ck">from</span> <span class="cs">"actor-kit"</span>;
+<span class="ck">import</span> { schema, view, uint32, string } <span class="ck">from</span> <span class="cs">"@actor-kit/core"</span>;
+<span class="ck">import</span> { defineActor, createActorClass, message } <span class="ck">from</span> <span class="cs">"@actor-kit/worker"</span>;
 
 <span class="ck">const</span> CounterView = <span class="cf">schema</span>({ count: uint32, lastUpdatedBy: string });
 
@@ -68,7 +68,7 @@ const tabs = [
     id: "client",
     label: "Client",
     file: "client.ts",
-    code: `<span class="ck">import</span> { <span class="cf">actorClient</span> } <span class="ck">from</span> <span class="cs">"actor-kit/client"</span>;
+    code: `<span class="ck">import</span> { <span class="cf">actorClient</span> } <span class="ck">from</span> <span class="cs">"@actor-kit/client"</span>;
 <span class="ck">import</span> { CounterContract } <span class="ck">from</span> <span class="cs">"./counter"</span>;
 
 <span class="cm">// Events &amp; views inferred from contract — no manual types</span>
@@ -92,7 +92,7 @@ client.<span class="cf">send</span>({ <span class="cp">type</span>: <span class=
     id: "react",
     label: "React",
     file: "App.tsx",
-    code: `<span class="ck">import</span> { <span class="cf">actorContext</span> } <span class="ck">from</span> <span class="cs">"actor-kit/react"</span>;
+    code: `<span class="ck">import</span> { <span class="cf">actorContext</span> } <span class="ck">from</span> <span class="cs">"@actor-kit/react"</span>;
 <span class="ck">import</span> { CounterContract } <span class="ck">from</span> <span class="cs">"./counter"</span>;
 <span class="ck">import</span> { CounterClient } <span class="ck">from</span> <span class="cs">"./client"</span>;
 
@@ -296,10 +296,11 @@ client.<span class="cf">send</span>({ <span class="cp">type</span>: <span class=
       <h2>One package, focused exports</h2>
       <p class="packages-sub">Import only what you need via subpath exports.</p>
       <div class="pkg-grid">
-        <a href="/api/core/" class="pkg"><strong>actor-kit</strong><span>defineActor(), createActorClass(), message(), schema(), view()</span></a>
-        <a href="/api/client/" class="pkg"><strong>actor-kit/client</strong><span>actorClient(contract) — typed views &amp; events</span></a>
-        <a href="/api/react/" class="pkg"><strong>actor-kit/react</strong><span>actorContext(contract) — useView(), useSend()</span></a>
-        <a href="/api/test/" class="pkg"><strong>actor-kit/test</strong><span>testActor(contract) — emission capture</span></a>
+        <a href="/api/core/" class="pkg"><strong>@actor-kit/core</strong><span>schema(), view(), uint32, string — shared types + binary encoding</span></a>
+        <a href="/api/core/" class="pkg"><strong>@actor-kit/worker</strong><span>defineActor(), createActorClass(), message(), withCallerIdentity()</span></a>
+        <a href="/api/client/" class="pkg"><strong>@actor-kit/client</strong><span>actorClient(contract) — typed views &amp; events</span></a>
+        <a href="/api/react/" class="pkg"><strong>@actor-kit/react</strong><span>actorContext(contract) — useView(), useSend(), useSelector()</span></a>
+        <a href="/api/test/" class="pkg"><strong>@actor-kit/test</strong><span>testActor(contract) — typed harness + emission capture</span></a>
       </div>
     </section>
 

@@ -9,6 +9,9 @@ export const CounterView = schema({ count: uint32, lastUpdatedBy: string });
 export const CounterContract = defineActor("counter", {
   input: z.object({}),
   init: (): CounterState => ({ count: 0, lastUpdatedBy: null }),
+  // Origin validation — prevents cross-site WebSocket CSRF
+  // In production, set to your actual domain(s)
+  allowedOrigins: ["http://localhost:8787", "http://localhost:8799"],
 
   roles: {
     admin: (
