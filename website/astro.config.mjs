@@ -73,6 +73,7 @@ export default defineConfig({
             { slug: "api/client", label: "client" },
             { slug: "api/react", label: "react" },
             { slug: "api/test", label: "test" },
+            { slug: "api/storybook", label: "storybook" },
           ],
         },
       ],
