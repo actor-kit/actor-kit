@@ -20,17 +20,6 @@ import { CounterContract } from "./counter";
 export const CounterClient = actorClient(CounterContract);
 ```
 
-### Schema-derived (legacy)
-
-```typescript
-import { actorClient } from "@actor-kit/client";
-import { CounterView } from "./counter";
-
-type CounterEvent = { type: "INCREMENT" } | { type: "DECREMENT" };
-
-export const CounterClient = actorClient(CounterView).events<CounterEvent>();
-```
-
 ### `.create(options)`
 
 Creates a runtime WebSocket connection. The client SDK does not handle authentication — your Worker is responsible for reading the caller identity and stamping it via `withCallerIdentity()` before forwarding to the DO. See [Quick Start](/getting-started/quick-start/) for the full pattern.

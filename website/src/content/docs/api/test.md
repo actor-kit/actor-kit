@@ -20,20 +20,6 @@ import { CounterContract } from "./counter";
 const t = testActor(CounterContract);
 ```
 
-### Raw definition (legacy)
-
-```typescript
-import { testActor } from "@actor-kit/test";
-
-const t = testActor({
-  input: z.object({ creator: z.string() }),
-  init: (input) => ({ todos: [], ownerId: input.creator, memberIds: [] }),
-  roles: { /* ... */ },
-  messages: { /* ... */ },
-  views: { /* ... */ },
-});
-```
-
 ### `t.init(input)`
 
 Validates input with Zod and returns the initial state.

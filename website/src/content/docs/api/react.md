@@ -20,16 +20,6 @@ import { CounterContract } from "./counter";
 const CounterCtx = actorContext(CounterContract);
 ```
 
-### Factory-derived (legacy)
-
-```typescript
-import { actorClient } from "@actor-kit/client";
-import { actorContext } from "@actor-kit/react";
-
-const CounterClient = actorClient(CounterView).events<CounterEvent>();
-const CounterCtx = actorContext<typeof CounterClient>();
-```
-
 ### Returns
 
 ```typescript
