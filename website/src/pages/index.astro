@@ -293,14 +293,15 @@ client.<span class="cf">send</span>({ <span class="cp">type</span>: <span class=
     </section>
 
     <section class="packages">
-      <h2>One package, focused exports</h2>
-      <p class="packages-sub">Import only what you need via subpath exports.</p>
+      <h2>Six packages, one typed contract</h2>
+      <p class="packages-sub">Install only what you need. Types flow from <code>defineActor()</code> through every package.</p>
       <div class="pkg-grid">
         <a href="/api/core/" class="pkg"><strong>@actor-kit/core</strong><span>schema(), view(), uint32, string — shared types + binary encoding</span></a>
         <a href="/api/core/" class="pkg"><strong>@actor-kit/worker</strong><span>defineActor(), createActorClass(), message(), withCallerIdentity()</span></a>
         <a href="/api/client/" class="pkg"><strong>@actor-kit/client</strong><span>actorClient(contract) — typed views &amp; events</span></a>
         <a href="/api/react/" class="pkg"><strong>@actor-kit/react</strong><span>actorContext(contract) — useView(), useSend(), useSelector()</span></a>
         <a href="/api/test/" class="pkg"><strong>@actor-kit/test</strong><span>testActor(contract) — typed harness + emission capture</span></a>
+        <a href="/api/test/" class="pkg"><strong>@actor-kit/storybook</strong><span>withActorKit() — Storybook decorator for visual testing</span></a>
       </div>
     </section>
 
