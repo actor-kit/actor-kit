@@ -19,6 +19,7 @@
  * ```
  */
 
+import { type ReactNode, createElement } from "react";
 import type { ActorClient } from "@actor-kit/client";
 import { createMockClient } from "./mock-client";
 
@@ -27,8 +28,8 @@ interface WithActorKitOptions<TView, TEvent extends { type: string }> {
   context: {
     Provider: (props: {
       client: ActorClient<TView, TEvent>;
-      children: unknown;
-    }) => unknown;
+      children?: ReactNode;
+    }) => ReactNode;
   };
   /** Initial view data for the mock client */
   view: TView;
@@ -49,21 +50,19 @@ export function withActorKit<
   const { context, view, role, onSend } = options;
 
   // Return a Storybook decorator function
-  // Using `any` here is unavoidable — Storybook's decorator types vary by version
-  // and we can't depend on a specific @storybook/react version's internal types
-  return (Story: () => unknown): unknown => {
+  // Storybook's decorator types vary by version — we use ReactNode for
+  // createElement compatibility without depending on @storybook/react internals
+  return (Story: () => ReactNode): ReactNode => {
     const client = createMockClient<TView, TEvent>({
       initialView: view,
       role,
       onSend,
     });
 
-    // Use createElement to avoid JSX dependency
-    const React = require("react");
-    return React.createElement(
+    return createElement(
       context.Provider,
       { client },
-      React.createElement(Story),
+      createElement(Story),
     );
   };
 }

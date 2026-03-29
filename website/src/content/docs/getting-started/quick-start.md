@@ -10,8 +10,8 @@ Build a shared counter that multiple users can increment in real-time. The full 
 ```typescript
 // src/counter.ts
 import { z } from "zod";
-import { schema, view, uint32, string } from "actor-kit";
-import { defineActor, createActorClass, message } from "actor-kit";
+import { schema, view, uint32, string } from "@actor-kit/core";
+import { defineActor, createActorClass, message } from "@actor-kit/worker";
 
 const CounterView = schema({ count: uint32, lastUpdatedBy: string });
 
@@ -108,7 +108,7 @@ Key things happening:
 ### Vanilla TypeScript
 
 ```typescript
-import { actorClient } from "actor-kit/client";
+import { actorClient } from "@actor-kit/client";
 import { CounterContract } from "./counter";
 
 // Create a typed client factory — events and views inferred from the contract
@@ -133,8 +133,8 @@ client.send({ type: "INCREMENT" });
 
 ```tsx
 import { useState, useEffect } from "react";
-import { actorClient } from "actor-kit/client";
-import { actorContext } from "actor-kit/react";
+import { actorClient } from "@actor-kit/client";
+import { actorContext } from "@actor-kit/react";
 import { CounterContract } from "./counter";
 
 const CounterClient = actorClient(CounterContract);

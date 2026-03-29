@@ -7,7 +7,7 @@
 
 import type { ActorClient, ConnectionState } from "@actor-kit/client";
 
-interface MockClientOptions<TView> {
+interface MockClientOptions<TView, TEvent extends { type: string }> {
   /** Initial view data to render */
   initialView: TView;
   /** Initial role (default: "user") */
@@ -15,13 +15,13 @@ interface MockClientOptions<TView> {
   /** Connection state (default: "connected") */
   connectionState?: ConnectionState | undefined;
   /** Optional handler for send — use in play functions to test interactions */
-  onSend?: ((event: { type: string; [key: string]: unknown }) => TView | void) | undefined;
+  onSend?: ((event: TEvent) => TView | void) | undefined;
 }
 
 export function createMockClient<
   TView,
   TEvent extends { type: string } = { type: string; [key: string]: unknown },
->(options: MockClientOptions<TView>): ActorClient<TView, TEvent> {
+>(options: MockClientOptions<TView, TEvent>): ActorClient<TView, TEvent> {
   const { initialView, role = "user", connectionState = "connected", onSend } = options;
 
   let currentView = initialView;
@@ -54,7 +54,7 @@ export function createMockClient<
     },
     send(event: TEvent) {
       if (onSend) {
-        const nextView = onSend(event as { type: string; [key: string]: unknown });
+        const nextView = onSend(event);
         if (nextView !== undefined) {
           currentView = nextView;
           for (const listener of viewListeners) {
@@ -64,7 +64,10 @@ export function createMockClient<
       }
     },
     trigger(type: string, payload?: Record<string, unknown>) {
-      this.send({ type, ...payload } as TEvent);
+      // trigger() bypasses type safety by design — it constructs an untyped event
+      // from string + payload. The real client has the same escape hatch.
+      const event: TEvent = Object.assign({ type }, payload) as TEvent;
+      this.send(event);
     },
     disconnect() {
       currentState = "disconnected";

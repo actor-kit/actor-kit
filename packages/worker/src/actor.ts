@@ -16,7 +16,7 @@ import type { Effect, FieldDescriptor, MessageContext, SchemaDefinition } from "
 import { createDeltaFrame, createSnapshotFrame, encode, encodeDelta } from "@actor-kit/core";
 import type { z } from "zod";
 import { getCallerFromToken } from "./auth";
-import { CALLER_ID_HEADER, CALLER_TYPE_HEADER } from "./identity";
+import { BINARY_SUPPORT_HEADER, CALLER_ID_HEADER, CALLER_TYPE_HEADER } from "./identity";
 import { routeMessage } from "./runtime/message-router";
 import { createOutbox, type OutboxEntry } from "./runtime/outbox";
 import { resolveRole } from "./runtime/roles";
@@ -152,6 +152,7 @@ export function actor(
     previousViews = new Map<WebSocket, string>(); // dedupe key: "role:json"
     previousViewData = new Map<WebSocket, Record<string, unknown>>(); // actual view data for delta computation
     connectionChecksums = new Map<WebSocket, string>(); // last checksum sent per connection
+    supportsBinary = new Map<WebSocket, boolean>(); // per-connection binary capability
     draining = false; // Prevents concurrent outbox drains
 
     constructor(ctx: DurableObjectState, env: Record<string, unknown>) {
@@ -566,8 +567,9 @@ export function actor(
       const caller = callerTag.slice("caller:".length);
       const callerType = typeTag.slice("callerType:".length);
       if (callerType !== "user" && callerType !== "service") return null;
-      // Re-populate in-memory map
+      // Re-populate in-memory maps (restore after hibernation)
       this.connections.set(ws, { caller, callerType });
+      this.supportsBinary.set(ws, tags.includes("binary"));
       return { caller, callerType };
     }
 
@@ -594,17 +596,27 @@ export function actor(
           const prevKey = this.previousViews.get(ws);
           if (dedupeKey === prevKey) continue;
 
-          const prevViewData = this.previousViewData.get(ws);
+          // Detect role change: if the role portion of the previous dedupe key differs,
+          // the client has an old schema's snapshot — delta would corrupt the view.
+          const prevRole = prevKey?.split(":")[0];
+          const roleChanged = prevRole !== undefined && prevRole !== role;
+
+          const prevViewData = roleChanged ? undefined : this.previousViewData.get(ws);
+          if (roleChanged) {
+            // Clear stale view data so next broadcast starts fresh
+            this.previousViewData.delete(ws);
+          }
           this.previousViews.set(ws, dedupeKey);
           this.previousViewData.set(ws, viewData as Record<string, unknown>);
           this.connectionChecksums.set(ws, this.computeChecksum(JSON.stringify(viewData)));
 
-          // Use binary encoding when the view has a schema
+          // Use binary encoding when the view has a schema AND connection supports binary
           const viewSchema = viewDef.schema;
-          if (viewSchema?.fields) {
+          const connSupportsBinary = this.supportsBinary.get(ws) ?? false;
+          if (viewSchema?.fields && connSupportsBinary) {
             const schemaDef = viewSchema as SchemaDefinition<Record<string, FieldDescriptor>>;
 
-            // Try delta encoding if we have previous view data
+            // Try delta encoding if we have previous view data (skip if role changed)
             if (prevViewData) {
               const deltaPayload = encodeDelta(schemaDef, prevViewData, viewData as Record<string, unknown>);
               if (deltaPayload) {
@@ -614,13 +626,13 @@ export function actor(
               }
             }
 
-            // Full snapshot (first connect or delta returned null)
+            // Full snapshot (first connect, role changed, or delta returned null)
             const payload = encode(schemaDef, viewData as Record<string, unknown>);
             const roleIndex = roleNames.indexOf(role);
             const frame = createSnapshotFrame(this.version, roleIndex, payload);
             ws.send(frame);
           } else {
-            // JSON fallback
+            // JSON fallback (no schema or connection doesn't support binary)
             ws.send(JSON.stringify({ type: "snapshot", role, data: viewData }));
           }
         } catch {
@@ -697,14 +709,22 @@ export function actor(
         return new Response("Forbidden", { status: 403 });
       }
 
+      // Detect binary support:
+      // - Token-based connections (SDK direct) always support binary
+      // - Header-based connections (Worker-forwarded) support binary only if opted in
+      const clientSupportsBinary = tokenProtocol ? true : request.headers.get(BINARY_SUPPORT_HEADER) === "1";
+
       // Create WebSocket pair
       const pair = new WebSocketPair();
       const [client, server] = [pair[0], pair[1]];
 
       // Store caller metadata as WebSocket tags so they survive DO hibernation.
       // Tags: ["caller:{id}", "callerType:{type}"]
-      this.ctx.acceptWebSocket(server, [`caller:${callerInfo.caller}`, `callerType:${callerInfo.callerType}`]);
+      const tags = [`caller:${callerInfo.caller}`, `callerType:${callerInfo.callerType}`];
+      if (clientSupportsBinary) tags.push("binary");
+      this.ctx.acceptWebSocket(server, tags);
       this.connections.set(server, { caller: callerInfo.caller, callerType: callerInfo.callerType });
+      this.supportsBinary.set(server, clientSupportsBinary);
 
       // Send initial snapshot — binary if schema available, JSON fallback
       const viewDef = def.views[role];
@@ -718,7 +738,7 @@ export function actor(
         this.connectionChecksums.set(server, checksum);
 
         const viewSchema = viewDef.schema;
-        if (viewSchema?.fields) {
+        if (viewSchema?.fields && clientSupportsBinary) {
           const schemaDef = viewSchema as SchemaDefinition<Record<string, FieldDescriptor>>;
           const payload = encode(schemaDef, viewData as Record<string, unknown>);
           const roleNames = Object.keys(def.roles);
@@ -837,7 +857,8 @@ export function actor(
         this.connectionChecksums.set(ws, currentChecksum);
 
         const viewSchema = viewDef.schema;
-        if (viewSchema?.fields) {
+        const connSupportsBinary = this.supportsBinary.get(ws) ?? false;
+        if (viewSchema?.fields && connSupportsBinary) {
           const schemaDef = viewSchema as SchemaDefinition<Record<string, FieldDescriptor>>;
           const payload = encode(schemaDef, viewData as Record<string, unknown>);
           const roleNames = Object.keys(def.roles);
@@ -858,6 +879,7 @@ export function actor(
       this.previousViews.delete(ws);
       this.previousViewData.delete(ws);
       this.connectionChecksums.delete(ws);
+      this.supportsBinary.delete(ws);
 
       // Run lifecycle.disconnect if defined
       if (def.lifecycle?.disconnect) {
@@ -951,6 +973,18 @@ export function actor(
           }
           if (nextState !== this.state) {
             this.state = nextState;
+
+            // Advance sequential state tracker if handler set __actorState
+            if (this.stateTracker && typeof this.state === "object" && this.state !== null) {
+              const stateObj = this.state as Record<string, unknown>;
+              if (typeof stateObj["__actorState"] === "string") {
+                const newStateName = stateObj["__actorState"];
+                if ("current" in this.stateTracker) {
+                  this.stateTracker = { current: newStateName };
+                }
+              }
+            }
+
             this.persistState();
             this.broadcastViews();
           }

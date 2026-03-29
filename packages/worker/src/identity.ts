@@ -5,10 +5,13 @@
 interface CallerIdentity {
   callerId: string;
   callerType: "user" | "service";
+  /** When true, the DO sends binary-encoded views to this connection. Default: false (JSON). */
+  supportsBinary?: boolean;
 }
 
 export const CALLER_ID_HEADER = "X-Actor-Kit-Caller-Id";
 export const CALLER_TYPE_HEADER = "X-Actor-Kit-Caller-Type";
+export const BINARY_SUPPORT_HEADER = "X-Actor-Kit-Binary";
 
 /**
  * Stamps a verified caller identity onto a request.
@@ -28,10 +31,14 @@ export function withCallerIdentity(request: Request, identity: CallerIdentity): 
   // Scrub — remove any inbound identity headers (case-insensitive by Headers spec)
   clone.headers.delete(CALLER_ID_HEADER);
   clone.headers.delete(CALLER_TYPE_HEADER);
+  clone.headers.delete(BINARY_SUPPORT_HEADER);
 
   // Stamp verified identity
   clone.headers.set(CALLER_ID_HEADER, identity.callerId);
   clone.headers.set(CALLER_TYPE_HEADER, identity.callerType);
+  if (identity.supportsBinary) {
+    clone.headers.set(BINARY_SUPPORT_HEADER, "1");
+  }
 
   return clone;
 }
