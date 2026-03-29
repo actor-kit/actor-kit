@@ -403,3 +403,45 @@ Working memory for v3 API redesign. Delete after run.
 
 ### Codex findings addressed
 - No findings — codex review confirmed all changes are clean (documentation/backlog artifacts and lockfile only).
+
+## Ship Task 1: Fix storybook type errors — DONE (already fixed)
+
+### What was done
+- Already fixed by commit 95c416e (prior agent). Verified: `pnpm typecheck` passes, `pnpm build` succeeds for storybook package.
+- Remaining `as TEvent` cast in `trigger()` is a legitimate escape hatch matching the real client's pattern (trigger bypasses type safety by design).
+
+## Ship Task 2: Fix remaining type/test failures — DONE
+
+### What was done
+- Root cause: commit 95c416e added binary/JSON capability detection. Header-based auth connections default to JSON; binary requires `X-Actor-Kit-Binary: 1` header. All WS integration tests used header auth without this header, causing 12 binary test failures (frame type 34 = ASCII `"` instead of binary frame types).
+- Added `"X-Actor-Kit-Binary": "1"` header to all `connectWs`/`connectAndGetSnapshot` helpers and inline fetches in 6 integration test files: websocket.test.ts, delta-sync.test.ts, binary-views.test.ts, reconnect.test.ts, views.test.ts, header-auth.test.ts.
+- edge-cases.test.ts "send on unspawned actor" now passes (was previously listed as pre-existing failure).
+
+### Final test counts
+- Typecheck: all packages clean
+- Unit tests: 45 files, 318 tests — all pass
+- Integration (isolated storage): 11 files, 44 tests — all pass
+- Integration (WebSocket): 9 files, 30/32 pass (2 pre-existing jose/JWT failures)
+
+### Pre-existing failures (reduced from 3 to 2)
+- `auth.test.ts` "accepts connection with valid JWT" — jose crypto context issue in vitest-pool-workers
+- `header-auth.test.ts` "falls back to token when identity headers absent" — same jose issue
+
+## Ship Task 3: Build all packages — DONE
+
+### What was done
+- Ran `pnpm build` in root — all 6 packages built successfully:
+  - `@actor-kit/core` → dist/index.js + dist/index.d.ts (+ source maps)
+  - `@actor-kit/worker` → dist/index.js, dist/testing.js, dist/token.js (+ .d.ts + source maps + auth.js, route-to-actor.js, timers.d.ts)
+  - `@actor-kit/client` → dist/index.js + dist/index.d.ts (+ source maps)
+  - `@actor-kit/react` → dist/index.js + dist/index.d.ts (+ source maps)
+  - `@actor-kit/test` → dist/index.js + dist/index.d.ts (+ source maps)
+  - `@actor-kit/storybook` → dist/index.js + dist/index.d.ts
+- Verified all package.json exports map to existing dist/ files — no mismatches
+- Website (docs) also builds: 26 pages
+- Typecheck: all packages clean
+- Unit tests: 45 files, 318 tests — all pass
+
+### Notes
+- tsdown emits "Invalid input options" warning about `define` key — cosmetic, does not affect build output
+- No code changes required — this was a verification task
