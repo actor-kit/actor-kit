@@ -6,6 +6,10 @@ on:
     branches:
       - main
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   quality:
     runs-on: ubuntu-latest
@@ -24,20 +28,23 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Build packages
+        run: pnpm build
+
       - name: Typecheck
         run: pnpm typecheck
 
       - name: Lint
         run: pnpm lint
 
-      - name: Build packages
-        run: pnpm build
-
       - name: Unit tests
         run: pnpm test:unit
 
-      - name: Integration tests
-        run: pnpm test:integration
+      - name: Integration tests (isolated storage)
+        run: cd tests/integration && vitest run --config vitest.config.ts
+
+      - name: Integration tests (WebSocket)
+        run: cd tests/integration && vitest run --config vitest.ws.config.ts
 
   e2e:
     runs-on: ubuntu-latest
@@ -57,8 +64,11 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Build packages
+        run: pnpm build
+
       - name: Install Playwright
-        run: npx playwright install chromium
+        run: npx playwright install --with-deps chromium
 
       - name: Run E2E tests
         run: npx playwright test --reporter=list
@@ -83,3 +93,40 @@ jobs:
 
       - name: Build docs
         run: cd website && pnpm build
+
+  release:
+    runs-on: ubuntu-latest
+    needs: [quality, e2e, docs]
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          registry-url: https://registry.npmjs.org
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build packages
+        run: pnpm build
+
+      - name: Create release PR or publish
+        uses: changesets/action@v1
+        with:
+          publish: pnpm changeset publish
+          version: pnpm changeset version
+          title: "chore: version packages"
+          commit: "chore: version packages"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}

@@ -13,6 +13,7 @@
     "actor-kit-counter-example",
     "actor-kit-todo-example",
     "actor-kit-chat-example",
-    "actor-kit-auction-example"
+    "actor-kit-auction-example",
+    "actor-kit-tanstack-start-counter"
   ]
 }
