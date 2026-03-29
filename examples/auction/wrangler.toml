@@ -9,3 +9,6 @@ class_name = "Auction"
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["Auction"]
+
+[env.preview]
+name = "actor-kit-auction-example-preview"

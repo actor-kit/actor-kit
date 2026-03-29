@@ -9,3 +9,6 @@ class_name = "ChatRoom"
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["ChatRoom"]
+
+[env.preview]
+name = "actor-kit-chat-example-preview"

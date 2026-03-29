@@ -9,3 +9,6 @@ class_name = "TodoList"
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["TodoList"]
+
+[env.preview]
+name = "actor-kit-todo-example-preview"

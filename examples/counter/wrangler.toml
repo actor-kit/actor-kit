@@ -9,3 +9,6 @@ class_name = "Counter"
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["Counter"]
+
+[env.preview]
+name = "actor-kit-counter-example-preview"

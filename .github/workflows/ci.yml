@@ -73,6 +73,92 @@ jobs:
       - name: Run E2E tests
         run: npx playwright test --reporter=list
 
+  e2e-deployed:
+    runs-on: ubuntu-latest
+    needs: quality
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    environment: preview
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build packages
+        run: pnpm build
+
+      - name: Deploy counter example
+        id: deploy-counter
+        working-directory: examples/counter
+        run: |
+          URL=$(npx wrangler deploy --env preview 2>&1 | grep -oE 'https://[^ ]+\.workers\.dev' | head -1)
+          echo "url=$URL" >> "$GITHUB_OUTPUT"
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
+      - name: Deploy todo-list example
+        id: deploy-todo-list
+        working-directory: examples/todo-list
+        run: |
+          URL=$(npx wrangler deploy --env preview 2>&1 | grep -oE 'https://[^ ]+\.workers\.dev' | head -1)
+          echo "url=$URL" >> "$GITHUB_OUTPUT"
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
+      - name: Deploy chat-room example
+        id: deploy-chat-room
+        working-directory: examples/chat-room
+        run: |
+          URL=$(npx wrangler deploy --env preview 2>&1 | grep -oE 'https://[^ ]+\.workers\.dev' | head -1)
+          echo "url=$URL" >> "$GITHUB_OUTPUT"
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
+      - name: Deploy auction example
+        id: deploy-auction
+        working-directory: examples/auction
+        run: |
+          URL=$(npx wrangler deploy --env preview 2>&1 | grep -oE 'https://[^ ]+\.workers\.dev' | head -1)
+          echo "url=$URL" >> "$GITHUB_OUTPUT"
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
+      - name: Deploy tanstack-start-counter example
+        id: deploy-tanstack
+        working-directory: examples/tanstack-start-counter
+        run: |
+          pnpm build
+          URL=$(npx wrangler deploy -c .output/server/wrangler.json --env preview 2>&1 | grep -oE 'https://[^ ]+\.workers\.dev' | head -1)
+          echo "url=$URL" >> "$GITHUB_OUTPUT"
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
+      - name: Install Playwright
+        run: npx playwright install --with-deps chromium
+
+      - name: Run E2E tests against deployed workers
+        run: npx playwright test --reporter=list
+        env:
+          DEPLOYED_COUNTER_URL: ${{ steps.deploy-counter.outputs.url }}
+          DEPLOYED_TODO_LIST_URL: ${{ steps.deploy-todo-list.outputs.url }}
+          DEPLOYED_CHAT_ROOM_URL: ${{ steps.deploy-chat-room.outputs.url }}
+          DEPLOYED_AUCTION_URL: ${{ steps.deploy-auction.outputs.url }}
+          DEPLOYED_TANSTACK_START_COUNTER_URL: ${{ steps.deploy-tanstack.outputs.url }}
+
   docs:
     runs-on: ubuntu-latest
     needs: quality
