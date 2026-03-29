@@ -40,7 +40,7 @@ interface ActorMessageSlot {
 
 interface ActorDef {
   input: z.ZodType;
-  init(input: unknown): unknown; // bivariant
+  init(input: unknown, env: unknown): unknown | Promise<unknown>; // bivariant — optionally async, receives env
   version?: number;
   initial?: string;
   roles: Record<
@@ -158,6 +158,11 @@ export function actor(
     constructor(ctx: DurableObjectState, env: Record<string, unknown>) {
       super(ctx, env);
       this.version = def.version ?? 1;
+      // Load state before any requests are served.
+      // blockConcurrencyWhile ensures no fetch/send/WebSocket during init.
+      this.ctx.blockConcurrencyWhile(async () => {
+        await this.loadState();
+      });
     }
 
     async ensureTables(): Promise<void> {
@@ -209,7 +214,7 @@ export function actor(
         const emptyParsed = def.input.safeParse({});
         if (emptyParsed.success) {
           this.actorId = this.ctx.id.toString();
-          this.state = def.init(emptyParsed.data);
+          this.state = await def.init(emptyParsed.data, this.env);
           this.initialized = true;
 
           // Initialize state tracker if using states
@@ -297,7 +302,7 @@ export function actor(
       this.actorId = input.actorId ?? this.ctx.id.toString();
 
       // Create initial state
-      this.state = def.init(parsed.data);
+      this.state = await def.init(parsed.data, this.env);
       this.initialized = true;
 
       // Initialize state tracker if using states

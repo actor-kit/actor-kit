@@ -8,8 +8,14 @@
  *   const Counter = defineActor("counter", { init, roles, messages, views });
  *   const CounterDO = createActorClass(Counter); // → DO class
  *
+ * init() can be async — useful for fetching initial state from KV/D1/R2:
+ *   init: async (input, env) => {
+ *     const config = await env.KV.get("config", "json");
+ *     return { ...config, count: 0 };
+ *   }
+ *
  * Type extraction:
- *   type State = ReturnType<typeof Counter.def.init>;
+ *   type State = Awaited<ReturnType<typeof Counter.def.init>>;
  *   type Roles = keyof typeof Counter.def.roles;
  *   type Messages = keyof typeof Counter.def.messages;
  */
