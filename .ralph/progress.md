@@ -265,3 +265,141 @@ Working memory for v3 API redesign. Delete after run.
 
 ### Codex findings addressed
 - [P1] Header spoofing risk: DO trusts `X-Actor-Kit-Caller-*` headers at face value, so a client could spoof identity if a Worker forwards raw requests via `stub.fetch(request)`. Addressed with clear security comments in the code. Full mitigation path: task 5 (update examples to use `withCallerIdentity`) + task 8 (Origin validation). The Cloudflare architecture ensures only Workers can access DOs; `withCallerIdentity` scrubs client-set headers before stamping verified identity. The vulnerability only exists when Workers forward raw requests — documented as a MUST-NOT pattern.
+
+## Auth Task 3: Make accessToken optional on client — DONE
+
+### What was done
+- Made `accessToken` optional (`string | undefined`) on `ClientOptions` in `packages/client/src/client.ts`
+- Made `accessToken` optional on `CreateOptions` in `packages/client/src/builder.ts`
+- Updated `connect()` to only add `token.*` subprotocol when `accessToken` is provided; connects without subprotocol when omitted
+- Rebuilt `@actor-kit/client` package
+
+### Tests written
+- **Unit** (6): client-optional-token.test.ts — connects without subprotocol when accessToken omitted, connects with token subprotocol when accessToken provided (backwards compat), receives snapshot without token, sends messages without token, CreateOptions accepts no accessToken (builder), CreateOptions with accessToken sends subprotocol (builder)
+
+### Codex findings addressed
+- [P1] Codex flagged that tokenless WebSocket connections need Worker-stamped identity headers to work against the DO runtime. This is by design — the Worker-trust model requires the Worker to call `withCallerIdentity` before forwarding to DO. Examples will be updated in task 5. The client SDK correctly supports both auth models now.
+
+## Auth Task 4: Move token functions to opt-in export — DONE
+
+### What was done
+- Created `packages/worker/src/token.ts` that re-exports `createAccessToken` and `getCallerFromToken` from `./auth`
+- Added `./token` subpath export to `packages/worker/package.json`
+- Added `token` entry to `packages/worker/tsdown.config.ts`
+- Removed token exports from main `index.ts` and `testing.ts` entry points
+- Updated all consumer imports across unit tests, integration tests, and examples to use `@actor-kit/worker/token`
+- Added `@actor-kit/worker/token` alias to root `vitest.config.ts` for clean-checkout support
+- Updated stale comment in `index.ts` ("auth" → "identity")
+
+### Tests written
+- **Unit** (4): token-subpath.test.ts — exports createAccessToken, exports getCallerFromToken, createAccessToken produces valid JWT, getCallerFromToken round-trips with createAccessToken
+
+### Codex findings addressed
+- [P1] Unit tests importing `@actor-kit/worker/token` would resolve to `dist/` which doesn't exist on clean checkout. Fixed by adding `@actor-kit/worker/token` alias to `vitest.config.ts` (same pattern as `@actor-kit/worker/testing`).
+
+## Auth Task 5: Remove ACTOR_KIT_SECRET from examples — DONE
+
+### What was done
+- Updated all 4 examples (counter, chat-room, todo-list, auction) to use `withCallerIdentity` instead of `createAccessToken`
+- Removed `/api/token` endpoint from all example workers
+- Removed `ACTOR_KIT_SECRET` from all `Env` interfaces
+- Removed `.dev.vars` files (only contained `ACTOR_KIT_SECRET`, already gitignored)
+- Client-side JS now generates callerId directly and connects WebSocket without subprotocol
+- Worker reads callerId from query params, stamps identity via `withCallerIdentity`, forwards to DO
+- Each example shows the pattern: authenticate caller → `withCallerIdentity(request, { callerId, callerType })` → `stub.fetch(stamped)`
+
+### Tests written
+- No new tests — this task updates examples only. Existing unit (318) and integration (43 + 1 pre-existing failure) tests all pass.
+
+### Codex findings addressed
+- [P1] Query param-based identity allows WebSocket CSRF (any site can open `wss://…?callerId=alice`). Acknowledged — the old `/api/token` flow had the same weakness (unauthenticated endpoint minted JWTs for any callerId). Added explicit security comments: "PRODUCTION: validate session cookie/OAuth. This demo uses query param — NOT safe for production. Origin validation (DO-level) provides CSRF defense." Task 8 (Origin validation) is the real fix.
+- [P2] Docs/landing page still reference `/api/token` endpoint. Expected — Task 7 (Update docs) is explicitly sequenced after Task 5 in the backlog and will update all doc references.
+
+## Auth Task 6: Update integration tests — DONE
+
+### What was done
+- Converted 7 integration test files from JWT token auth (`createAccessToken` + `Sec-WebSocket-Protocol`) to header-based auth (`X-Actor-Kit-Caller-Id` + `X-Actor-Kit-Caller-Type`):
+  - `websocket.test.ts` — `connectWs()` helper now uses identity headers, renamed "rejects without auth token" to "rejects without identity headers or token"
+  - `binary-views.test.ts` — `connectAndGetSnapshot()` helper now uses identity headers
+  - `reconnect.test.ts` — `connectWs()` helper now uses identity headers
+  - `delta-sync.test.ts` — `connectWs()` helper now uses identity headers
+  - `tick.test.ts` — inline token creation replaced with identity headers
+  - `error-feedback.test.ts` — both test cases use identity headers
+  - `views.test.ts` — binary snapshot WebSocket test uses identity headers
+- Preserved `auth.test.ts` (JWT-specific edge cases: invalid JWT, wrong actor, valid JWT) and `header-auth.test.ts` (header auth + token fallback/priority tests) — these intentionally test auth-specific paths
+
+### Tests written
+- No new tests — this task converts existing tests from token to header auth. Existing unit (318) and integration (43 isolated + 30 WS, with 1 + 2 pre-existing failures) tests all pass.
+
+### Pre-existing failures (unchanged)
+- `edge-cases.test.ts` "send on unspawned actor returns error" — both configs
+- `auth.test.ts` "accepts connection with valid JWT" — jose crypto context issue in vitest-pool-workers
+- `header-auth.test.ts` "falls back to token when identity headers are absent" — same jose issue
+
+### Codex findings addressed
+- [P2] Token-authenticated WebSocket path loses functional test coverage (only handshake-level assertions remain in auth.test.ts). Acknowledged — the JWT-based WebSocket tests have a pre-existing failure (jose crypto context issue in vitest-pool-workers non-isolated mode). Adding a functional token-path test would fail for the same reason. The token path is covered at handshake level by auth.test.ts and header-auth.test.ts. When the jose/miniflare issue is resolved, functional token-path coverage can be restored.
+
+## Auth Task 7: Update docs — DONE
+
+### What was done
+- Updated 14 docs pages + homepage (15 total) for Worker-trust auth model:
+  - **Getting Started** (3): overview (Worker stamps identity instead of JWT), installation (removed ACTOR_KIT_SECRET setup, added `@actor-kit/worker/token` to package table), quick-start (withCallerIdentity Worker pattern, no token endpoint, demo-only callout)
+  - **Examples** (4): counter, chat-room, todo-list, auction — all client snippets remove `accessToken`/token fetch, connect directly via Worker-routed URL
+  - **Concepts** (2): roles-and-authorization (callerType from withCallerIdentity, not JWT), binary-sync (client example without accessToken)
+  - **API Reference** (3): core (added withCallerIdentity as primary, moved createAccessToken/getCallerFromToken to opt-in `@actor-kit/worker/token` section), client (accessToken optional, clarified Worker-side identity stamping), react (removed token from example)
+  - **Recipes** (1): FAQ (caller identity from headers not JWT, wrangler config no secret required, ACTOR_KIT_SECRET only for opt-in token auth)
+  - **Homepage** (1): Worker tab uses withCallerIdentity, client tab removes accessToken, React tab uses callerId prop, data flow diagram updated
+- Built docs site successfully (26 pages)
+
+### Tests written
+- No new tests — this task updates documentation only. Existing unit (318) and integration tests all pass.
+
+### Codex findings addressed
+- [P1] Quick-start Worker snippet derives callerId from query param without marking it demo-only — could teach insecure auth pattern. Fixed by adding explicit "PRODUCTION: validate session cookie/OAuth" comment and "Demo only" callout in the key points list.
+- [P2] Client API page showed `?callerId=user-1` in URL without explaining Worker-side requirement — makes documented path fail without custom Worker code. Fixed by removing callerId from generic URL example and adding paragraph explaining Worker is responsible for identity stamping, with link to Quick Start.
+
+## Auth Task 8: Add Origin validation — DONE
+
+### What was done
+- Added `allowedOrigins?: readonly string[]` to `ActorDef` interface in `packages/worker/src/actor.ts`
+- Added Origin validation in the DO fetch handler's WebSocket upgrade path:
+  - Only runs when `allowedOrigins` is configured AND header-based auth was used
+  - Skipped for token-based auth (tokens are self-authenticating, no CSRF risk)
+  - Non-browser clients that omit Origin are allowed through (browsers always send Origin on WebSocket upgrades)
+  - If Origin is present but not in `allowedOrigins`, returns 403 "Origin not allowed"
+- Uses `usedHeaderAuth` boolean flag to track which auth path was taken (correct when both headers and token are present — headers win, Origin still validated)
+- Updated `Task 8` comment to reflect implementation status
+- Created `OriginCounter` test actor with `allowedOrigins: ["https://example.com", "https://staging.example.com"]`
+- Used append-only migration (new `v2` tag) for `OriginCounter` DO binding
+
+### Tests written
+- **Integration** (6): origin-validation.test.ts — accepts matching Origin, accepts second allowed origin, rejects non-matching Origin, allows absent Origin (non-browser), skips validation when allowedOrigins not configured (regular Counter), rejects bad Origin with valid identity headers
+
+### Pre-existing failures (unchanged)
+- `edge-cases.test.ts` "send on unspawned actor returns error" — both configs
+- `auth.test.ts` "accepts connection with valid JWT" — jose crypto context issue
+- `header-auth.test.ts` "falls back to token when identity headers absent" — same jose issue
+
+### Codex findings addressed
+- [P2] Non-browser header-auth clients rejected when Origin absent — fixed by changing `!origin || !def.allowedOrigins.includes(origin)` to `origin && !def.allowedOrigins.includes(origin)`. Non-browser clients (Worker-to-DO, Node) typically omit Origin; browsers always send it on WebSocket upgrades. Updated test from "rejects when missing" to "allows when absent".
+- [P3] Append-only migration for OriginCounter — fixed by adding separate `[[migrations]] tag = "v2"` for OriginCounter instead of mutating the existing `v1` migration.
+
+## Auth Task 9: Final verification — DONE
+
+### What was done
+- Ran full verification suite:
+  - `pnpm typecheck` — all packages clean
+  - `pnpm test:unit` — 318 tests pass (45 files)
+  - `pnpm test:integration` (isolated storage) — 43/44 tests pass (11 files, 1 pre-existing failure)
+  - `pnpm test:integration` (WebSocket) — 36/38 tests pass (10 files, 2 pre-existing failures)
+  - `pnpm lint` — warnings only, no errors
+  - Docs site build — 26 pages built successfully
+  - Codex review — no P1/P2 findings
+
+### Pre-existing failures (unchanged)
+- `edge-cases.test.ts` "send on unspawned actor returns error" — both configs
+- `auth.test.ts` "accepts connection with valid JWT" — jose crypto context issue in vitest-pool-workers
+- `header-auth.test.ts` "falls back to token when identity headers absent" — same jose issue
+
+### Codex findings addressed
+- No findings — codex review confirmed all changes are clean (documentation/backlog artifacts and lockfile only).

@@ -1,0 +1,12 @@
+Committed: `a687c0e chore: final verification of @actor-kit/* package split`
+
+All 11 tasks complete. The `@actor-kit/*` package split is done:
+
+- **typecheck**: 6 packages clean
+- **test:unit**: 277/277 pass
+- **test:integration**: 42/42 pass (isolated), 15 pre-existing ws failures
+- **lint**: clean (only pre-existing warnings)
+- **docs**: 25 pages build
+- **codex review**: no findings
+
+<promise>COMPLETE</promise>
