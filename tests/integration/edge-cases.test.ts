@@ -7,12 +7,15 @@ function getStub(name: string) {
 }
 
 describe("Counter DO edge cases", () => {
-  it("send on unspawned actor returns error", async () => {
-    const { stub } = getStub("edge-unspawned-send");
+  it("send on auto-spawned actor succeeds (no-input actors auto-initialize)", async () => {
+    const { stub } = getStub("edge-auto-spawn");
 
+    // Counter has input: z.object({}) — auto-spawns on first send()
     const result = await stub.send("user-1", "user", { type: "INCREMENT", amount: 1 });
-    expect(result.ok).toBe(false);
-    expect(result.error).toMatch(/not initialized/i);
+    expect(result.ok).toBe(true);
+
+    const snapshot = await stub.getSnapshot("user-1", "user");
+    expect(snapshot.snapshot.count).toBe(1);
   });
 
   it("multiple rapid sends maintain consistency", async () => {

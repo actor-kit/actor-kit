@@ -100,7 +100,6 @@ interface ActorDef {
   migrate?(persisted: unknown, fromVersion: number): unknown;
   serialize?(state: unknown): unknown;
   restore?(serialized: unknown): unknown;
-  allowedOrigins?: readonly string[];
 }
 
 // --- SQL table creation ---
@@ -655,7 +654,6 @@ export function actor(
         .find((p) => p.startsWith("token."));
 
       let callerInfo: { caller: string; callerType: "user" | "service" };
-      let usedHeaderAuth = false;
 
       if (headerCallerId && headerCallerType) {
         // Header-based auth: Worker already authenticated the caller.
@@ -663,7 +661,6 @@ export function actor(
           return new Response("Invalid caller type", { status: 401 });
         }
         callerInfo = { caller: headerCallerId, callerType: headerCallerType };
-        usedHeaderAuth = true;
       } else if (tokenProtocol) {
         // Token fallback: validate JWT from subprotocol.
         const token = tokenProtocol.slice("token.".length);
@@ -687,19 +684,6 @@ export function actor(
         }
       } else {
         return new Response("Missing caller identity", { status: 401 });
-      }
-
-      // --- Origin validation (header-based auth only) ---
-      // When using identity headers (Worker-trust model), validate the Origin header
-      // to prevent browser-based CSRF. Token-based auth is self-authenticating —
-      // browsers can't forge the Sec-WebSocket-Protocol value, so no CSRF risk.
-      // Non-browser clients (Worker-to-DO, Node) typically omit Origin — allow them
-      // through. Browsers always send Origin on WebSocket upgrades.
-      if (def.allowedOrigins && usedHeaderAuth) {
-        const origin = request.headers.get("Origin");
-        if (origin && !def.allowedOrigins.includes(origin)) {
-          return new Response("Origin not allowed", { status: 403 });
-        }
       }
 
       // Load state if not already loaded (header-based auth skips the token path)
