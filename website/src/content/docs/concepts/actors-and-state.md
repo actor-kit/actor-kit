@@ -81,7 +81,7 @@ Whether you need to explicitly spawn an actor depends on its `input` schema.
 
 ### Auto-spawn (no required input)
 
-Actors with no required input auto-initialize on the first `fetch()` — no `spawn()` call needed. This is the common case for actors like counters, chat rooms, or any actor where the initial state doesn't depend on external data:
+Actors with no required input auto-initialize on the first `fetch()` — no `spawn()` call needed:
 
 ```typescript
 input: z.object({}),
