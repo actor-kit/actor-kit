@@ -99,7 +99,7 @@ Requirements:
 ### 3. SQLite CDC (Change Data Capture)
 
 ```typescript
-export const TodoList = actor("todo-list", {
+const todoList = defineActor({
   cdc: true, // opt-in
   // ...
 });
@@ -129,7 +129,7 @@ Requirements:
 ### 5. `routeToActor()` helper
 
 ```typescript
-import { routeToActor } from "@actor-kit/worker";
+import { parseActorRoute } from "@actor-kit/worker";
 
 app.all("/api/:actorType/:actorId/*", async (c) => {
   return routeToActor(c.req.raw, c.env, {

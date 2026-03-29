@@ -11,62 +11,62 @@ Actor Kit v2 is a framework for building real-time, event-driven applications on
 ## Module boundaries
 
 ```
-actor-kit/
-├── src/
-│   ├── core/          Public API: actor(), schema(), view(), message(), ref(), emit()
-│   ├── schema/        schema() builder, type primitives, binary codec
-│   ├── runtime/       DO class factory, WebSocket lifecycle, persistence, outbox
-│   ├── auth/          JWT creation (createAccessToken) + validation (getCallerFromRequest)
-│   ├── client/        connect(), subscribe, send, trigger, reconnection
-│   ├── react/         createContext(), useView(), useSend(), useRole(), Provider
-│   └── test/          testActor(), sendWithEffects(), view assertions
+packages/
+├── core/              schema() builder, type primitives, binary codec, shared types
+├── worker/            defineActor(), createActorClass(), message(), DO runtime, identity
+├── client/            actorClient(contract).create(), subscribe, send, reconnection
+├── react/             actorContext(contract), useView(), useSend(), useRole(), Provider
+├── test/              testActor(contract), sendWithEffects(), view assertions
+└── storybook/         withActorKit() Storybook decorator, mock client
 ```
 
 ### Dependency flow
 
 ```
-schema/ ← core/ ← runtime/        (server-side, imports cloudflare:workers)
-schema/ ← core/ ← client/         (browser-side, no CF deps)
-               ← react/           (browser-side, imports react)
-               ← test/            (test-time, no CF deps for unit tests)
-               ← auth/            (standalone, imports jose)
+@actor-kit/core ← @actor-kit/worker        (server-side, imports cloudflare:workers)
+@actor-kit/core ← @actor-kit/client         (browser-side, no CF deps)
+@actor-kit/core ← @actor-kit/react          (browser-side, imports react)
+@actor-kit/core ← @actor-kit/test           (test-time, no CF deps for unit tests)
 ```
 
-Critical constraint: `client/`, `react/`, and `test/` must NEVER import from `runtime/`. The runtime imports `cloudflare:workers` which cannot ship to browsers or run in plain Node.
+Critical constraint: `@actor-kit/client`, `@actor-kit/react`, and `@actor-kit/test` must NEVER import from `@actor-kit/worker`. The worker package imports `cloudflare:workers` which cannot ship to browsers or run in plain Node.
 
-### Subpath exports
+### Package exports
 
-```json
-{
-  "exports": {
-    ".":        "./dist/core/index.js",
-    "./client": "./dist/client/index.js",
-    "./react":  "./dist/react/index.js",
-    "./test":   "./dist/test/index.js"
-  }
-}
-```
-
-The root export (`.`) includes the server-side runtime. Users import it in their Worker entrypoint. `./client` and `./react` are browser-safe.
+Each package is published independently under the `@actor-kit/*` scope:
+- `@actor-kit/core` — schema primitives, types, binary codec
+- `@actor-kit/worker` — `defineActor()`, `createActorClass()`, `message()`, `withCallerIdentity()`
+- `@actor-kit/client` — `actorClient(contract).create()`, browser-safe WebSocket client
+- `@actor-kit/react` — `actorContext(contract)`, React hooks and Provider
+- `@actor-kit/test` — `testActor(contract)`, test harness
+- `@actor-kit/storybook` — `withActorKit()` Storybook decorator
 
 ## Type system
 
-### The `actor()` function
+### The `defineActor()` + `createActorClass()` pattern
 
 ```typescript
-function actor<TEnv>(
-  name: string,
-  def: ActorDef<TEnv, ...inferred>,
-): ActorClass<...inferred>;
+import { defineActor, createActorClass, message } from "@actor-kit/worker";
 
-// TEnv is the only explicit generic — Worker env bindings type
-// Everything else is inferred from the definition object
+// defineActor() returns a typed contract (not a DO class)
+const counter = defineActor({
+  init: () => ({ count: 0 }),
+  roles: { anyone: () => true },
+  messages: {
+    anyone: {
+      increment: message(z.object({}), (state) => ({ ...state, count: state.count + 1 })),
+    },
+  },
+  views: { /* ... */ },
+});
+
+// createActorClass() converts contract → DO class
+export const Counter = createActorClass(counter);
 ```
 
 Key type relationships:
 
 ```
-TEnv         ← explicit generic parameter (Worker env bindings)
 TState       ← inferred from init() return type
 TRoles       ← inferred from roles object keys + predicates
 TMessages    ← constrained to keys of TRoles, values are Record<string, MessageDef>
@@ -78,10 +78,10 @@ TAllMessages ← union of all message types across all roles (what the client se
 ### The `message()` helper
 
 ```typescript
-function message<TSchema extends z.ZodType, TState, TEnv>(
+function message<TSchema extends z.ZodType, TState>(
   schema: TSchema,
-  handler: (state: TState, payload: z.infer<TSchema>, ctx: MessageContext<TEnv>) => TState | Promise<TState>,
-): MessageDef<z.infer<TSchema>, TState, TEnv>;
+  handler: (state: TState, payload: z.infer<TSchema>, ctx: MessageContext) => TState,
+): MessageDef<z.infer<TSchema>, TState>;
 ```
 
 Every message handler must be wrapped in `message()` to pair a Zod schema with the handler. The schema is used at runtime for boundary parsing — invalid payloads are rejected before the handler runs.
@@ -89,12 +89,12 @@ Every message handler must be wrapped in `message()` to pair a Zod schema with t
 ### MessageContext
 
 ```typescript
-type MessageContext<TEnv> = {
-  caller: string;              // "user-123" — from JWT sub claim
-  callerType: "user" | "service";  // from JWT act claim (stable identity, not authorization)
+type MessageContext = {
+  caller: string;              // "user-123" — from identity headers
+  callerType: "user" | "service";  // from identity headers (stable identity, not authorization)
   role: string;                // "owner" — computed from state by role predicates
   env: TEnv;                   // Worker env bindings (queues, AI, secrets, etc.)
-  emit: EmitFn;                // (type, payload) → void — transactional outbox
+  emit: EmitFn;                // (effect) → void — transactional outbox
 };
 ```
 
@@ -108,7 +108,7 @@ type RolePredicate<TState> = (
 ) => boolean;
 ```
 
-Role predicates receive `callerType` from JWT claims for distinguishing service vs user callers. Authorization is still derived from state — `callerType` is identity metadata, not a role.
+Role predicates receive `callerType` from identity headers for distinguishing service vs user callers. Authorization is still derived from state — `callerType` is identity metadata, not a role.
 
 ### Schema type inference
 
@@ -141,7 +141,7 @@ type TView =
 
 // Client code narrows via discriminant:
 if (view.role === "owner") {
-  view.todos;  // ✓ typed
+  view.todos;  // typed
 }
 ```
 
@@ -151,16 +151,15 @@ if (view.role === "owner") {
 
 ```
 1. HTTP request arrives at Worker
-2. Worker calls ref(env, "todo-list", "abc123")
-3. ref() gets DO stub: env.TODO_LIST.get(env.TODO_LIST.idFromName("abc123"))
-4. Worker calls stub.spawn({ creator: "user-1" })
-5. DO activates (or wakes from hibernation)
-6. If first spawn:
+2. Worker stamps identity via withCallerIdentity(request, { callerId, callerType })
+3. Worker forwards to DO via stub.fetch(stampedRequest)
+4. DO activates (or wakes from hibernation)
+5. If first spawn:
    a. Validate input against Zod schema
    b. Run init(input) → initial state
    c. Persist state to SQLite
    d. Persist actor metadata (name, id, version)
-7. If already spawned: no-op (idempotent)
+6. If already spawned: no-op (idempotent)
 ```
 
 ### Message processing
@@ -168,37 +167,36 @@ if (view.role === "owner") {
 ```
 1. WebSocket frame arrives (binary)
 2. Decode message type + payload
-3. Validate JWT (already validated on connect, but check expiry)
+3. Extract caller identity from headers (stamped by Worker via withCallerIdentity)
 4. Resolve caller role: iterate roles top-to-bottom, first match wins
 5. Validate message type exists for this role
 6. Validate payload against Zod schema for this message type
 7. Run handler: (state, payload, { caller, role, env, emit }) → newState
-8. If handler is async: await it
-9. BEGIN SQLite transaction:
+8. BEGIN SQLite transaction:
    a. Persist new state snapshot
    b. Persist any emit() calls to outbox table
    COMMIT
-10. Compute view for each connected caller (may differ per role)
-11. Diff previous view vs new view per caller
-12. Encode delta as binary frame
-13. Send binary frame to each WebSocket
-14. Drain outbox (async, outside transaction)
+9. Compute view for each connected caller (may differ per role)
+10. Diff previous view vs new view per caller
+11. Encode delta as binary frame
+12. Send binary frame to each WebSocket
+13. Drain outbox (async, outside transaction)
 ```
 
 ### WebSocket lifecycle
 
 ```
 Connect:
-  1. Validate JWT
+  1. Extract caller identity from headers (Worker-trust) or JWT (fallback)
   2. Resolve role (reject with 403 if no match)
   3. Register WebSocket in connections map (keyed by caller)
   4. Send SNAPSHOT frame (full binary state for this caller's view)
-  5. Run on.connect(state, caller) if defined
+  5. Run lifecycle.connect(state, { caller }, ctx) if defined
   6. Persist state if connect handler changed it
   7. Broadcast view updates to ALL connected callers
 
 Disconnect:
-  1. Run on.disconnect(state, caller) if defined
+  1. Run lifecycle.disconnect(state, { caller }, ctx) if defined
   2. Persist state if disconnect handler changed it
   3. Remove WebSocket from connections map
   4. Broadcast view updates to remaining callers
@@ -305,30 +303,24 @@ Two mechanisms:
 ```
 Client                    Worker                    DO
   │                         │                        │
-  │ GET /token              │                        │
+  │ Request                 │                        │
   │ (with app auth)         │                        │
   │────────────────────────>│                        │
-  │                         │ createAccessToken()    │
-  │                         │ JWT: sub=user-123      │
-  │                         │      jti=todo-456      │
-  │                         │      aud=todo-list     │
-  │<────────────────────────│                        │
-  │ { token: "eyJ..." }    │                        │
-  │                         │                        │
-  │ WS /api/todo-list/456  │                        │
-  │ Authorization: Bearer   │                        │
-  │────────────────────────>│ routeToActor()         │
+  │                         │ Authenticate caller    │
+  │                         │ withCallerIdentity()   │
+  │                         │ stamps X-Actor-Kit-*   │
+  │                         │ headers on request     │
   │                         │───────────────────────>│
-  │                         │                        │ Validate JWT
-  │                         │                        │ Extract caller = "user-123"
+  │                         │                        │ Extract identity from headers
   │                         │                        │ Resolve role
   │<─────────────────────────────────────────────────│
   │ SNAPSHOT (binary)       │                        │
 ```
 
-JWT claims:
-- `sub`: caller identity (plain string)
-- `jti`: actor ID (ties token to specific actor)
-- `aud`: actor type (prevents cross-type token reuse)
-- `exp`: expiry (default 30 days)
-- Signed with HS256 using `ACTOR_KIT_SECRET` from Worker env
+Identity model:
+- Worker authenticates the caller (session cookie, OAuth, etc.)
+- Worker stamps identity via `withCallerIdentity(request, { callerId, callerType })`
+- DO trusts the Worker — extracts identity from `X-Actor-Kit-Caller-Id` / `X-Actor-Kit-Caller-Type` headers
+- `withCallerIdentity()` scrubs any inbound identity headers first (prevents client spoofing)
+- CORS/Origin validation is handled at the Worker level (e.g., Hono `cors()` middleware), not inside the actor
+- JWT via `Sec-WebSocket-Protocol` is available as a fallback for external clients

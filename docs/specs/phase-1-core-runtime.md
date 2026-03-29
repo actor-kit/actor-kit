@@ -8,7 +8,7 @@ Implement the foundational runtime: `actor()`, `schema()`, `view()`, `message()`
 
 ### 1. `schema()` builder
 
-**File**: `packages/actor-kit/src/schema/schema.ts`
+**File**: `packages/core/src/schema.ts`
 
 Define view shapes with runtime type information and TypeScript inference.
 
@@ -37,7 +37,7 @@ Requirements:
 
 ### 2. `view()` helper
 
-**File**: `packages/actor-kit/src/core/view.ts`
+**File**: `packages/worker/src/view.ts`
 
 Pairs a schema with a projection function.
 
@@ -55,7 +55,7 @@ Requirements:
 
 ### 3. `message()` helper
 
-**File**: `packages/actor-kit/src/core/message.ts`
+**File**: `packages/worker/src/message.ts`
 
 Pairs a Zod schema with a handler function. Every message handler must have a runtime schema for payload validation at the boundary.
 
@@ -90,11 +90,11 @@ Requirements:
 - `message()` objects can be shared across roles (extract to a variable, reference in multiple roles)
 - Handlers can be sync or async
 
-### 4. `actor()` function
+### 4. `defineActor()` + `createActorClass()`
 
-**File**: `packages/actor-kit/src/core/actor.ts`
+**File**: `packages/worker/src/define.ts` + `packages/worker/src/actor.ts`
 
-Single function that defines an actor and returns a DO class. Takes a generic `TEnv` parameter for typed Worker env bindings.
+`defineActor()` returns a typed contract. `createActorClass()` converts it to a DO class.
 
 ```typescript
 type Env = {
@@ -119,7 +119,7 @@ const toggle = message(
     }),
 );
 
-export const TodoList = actor<Env>("todo-list", {
+const todoList = defineActor({
   input: z.object({ creator: z.string() }),
 
   init: (input) => ({
@@ -191,20 +191,18 @@ export const TodoList = actor<Env>("todo-list", {
     })),
   },
 
-  on: {
-    connect: (state, caller, ctx) => state,
-    disconnect: (state, caller, ctx) => state,
-    REPORT_LOADED: (state, result) =>
-      produce(state, d => { d.report = result; d.reportStatus = "loaded"; }),
-    REPORT_FAILED: (state, error) =>
-      produce(state, d => { d.reportError = error; d.reportStatus = "failed"; }),
+  lifecycle: {
+    connect: (state, { caller }, ctx) => state,
+    disconnect: (state, { caller }, ctx) => state,
   },
 });
+
+export const TodoList = createActorClass(todoList);
 ```
 
 Requirements:
-- `actor<TEnv>(name, def)` — TEnv is the Worker env type, flows into `MessageContext<TEnv>`
-- Returns a class that extends `DurableObject` (from `cloudflare:workers`)
+- `defineActor(def)` — returns a typed contract preserving TState, TInput, TMessages, TRoles, TViews
+- `createActorClass(contract)` — returns a class that extends `DurableObject` (from `cloudflare:workers`)
 - TState inferred from `init()` return type
 - TRoles inferred from `roles` object keys
 - TMessages constrained: keys must be subset of TRoles keys, values must be `Record<string, MessageDef>`
@@ -217,7 +215,7 @@ Requirements:
 
 ### 5. Role evaluation
 
-**File**: `packages/actor-kit/src/runtime/roles.ts`
+**File**: `packages/worker/src/runtime/roles.ts`
 
 ```typescript
 type RolePredicate<TState> = (
@@ -243,7 +241,7 @@ Requirements:
 
 ### 6. Message routing
 
-**File**: `packages/actor-kit/src/runtime/messages.ts`
+**File**: `packages/worker/src/runtime/message-router.ts`
 
 Requirements:
 - Given a role and message type, look up the `MessageDef`
@@ -260,9 +258,9 @@ Requirements:
 
 ### 7. DO class generation
 
-**File**: `packages/actor-kit/src/runtime/durable-actor.ts`
+**File**: `packages/worker/src/actor.ts`
 
-The class returned by `actor()`. Extends `DurableObject`.
+The class returned by `createActorClass()`. Extends `DurableObject`.
 
 Methods:
 - `spawn(input)` — idempotent. Validates input with `safeParse`, runs `init()`, persists metadata + state. Invalid input = error, actor never created.
@@ -271,9 +269,9 @@ Methods:
 - `fetch(request)` — handles WebSocket upgrade, forwards to WS lifecycle.
 
 WebSocket lifecycle:
-- On connect: validate JWT, extract caller + callerType, resolve role (reject 403 if no match), add to connections map, send full snapshot, run `on.connect`.
+- On connect: extract caller identity from headers (Worker-trust) or JWT (fallback), resolve role (reject 403 if no match), add to connections map, send full snapshot, run `lifecycle.connect`.
 - On message: decode JSON, route to `send()`.
-- On close: run `on.disconnect`, remove from connections map.
+- On close: run `lifecycle.disconnect`, remove from connections map.
 - On error: remove from connections map.
 
 Broadcasting:
@@ -283,7 +281,7 @@ Broadcasting:
 
 ### 8. SQLite persistence
 
-**File**: `packages/actor-kit/src/runtime/storage.ts`
+**File**: `packages/worker/src/runtime/storage.ts`
 
 Requirements:
 - Create tables on first spawn (actor_meta, snapshots, outbox, emission_failures)
@@ -294,7 +292,7 @@ Requirements:
 
 ### 9. `emit()` and `request()` — transactional outbox
 
-**File**: `packages/actor-kit/src/runtime/outbox.ts`
+**File**: `packages/worker/src/runtime/outbox.ts`
 
 Two functions on `ctx`:
 
@@ -341,22 +339,22 @@ Requirements:
 - After 3 failures: move to emission_failures, deliver `onError` if it was a request, or system `emissionFailed` event if it was a fire-and-forget emit
 - On DO restart: drain pending outbox entries (callbacks survive crash because they're stored as strings)
 
-### 10. Auth helpers
+### 10. Identity helpers
 
-**File**: `packages/actor-kit/src/auth/`
+**File**: `packages/worker/src/identity.ts`
 
-- `createAccessToken({ actorType, actorId, callerId, callerType, secret, expiresIn? })` → JWT string
-- `getCallerFromRequest(request, actorType, actorId, secret)` → `{ caller: string, callerType: "user" | "service" }`
-- JWT claims: `sub` = callerId, `act` = callerType, `jti` = actorId, `aud` = actorType
-- HS256 signing
-- Self-contained — no imports from runtime (no `cloudflare:workers`)
+- `withCallerIdentity(request, { callerId, callerType })` — stamps verified identity headers on a request
+- Scrubs any inbound `X-Actor-Kit-Caller-*` headers first (prevents client spoofing)
+- Worker authenticates the caller, DO trusts the Worker
+- JWT via `Sec-WebSocket-Protocol` available as fallback for external clients
+- CORS/Origin validation is handled at the Worker level (e.g., Hono `cors()` middleware), not inside the actor
 
 ### 11. `testActor()` helper
 
-**File**: `packages/actor-kit/src/test/test-actor.ts`
+**File**: `packages/test/src/test-actor.ts`
 
 Requirements:
-- `testActor(ActorDef)` returns a test harness
+- `testActor(contract)` returns a test harness
 - `t.init(input)` — validates input, runs init, returns state
 - `t.send(state, caller, event)` — resolves role (default callerType: "user"), validates message schema, runs handler, returns new state
 - `t.send(state, caller, event, { callerType: "service" })` — override callerType
@@ -368,27 +366,28 @@ Requirements:
 
 ### 12. States (optional)
 
-**File**: `packages/actor-kit/src/runtime/states.ts`
+**File**: `packages/worker/src/runtime/states.ts`
 
 Three modes — all supported in Phase 1:
 
 **Mode A: No states** — messages at top level. All messages always valid (gated by role + guard only).
 
 ```typescript
-actor<Env>("counter", {
+const counter = defineActor({
   init: () => ({ count: 0 }),
   roles: { anyone: () => true },
   messages: {
     anyone: { INCREMENT: increment },
   },
-  views: { ... },
+  views: { /* ... */ },
 });
+export const Counter = createActorClass(counter);
 ```
 
 **Mode B: Sequential states** — one active state at a time. Messages defined per state × role.
 
 ```typescript
-actor<Env>("auction", {
+const auction = defineActor({
   init: (input) => ({ item: input.item, bids: [], winner: null }),
   initial: "bidding",
   roles: {
@@ -429,7 +428,7 @@ actor<Env>("auction", {
 **Mode C: Parallel states** — multiple independent regions active simultaneously.
 
 ```typescript
-actor<Env>("player", {
+const player = defineActor({
   init: () => ({ health: 100, ... }),
   roles: { player: () => true },
   states: {
@@ -477,7 +476,7 @@ Requirements:
 
 ## Acceptance criteria
 
-1. A counter actor can be defined with `actor()` and deployed to CF Workers
+1. A counter actor can be defined with `defineActor()` + `createActorClass()` and deployed to CF Workers
 2. WebSocket connections receive JSON snapshots on connect
 3. Messages are routed to the correct role's handler
 4. Unauthorized messages are rejected (wrong role)

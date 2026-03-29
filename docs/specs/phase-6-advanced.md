@@ -19,7 +19,7 @@ Phases 1-5 complete.
 ### 1. Actor supervision
 
 ```typescript
-export const GameServer = actor<Env>("game-server", {
+const gameServer = defineActor({
   // ...
 
   supervise: {
@@ -53,7 +53,7 @@ Requirements:
 ### 2. Observability hooks
 
 ```typescript
-actor<Env>("todo-list", {
+const todoList = defineActor({
   // ...
 
   observe: {

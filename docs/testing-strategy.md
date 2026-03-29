@@ -5,22 +5,22 @@
 Following Kent C. Dodds' testing trophy: more integration tests, fewer unit tests. Confidence over coverage.
 
 ```
-          ╱╲
-         ╱  ╲        E2E (Playwright — future, not Phase 1)
-        ╱────╲
-       ╱      ╲      Integration (vitest-pool-workers: real DO, real WS, real SQLite)
-      ╱────────╲
-     ╱          ╲    Integration (testActor: transitions + roles + views, no CF runtime)
-    ╱────────────╲
-   ╱              ╲   Unit (schema encoder/decoder, auth, pure helpers)
-  ╱────────────────╲
+          /\
+         /  \        E2E (Playwright — future, not Phase 1)
+        /----\
+       /      \      Integration (vitest-pool-workers: real DO, real WS, real SQLite)
+      /--------\
+     /          \    Integration (testActor: transitions + roles + views, no CF runtime)
+    /------------\
+   /              \   Unit (schema encoder/decoder, auth, pure helpers)
+  /----------------\
 ```
 
 ## Test levels
 
 ### Level 1: Unit tests (pure functions)
 
-**What**: Schema encoder/decoder, JWT helpers, role evaluation, individual message handlers.
+**What**: Schema encoder/decoder, identity helpers, role evaluation, individual message handlers.
 **How**: Plain Vitest. No CF runtime, no network.
 **Speed**: < 1ms per test.
 **Location**: `tests/unit/`
@@ -60,63 +60,45 @@ describe("schema encoder", () => {
 ```typescript
 import { describe, it, expect } from "vitest";
 import { testActor } from "@actor-kit/test";
-import { TodoList } from "../../packages/actor-kit/src/examples/todo";
+import { todoContract } from "./todo-contract";
 
 describe("TodoList actor", () => {
-  const t = testActor(TodoList);
+  const t = testActor(todoContract);
 
   it("initializes with empty todos", () => {
-    const state = t.init({ creator: "alice" });
-    expect(state.todos).toEqual([]);
-    expect(state.ownerId).toBe("alice");
+    t.init({ creator: "alice" });
+    const view = t.view("alice");
+    expect(view.todos).toEqual([]);
   });
 
   it("owner can add todo", () => {
-    const state = t.init({ creator: "alice" });
-    const next = t.send(state, "alice", { type: "ADD_TODO", text: "Buy milk" });
-    expect(next.todos).toHaveLength(1);
-    expect(next.todos[0].text).toBe("Buy milk");
+    t.init({ creator: "alice" });
+    t.send("ADD_TODO", { text: "Buy milk" });
+    const view = t.view("alice");
+    expect(view.todos).toHaveLength(1);
+    expect(view.todos[0].text).toBe("Buy milk");
   });
 
   it("resolves owner role for creator", () => {
-    const state = t.init({ creator: "alice" });
-    expect(t.role(state, "alice")).toBe("owner");
+    t.init({ creator: "alice" });
+    expect(t.role("alice")).toBe("owner");
   });
 
   it("resolves viewer role for unknown caller", () => {
-    const state = t.init({ creator: "alice" });
-    expect(t.role(state, "stranger")).toBe("viewer");
+    t.init({ creator: "alice" });
+    expect(t.role("stranger")).toBe("viewer");
   });
 
   it("rejects messages not in caller's role", () => {
-    const state = t.init({ creator: "alice" });
+    t.init({ creator: "alice" });
     expect(() => {
-      t.send(state, "stranger", { type: "ADD_TODO", text: "Nope" });
+      t.send("ADD_TODO", { text: "Nope" });
     }).toThrow(); // "stranger" is "viewer", viewer has no ADD_TODO
   });
 
-  it("owner view includes todos", () => {
-    let state = t.init({ creator: "alice" });
-    state = t.send(state, "alice", { type: "ADD_TODO", text: "Buy milk" });
-    const view = t.view(state, "alice");
-    expect(view.role).toBe("owner");
-    expect(view.todos).toHaveLength(1);
-  });
-
-  it("viewer view includes counts, not todos", () => {
-    let state = t.init({ creator: "alice" });
-    state = t.send(state, "alice", { type: "ADD_TODO", text: "Buy milk" });
-    const view = t.view(state, "stranger");
-    expect(view.role).toBe("viewer");
-    expect(view.todoCount).toBe(1);
-    expect(view).not.toHaveProperty("todos");
-  });
-
   it("captures emissions from emit()", () => {
-    let state = t.init({ creator: "alice" });
-    const { state: next, emissions } = t.sendWithEffects(
-      state, "alice", { type: "NOTIFY_ALL" }
-    );
+    t.init({ creator: "alice" });
+    const { state, emissions } = t.sendWithEffects("NOTIFY_ALL", {});
     expect(emissions).toHaveLength(1);
     expect(emissions[0].type).toBe("queue");
   });
@@ -201,21 +183,21 @@ Red-green-refactor for every feature:
 
 | Concern | Unit | testActor | Integration |
 |---------|------|-----------|-------------|
-| Schema encode/decode | ✓ | | |
-| JWT creation/validation | ✓ | | |
-| Role evaluation | | ✓ | |
-| Message routing | | ✓ | |
-| State transitions | | ✓ | |
-| View computation | | ✓ | |
-| Emission capture | | ✓ | |
-| Persistence | | | ✓ |
-| WebSocket lifecycle | | | ✓ |
-| Binary frame encoding | | | ✓ |
-| Reconnection | | | ✓ |
-| Outbox drain | | | ✓ |
-| DO Alarms | | | ✓ |
-| Actor-to-actor RPC | | | ✓ |
-| Schema migration | | ✓ | ✓ |
+| Schema encode/decode | x | | |
+| Identity helpers | x | | |
+| Role evaluation | | x | |
+| Message routing | | x | |
+| State transitions | | x | |
+| View computation | | x | |
+| Emission capture | | x | |
+| Persistence | | | x |
+| WebSocket lifecycle | | | x |
+| Binary frame encoding | | | x |
+| Reconnection | | | x |
+| Outbox drain | | | x |
+| DO Alarms | | | x |
+| Actor-to-actor RPC | | | x |
+| Schema migration | | x | x |
 
 ## Fakes over mocks
 

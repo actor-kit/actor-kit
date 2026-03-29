@@ -10,15 +10,15 @@ Phase 3 complete. Client SDK working.
 
 ## Deliverables
 
-### 1. `createContext()`
+### 1. `actorContext()`
 
-**File**: `packages/actor-kit/src/react/context.ts`
+**File**: `packages/react/src/actor-context.ts`
 
 ```typescript
-import { createContext } from "@actor-kit/react";
-import { TodoList } from "./actors/todo";
+import { actorContext } from "@actor-kit/react";
+import { todoContract } from "./contracts/todo";
 
-const TodoContext = createContext(TodoList);
+const TodoContext = actorContext(todoContract);
 ```
 
 Returns an object with: `Provider`, `useView`, `useSend`, `useRole`, `useSelector`, `useConnectionState`.
@@ -37,7 +37,7 @@ Returns an object with: `Provider`, `useView`, `useSend`, `useRole`, `useSelecto
 ```
 
 Requirements:
-- Creates `ActorConnection` via `connect()` on mount
+- Creates client via `actorClient(contract).create()` on mount
 - Disconnects on unmount
 - Provides connection context to children
 - `accessToken` can change (reconnects with new token)

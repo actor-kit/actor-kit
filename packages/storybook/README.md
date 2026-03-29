@@ -11,13 +11,13 @@ pnpm add -D @actor-kit/storybook
 ## Usage
 
 ```tsx
-import { actorDecorator } from "@actor-kit/storybook";
+import { withActorKit } from "@actor-kit/storybook";
 import { counterContract } from "./contract";
 
 export default {
   title: "Counter",
   decorators: [
-    actorDecorator(counterContract, {
+    withActorKit(counterContract, {
       initialState: { count: 5 },
     }),
   ],

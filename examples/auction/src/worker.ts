@@ -22,7 +22,7 @@ export default {
       // Authenticate the caller.
       // PRODUCTION: validate a session cookie, OAuth token, or similar credential here.
       // This demo uses a query param for simplicity — NOT safe for production.
-      // Origin validation (DO-level) provides CSRF defense for deployed apps.
+      // CORS/Origin validation is handled at the Worker level (e.g., Hono cors() middleware), not inside the actor.
       const callerId = url.searchParams.get("user") ?? `bidder-${crypto.randomUUID().slice(0, 6)}`;
 
       const id = env.AUCTION.idFromName(auctionId);

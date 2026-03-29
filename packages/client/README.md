@@ -17,7 +17,6 @@ import { counterContract } from "./contract";
 const client = actorClient(counterContract).create({
   url: "wss://my-worker.example.com",
   actorId: "counter-1",
-  token: "jwt-token",
 });
 
 // Subscribe to view updates
@@ -31,6 +30,8 @@ client.send("increment", {});
 // Disconnect when done
 client.disconnect();
 ```
+
+The client connects to the Worker, which authenticates the caller and stamps identity via `withCallerIdentity()`. No access token is required on the client side in the Worker-trust model.
 
 ## Docs
 

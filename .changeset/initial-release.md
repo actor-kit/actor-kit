@@ -16,7 +16,6 @@ Key features:
 - Flat messages with role-based guards for authorization
 - Binary-first sync with `schema()` builder, delta encoding, and per-role views
 - Worker-trust auth model via `withCallerIdentity()` (JWT auth available as opt-in)
-- Origin validation for WebSocket CSRF protection
 - Contract-derived client SDK (`actorClient(contract)`), React hooks (`actorContext(contract)`), test harness (`testActor(contract)`), and DO-to-DO refs (`createRef(contract)`)
 - Sync-only message handlers with Immer `produce()` for state mutations
 - Transactional side effects via `emit()` → SQLite outbox

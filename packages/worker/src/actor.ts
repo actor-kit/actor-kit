@@ -653,7 +653,7 @@ export function actor(
       //   SECURITY: withCallerIdentity scrubs inbound headers before setting verified ones.
       //   Workers MUST call withCallerIdentity() before forwarding to the DO — forwarding
       //   raw client requests (stub.fetch(request)) allows header spoofing.
-      //   CSRF defense is the Worker's responsibility (e.g., Origin validation before forwarding).
+      //   CORS/Origin validation is handled at the Worker level (e.g., Hono cors() middleware), not inside the actor.
       // Priority 2: JWT token in Sec-WebSocket-Protocol (backward compat / external clients).
       const headerCallerId = request.headers.get(CALLER_ID_HEADER);
       const headerCallerType = request.headers.get(CALLER_TYPE_HEADER);

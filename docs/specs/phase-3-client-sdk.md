@@ -10,24 +10,22 @@ Phase 2 complete. Binary encoding/decoding working.
 
 ## Deliverables
 
-### 1. `connect()` function
+### 1. `actorClient(contract).create()` function
 
-**File**: `packages/actor-kit/src/client/connect.ts`
+**File**: `packages/client/src/builder.ts`
 
 ```typescript
-import { connect } from "@actor-kit/client";
+import { actorClient } from "@actor-kit/client";
 
-const todo = await connect(TodoList, {
-  host: "example.com",
+const client = actorClient(todoContract).create({
+  url: "wss://example.com",
   actorId: "my-list",
-  accessToken: jwt,
 });
 ```
 
 Requirements:
-- Opens WebSocket to `wss://{host}/api/{actorType}/{actorId}`
-- Sends JWT as Authorization header (or query param if headers unsupported)
-- Receives initial SNAPSHOT frame, decodes using actor's view schemas
+- Opens WebSocket to the provided URL
+- Receives initial SNAPSHOT frame, decodes using contract's view schemas
 - Returns a typed `ActorConnection<TView, TAllMessages>` object
 - `TView` is the discriminated union of all role views (narrowed via `view.role`)
 - `TAllMessages` is the **union of all message types across all roles** — role enforcement is server-side only. The client can send any message; the server rejects unauthorized ones with an error frame.
@@ -75,10 +73,9 @@ Requirements:
 ### 4. REDIRECT handling
 
 ```typescript
-const zone = await connect(Zone, {
-  host: "example.com",
+const zone = actorClient(zoneContract).create({
+  url: "wss://example.com",
   actorId: "plains-central",
-  accessToken: jwt,
   onRedirect: (target) => {
     console.log(`Transferring to ${target.actorId}...`);
   },
@@ -110,7 +107,7 @@ Requirements:
 
 ## Acceptance criteria
 
-1. `connect()` establishes WebSocket and receives typed view
+1. `actorClient(contract).create()` establishes WebSocket and receives typed view
 2. `subscribe()` fires on every view update
 3. `send()` delivers message to actor, view updates arrive
 4. Reconnection works: brief disconnect → reconnect → delta applied

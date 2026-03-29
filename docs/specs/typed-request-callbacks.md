@@ -42,7 +42,7 @@ ctx.request({
 ### Actor definition — `lifecycle` + `callbacks`
 
 ```typescript
-export const PriceChecker = actor<Env>("price-checker", {
+const priceChecker = defineActor({
   input: z.object({}),
   init: () => ({ prices: {} as Record<string, number>, errors: [] as string[] }),
 
@@ -133,30 +133,30 @@ type CallbackHandler<TState, TResult, TMeta, TEnv> = (
 ## Implementation Plan
 
 ### Phase 1: `callback()` helper + `CallbackDef` type
-- New file: `packages/actor-kit/src/core/callback.ts`
-- Export from `packages/actor-kit/src/core/index.ts`
+- New file: `packages/worker/src/callback.ts`
+- Export from `packages/worker/src/index.ts`
 - Tests: `tests/unit/callback.test.ts` — type inference, Zod validation
 
 ### Phase 2: Update `RequestConfig` to accept callback defs
-- Modify: `packages/actor-kit/src/core/message.ts`
+- Modify: `packages/worker/src/message.ts`
 - `request()` on `MessageContext` becomes generic
 - Outbox stores meta alongside the effect
 - Tests: `tests/unit/request-typed.test.ts` — type tests for request + callback linking
 
 ### Phase 3: Split `on` into `lifecycle` + `callbacks`
-- Modify: `packages/actor-kit/src/core/actor.ts` — `ActorDef` interface
+- Modify: `packages/worker/src/actor.ts` — `ActorDef` interface
 - New handler routing for lifecycle vs callbacks
 - Callbacks validated by Zod before handler
 - Tests: `tests/unit/lifecycle.test.ts`, `tests/unit/callbacks.test.ts`
 
 ### Phase 4: Update outbox to persist meta
-- Modify: `packages/actor-kit/src/runtime/outbox.ts`
-- Modify: `packages/actor-kit/src/core/actor.ts` — outbox drain delivers meta to callback
+- Modify: `packages/worker/src/runtime/outbox.ts`
+- Modify: `packages/worker/src/actor.ts` — outbox drain delivers meta to callback
 - Schema migration: add `meta` column to outbox table
 - Tests: integration tests for meta persistence across restart
 
 ### Phase 5: Update `testActor()` to support new API
-- Modify: `packages/actor-kit/src/test/test-actor.ts`
+- Modify: `packages/test/src/test-actor.ts`
 - `sendWithEffects()` captures typed callback defs
 - Tests: `tests/unit/test-actor-callbacks.test.ts`
 

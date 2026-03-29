@@ -18,17 +18,17 @@ const CounterActor = actorContext(counterContract);
 
 function App() {
   return (
-    <CounterActor.Provider url="wss://my-worker.example.com" actorId="counter-1" token={token}>
+    <CounterActor.Provider url="wss://my-worker.example.com" actorId="counter-1">
       <Counter />
     </CounterActor.Provider>
   );
 }
 
 function Counter() {
-  const count = useSelector(CounterActor, (view) => view.count);
-  const send = useSend(CounterActor);
+  const view = CounterActor.useView();
+  const send = CounterActor.useSend();
 
-  return <button onClick={() => send("increment", {})}>Count: {count}</button>;
+  return <button onClick={() => send("increment", {})}>Count: {view.count}</button>;
 }
 ```
 

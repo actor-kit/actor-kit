@@ -12,7 +12,7 @@ Phase 1 complete. JSON sync working end-to-end.
 
 ### 1. Binary encoder
 
-**File**: `packages/actor-kit/src/schema/encode.ts`
+**File**: `packages/core/src/encode.ts`
 
 ```typescript
 function encode<T extends SchemaDefinition>(schema: T, data: Infer<T>): Uint8Array;
@@ -30,7 +30,7 @@ Requirements:
 
 ### 2. Binary decoder
 
-**File**: `packages/actor-kit/src/schema/decode.ts`
+**File**: `packages/core/src/decode.ts`
 
 ```typescript
 function decode<T extends SchemaDefinition>(schema: T, bytes: Uint8Array): Infer<T>;
@@ -41,12 +41,12 @@ Requirements:
 - `decode()` reads a SNAPSHOT payload → typed object
 - `applyDelta()` reads a DELTA payload, applies changed fields to current state → new object
 - Immutable: `applyDelta` returns a new object, doesn't mutate `current`
-- Decoder must be browser-safe (ships in `@actor-kit/client`)
+- Decoder must be browser-safe (ships in `@actor-kit/core`, used by `@actor-kit/client`)
 - Handles malformed input gracefully (throws typed error, doesn't crash)
 
 ### 3. Frame framing
 
-**File**: `packages/actor-kit/src/schema/frame.ts`
+**File**: `packages/core/src/frame.ts`
 
 ```typescript
 function createSnapshotFrame(version: number, checksum: bigint, role: number, payload: Uint8Array): Uint8Array;
@@ -59,7 +59,7 @@ Frame header: 4 bytes (version: uint8, type: uint8, length: uint16).
 
 ### 4. Change detection (diff-based)
 
-**File**: `packages/actor-kit/src/runtime/diff.ts`
+**File**: `packages/worker/src/runtime/diff.ts`
 
 ```typescript
 function diffViews<T extends SchemaDefinition>(
@@ -76,7 +76,7 @@ Requirements:
 
 ### 5. Integrate with runtime
 
-Update `durable-actor.ts` to:
+Update `packages/worker/src/actor.ts` to:
 - Send binary SNAPSHOT frames on WebSocket connect
 - Send binary DELTA frames after transitions
 - Skip frames when checksum matches (no changes)
@@ -84,7 +84,7 @@ Update `durable-actor.ts` to:
 
 ### 6. Checksum computation
 
-**File**: `packages/actor-kit/src/schema/checksum.ts`
+**File**: `packages/core/src/checksum.ts`
 
 Requirements:
 - xxhash64 of the full SNAPSHOT payload
