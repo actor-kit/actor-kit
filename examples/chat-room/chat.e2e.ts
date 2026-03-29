@@ -86,4 +86,28 @@ test.describe("Chat Room Example", () => {
     await ctx1.close();
     await ctx2.close();
   });
+
+  test("disconnect reduces online count", async ({ browser }) => {
+    const room = "e2e-disconnect-" + Date.now();
+
+    const ctx1 = await browser.newContext();
+    const ctx2 = await browser.newContext();
+    const page1 = await ctx1.newPage();
+    const page2 = await ctx2.newPage();
+
+    await page1.goto("/?room=" + room + "&user=alice");
+    await page2.goto("/?room=" + room + "&user=bob");
+
+    // Both connected, 2 online
+    await expect(page1.locator("#info")).toContainText("2 online", { timeout: 5000 });
+    await expect(page2.locator("#info")).toContainText("2 online", { timeout: 5000 });
+
+    // Bob disconnects
+    await ctx2.close();
+
+    // Alice should see count drop to 1
+    await expect(page1.locator("#info")).toContainText("1 online", { timeout: 10000 });
+
+    await ctx1.close();
+  });
 });

@@ -72,17 +72,45 @@ test.describe("Auction Example", () => {
     await ctx2.close();
   });
 
-  test("guard rejects bid when auction is closed", async ({ page }) => {
-    const id = "e2e-guard-" + Date.now();
+  test("lower bid does not replace higher bid", async ({ page }) => {
+    const id = "e2e-lowbid-" + Date.now();
     await page.goto("/?auction=" + id + "&item=Widget&user=alice");
     await expect(page.locator("#status")).toContainText("Connected", { timeout: 5000 });
 
-    // Place a bid, then close (CLOSE is auctioneer-only, but we test the guard on BID)
-    await page.locator("#bid-input").fill("100");
+    // Place a high bid
+    await page.locator("#bid-input").fill("200");
     await page.locator("#bid-btn").click();
-    await expect(page.locator("#highest-bid")).toHaveText("100", { timeout: 3000 });
+    await expect(page.locator("#highest-bid")).toHaveText("200", { timeout: 3000 });
+    await expect(page.locator("#bid-count")).toHaveText("1");
 
-    // For this test, we just verify the UI works and bids register
-    // Full close testing requires service-level access
+    // Try to place a lower bid — guard silently rejects
+    await page.locator("#bid-input").fill("50");
+    await page.locator("#bid-btn").click();
+
+    // Highest bid should remain 200, bid count should remain 1
+    // Wait a moment for any potential state update to propagate
+    await page.locator("#bid-input").fill("300");
+    await page.locator("#bid-btn").click();
+    await expect(page.locator("#highest-bid")).toHaveText("300", { timeout: 3000 });
+
+    // Only 2 bids accepted (200 and 300), the 50 was rejected
+    await expect(page.locator("#bid-count")).toHaveText("2");
+  });
+
+  test("bid form and initial state display correctly", async ({ page }) => {
+    const id = "e2e-display-" + Date.now();
+    await page.goto("/?auction=" + id + "&item=Vintage+Clock&user=alice");
+    await expect(page.locator("#status")).toContainText("Connected", { timeout: 5000 });
+
+    // Verify initial display state
+    await expect(page.locator("#item")).toContainText("Vintage Clock", { timeout: 3000 });
+    await expect(page.locator("#highest-bid")).toHaveText("0");
+    await expect(page.locator("#bid-count")).toHaveText("0");
+
+    // Bid form should be visible (auction not closed)
+    await expect(page.locator("#bid-form")).toBeVisible();
+
+    // Winner banner should be hidden initially
+    await expect(page.locator("#winner")).not.toBeVisible();
   });
 });

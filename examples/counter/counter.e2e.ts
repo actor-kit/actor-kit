@@ -28,23 +28,19 @@ test.describe("Counter Example", () => {
   });
 
   test("decrement button decreases count", async ({ page }) => {
-    await page.goto("/?id=e2e-decrement");
+    const id = "e2e-dec-" + Date.now();
+    await page.goto("/?id=" + id);
     await expect(page.locator("#status")).toContainText("Connected", { timeout: 5000 });
     await expect(page.locator("#count")).not.toHaveText("—", { timeout: 5000 });
 
-    // Increment first to have something to decrement
+    // Increment twice to have something to decrement
     await page.locator("#increment").click();
     await page.locator("#increment").click();
-    await page.waitForTimeout(500);
+    await expect(page.locator("#count")).toHaveText("2", { timeout: 3000 });
 
-    const countBefore = parseInt((await page.locator("#count").textContent()) ?? "0", 10);
-    expect(countBefore).toBeGreaterThanOrEqual(2);
-
+    // Decrement once
     await page.locator("#decrement").click();
-    await page.waitForTimeout(500);
-
-    const countAfter = parseInt((await page.locator("#count").textContent()) ?? "0", 10);
-    expect(countAfter).toBe(countBefore - 1);
+    await expect(page.locator("#count")).toHaveText("1", { timeout: 3000 });
   });
 
   test("shows last updated by after action", async ({ page }) => {
@@ -53,13 +49,13 @@ test.describe("Counter Example", () => {
     await expect(page.locator("#count")).not.toHaveText("—", { timeout: 5000 });
 
     await page.locator("#increment").click();
-    await page.waitForTimeout(500);
 
-    await expect(page.locator("#last-updated")).toContainText("Last updated by: user-");
+    await expect(page.locator("#last-updated")).toContainText("Last updated by: user-", { timeout: 3000 });
   });
 
   test("multiple rapid clicks all register", async ({ page }) => {
-    await page.goto("/?id=e2e-rapid");
+    const id = "e2e-rapid-" + Date.now();
+    await page.goto("/?id=" + id);
     await expect(page.locator("#status")).toContainText("Connected", { timeout: 5000 });
     await expect(page.locator("#count")).not.toHaveText("—", { timeout: 5000 });
 
@@ -68,10 +64,8 @@ test.describe("Counter Example", () => {
       await page.locator("#increment").click();
     }
 
-    await page.waitForTimeout(1000);
-
-    const count = parseInt((await page.locator("#count").textContent()) ?? "0", 10);
-    expect(count).toBeGreaterThanOrEqual(5);
+    // All 5 clicks should register
+    await expect(page.locator("#count")).toHaveText("5", { timeout: 5000 });
   });
 
   test("two browsers see the same counter", async ({ browser }) => {
@@ -88,22 +82,25 @@ test.describe("Counter Example", () => {
     await expect(page1.locator("#status")).toContainText("Connected", { timeout: 5000 });
     await expect(page2.locator("#status")).toContainText("Connected", { timeout: 5000 });
 
-    // Wait for initial state
-    await page1.waitForTimeout(500);
+    // Wait for initial snapshot on both
+    await expect(page1.locator("#count")).not.toHaveText("—", { timeout: 5000 });
+    await expect(page2.locator("#count")).not.toHaveText("—", { timeout: 5000 });
 
-    // User 1 increments
+    // User 1 increments 3 times
     await page1.locator("#increment").click();
     await page1.locator("#increment").click();
     await page1.locator("#increment").click();
-    await page1.waitForTimeout(1000);
 
-    // Both should see count >= 3
-    const count1 = parseInt((await page1.locator("#count").textContent()) ?? "0", 10);
-    expect(count1).toBeGreaterThanOrEqual(3);
+    // Both should see count of 3 via real-time sync
+    await expect(page1.locator("#count")).toHaveText("3", { timeout: 5000 });
+    await expect(page2.locator("#count")).toHaveText("3", { timeout: 5000 });
 
-    // User 2 should also see the updated count (real-time sync)
-    const count2 = parseInt((await page2.locator("#count").textContent()) ?? "0", 10);
-    expect(count2).toBeGreaterThanOrEqual(3);
+    // User 2 decrements once
+    await page2.locator("#decrement").click();
+
+    // Both should see count of 2
+    await expect(page1.locator("#count")).toHaveText("2", { timeout: 5000 });
+    await expect(page2.locator("#count")).toHaveText("2", { timeout: 5000 });
 
     await context1.close();
     await context2.close();
