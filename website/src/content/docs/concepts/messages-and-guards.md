@@ -8,7 +8,7 @@ description: How messages are validated and how guards work.
 Every message handler is wrapped in `message()` — pairing a Zod schema with a handler function.
 
 ```typescript
-import { message } from "actor-kit";
+import { message } from "@actor-kit/worker";
 import { z } from "zod";
 
 const addTodo = message(

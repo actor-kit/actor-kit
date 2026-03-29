@@ -21,7 +21,8 @@ The counter is the simplest actor — it demonstrates the contract-first API, fl
 
 ```typescript
 import { z } from "zod";
-import { schema, view, uint32, string, defineActor, createActorClass, message } from "actor-kit";
+import { schema, view, uint32, string } from "@actor-kit/core";
+import { defineActor, createActorClass, message } from "@actor-kit/worker";
 
 type CounterState = { count: number; lastUpdatedBy: string | null };
 
@@ -81,7 +82,7 @@ Key points:
 Use `actorClient(contract)` for typed views, automatic reconnection, and binary delta decoding. Event types are inferred from the contract — no manual union needed:
 
 ```typescript
-import { actorClient } from "actor-kit/client";
+import { actorClient } from "@actor-kit/client";
 import { CounterContract } from "./counter";
 
 // Events and views inferred from the contract
@@ -103,8 +104,8 @@ client.send({ type: "INCREMENT" });
 ### React
 
 ```tsx
-import { actorClient } from "actor-kit/client";
-import { actorContext } from "actor-kit/react";
+import { actorClient } from "@actor-kit/client";
+import { actorContext } from "@actor-kit/react";
 import { CounterContract } from "./counter";
 
 const CounterClient = actorClient(CounterContract);

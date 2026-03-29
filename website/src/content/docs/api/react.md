@@ -1,9 +1,9 @@
 ---
-title: "actor-kit/react"
+title: "@actor-kit/react"
 description: React SDK reference.
 ---
 
-The React export (`import from "actor-kit/react"`) provides typed context and hooks for React applications.
+The React package (`@actor-kit/react`) provides typed context and hooks for React applications.
 
 ## `actorContext(contract)` / `actorContext<typeof Factory>()`
 
@@ -14,7 +14,7 @@ Creates a typed React context. Accepts either a contract (from `defineActor()`) 
 Types are inferred from the contract — no manual generics:
 
 ```typescript
-import { actorContext } from "actor-kit/react";
+import { actorContext } from "@actor-kit/react";
 import { CounterContract } from "./counter";
 
 const CounterCtx = actorContext(CounterContract);
@@ -23,8 +23,8 @@ const CounterCtx = actorContext(CounterContract);
 ### Factory-derived (legacy)
 
 ```typescript
-import { actorClient } from "actor-kit/client";
-import { actorContext } from "actor-kit/react";
+import { actorClient } from "@actor-kit/client";
+import { actorContext } from "@actor-kit/react";
 
 const CounterClient = actorClient(CounterView).events<CounterEvent>();
 const CounterCtx = actorContext<typeof CounterClient>();
@@ -167,7 +167,7 @@ function Status() {
 If you prefer explicit generics over the contract pattern:
 
 ```typescript
-import { createActorContext } from "actor-kit/react";
+import { createActorContext } from "@actor-kit/react";
 
 type MyView = { count: number };
 type MyEvent = { type: "INCREMENT" } | { type: "DECREMENT" };

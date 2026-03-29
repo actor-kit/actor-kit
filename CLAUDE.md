@@ -16,27 +16,27 @@ Actors on the edge. Each actor is a Cloudflare Durable Object with a mailbox, pr
 
 ## Repo structure
 
-Single published package (`actor-kit`) with subpath exports, plus internal dev packages:
+Six scoped packages under `@actor-kit/*`:
 
 ```
 actor-kit-2/
 ├── packages/
-│   └── actor-kit/         → published as "actor-kit"
-│       ├── src/
-│       │   ├── core/      → actor(), schema(), view(), roles, messages
-│       │   ├── runtime/   → DO class generation, WebSocket lifecycle, persistence
-│       │   ├── schema/    → schema() builder, binary encoder/decoder, type primitives
-│       │   ├── auth/      → JWT creation + validation
-│       │   ├── client/    → connect(), subscribe, send, reconnection
-│       │   ├── react/     → createContext(), useView(), useSend(), useRole()
-│       │   └── test/      → testActor(), emission capture, view assertions
-│       └── package.json   → subpath exports: ".", "./client", "./react", "./test"
+│   ├── core/              → @actor-kit/core: schema(), view(), type primitives, encode/decode
+│   ├── worker/            → @actor-kit/worker: defineActor(), createActorClass(), message(), withCallerIdentity()
+│   ├── client/            → @actor-kit/client: actorClient(), WebSocket connection, binary decoding
+│   ├── react/             → @actor-kit/react: actorContext(), useView(), useSend(), useRole()
+│   ├── test/              → @actor-kit/test: testActor(), emission capture, view assertions
+│   └── storybook/         → @actor-kit/storybook: withActorKit(), createMockClient()
 ├── tests/
 │   ├── unit/              → Pure logic tests (no CF runtime)
 │   └── integration/       → vitest-pool-workers (full DO lifecycle)
 ├── examples/
 │   ├── counter/           → Minimal counter actor
-│   └── todo/              → Full todo list with roles
+│   ├── todo-list/         → Full todo list with roles
+│   ├── chat-room/         → Real-time chat with lifecycle
+│   ├── auction/           → Guards and competitive bidding
+│   └── tanstack-start-counter/ → TanStack Start SSR + WebSocket
+├── website/               → Docs site (Astro + Starlight)
 ├── docs/
 │   ├── architecture.md    → System design, module boundaries, type system
 │   ├── binary-protocol.md → Wire format, frame layout, delta encoding

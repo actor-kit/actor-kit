@@ -69,10 +69,10 @@ export default defineConfig({
         {
           label: "API Reference",
           items: [
-            { slug: "api/core" },
-            { slug: "api/client" },
-            { slug: "api/react" },
-            { slug: "api/test" },
+            { slug: "api/core", label: "core & worker" },
+            { slug: "api/client", label: "client" },
+            { slug: "api/react", label: "react" },
+            { slug: "api/test", label: "test" },
           ],
         },
       ],

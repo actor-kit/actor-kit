@@ -74,7 +74,7 @@ The `.slice(-49)` keeps the last 50 messages — old messages are discarded to b
 Use `actorClient(contract)` for typed views and events. Binary delta decoding is handled transparently — the `subscribe` callback always receives the full, merged view:
 
 ```typescript
-import { actorClient } from "actor-kit/client";
+import { actorClient } from "@actor-kit/client";
 import { ChatRoomContract } from "./chat";
 
 // Events and views inferred from the contract
@@ -100,8 +100,8 @@ client.send({ type: "SEND_MESSAGE", text: "Hello!" });
 
 ```tsx
 import { useState, useEffect } from "react";
-import { actorClient } from "actor-kit/client";
-import { actorContext } from "actor-kit/react";
+import { actorClient } from "@actor-kit/client";
+import { actorContext } from "@actor-kit/react";
 import { ChatRoomContract } from "./chat";
 
 const ChatClient = actorClient(ChatRoomContract);

@@ -77,7 +77,7 @@ Key points:
 Use `actorClient(contract)` for typed views and events. Binary delta decoding is handled transparently — the `subscribe` callback always receives the full, merged view:
 
 ```typescript
-import { actorClient } from "actor-kit/client";
+import { actorClient } from "@actor-kit/client";
 import { AuctionContract } from "./auction";
 
 // Events and views inferred from the contract
@@ -106,8 +106,8 @@ client.send({ type: "BID", amount: 100 });
 
 ```tsx
 import { useState, useEffect } from "react";
-import { actorClient } from "actor-kit/client";
-import { actorContext } from "actor-kit/react";
+import { actorClient } from "@actor-kit/client";
+import { actorContext } from "@actor-kit/react";
 import { AuctionContract } from "./auction";
 
 const AuctionClient = actorClient(AuctionContract);

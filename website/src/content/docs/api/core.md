@@ -1,9 +1,9 @@
 ---
-title: "actor-kit"
+title: "@actor-kit/core & @actor-kit/worker"
 description: Server-side API reference.
 ---
 
-The core package (`import from "actor-kit"`) provides the server-side API. Use in your Cloudflare Worker.
+The server-side API is split across two packages: `@actor-kit/core` (schema, view, type primitives) and `@actor-kit/worker` (defineActor, createActorClass, message, identity). Use both in your Cloudflare Worker.
 
 ## `defineActor(name, def)`
 
@@ -11,7 +11,8 @@ Creates a typed contract from an actor definition. The contract preserves all ty
 
 ```typescript
 import { z } from "zod";
-import { defineActor, message, view, schema, uint32, string } from "actor-kit";
+import { schema, view, uint32, string } from "@actor-kit/core";
+import { defineActor, message } from "@actor-kit/worker";
 
 const CounterView = schema({ count: uint32, lastUpdatedBy: string });
 

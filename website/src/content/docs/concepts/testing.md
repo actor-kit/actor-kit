@@ -42,7 +42,7 @@ Pure function tests with Vitest. No Actor Kit APIs, no Cloudflare runtime — ju
 
 ```typescript
 import { describe, expect, it } from "vitest";
-import { encode, decode } from "actor-kit";
+import { encode, decode } from "@actor-kit/core";
 import { PlayerView } from "./schemas";
 
 describe("binary encoding", () => {
@@ -62,7 +62,7 @@ Good for: schema encoding/decoding, JWT helpers, pure utility functions.
 `testActor()` is the workhorse of Actor Kit testing. It runs your full actor definition — role evaluation, message routing, Zod validation, guards, view projection, and side effect capture — without a Cloudflare runtime.
 
 ```typescript
-import { testActor } from "actor-kit/test";
+import { testActor } from "@actor-kit/test";
 import { CounterContract } from "./counter";
 
 const t = testActor(CounterContract);

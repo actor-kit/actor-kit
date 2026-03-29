@@ -10,7 +10,7 @@ Actor Kit synchronizes state to connected clients over WebSocket using a binary 
 Every actor defines views per role using `schema()` and `view()`:
 
 ```typescript
-import { schema, view, uint32, float32, string, boolean, array } from "actor-kit";
+import { schema, view, uint32, float32, string, boolean, array } from "@actor-kit/core";
 
 const PlayerView = schema({
   x: float32,
@@ -126,7 +126,7 @@ All multi-byte integers use big-endian byte order. No padding, no alignment — 
 The client SDK handles binary frames automatically. Pass the view schema to `actorClient()` and the decoder is wired in:
 
 ```typescript
-import { actorClient } from "actor-kit/client";
+import { actorClient } from "@actor-kit/client";
 
 const GameClient = actorClient(PlayerView);  // Same schema used on server
 

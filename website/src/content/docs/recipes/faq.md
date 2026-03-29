@@ -7,7 +7,7 @@ description: Frequently asked questions about Actor Kit.
 
 ### Do I need to use React?
 
-No. The core library (`actor-kit`) and the client SDK (`actor-kit/client`) have no React dependency. You can use them with any frontend framework or vanilla JavaScript. The `actor-kit/react` package is an optional convenience layer.
+No. The core library (`@actor-kit/core`) and the client SDK (`@actor-kit/client`) have no React dependency. You can use them with any frontend framework or vanilla JavaScript. The `@actor-kit/react` package is an optional convenience layer.
 
 ### How does binary sync work?
 

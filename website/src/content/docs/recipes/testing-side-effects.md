@@ -10,7 +10,7 @@ Side effects (`emit()`) are recorded during transitions but not executed in `tes
 Use `sendWithEffects()` instead of `send()`:
 
 ```typescript
-import { testActor } from "actor-kit/test";
+import { testActor } from "@actor-kit/test";
 import { OrderContract } from "./order";
 
 const t = testActor(OrderContract);

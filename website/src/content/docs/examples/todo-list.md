@@ -131,7 +131,7 @@ The `ownerId` from input flows into `init()`, which sets the initial state. Role
 Use `actorClient(contract)` for typed views and events. Binary delta decoding is handled transparently — the `subscribe` callback always receives the full, merged view:
 
 ```typescript
-import { actorClient } from "actor-kit/client";
+import { actorClient } from "@actor-kit/client";
 import { TodoListContract } from "./todo";
 
 // Events and views inferred from the contract
@@ -154,8 +154,8 @@ client.send({ type: "ADD_TODO", text: "Buy milk" });
 
 ```tsx
 import { useState, useEffect } from "react";
-import { actorClient } from "actor-kit/client";
-import { actorContext } from "actor-kit/react";
+import { actorClient } from "@actor-kit/client";
+import { actorContext } from "@actor-kit/react";
 import { TodoListContract } from "./todo";
 
 const TodoClient = actorClient(TodoListContract);

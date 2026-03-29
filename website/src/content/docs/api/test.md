@@ -1,9 +1,9 @@
 ---
-title: "actor-kit/test"
+title: "@actor-kit/test"
 description: Test helper reference.
 ---
 
-The test export (`import from "actor-kit/test"`) provides a test harness that runs actor transitions without a Cloudflare runtime.
+The test package (`@actor-kit/test`) provides a test harness that runs actor transitions without a Cloudflare runtime.
 
 ## `testActor(contract)` / `testActor(def)`
 
@@ -14,7 +14,7 @@ Creates a test harness for an actor. Accepts either a contract (from `defineActo
 Types for `init()`, `send()`, `view()`, and `role()` are all inferred from the contract:
 
 ```typescript
-import { testActor } from "actor-kit/test";
+import { testActor } from "@actor-kit/test";
 import { CounterContract } from "./counter";
 
 const t = testActor(CounterContract);
@@ -23,7 +23,7 @@ const t = testActor(CounterContract);
 ### Raw definition (legacy)
 
 ```typescript
-import { testActor } from "actor-kit/test";
+import { testActor } from "@actor-kit/test";
 
 const t = testActor({
   input: z.object({ creator: z.string() }),

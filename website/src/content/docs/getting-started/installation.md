@@ -19,8 +19,8 @@ pnpm add @actor-kit/core @actor-kit/client
 
 | Package | Usage |
 |---------|-------|
-| `@actor-kit/core` | Shared: `defineActor`, `message`, `view`, `schema`, type primitives |
-| `@actor-kit/worker` | Server: `createActorClass`, `withCallerIdentity` |
+| `@actor-kit/core` | Shared: `schema`, `view`, type primitives (`uint32`, `string`, etc.), `encode`, `decode` |
+| `@actor-kit/worker` | Server: `defineActor`, `createActorClass`, `message`, `withCallerIdentity` |
 | `@actor-kit/worker/token` | Opt-in: `createAccessToken`, `getCallerFromToken` (JWT auth for external clients) |
 | `@actor-kit/client` | Browser: `actorClient` — WebSocket connection with binary decoding |
 | `@actor-kit/react` | React: `actorContext` — hooks for view, send, role |
