@@ -24,17 +24,23 @@ const notify = message(z.object({}), (state, _payload, { emit }) => {
 
 ### Results Come Back as Messages
 
-When external I/O needs to inform state, the Queue consumer sends the result back as a normal message:
+When external I/O needs to inform state, the pattern is:
+
+1. **Actor emits intent** to a CF Queue
+2. **Queue consumer Worker** receives the message, does the actual I/O
+3. **Queue consumer sends the result** back to the actor as a normal message via `stub.send()`
+
+**Step 1 — Actor emits intent:**
 
 ```typescript
+// In your actor definition
 messages: {
-  // Initiate: emit intent to a Queue
   FETCH_PRICE: message(z.object({ itemId: z.string() }), (state, { itemId }, { emit }) => {
-    emit({ queue: "EFFECTS", body: { type: "FETCH_PRICE", itemId } });
+    emit({ queue: "EFFECTS", body: { type: "FETCH_PRICE", itemId, actorId: "price-checker-1" } });
     return { ...state, status: "loading" };
   }),
 
-  // Result comes back as a normal message (sent by the Queue consumer)
+  // This message will be sent by the Queue consumer after the fetch completes
   PRICE_RESULT: message(z.object({ itemId: z.string(), total: z.number() }), (state, { itemId, total }) => ({
     ...state,
     prices: { ...state.prices, [itemId]: total },
@@ -43,7 +49,42 @@ messages: {
 },
 ```
 
-The Queue consumer is a separate Worker that does the actual fetch and sends the result back via `stub.send()`.
+**Step 2 — Queue consumer Worker does the fetch and sends result back:**
+
+```typescript
+// A separate Worker that processes the EFFECTS queue
+// wrangler.toml: [[queues.consumers]] queue = "EFFECTS"
+
+import { withCallerIdentity } from "@actor-kit/worker";
+
+export default {
+  async queue(batch: MessageBatch, env: Env) {
+    for (const msg of batch.messages) {
+      const { type, itemId, actorId } = msg.body;
+
+      if (type === "FETCH_PRICE") {
+        try {
+          // Do the actual fetch — real fetch(), no wrappers
+          const res = await fetch(`https://api.example.com/prices/${itemId}`);
+          const { total } = await res.json();
+
+          // Send result back to the actor as a normal message
+          const stub = env.PRICE_CHECKER.get(env.PRICE_CHECKER.idFromName(actorId));
+          await stub.send("system", "service", { type: "PRICE_RESULT", itemId, total });
+        } catch (e) {
+          // Handle errors — retry, dead-letter, or send error message back
+          const stub = env.PRICE_CHECKER.get(env.PRICE_CHECKER.idFromName(actorId));
+          await stub.send("system", "service", { type: "PRICE_ERROR", itemId, error: e.message });
+        }
+      }
+
+      msg.ack();
+    }
+  },
+};
+```
+
+The actor never does `fetch()` directly. It emits the intent, the Queue consumer does the work, and the result arrives as a typed message. This keeps the actor a pure state machine — and CF Queues handle retry and dead-letter for you.
 
 ## Effect Types
 
