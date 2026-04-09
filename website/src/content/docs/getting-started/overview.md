@@ -22,8 +22,7 @@ Not a good fit:
 ## Key terms
 
 - **Actor** — a Durable Object instance with state, roles, messages, and views
-- **Message** — a named action defined on the actor (server-side). Example: `INCREMENT`, `ADD_TODO`
-- **Event** — the object sent from the client to trigger a message. Example: `{ type: "INCREMENT", amount: 5 }`
+- **Message** — a named action sent to the actor. On the server, defined in the `messages` block. On the client, sent as `{ type: "INCREMENT", amount: 5 }`
 - **View** — a role-scoped projection of the actor's state, sent to connected clients
 - **Role** — a predicate that determines what a caller can see and do
 - **Lifecycle** — `connect` and `disconnect` handlers that fire on WebSocket open/close
@@ -50,7 +49,7 @@ Browser → WebSocket → CF Worker → Durable Object (Actor)
 
 | | Actor Kit | PartyKit | Liveblocks | Socket.IO |
 |---|---|---|---|---|
-| Programming model | Event-driven (typed messages) | Imperative | Document mutations | Imperative |
+| Programming model | Message-driven (typed messages) | Imperative | Document mutations | Imperative |
 | Runtime | CF Durable Objects | CF Durable Objects | Managed cloud | Self-hosted |
 | State model | Actor per entity | Room per party | Document per room | No built-in state |
 | State changes | Typed messages → pure handlers | Arbitrary mutations | CRDT operations | Arbitrary emissions |
@@ -67,7 +66,7 @@ Actor Kit embraces Cloudflare's infrastructure:
 |------------|----------------------|
 | Durable Objects | Each actor is a DO — single-threaded, globally addressable |
 | DO SQLite | State persistence, transactional outbox |
-| DO Alarms | Durable timers (`after`) that survive hibernation |
+| DO Alarms | Durable timers that survive hibernation |
 | DO WebSocket Hibernation | Caller metadata stored as tags, survives restarts |
 | Workers | Route requests, serve UI, stamp caller identity |
 

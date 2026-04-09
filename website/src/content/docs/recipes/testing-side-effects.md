@@ -1,11 +1,11 @@
 ---
 title: Testing Side Effects
-description: How to verify emit() calls without executing them.
+description: How to verify execute() calls without running them.
 ---
 
-Side effects (`emit()`) are recorded during transitions but not executed in `testActor()`. This lets you assert exactly what was emitted without hitting external services.
+Side effects (`execute()`) are recorded during transitions but not executed in `testActor()`. This lets you assert exactly what was scheduled without hitting external services.
 
-## Capturing emissions
+## Capturing executions
 
 Use `sendWithEffects()` instead of `send()`:
 
@@ -16,37 +16,31 @@ import { OrderContract } from "./order";
 const t = testActor(OrderContract);
 let state = t.init({ items: ["widget"] });
 
-const { state: next, emissions } = t.sendWithEffects(
+const { state: next, executions } = await t.sendWithEffects(
   state, "alice", { type: "PLACE_ORDER" }
 );
 ```
 
-`emissions` contains every `emit()` call made during the transition.
+`executions` contains every `execute()` call made during the transition.
 
-## Asserting fire-and-forget effects
+## Asserting service executions
+
+Each execution has `{ service, payload }`:
 
 ```typescript
-// Verify a queue emission
-expect(emissions).toContainEqual(
+// Verify a named service was called
+expect(executions).toContainEqual(
   expect.objectContaining({
-    queue: "ORDER_QUEUE",
-    body: expect.objectContaining({ items: ["widget"] }),
+    service: "ORDER_QUEUE",
+    payload: expect.objectContaining({ items: ["widget"] }),
   })
 );
 
-// Verify an actor-to-actor emission
-expect(emissions).toContainEqual(
+// Verify an inventory reservation
+expect(executions).toContainEqual(
   expect.objectContaining({
-    actor: "INVENTORY",
-    id: "warehouse-1",
-    message: "RESERVE_ITEMS",
-  })
-);
-
-// Verify a fetch emission
-expect(emissions).toContainEqual(
-  expect.objectContaining({
-    fetch: expect.stringContaining("api.example.com"),
+    service: "RESERVE_ITEMS",
+    payload: expect.objectContaining({ warehouse: "warehouse-1" }),
   })
 );
 ```
@@ -54,30 +48,30 @@ expect(emissions).toContainEqual(
 ## Asserting no side effects
 
 ```typescript
-const { emissions } = t.sendWithEffects(
+const { executions } = await t.sendWithEffects(
   state, "alice", { type: "INCREMENT" }
 );
 
-expect(emissions).toHaveLength(0);
+expect(executions).toHaveLength(0);
 ```
 
-## Asserting emission counts
+## Asserting execution counts
 
 ```typescript
-const { emissions } = t.sendWithEffects(
+const { executions } = await t.sendWithEffects(
   state, "alice", { type: "NOTIFY_ALL" }
 );
 
 // Exactly 3 notifications sent
-expect(emissions).toHaveLength(3);
+expect(executions).toHaveLength(3);
 
-// All went to the same queue
-expect(emissions.every(e => "queue" in e && e.queue === "NOTIFICATIONS")).toBe(true);
+// All went to the same service
+expect(executions.every(e => e.service === "NOTIFICATIONS")).toBe(true);
 ```
 
 ## Integration testing side effects
 
-`testActor()` captures but doesn't execute effects. To test actual delivery (outbox drain, retry behavior, actor-to-actor), use integration tests with `vitest-pool-workers`:
+`testActor()` captures but doesn't run effects. To test actual delivery (outbox drain, retry behavior, actor-to-actor), use integration tests with `vitest-pool-workers`:
 
 ```typescript
 import { env } from "cloudflare:test";

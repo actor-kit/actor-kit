@@ -1,21 +1,17 @@
 import { actorClient, createActorClient } from "@actor-kit/client";
 import { describe, expect, it } from "vitest";
 
-// Fake WebSocket for testing
 class FakeWebSocket {
   listeners = new Map<string, Set<Function>>();
   sent: string[] = [];
-  readyState = 1; // OPEN
+  readyState = 1;
   protocol = "";
 
   constructor(
     public url: string,
     public protocols?: string | string[],
   ) {
-    if (Array.isArray(protocols)) {
-      this.protocol = protocols[0] ?? "";
-    }
-    // Auto-fire open after construction
+    if (Array.isArray(protocols)) this.protocol = protocols[0] ?? "";
     setTimeout(() => this.fireEvent("open", {}), 0);
   }
 
@@ -33,15 +29,12 @@ class FakeWebSocket {
   }
 
   close() {
-    this.readyState = 3; // CLOSED
+    this.readyState = 3;
     this.fireEvent("close", { code: 1000 });
   }
 
-  // Test helpers
   fireEvent(event: string, data: unknown) {
-    for (const fn of this.listeners.get(event) ?? []) {
-      fn(data);
-    }
+    for (const fn of this.listeners.get(event) ?? []) fn(data);
   }
 
   receiveMessage(data: string) {
@@ -49,11 +42,17 @@ class FakeWebSocket {
   }
 }
 
-describe("optional accessToken", () => {
-  it("connects without subprotocol when accessToken is omitted", async () => {
+const baseOptions = {
+  path: "/api/counter/test-1",
+  host: "example.com",
+  initialView: undefined,
+};
+
+describe("optional getToken", () => {
+  it("connects with only the actor-kit.v1 protocol when getToken is omitted", async () => {
     let capturedProtocols: string | string[] | undefined;
     const client = createActorClient({
-      url: "wss://example.com/api/counter/test-1",
+      ...baseOptions,
       WebSocketImpl: class extends FakeWebSocket {
         constructor(url: string, protocols?: string | string[]) {
           super(url, protocols);
@@ -61,18 +60,18 @@ describe("optional accessToken", () => {
         }
       } as unknown as typeof WebSocket,
     });
+    client.connect();
 
     await new Promise((r) => setTimeout(r, 10));
-    // No subprotocol should be sent
-    expect(capturedProtocols).toBeUndefined();
+    expect(capturedProtocols).toEqual(["actor-kit.v1"]);
     client.disconnect();
   });
 
-  it("connects with token subprotocol when accessToken is provided (backwards compat)", async () => {
+  it("connects with auth.<token> protocol when getToken is provided", async () => {
     let capturedProtocols: string | string[] | undefined;
     const client = createActorClient({
-      url: "wss://example.com/api/counter/test-1",
-      accessToken: "my-jwt-token",
+      ...baseOptions,
+      getToken: () => "my-jwt-token",
       WebSocketImpl: class extends FakeWebSocket {
         constructor(url: string, protocols?: string | string[]) {
           super(url, protocols);
@@ -80,16 +79,17 @@ describe("optional accessToken", () => {
         }
       } as unknown as typeof WebSocket,
     });
+    client.connect();
 
     await new Promise((r) => setTimeout(r, 10));
-    expect(capturedProtocols).toEqual(["token.my-jwt-token"]);
+    expect(capturedProtocols).toEqual(["actor-kit.v1", "auth.my-jwt-token"]);
     client.disconnect();
   });
 
   it("receives snapshot and updates view without token", async () => {
     let fakeWs: FakeWebSocket | undefined;
     const client = createActorClient({
-      url: "wss://example.com/api/counter/test-1",
+      ...baseOptions,
       WebSocketImpl: class extends FakeWebSocket {
         constructor(url: string, protocols?: string | string[]) {
           super(url, protocols);
@@ -97,15 +97,10 @@ describe("optional accessToken", () => {
         }
       } as unknown as typeof WebSocket,
     });
+    client.connect();
 
     await new Promise((r) => setTimeout(r, 10));
-    fakeWs?.receiveMessage(
-      JSON.stringify({
-        type: "snapshot",
-        role: "user",
-        data: { count: 42 },
-      }),
-    );
+    fakeWs?.receiveMessage(JSON.stringify({ type: "snapshot", role: "user", data: { count: 42 } }));
 
     expect(client.view).toEqual({ count: 42 });
     expect(client.connectionState).toBe("connected");
@@ -115,7 +110,7 @@ describe("optional accessToken", () => {
   it("sends messages without token", async () => {
     let fakeWs: FakeWebSocket | undefined;
     const client = createActorClient({
-      url: "wss://example.com/api/counter/test-1",
+      ...baseOptions,
       WebSocketImpl: class extends FakeWebSocket {
         constructor(url: string, protocols?: string | string[]) {
           super(url, protocols);
@@ -123,15 +118,10 @@ describe("optional accessToken", () => {
         }
       } as unknown as typeof WebSocket,
     });
+    client.connect();
 
     await new Promise((r) => setTimeout(r, 10));
-    fakeWs?.receiveMessage(
-      JSON.stringify({
-        type: "snapshot",
-        role: "user",
-        data: { count: 0 },
-      }),
-    );
+    fakeWs?.receiveMessage(JSON.stringify({ type: "snapshot", role: "user", data: { count: 0 } }));
 
     client.send({ type: "INCREMENT" });
     expect(fakeWs?.sent).toHaveLength(1);
@@ -140,8 +130,8 @@ describe("optional accessToken", () => {
   });
 });
 
-describe("actorClient builder — optional accessToken", () => {
-  it("CreateOptions accepts no accessToken", async () => {
+describe("actorClient builder — optional getToken", () => {
+  it("CreateOptions accepts no getToken", async () => {
     let capturedProtocols: string | string[] | undefined;
     const factory = actorClient({
       name: "counter",
@@ -153,7 +143,7 @@ describe("actorClient builder — optional accessToken", () => {
     });
 
     const client = factory.create({
-      url: "wss://example.com/api/counter/test-1",
+      ...baseOptions,
       WebSocketImpl: class extends FakeWebSocket {
         constructor(url: string, protocols?: string | string[]) {
           super(url, protocols);
@@ -161,13 +151,14 @@ describe("actorClient builder — optional accessToken", () => {
         }
       } as unknown as typeof WebSocket,
     });
+    client.connect();
 
     await new Promise((r) => setTimeout(r, 10));
-    expect(capturedProtocols).toBeUndefined();
+    expect(capturedProtocols).toEqual(["actor-kit.v1"]);
     client.disconnect();
   });
 
-  it("CreateOptions with accessToken sends subprotocol", async () => {
+  it("CreateOptions with getToken sends auth subprotocol", async () => {
     let capturedProtocols: string | string[] | undefined;
     const factory = actorClient({
       name: "counter",
@@ -179,8 +170,8 @@ describe("actorClient builder — optional accessToken", () => {
     });
 
     const client = factory.create({
-      url: "wss://example.com/api/counter/test-1",
-      accessToken: "my-token",
+      ...baseOptions,
+      getToken: () => "my-token",
       WebSocketImpl: class extends FakeWebSocket {
         constructor(url: string, protocols?: string | string[]) {
           super(url, protocols);
@@ -188,9 +179,10 @@ describe("actorClient builder — optional accessToken", () => {
         }
       } as unknown as typeof WebSocket,
     });
+    client.connect();
 
     await new Promise((r) => setTimeout(r, 10));
-    expect(capturedProtocols).toEqual(["token.my-token"]);
+    expect(capturedProtocols).toEqual(["actor-kit.v1", "auth.my-token"]);
     client.disconnect();
   });
 });

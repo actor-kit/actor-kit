@@ -1,5 +1,5 @@
 import { withCallerIdentity } from "@actor-kit/worker";
-import { Counter } from "./counter";
+import { Counter } from "./counter.server";
 
 export { Counter };
 
@@ -11,22 +11,22 @@ export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
 
-    // Serve the client page
+    // Serve the client page — issue a session cookie on first visit.
     if (url.pathname === "/" || url.pathname === "/index.html") {
-      return new Response(clientHTML(), {
-        headers: { "Content-Type": "text/html" },
-      });
+      const { callerId, setCookie } = resolveCaller(request);
+      const headers = new Headers({ "Content-Type": "text/html" });
+      if (setCookie) headers.set("Set-Cookie", setCookie);
+      return new Response(clientHTML(callerId), { headers });
     }
 
     // Route WebSocket connections to the Counter DO
     if (url.pathname.startsWith("/api/counter/")) {
       const actorId = url.pathname.split("/")[3] ?? "default";
 
-      // Authenticate the caller.
-      // PRODUCTION: validate a session cookie, OAuth token, or similar credential here.
-      // This demo uses a query param for simplicity — NOT safe for production.
-      // CORS/Origin validation is handled at the Worker level (e.g., Hono cors() middleware), not inside the actor.
-      const callerId = url.searchParams.get("callerId") ?? `user-${crypto.randomUUID().slice(0, 8)}`;
+      // Authenticate the caller via session cookie.
+      // PRODUCTION: validate a signed session cookie, OAuth token, or similar credential.
+      // CORS/Origin validation is handled at the Worker level, not inside the actor.
+      const { callerId } = resolveCaller(request);
 
       const id = env.COUNTER.idFromName(actorId);
       const stub = env.COUNTER.get(id);
@@ -43,7 +43,16 @@ export default {
   },
 };
 
-function clientHTML(): string {
+function resolveCaller(request: Request): { callerId: string; setCookie: string | null } {
+  const cookieHeader = request.headers.get("Cookie") ?? "";
+  const match = cookieHeader.match(/(?:^|;\s*)caller_id=([^;]+)/);
+  if (match?.[1]) return { callerId: decodeURIComponent(match[1]), setCookie: null };
+  const callerId = `user-${crypto.randomUUID().slice(0, 8)}`;
+  const setCookie = `caller_id=${encodeURIComponent(callerId)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=31536000`;
+  return { callerId, setCookie };
+}
+
+function clientHTML(callerId: string): string {
   return `<!DOCTYPE html>
 <html>
 <head>
@@ -74,12 +83,12 @@ function clientHTML(): string {
     async function init() {
       const params = new URLSearchParams(location.search);
       const actorId = params.get('id') || 'default';
-      const callerId = params.get('user') || 'user-' + crypto.randomUUID().slice(0, 8);
+      const callerId = ${JSON.stringify(callerId)};
       document.getElementById('status').textContent = 'Connecting as ' + callerId + '...';
 
-      // Connect WebSocket — Worker stamps identity via withCallerIdentity
+      // Connect WebSocket — session cookie is sent automatically; worker stamps identity via withCallerIdentity
       const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
-      ws = new WebSocket(protocol + '//' + location.host + '/api/counter/' + actorId + '?callerId=' + encodeURIComponent(callerId));
+      ws = new WebSocket(protocol + '//' + location.host + '/api/counter/' + actorId);
 
       ws.addEventListener('open', () => {
         document.getElementById('status').textContent = 'Connected as ' + callerId;

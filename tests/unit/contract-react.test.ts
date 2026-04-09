@@ -44,18 +44,18 @@ describe("contract-derived React context", () => {
     expectTypeOf(Ctx.useView).returns.toEqualTypeOf<{ count: number; name: string } | undefined>();
   });
 
-  it("actorContext(contract) infers event types from flat messages", () => {
+  it("actorContext(contract) infers message types from flat messages", () => {
     const Ctx = actorContext(Counter);
 
     type SendFn = ReturnType<typeof Ctx.useSend>;
 
-    // Should accept valid events
-    type ExpectedEvent =
+    // Should accept valid messages
+    type ExpectedMessage =
       | { type: "INCREMENT"; amount: number }
       | { type: "RESET" }
       | { type: "RENAME"; newName: string };
 
-    expectTypeOf<SendFn>().toEqualTypeOf<(event: ExpectedEvent) => void>();
+    expectTypeOf<SendFn>().toEqualTypeOf<(message: ExpectedMessage) => void>();
   });
 
   it("useSelector receives typed view from contract", () => {

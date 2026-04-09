@@ -63,7 +63,7 @@ Good for: schema encoding/decoding, JWT helpers, pure utility functions.
 
 ```typescript
 import { testActor } from "@actor-kit/test";
-import { CounterContract } from "./counter";
+import { CounterContract } from "./counter.contract";
 
 const t = testActor(CounterContract);
 ```
@@ -79,7 +79,7 @@ const state = t.init({});
 **Send messages** and get back the new state:
 
 ```typescript
-const next = t.send(state, "alice", { type: "INCREMENT" });
+const next = await t.send(state, "alice", { type: "INCREMENT" });
 ```
 
 **Check which role** a caller resolves to:
@@ -96,15 +96,15 @@ expect(role).toBe("user");
 expect(data.count).toBe(0);
 ```
 
-**Capture side effects** (emissions) without executing them:
+**Capture service calls** without executing them:
 
 ```typescript
-const { state: next, emissions } = t.sendWithEffects(
+const { state: next, executions } = await t.sendWithEffects(
   state, "alice", { type: "NOTIFY_MEMBERS" }
 );
 
-expect(emissions).toContainEqual(
-  expect.objectContaining({ queue: "notifications" })
+expect(executions).toContainEqual(
+  expect.objectContaining({ service: "notifications" })
 );
 ```
 
@@ -195,5 +195,5 @@ pnpm test               # all of the above
 
 ## Related
 
-- [Testing Side Effects](/recipes/testing-side-effects/) — how to capture and assert `emit()` calls
+- [Testing Side Effects](/recipes/testing-side-effects/) — how to capture and assert `execute()` calls
 - [actor-kit/test API Reference](/api/test/) — full `testActor()` API documentation

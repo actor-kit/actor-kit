@@ -66,8 +66,8 @@ export const Interactive: Story = {
     withActorKit({
       context: CounterCtx,
       view: { count: 0, lastUpdatedBy: "" },
-      onSend: (event) => {
-        if (event.type === "INCREMENT") {
+      onSend: (message) => {
+        if (message.type === "INCREMENT") {
           // Return a new view — the mock client updates and re-renders
           return { count: 1, lastUpdatedBy: "test" };
         }
@@ -130,11 +130,11 @@ For more control, create a mock client directly:
 ```typescript
 import { createMockClient } from "@actor-kit/storybook";
 
-const client = createMockClient<CounterView, CounterEvent>({
+const client = createMockClient<CounterView, CounterMessage>({
   initialView: { count: 0, lastUpdatedBy: "" },
   role: "user",
-  onSend: (event) => {
-    if (event.type === "INCREMENT") {
+  onSend: (message) => {
+    if (message.type === "INCREMENT") {
       return { count: (client.view?.count ?? 0) + 1, lastUpdatedBy: "test" };
     }
   },
@@ -155,7 +155,7 @@ const client = createMockClient<CounterView, CounterEvent>({
 | `context` | `actorContext()` result | Yes | The context that provides `useView()`, `useSend()`, etc. |
 | `view` | `TView` | Yes | Initial view data |
 | `role` | `string` | No | Role for `useRole()` (default: "user") |
-| `onSend` | `(event) => TView \| void` | No | Handle `send()` calls. Return a new view to update, or void to ignore. |
+| `onSend` | `(message) => TView \| void` | No | Handle `send()` calls. Return a new view to update, or void to ignore. |
 
 ### `createMockClient(options)`
 
@@ -164,4 +164,4 @@ const client = createMockClient<CounterView, CounterEvent>({
 | `initialView` | `TView` | Yes | Initial view data |
 | `role` | `string` | No | Role (default: "user") |
 | `connectionState` | `ConnectionState` | No | Initial state (default: "connected") |
-| `onSend` | `(event) => TView \| void` | No | Handle sends interactively |
+| `onSend` | `(message) => TView \| void` | No | Handle sends interactively |

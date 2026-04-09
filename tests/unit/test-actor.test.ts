@@ -189,9 +189,9 @@ describe("testActor()", () => {
   });
 
   describe("sendWithEffects", () => {
-    it("captures emissions from emit()", async () => {
+    it("captures executions from execute()", async () => {
       const notifyMsg = message(z.object({}), (state: State, _payload, ctx) => {
-        ctx.emit({ queue: "EMAIL", body: { to: state.memberIds } });
+        ctx.execute("EMAIL", { to: state.memberIds });
         return state;
       });
 
@@ -205,11 +205,11 @@ describe("testActor()", () => {
 
       const tw = testActor(defWithNotify);
       const state = tw.init({ creator: "alice" });
-      const { state: nextState, emissions } = await tw.sendWithEffects(state, "alice", { type: "NOTIFY" });
+      const { state: nextState, executions } = await tw.sendWithEffects(state, "alice", { type: "NOTIFY" });
 
       expect(nextState).toEqual(state);
-      expect(emissions).toHaveLength(1);
-      expect(emissions[0]).toEqual({ queue: "EMAIL", body: { to: [] } });
+      expect(executions).toHaveLength(1);
+      expect(executions[0]).toEqual({ service: "EMAIL", payload: { to: [] } });
     });
   });
 });

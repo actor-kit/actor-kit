@@ -1,5 +1,5 @@
 import { withCallerIdentity } from "@actor-kit/worker";
-import { TodoList } from "./todo";
+import { TodoList } from "./todo.server";
 
 export { TodoList };
 
@@ -12,24 +12,25 @@ export default {
     const url = new URL(request.url);
 
     if (url.pathname === "/" || url.pathname === "/index.html") {
-      return new Response(clientHTML(), { headers: { "Content-Type": "text/html" } });
+      const { callerId, setCookie } = resolveCaller(request);
+      const headers = new Headers({ "Content-Type": "text/html" });
+      if (setCookie) headers.set("Set-Cookie", setCookie);
+      return new Response(clientHTML(callerId), { headers });
     }
 
     if (url.pathname.startsWith("/api/todo-list/")) {
       const listId = url.pathname.split("/")[3] ?? "default";
 
-      // Authenticate the caller.
-      // PRODUCTION: validate a session cookie, OAuth token, or similar credential here.
-      // This demo uses a query param for simplicity — NOT safe for production.
-      // CORS/Origin validation is handled at the Worker level (e.g., Hono cors() middleware), not inside the actor.
-      const callerId = url.searchParams.get("callerId") ?? `user-${crypto.randomUUID().slice(0, 8)}`;
+      // Authenticate the caller via session cookie.
+      // PRODUCTION: validate a signed session cookie, OAuth token, or similar credential.
+      // CORS/Origin validation is handled at the Worker level, not inside the actor.
+      const { callerId } = resolveCaller(request);
 
       const id = env.TODO_LIST.idFromName(listId);
       const stub = env.TODO_LIST.get(id);
 
-      // Spawn with creator from query param (or first caller)
-      const creator = url.searchParams.get("creator") ?? callerId;
-      await stub.spawn({ actorId: listId, caller: creator, callerType: "user", input: { creator } });
+      // Spawn with the current caller as creator (idempotent after first spawn)
+      await stub.spawn({ actorId: listId, caller: callerId, callerType: "user", input: { creator: callerId } });
 
       const stamped = withCallerIdentity(request, { callerId, callerType: "user" });
       return stub.fetch(stamped);
@@ -39,7 +40,16 @@ export default {
   },
 };
 
-function clientHTML(): string {
+function resolveCaller(request: Request): { callerId: string; setCookie: string | null } {
+  const cookieHeader = request.headers.get("Cookie") ?? "";
+  const match = cookieHeader.match(/(?:^|;\s*)caller_id=([^;]+)/);
+  if (match?.[1]) return { callerId: decodeURIComponent(match[1]), setCookie: null };
+  const callerId = `user-${crypto.randomUUID().slice(0, 8)}`;
+  const setCookie = `caller_id=${encodeURIComponent(callerId)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=31536000`;
+  return { callerId, setCookie };
+}
+
+function clientHTML(callerId: string): string {
   return `<!DOCTYPE html>
 <html>
 <head>
@@ -77,14 +87,13 @@ function clientHTML(): string {
     async function init() {
       const params = new URLSearchParams(location.search);
       const listId = params.get('list') || 'default';
-      const callerId = params.get('user') || 'user-' + crypto.randomUUID().slice(0, 8);
+      const callerId = ${JSON.stringify(callerId)};
 
       document.getElementById('status').textContent = 'Connecting as ' + callerId + '...';
 
-      // Connect WebSocket — Worker stamps identity via withCallerIdentity
+      // Connect WebSocket — session cookie is sent automatically; worker stamps identity via withCallerIdentity
       const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
-      const wsUrl = protocol + '//' + location.host + '/api/todo-list/' + listId + '?callerId=' + encodeURIComponent(callerId) + '&creator=' + encodeURIComponent(callerId);
-      ws = new WebSocket(wsUrl);
+      ws = new WebSocket(protocol + '//' + location.host + '/api/todo-list/' + listId);
 
       ws.addEventListener('open', () => {
         document.getElementById('status').textContent = 'Connected as ' + callerId;

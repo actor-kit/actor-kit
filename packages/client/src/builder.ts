@@ -8,21 +8,30 @@
  *   import { defineActor, message } from "@actor-kit/worker";
  *   const Counter = defineActor("counter", { init, messages, views });
  *   const CounterClient = actorClient(Counter);
- *   const client = CounterClient.create({ url, accessToken });
+ *   const client = CounterClient.create({ path: "/api/counter/abc", initialView });
+ *   client.connect();
  *
  * Usage (legacy — manual schema):
  *   const CounterClient = actorClient(CounterView).events<CounterEvent>();
- *   const client = CounterClient.create({ url, accessToken });
+ *   const client = CounterClient.create({ path, initialView });
+ *   client.connect();
  */
 
 import type { FieldDescriptor, Infer, SchemaDefinition } from "@actor-kit/core";
 import { type ActorClient, createActorClient } from "./client";
 
 /** Runtime options for creating a client connection. */
-export interface CreateOptions {
-  url: string;
-  accessToken?: string | undefined;
-  roleNames?: string[];
+export interface CreateOptions<TView = unknown> {
+  /** Path on the server (required), e.g. "/api/counter/test-1". */
+  path: string;
+  /** Host with optional port. Defaults to window.location.host in the browser. */
+  host?: string;
+  /** Initial view from the server (SSR snapshot). Required. */
+  initialView: TView;
+  /** Token getter — sent via Sec-WebSocket-Protocol on every (re)connect. */
+  getToken?: () => string | Promise<string>;
+  /** Headers getter — native (RN/Node) only; throws in the browser. */
+  getHeaders?: () => Record<string, string> | Promise<Record<string, string>>;
   WebSocketImpl?: typeof WebSocket;
   onRedirect?: (target: { actorType: string; actorId: string }) => void;
   onError?: (error: { message: string; error: string }) => void;
@@ -31,10 +40,13 @@ export interface CreateOptions {
 
 /** Typed actor client factory — knows TView and TEvent at compile time. */
 export interface ActorClientFactory<TView, TEvent extends { type: string }> {
-  /** Create a runtime WebSocket connection with typed view and events. */
-  create(options: CreateOptions): ActorClient<TView, TEvent>;
+  /** Create an unconnected client. Call client.connect() to open the WebSocket. */
+  create(options: CreateOptions<TView>): ActorClient<TView, TEvent>;
 
-  /** Narrow the event type. Returns a new factory with the same TView and a stricter TEvent. */
+  /** Narrow the message type. Returns a new factory with the same TView and a stricter TMessage. */
+  messages<M extends { type: string }>(): ActorClientFactory<TView, M>;
+
+  /** @deprecated Use `messages()` instead. */
   events<E extends { type: string }>(): ActorClientFactory<TView, E>;
 }
 
@@ -46,14 +58,6 @@ export type InferEvent<T> = T extends ActorClientFactory<infer _V, infer E> ? E 
 
 // --- Contract type inference helpers ---
 
-/**
- * Extract the event union from a contract's flat messages.
- * Each message name K becomes { type: K } & payload.
- * Payload is inferred from the Zod schema's _output type.
- *
- * Only matches flat messages (values have `schema` property).
- * Nested role-based messages fall through to loose event typing.
- */
 export type ContractEvents<T> = T extends {
   def: { messages: Record<string, { schema: { _output: unknown } }> };
 }
@@ -66,10 +70,6 @@ export type ContractEvents<T> = T extends {
     }[keyof T["def"]["messages"] & string]
   : { type: string; [key: string]: unknown };
 
-/**
- * Extract the view union from a contract's views.
- * Uses the schema's Infer type (same type used for binary decoding).
- */
 export type ContractView<T> = T extends {
   def: { views: Record<string, unknown> };
 }
@@ -84,18 +84,10 @@ export type ContractView<T> = T extends {
 
 // --- Overloads ---
 
-/**
- * Create a typed actor client factory from a contract (v3).
- * TView and TEvent are inferred from the contract's views and messages.
- */
 export function actorClient<TContract extends { readonly name: string; readonly def: Record<string, unknown> }>(
   contract: TContract,
 ): ActorClientFactory<ContractView<TContract>, ContractEvents<TContract>>;
 
-/**
- * Create a typed actor client factory from a view schema (legacy).
- * Call .events<E>() to narrow the event type.
- */
 export function actorClient<TShape extends Record<string, FieldDescriptor>>(
   viewSchema: SchemaDefinition<TShape>,
 ): ActorClientFactory<Infer<SchemaDefinition<TShape>>, { type: string; [key: string]: unknown }>;
@@ -106,11 +98,10 @@ export function actorClient(
     | { readonly name: string; readonly def: Record<string, unknown> }
     | SchemaDefinition<Record<string, FieldDescriptor>>,
 ): ActorClientFactory<unknown, { type: string }> {
-  // Detect contract vs viewSchema
   if ("name" in arg && "def" in arg) {
     return buildContractFactory(arg);
   }
-  return buildSchemaFactory(arg as SchemaDefinition<Record<string, FieldDescriptor>>);
+  return buildSchemaFactory(arg);
 }
 
 // --- Contract-based factory ---
@@ -121,17 +112,19 @@ function buildContractFactory(contract: {
 }): ActorClientFactory<unknown, { type: string }> {
   const def = contract.def;
 
-  // Extract role names from def.roles (matches worker's Object.keys(def.roles) for roleIndex)
   const roles =
     typeof def === "object" && def !== null && "roles" in def
       ? (def as { roles: Record<string, unknown> }).roles
       : undefined;
   const roleNames = roles ? Object.keys(roles) : undefined;
 
-  // Extract per-role view schemas for binary decoding
   const views =
     typeof def === "object" && def !== null && "views" in def
-      ? (def as { views: Record<string, { schema?: SchemaDefinition<Record<string, FieldDescriptor>> }> }).views
+      ? (
+          def as {
+            views: Record<string, { schema?: SchemaDefinition<Record<string, FieldDescriptor>> }>;
+          }
+        ).views
       : undefined;
 
   let viewSchemas: Record<string, SchemaDefinition<Record<string, FieldDescriptor>>> | undefined;
@@ -147,18 +140,24 @@ function buildContractFactory(contract: {
     }
   }
 
-  return {
-    create(options: CreateOptions): ActorClient<unknown, { type: string }> {
-      return createActorClient({
-        ...options,
-        viewSchemas,
-        roleNames: options.roleNames ?? roleNames,
-      });
-    },
-    events<E extends { type: string }>(): ActorClientFactory<unknown, E> {
-      return this as unknown as ActorClientFactory<unknown, E>;
-    },
-  };
+  function build<TEvent extends { type: string }>(): ActorClientFactory<unknown, TEvent> {
+    return {
+      create(options: CreateOptions<unknown>): ActorClient<unknown, TEvent> {
+        return createActorClient<unknown, TEvent>({
+          ...options,
+          viewSchemas,
+          roleNames,
+        });
+      },
+      messages<M extends { type: string }>(): ActorClientFactory<unknown, M> {
+        return build<M>();
+      },
+      events<E extends { type: string }>(): ActorClientFactory<unknown, E> {
+        return build<E>();
+      },
+    };
+  }
+  return build<{ type: string }>();
 }
 
 // --- Schema-based factory (legacy) ---
@@ -170,11 +169,15 @@ function buildSchemaFactory<TShape extends Record<string, FieldDescriptor>>(
 
   function buildFactory<TEvent extends { type: string }>(): ActorClientFactory<TView, TEvent> {
     return {
-      create(options: CreateOptions): ActorClient<TView, TEvent> {
+      create(options: CreateOptions<TView>): ActorClient<TView, TEvent> {
         return createActorClient<TShape, TEvent>({
           ...options,
           viewSchema,
         });
+      },
+
+      messages<M extends { type: string }>(): ActorClientFactory<TView, M> {
+        return buildFactory<M>();
       },
 
       events<E extends { type: string }>(): ActorClientFactory<TView, E> {

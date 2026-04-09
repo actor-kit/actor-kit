@@ -6,19 +6,20 @@
  *   type MyEvent = { type: "INCREMENT" } | { type: "DECREMENT" };
  *   const CounterCtx = createActorContext<MyView, MyEvent>();
  *
- *   const client = createActorClient<typeof CounterView.shape, MyEvent>({ url, accessToken, viewSchema: CounterView });
+ *   const client = CounterClient.create({ url, initialView: snapshot });
  *
  *   <CounterCtx.Provider client={client}>
  *     <Counter />
  *   </CounterCtx.Provider>
  *
  *   function Counter() {
- *     const view = CounterCtx.useView();   // MyView | undefined
+ *     const view = CounterCtx.useView();   // MyView (never undefined)
  *     const send = CounterCtx.useSend();   // (event: MyEvent) => void
  *   }
  */
 
-import type { ActorClient, ConnectionState } from "@actor-kit/client";
+import type { ActorClient, ConnectionState, CreateOptions } from "@actor-kit/client";
+import { createActorClient } from "@actor-kit/client";
 import { createContext, createElement, type ReactNode, useContext, useEffect, useRef, useState } from "react";
 
 // --- Types ---
@@ -30,11 +31,12 @@ interface ProviderProps<TView, TEvent extends { type: string }> {
 
 interface ActorContext<TView = unknown, TEvent extends { type: string } = { type: string; [key: string]: unknown }> {
   Provider: (props: ProviderProps<TView, TEvent>) => ReactNode;
-  useView: () => TView | undefined;
+  useClient: (options: CreateOptions<TView>) => ActorClient<TView, TEvent>;
+  useView: () => TView;
   useSend: () => (event: TEvent) => void;
   useRole: () => string | undefined;
   useConnectionState: () => ConnectionState;
-  useSelector: <T>(selector: (view: TView | undefined) => T, equalityFn?: (a: T, b: T) => boolean) => T;
+  useSelector: <T>(selector: (view: TView) => T, equalityFn?: (a: T, b: T) => boolean) => T;
 }
 
 // --- Implementation ---
@@ -57,13 +59,13 @@ export function createActorContext<
     return createElement(ClientContext.Provider, { value: client }, children);
   }
 
-  function useView(): TView | undefined {
+  function useView(): TView {
     const client = useClient();
-    const [view, setView] = useState<TView | undefined>(client.view);
+    const [view, setView] = useState<TView>(() => client.view as TView);
 
     useEffect(() => {
       if (client.view !== undefined) {
-        setView(client.view);
+        setView(client.view as TView);
       }
       return client.subscribe((newView: TView) => {
         setView(newView);
@@ -108,12 +110,9 @@ export function createActorContext<
     return state;
   }
 
-  function useSelector<T>(
-    selector: (view: TView | undefined) => T,
-    equalityFn: (a: T, b: T) => boolean = Object.is,
-  ): T {
+  function useSelector<T>(selector: (view: TView) => T, equalityFn: (a: T, b: T) => boolean = Object.is): T {
     const client = useClient();
-    const [selected, setSelected] = useState<T>(() => selector(client.view));
+    const [selected, setSelected] = useState<T>(() => selector(client.view as TView));
 
     useEffect(() => {
       return client.subscribe((view: TView) => {
@@ -125,8 +124,22 @@ export function createActorContext<
     return selected;
   }
 
+  function useClientHook(options: CreateOptions<TView>): ActorClient<TView, TEvent> {
+    const [client] = useState(() => createActorClient<TView, TEvent>(options));
+
+    useEffect(() => {
+      client.connect();
+      return () => {
+        client.disconnect();
+      };
+    }, [client]);
+
+    return client;
+  }
+
   return {
     Provider,
+    useClient: useClientHook,
     useView,
     useSend,
     useRole,

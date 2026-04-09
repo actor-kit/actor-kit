@@ -75,6 +75,106 @@ Views are computed after every transition. The framework:
 
 This means views are cheap — if nothing changed for a particular caller, nothing is sent.
 
+## Discriminated Union Views (`LinkedView`)
+
+Every view push (to both WebSocket clients and linked actors) includes a `role` field. This produces a TypeScript discriminated union:
+
+```typescript
+views: {
+  admin:     view(AdminView,     (state) => ({ players: state.players, settings: state.settings })),
+  player:    view(PlayerView,    (state, caller) => ({ players: state.players, myScore: state.scores[caller] })),
+  spectator: view(SpectatorView, (state) => ({ players: state.players })),
+}
+
+// LinkedView<GameContract> — auto-derived from the contract:
+// | { role: "admin";     players: Player[]; settings: Settings }
+// | { role: "player";    players: Player[]; myScore: number }
+// | { role: "spectator"; players: Player[] }
+```
+
+Use `view.role` to narrow in TypeScript:
+
+```typescript
+switch (view.role) {
+  case "admin":     /* view.settings is available */ break;
+  case "player":    /* view.myScore is available */ break;
+  case "spectator": /* only view.players */ break;
+}
+```
+
+Fields common to all variants (like `players` above) are accessible without narrowing.
+
+### In React
+
+```tsx
+// Route by role
+const role = useRole();  // "admin" | "player" | "spectator" | undefined
+
+// Select common fields — no narrowing needed
+const players = useSelector((view) => view?.players);
+
+// Select role-specific fields — pass role to narrow
+const revenue = useSelector("admin", (view) => view.revenue);
+// type: number | undefined (undefined if role isn't "admin")
+```
+
+### In actor-to-actor links
+
+Same pattern. `onUpdate` receives the discriminated union:
+
+```typescript
+links: {
+  game: link(GameContract, {
+    onUpdate: (state, view, gameId) => {
+      // view.players works without narrowing (common field)
+      // view.role discriminates for role-specific fields
+      return { ...state, games: { ...state.games, [gameId]: view } };
+    },
+  }),
+},
+```
+
+See [Actor-to-Actor Communication](/recipes/actor-to-actor/) for the full `link()` API.
+
+## Role Composition
+
+Roles don't "inherit" from each other — there's no role hierarchy in the framework. Instead, compose views by extracting shared projection logic into plain functions and spreading into each role's view.
+
+```typescript
+// Extract shared projection for reuse across roles
+const baseProjection = (state: GameState) => ({
+  players: state.players,
+  status: state.status,
+  roundNumber: state.roundNumber,
+});
+
+views: {
+  admin: view(AdminView, (state) => ({
+    ...baseProjection(state),
+    revenue: state.revenue,
+    settings: state.settings,
+    reports: state.reports,
+  })),
+  moderator: view(ModView, (state) => ({
+    ...baseProjection(state),
+    reports: state.reports,
+  })),
+  player: view(PlayerView, (state, caller) => ({
+    ...baseProjection(state),
+    myScore: state.scores[caller],
+  })),
+  spectator: view(SpectatorView, (state) => baseProjection(state)),
+}
+```
+
+A few things to note:
+
+- **Shared functions, not framework magic.** `baseProjection` is a plain function you write. The framework doesn't know about it — it just calls your view function.
+- **Admin is a superset of spectator.** That's a consequence of spreading the same base and adding fields. TypeScript's structural typing means fields common to all views (like `players`, `status`, `roundNumber`) are accessible without narrowing on the discriminated union.
+- **Each role still has its own schema.** `AdminView` and `SpectatorView` are separate `schema()` definitions with different binary layouts. The shared projection is a convenience for the _function_, not the _encoding_.
+- **Keep projections pure.** View functions run after every transition. Avoid allocations or computation that scales with connection count — the framework already handles per-connection diffing.
+
 ## Related
 
 - [Binary State Sync](/concepts/binary-sync/) — deep dive into the binary wire protocol, delta encoding, and frame format
+- [Actor-to-Actor Communication](/recipes/actor-to-actor/) — links, services, and DO stubs for actor sync

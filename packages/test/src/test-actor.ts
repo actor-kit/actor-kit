@@ -7,15 +7,16 @@
  * Accepts either a contract (from defineActor) or a raw TestableActorDef.
  */
 
-import type { Effect, Infer, MessageContext, SchemaDefinition } from "@actor-kit/core";
-import { type RolePredicate, resolveRole, routeMessage } from "@actor-kit/worker/testing";
+import type { Execution, ForwardCall, Infer, MessageContext, SchemaDefinition } from "@actor-kit/core";
+import type { LinkCall, RolePredicate, UnlinkCall } from "@actor-kit/worker/testing";
+import { resolveRole, routeMessage } from "@actor-kit/worker/testing";
 import type { z } from "zod";
 
 // --- Actor definition shape (minimal for testing) ---
 
 interface TestableActorDef<TState, TInput> {
   input: z.ZodType<TInput>;
-  init: (input: TInput) => TState;
+  init: (input: TInput, ctx?: { env: unknown; link: (name: string, id: string) => Promise<unknown> }) => TState;
   roles: Record<string, RolePredicate<TState>>;
   messages: Record<
     string,
@@ -63,11 +64,11 @@ type ContractState<T> = T extends { def: { init: (...args: never[]) => infer S }
 type ContractInput<T> = T extends { def: { input: { _input: infer I } } } ? I : unknown;
 
 /**
- * Extract the event union from a contract's flat messages.
+ * Extract the message union from a contract's flat messages.
  * Each message name K becomes { type: K } & payload.
  * Only matches flat messages (values have `schema` property).
  */
-type ContractEvents<T> = T extends {
+type ContractMessages<T> = T extends {
   def: { messages: Record<string, { schema: { _output: unknown } }> };
 }
   ? {
@@ -103,33 +104,39 @@ interface TestHarness<TState, TInput> {
   send(
     state: TState,
     caller: string,
-    event: { type: string; [key: string]: unknown },
+    message: { type: string; [key: string]: unknown },
     opts?: { callerType?: "user" | "service" },
   ): Promise<TState>;
   sendWithEffects(
     state: TState,
     caller: string,
-    event: { type: string; [key: string]: unknown },
+    message: { type: string; [key: string]: unknown },
     opts?: { callerType?: "user" | "service" },
   ): Promise<{
     state: TState;
-    emissions: Effect[];
+    executions: Execution[];
+    links: LinkCall[];
+    unlinks: UnlinkCall[];
+    forwards: ForwardCall[];
   }>;
   view(state: TState, caller: string, opts?: { callerType?: "user" | "service" }): { role: string; data: unknown };
 }
 
-interface ContractTestHarness<TState, TInput, TEvent, TViewData> {
+interface ContractTestHarness<TState, TInput, TMessage, TViewData> {
   init(input: TInput): TState;
   role(state: TState, caller: string, opts?: { callerType?: "user" | "service" }): string | null;
-  send(state: TState, caller: string, event: TEvent, opts?: { callerType?: "user" | "service" }): Promise<TState>;
+  send(state: TState, caller: string, message: TMessage, opts?: { callerType?: "user" | "service" }): Promise<TState>;
   sendWithEffects(
     state: TState,
     caller: string,
-    event: TEvent,
+    message: TMessage,
     opts?: { callerType?: "user" | "service" },
   ): Promise<{
     state: TState;
-    emissions: Effect[];
+    executions: Execution[];
+    links: LinkCall[];
+    unlinks: UnlinkCall[];
+    forwards: ForwardCall[];
   }>;
   view(state: TState, caller: string, opts?: { callerType?: "user" | "service" }): { role: string; data: TViewData };
 }
@@ -160,7 +167,7 @@ interface ContractShape {
   readonly name: string;
   readonly def: {
     input: z.ZodType;
-    init: (...args: never[]) => unknown;
+    init: (input: unknown, ctx?: { env: unknown; link: (name: string, id: string) => Promise<unknown> }) => unknown;
     roles: Record<string, RolePredicate<unknown>>;
     messages: Record<string, unknown>;
     views: Record<string, { readonly fn: (state: unknown, caller: string) => unknown }>;
@@ -202,7 +209,7 @@ export function testActor<
 ): ContractTestHarness<
   ContractState<TContract>,
   ContractInput<TContract>,
-  ContractEvents<TContract>,
+  ContractMessages<TContract>,
   ContractView<TContract>
 >;
 
@@ -224,7 +231,10 @@ export function testActor(
     opts?: { callerType?: "user" | "service" },
   ): Promise<{
     state: unknown;
-    emissions: Effect[];
+    executions: Execution[];
+    links: LinkCall[];
+    unlinks: UnlinkCall[];
+    forwards: ForwardCall[];
   }> {
     const callerType = opts?.callerType ?? "user";
     const role = resolveRole(def.roles, state, caller, { callerType });
@@ -233,14 +243,26 @@ export function testActor(
       throw new Error(`No role matched for caller "${caller}"`);
     }
 
-    const emissions: Effect[] = [];
+    const executions: Execution[] = [];
+    const links: LinkCall[] = [];
+    const unlinks: UnlinkCall[] = [];
+    const forwards: ForwardCall[] = [];
 
     const ctx: Omit<MessageContext, "role"> = {
       caller,
       callerType,
       env: {},
-      emit: (effect: Effect) => {
-        emissions.push(effect);
+      execute: (service: string, payload: unknown) => {
+        executions.push({ service, payload });
+      },
+      link: (name: string, id: string) => {
+        links.push({ name, id });
+      },
+      unlink: (name: string, id?: string) => {
+        unlinks.push({ name, id });
+      },
+      forward: (linkName, targetId, message) => {
+        forwards.push({ linkName, targetId, message });
       },
     };
 
@@ -261,7 +283,7 @@ export function testActor(
       def.observe.onTransition(state, result.state, event, { caller, role });
     }
 
-    return { state: result.state, emissions };
+    return { state: result.state, executions, links, unlinks, forwards };
   }
 
   return {
@@ -270,7 +292,12 @@ export function testActor(
       if (!parsed.success) {
         throw new Error(`Invalid input: ${parsed.error.message}`);
       }
-      return def.init(parsed.data);
+      return def.init(parsed.data, {
+        env: {},
+        link: async () => {
+          throw new Error("link() not available in test harness init — use sendWithEffects() for link testing");
+        },
+      });
     },
 
     role(state: unknown, caller: string, opts?: { callerType?: "user" | "service" }): string | null {
@@ -325,7 +352,10 @@ function extractDef(contract: ContractShape): TestableActorDef<unknown, unknown>
 
   const result: TestableActorDef<unknown, unknown> = {
     input: def.input,
-    init: def.init as (input: unknown) => unknown,
+    init: def.init as (
+      input: unknown,
+      ctx?: { env: unknown; link: (name: string, id: string) => Promise<unknown> },
+    ) => unknown,
     roles: def.roles,
     messages,
     views: def.views,

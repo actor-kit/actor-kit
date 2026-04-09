@@ -133,14 +133,14 @@ describe("contract-derived test harness", () => {
     await expect(t.send(state, "viewer-user", { type: "ADMIN_ONLY" })).rejects.toThrow("Guard rejected");
   });
 
-  it("testActor(contract) runtime: sendWithEffects captures emissions", async () => {
-    const EmittingCounter = defineActor("emitting", {
+  it("testActor(contract) runtime: sendWithEffects captures executions", async () => {
+    const ExecutingCounter = defineActor("executing", {
       input: z.object({}),
       init: (): CounterState => ({ count: 0, name: "" }),
       roles: { user: () => true },
       messages: {
         NOTIFY: message(z.object({}), (state: CounterState, _payload, ctx) => {
-          ctx.emit({ queue: "NOTIFICATIONS", body: { count: state.count } });
+          ctx.execute("NOTIFICATIONS", { count: state.count });
           return state;
         }),
       },
@@ -152,13 +152,13 @@ describe("contract-derived test harness", () => {
       },
     });
 
-    const t = testActor(EmittingCounter);
+    const t = testActor(ExecutingCounter);
     const state = t.init({});
-    const { state: next, emissions } = await t.sendWithEffects(state, "anyone", { type: "NOTIFY" });
+    const { state: next, executions } = await t.sendWithEffects(state, "anyone", { type: "NOTIFY" });
 
     expect(next).toEqual(state);
-    expect(emissions).toHaveLength(1);
-    expect(emissions[0]).toEqual({ queue: "NOTIFICATIONS", body: { count: 0 } });
+    expect(executions).toHaveLength(1);
+    expect(executions[0]).toEqual({ service: "NOTIFICATIONS", payload: { count: 0 } });
   });
 
   it("testActor(contract) runtime: role resolution works", () => {

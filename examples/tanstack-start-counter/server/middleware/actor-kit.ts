@@ -35,12 +35,13 @@ export default async function actorKitMiddleware(event: MiddlewareEvent) {
   const doId = namespace.idFromName(actorId);
   const stub = namespace.get(doId);
 
-  // Authenticate the caller.
-  // PRODUCTION: validate session cookie, OAuth token, or similar credential here.
-  // This demo uses a query param for simplicity — NOT safe for production.
-  const callerId =
-    url.searchParams.get("callerId") ??
-    `user-${crypto.randomUUID().slice(0, 8)}`;
+  // Authenticate the caller via session cookie.
+  // PRODUCTION: validate a signed session cookie, OAuth token, or similar credential.
+  const cookieHeader = event.req.headers.get("Cookie") ?? "";
+  const cookieMatch = cookieHeader.match(/(?:^|;\s*)caller_id=([^;]+)/);
+  const callerId = cookieMatch?.[1]
+    ? decodeURIComponent(cookieMatch[1])
+    : `user-${crypto.randomUUID().slice(0, 8)}`;
 
   // Spawn idempotently with system credentials
   await stub.spawn({

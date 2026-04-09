@@ -30,11 +30,11 @@ export const Default: Story = {
 | `context` | `{ Provider }` | Yes | The `actorContext()` result — provides the Provider |
 | `view` | `TView` | Yes | Initial view data for the mock client |
 | `role` | `string` | No | Caller role (default: `"user"`) |
-| `onSend` | `(event: TEvent) => TView \| void` | No | Handler for `send()` — return a new view to update state |
+| `onSend` | `(message: TMessage) => TView \| void` | No | Handler for `send()` — return a new view to update state |
 
 ### Interactive stories with `onSend`
 
-Use `onSend` to make stories interactive — the handler receives events and can return an updated view:
+Use `onSend` to make stories interactive — the handler receives messages and can return an updated view:
 
 ```tsx
 export const Interactive: Story = {
@@ -42,8 +42,8 @@ export const Interactive: Story = {
     withActorKit({
       context: CounterCtx,
       view: { count: 0, lastUpdatedBy: "" },
-      onSend: (event) => {
-        if (event.type === "INCREMENT") {
+      onSend: (message) => {
+        if (message.type === "INCREMENT") {
           return { count: 1, lastUpdatedBy: "storybook" };
         }
       },
@@ -108,6 +108,6 @@ const client = createMockClient({
 | `initialView` | `TView` | Yes | Initial view data |
 | `role` | `string` | No | Caller role (default: `"user"`) |
 | `connectionState` | `ConnectionState` | No | Initial state (default: `"connected"`) |
-| `onSend` | `(event: TEvent) => TView \| void` | No | Handler for `send()` — return a new view to update |
+| `onSend` | `(message: TMessage) => TView \| void` | No | Handler for `send()` — return a new view to update |
 
 When `onSend` returns a new view, all `subscribe()` listeners are notified with the updated view. When it returns `void`, the view stays unchanged.

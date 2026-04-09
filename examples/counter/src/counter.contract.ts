@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { schema, string, uint32, view } from "@actor-kit/core";
-import { createActorClass, defineActor, message } from "@actor-kit/worker";
+import { defineActor, message } from "@actor-kit/worker";
 
 type CounterState = { count: number; lastUpdatedBy: string | null };
 
@@ -55,4 +55,4 @@ export const CounterContract = defineActor("counter", {
   },
 });
 
-export const Counter = createActorClass(CounterContract);
+export type CounterContract = typeof CounterContract;

@@ -9,13 +9,13 @@
  * 5. Call handler with (state, parsedPayload, ctx)
  */
 
-import type { MessageContext } from "@actor-kit/core";
+import type { GuardContext, MessageContext } from "@actor-kit/core";
 import type { z } from "zod";
 
 // --- Route result ---
 
 export type RouteResult<TState> =
-  | { ok: true; state: TState; emissions: unknown[] }
+  | { ok: true; state: TState }
   | { ok: false; error: "message_not_found" | "validation_failed" | "guard_failed"; detail?: string };
 
 // --- Minimal shape for the router ---
@@ -29,7 +29,7 @@ interface RoutableMessage<TState> {
   readonly schema: z.ZodType;
   // Method signature (bivariant in --strict) instead of property signature (contravariant)
   handler(state: TState, payload: unknown, ctx: MessageContext): TState;
-  guard?(state: TState, payload: unknown, ctx: MessageContext): boolean;
+  guard?(state: TState, payload: unknown, ctx: GuardContext): boolean;
 }
 
 // --- Router ---
@@ -66,15 +66,23 @@ export function routeMessage<TState>(
     };
   }
 
-  // 5. Build full context (before guard so guards get ctx)
+  // 5. Build full context
   const ctx: MessageContext = {
     ...ctxBase,
     role,
   };
 
-  // 6. Evaluate guard with (state, payload, ctx)
-  if (messageDef.guard !== undefined && !messageDef.guard(state, parseResult.data, ctx)) {
-    return { ok: false, error: "guard_failed" };
+  // 6. Evaluate guard with (state, payload, guardCtx) — guards are pure predicates, no side effects
+  if (messageDef.guard !== undefined) {
+    const guardCtx: GuardContext = {
+      role,
+      caller: ctxBase.caller,
+      callerType: ctxBase.callerType,
+      env: ctxBase.env,
+    };
+    if (!messageDef.guard(state, parseResult.data, guardCtx)) {
+      return { ok: false, error: "guard_failed" };
+    }
   }
 
   // 7. Call handler — payload is Zod-validated, handler is correctly typed at definition site
@@ -83,9 +91,9 @@ export function routeMessage<TState>(
   // Runtime guard: reject async handlers that slip past the type system (JS consumers, structural typing)
   if (nextState instanceof Promise) {
     throw new Error(
-      `Message handler for "${event.type}" returned a Promise. Handlers must be synchronous — use emit() for async side effects.`,
+      `Message handler for "${event.type}" returned a Promise. Handlers must be synchronous — use execute() for async side effects.`,
     );
   }
 
-  return { ok: true, state: nextState, emissions: [] };
+  return { ok: true, state: nextState };
 }

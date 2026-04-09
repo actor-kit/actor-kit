@@ -73,8 +73,10 @@ describe("contract-derived client", () => {
   it("actorClient(contract) infers event types from flat messages", () => {
     const CounterClient = actorClient(Counter);
     const client = CounterClient.create({
-      url: "wss://example.com/counter/test",
-      accessToken: "token",
+      path: "/counter/test",
+      host: "example.com",
+      initialView: { count: 0, name: "" },
+      getToken: () => "token",
       WebSocketImpl: FakeWebSocket as unknown as typeof WebSocket,
     });
 
@@ -92,8 +94,10 @@ describe("contract-derived client", () => {
   it("actorClient(contract) infers view type from views", () => {
     const CounterClient = actorClient(Counter);
     const client = CounterClient.create({
-      url: "wss://example.com/counter/test",
-      accessToken: "token",
+      path: "/counter/test",
+      host: "example.com",
+      initialView: { count: 0, name: "" },
+      getToken: () => "token",
       WebSocketImpl: FakeWebSocket as unknown as typeof WebSocket,
     });
 
@@ -105,8 +109,10 @@ describe("contract-derived client", () => {
   it("send() requires correct payload fields", () => {
     const CounterClient = actorClient(Counter);
     const client = CounterClient.create({
-      url: "wss://example.com/counter/test",
-      accessToken: "token",
+      path: "/counter/test",
+      host: "example.com",
+      initialView: { count: 0, name: "" },
+      getToken: () => "token",
       WebSocketImpl: FakeWebSocket as unknown as typeof WebSocket,
     });
 
@@ -122,8 +128,10 @@ describe("contract-derived client", () => {
   it("subscribe callback receives typed view", () => {
     const CounterClient = actorClient(Counter);
     const client = CounterClient.create({
-      url: "wss://example.com/counter/test",
-      accessToken: "token",
+      path: "/counter/test",
+      host: "example.com",
+      initialView: { count: 0, name: "" },
+      getToken: () => "token",
       WebSocketImpl: FakeWebSocket as unknown as typeof WebSocket,
     });
 
@@ -137,13 +145,15 @@ describe("contract-derived client", () => {
   it("actorClient(contract).create() returns a working client", () => {
     const CounterClient = actorClient(Counter);
     const client = CounterClient.create({
-      url: "wss://example.com/counter/test",
-      accessToken: "token",
+      path: "/counter/test",
+      host: "example.com",
+      initialView: { count: 0, name: "" },
+      getToken: () => "token",
       WebSocketImpl: FakeWebSocket as unknown as typeof WebSocket,
     });
 
-    expect(client.connectionState).toBe("connecting");
-    expect(client.view).toBeUndefined();
+    expect(client.connectionState).toBe("disconnected");
+    expect(client.view).toEqual({ count: 0, name: "" });
     expect(client.send).toBeTypeOf("function");
     expect(client.subscribe).toBeTypeOf("function");
     expect(client.disconnect).toBeTypeOf("function");
@@ -173,8 +183,10 @@ describe("contract-derived client", () => {
 
     const MultiClient = actorClient(MultiView);
     const client = MultiClient.create({
-      url: "wss://example.com/multi/test",
-      accessToken: "token",
+      path: "/multi/test",
+      host: "example.com",
+      initialView: { count: 0, name: "" },
+      getToken: () => "token",
       WebSocketImpl: FakeWebSocket as unknown as typeof WebSocket,
     });
 

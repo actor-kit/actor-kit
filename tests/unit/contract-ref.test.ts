@@ -157,3 +157,64 @@ describe("contract-derived ref", () => {
     ref.send("alice", "user", { type: "ANYTHING", foo: "bar" });
   });
 });
+
+// --- ctx.exports overload tests (ADR-012) ---
+
+describe("createRef with exports (ADR-012)", () => {
+  function fakeExports() {
+    return {
+      CounterDO: {
+        __actorKitContractName: "counter",
+        idFromName: (name: string) => ({ toString: () => `id-${name}` }),
+        get: () => ({
+          spawn: async () => {},
+          send: async () => ({ ok: true }),
+          getSnapshot: async () => ({ snapshot: { count: 42 }, role: "user", checksum: "abc" }),
+        }),
+      },
+    };
+  }
+
+  it("resolves namespace from exports by contract name", () => {
+    const ref = createRef(Counter, fakeExports(), {}, "counter-1");
+    expect(ref.actorType).toBe("counter");
+    expect(ref.actorId).toBe("counter-1");
+  });
+
+  it("send() delegates to stub resolved from exports", async () => {
+    const calls: unknown[] = [];
+    const exports = {
+      CounterDO: {
+        __actorKitContractName: "counter",
+        idFromName: (name: string) => ({ toString: () => `id-${name}` }),
+        get: () => ({
+          send: async (caller: string, callerType: string, event: unknown) => {
+            calls.push({ caller, callerType, event });
+            return { ok: true };
+          },
+        }),
+      },
+    };
+    const ref = createRef(Counter, exports, {}, "counter-1");
+    await ref.send("alice", "user", { type: "INCREMENT", amount: 5 });
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toEqual({
+      caller: "alice",
+      callerType: "user",
+      event: { type: "INCREMENT", amount: 5 },
+    });
+  });
+
+  it("falls back to env binding when contract not in exports", () => {
+    const ref = createRef(Counter, {}, fakeEnv(), "counter-1");
+    expect(ref.actorType).toBe("counter");
+    expect(ref.actorId).toBe("counter-1");
+  });
+
+  it("throws when not found in exports or env", () => {
+    expect(() => createRef(Counter, {}, {}, "counter-1")).toThrow(
+      'Actor "counter" not found in ctx.exports or env.COUNTER',
+    );
+  });
+});

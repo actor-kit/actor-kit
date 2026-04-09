@@ -11,8 +11,7 @@ type AppState = {
 };
 
 const increment = message(z.object({ amount: z.number() }), (state: AppState, { amount }, ctx) => {
-  // emit() is the only side-effect mechanism — no request()
-  ctx.emit({ queue: "ANALYTICS", body: { count: state.count + amount } });
+  ctx.execute("ANALYTICS", { count: state.count + amount });
   return { ...state, count: state.count + amount };
 });
 
@@ -49,7 +48,7 @@ describe("lifecycle handlers (v3 — no callbacks)", () => {
     expect(state.count).toBe(0);
   });
 
-  it("sendWithEffects returns emissions only (no requests)", async () => {
+  it("sendWithEffects returns executions from execute()", async () => {
     const t = testActor(appDef);
     const state = t.init({});
 
@@ -59,9 +58,8 @@ describe("lifecycle handlers (v3 — no callbacks)", () => {
     });
 
     expect(result.state.count).toBe(5);
-    expect(result.emissions).toHaveLength(1);
-    expect(result.emissions[0]).toEqual({ queue: "ANALYTICS", body: { count: 5 } });
-    // v3: sendWithEffects no longer returns 'requests' — only emissions
-    expect(result).not.toHaveProperty("requests");
+    expect(result.executions).toHaveLength(1);
+    expect(result.executions[0]).toEqual({ service: "ANALYTICS", payload: { count: 5 } });
+    expect(result).not.toHaveProperty("emissions");
   });
 });

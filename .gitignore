@@ -1,12 +1,15 @@
 node_modules/
 dist/
 .nightshift/
-.codex-review-output.md
+.codex-review-*.md
 *.tsbuildinfo
 .wrangler/
 .dev.vars
-.codex-review-api-stress.md
 .stryker-tmp/
 test-results/
 .output/
 .tanstack/
+.claude/
+.ralph/
+reports/
+workers-qb/

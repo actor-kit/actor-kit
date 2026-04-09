@@ -47,6 +47,7 @@ export default defineConfig({
           label: "Concepts",
           items: [
             { slug: "concepts/actors-and-state" },
+            { slug: "concepts/authentication" },
             { slug: "concepts/roles-and-authorization" },
             { slug: "concepts/messages-and-guards" },
             { slug: "concepts/views" },
@@ -60,12 +61,12 @@ export default defineConfig({
           label: "Recipes",
           items: [
             { slug: "recipes/actor-to-actor" },
-            { slug: "recipes/sequential-and-parallel-states" },
+            { slug: "recipes/scaling-with-relays" },
             { slug: "recipes/testing-side-effects" },
             { slug: "recipes/storybook" },
-            { slug: "recipes/faq" },
           ],
         },
+        { slug: "faq", label: "FAQ" },
         {
           label: "API Reference",
           items: [

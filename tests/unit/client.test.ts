@@ -15,7 +15,6 @@ class FakeWebSocket {
     if (Array.isArray(protocols)) {
       this.protocol = protocols[0] ?? "";
     }
-    // Auto-fire open after construction
     setTimeout(() => this.fireEvent("open", {}), 0);
   }
 
@@ -37,7 +36,6 @@ class FakeWebSocket {
     this.fireEvent("close", { code: 1000 });
   }
 
-  // Test helpers
   fireEvent(event: string, data: unknown) {
     for (const fn of this.listeners.get(event) ?? []) {
       fn(data);
@@ -49,22 +47,31 @@ class FakeWebSocket {
   }
 }
 
+const baseOptions = {
+  path: "/api/counter/test-1",
+  host: "example.com",
+  initialView: undefined,
+};
+
 describe("createActorClient()", () => {
-  it("creates a client with initial disconnected state", () => {
+  it("creates a disconnected client; connect() transitions to connecting", () => {
     const client = createActorClient({
-      url: "wss://example.com/api/counter/test-1",
-      accessToken: "test-token",
+      ...baseOptions,
+      getToken: () => "test-token",
       WebSocketImpl: FakeWebSocket as unknown as typeof WebSocket,
     });
 
+    expect(client.connectionState).toBe("disconnected");
+    client.connect();
     expect(client.connectionState).toBe("connecting");
+    client.disconnect();
   });
 
   it("receives initial snapshot and updates view", async () => {
     let fakeWs: FakeWebSocket | undefined;
     const client = createActorClient({
-      url: "wss://example.com/api/counter/test-1",
-      accessToken: "test-token",
+      ...baseOptions,
+      getToken: () => "test-token",
       WebSocketImpl: class extends FakeWebSocket {
         constructor(url: string, protocols?: string | string[]) {
           super(url, protocols);
@@ -72,12 +79,11 @@ describe("createActorClient()", () => {
         }
       } as unknown as typeof WebSocket,
     });
+    client.connect();
 
-    // Wait for connection
     await new Promise((r) => setTimeout(r, 10));
     expect(fakeWs).toBeDefined();
 
-    // Server sends snapshot
     fakeWs?.receiveMessage(
       JSON.stringify({
         type: "snapshot",
@@ -94,8 +100,8 @@ describe("createActorClient()", () => {
   it("subscribe fires on view changes", async () => {
     let fakeWs: FakeWebSocket | undefined;
     const client = createActorClient({
-      url: "wss://example.com/api/counter/test-1",
-      accessToken: "test-token",
+      ...baseOptions,
+      getToken: () => "test-token",
       WebSocketImpl: class extends FakeWebSocket {
         constructor(url: string, protocols?: string | string[]) {
           super(url, protocols);
@@ -103,27 +109,15 @@ describe("createActorClient()", () => {
         }
       } as unknown as typeof WebSocket,
     });
+    client.connect();
 
     await new Promise((r) => setTimeout(r, 10));
 
     const views: unknown[] = [];
     client.subscribe((view) => views.push(view));
 
-    fakeWs?.receiveMessage(
-      JSON.stringify({
-        type: "snapshot",
-        role: "user",
-        data: { count: 1 },
-      }),
-    );
-
-    fakeWs?.receiveMessage(
-      JSON.stringify({
-        type: "snapshot",
-        role: "user",
-        data: { count: 2 },
-      }),
-    );
+    fakeWs?.receiveMessage(JSON.stringify({ type: "snapshot", role: "user", data: { count: 1 } }));
+    fakeWs?.receiveMessage(JSON.stringify({ type: "snapshot", role: "user", data: { count: 2 } }));
 
     expect(views).toHaveLength(2);
     expect(views[0]).toEqual({ count: 1 });
@@ -133,8 +127,8 @@ describe("createActorClient()", () => {
   it("send() dispatches message via WebSocket", async () => {
     let fakeWs: FakeWebSocket | undefined;
     const client = createActorClient({
-      url: "wss://example.com/api/counter/test-1",
-      accessToken: "test-token",
+      ...baseOptions,
+      getToken: () => "test-token",
       WebSocketImpl: class extends FakeWebSocket {
         constructor(url: string, protocols?: string | string[]) {
           super(url, protocols);
@@ -142,17 +136,10 @@ describe("createActorClient()", () => {
         }
       } as unknown as typeof WebSocket,
     });
+    client.connect();
 
     await new Promise((r) => setTimeout(r, 10));
-
-    // Send initial snapshot so client is "connected"
-    fakeWs?.receiveMessage(
-      JSON.stringify({
-        type: "snapshot",
-        role: "user",
-        data: { count: 0 },
-      }),
-    );
+    fakeWs?.receiveMessage(JSON.stringify({ type: "snapshot", role: "user", data: { count: 0 } }));
 
     client.send({ type: "INCREMENT", amount: 5 });
 
@@ -163,8 +150,8 @@ describe("createActorClient()", () => {
   it("trigger shorthand constructs message", async () => {
     let fakeWs: FakeWebSocket | undefined;
     const client = createActorClient({
-      url: "wss://example.com/api/counter/test-1",
-      accessToken: "test-token",
+      ...baseOptions,
+      getToken: () => "test-token",
       WebSocketImpl: class extends FakeWebSocket {
         constructor(url: string, protocols?: string | string[]) {
           super(url, protocols);
@@ -172,15 +159,10 @@ describe("createActorClient()", () => {
         }
       } as unknown as typeof WebSocket,
     });
+    client.connect();
 
     await new Promise((r) => setTimeout(r, 10));
-    fakeWs?.receiveMessage(
-      JSON.stringify({
-        type: "snapshot",
-        role: "user",
-        data: { count: 0 },
-      }),
-    );
+    fakeWs?.receiveMessage(JSON.stringify({ type: "snapshot", role: "user", data: { count: 0 } }));
 
     client.trigger("INCREMENT", { amount: 5 });
 
@@ -191,8 +173,8 @@ describe("createActorClient()", () => {
   it("disconnect() closes WebSocket", async () => {
     let fakeWs: FakeWebSocket | undefined;
     const client = createActorClient({
-      url: "wss://example.com/api/counter/test-1",
-      accessToken: "test-token",
+      ...baseOptions,
+      getToken: () => "test-token",
       WebSocketImpl: class extends FakeWebSocket {
         constructor(url: string, protocols?: string | string[]) {
           super(url, protocols);
@@ -200,15 +182,10 @@ describe("createActorClient()", () => {
         }
       } as unknown as typeof WebSocket,
     });
+    client.connect();
 
     await new Promise((r) => setTimeout(r, 10));
-    fakeWs?.receiveMessage(
-      JSON.stringify({
-        type: "snapshot",
-        role: "user",
-        data: {},
-      }),
-    );
+    fakeWs?.receiveMessage(JSON.stringify({ type: "snapshot", role: "user", data: {} }));
 
     client.disconnect();
     expect(client.connectionState).toBe("disconnected");
@@ -217,8 +194,8 @@ describe("createActorClient()", () => {
   it("unsubscribe stops listener", async () => {
     let fakeWs: FakeWebSocket | undefined;
     const client = createActorClient({
-      url: "wss://example.com/api/counter/test-1",
-      accessToken: "test-token",
+      ...baseOptions,
+      getToken: () => "test-token",
       WebSocketImpl: class extends FakeWebSocket {
         constructor(url: string, protocols?: string | string[]) {
           super(url, protocols);
@@ -226,6 +203,7 @@ describe("createActorClient()", () => {
         }
       } as unknown as typeof WebSocket,
     });
+    client.connect();
 
     await new Promise((r) => setTimeout(r, 10));
 
@@ -236,14 +214,14 @@ describe("createActorClient()", () => {
     unsub();
     fakeWs?.receiveMessage(JSON.stringify({ type: "snapshot", role: "user", data: { count: 2 } }));
 
-    expect(views).toHaveLength(1); // Only the first one
+    expect(views).toHaveLength(1);
   });
 
-  it("connects with Sec-WebSocket-Protocol for auth", async () => {
+  it("connects with Sec-WebSocket-Protocol carrying actor-kit version + auth.<token>", async () => {
     let capturedProtocols: string | string[] | undefined;
-    const _client = createActorClient({
-      url: "wss://example.com/api/counter/test-1",
-      accessToken: "my-jwt-token",
+    const client = createActorClient({
+      ...baseOptions,
+      getToken: () => "my-jwt-token",
       WebSocketImpl: class extends FakeWebSocket {
         constructor(url: string, protocols?: string | string[]) {
           super(url, protocols);
@@ -251,15 +229,16 @@ describe("createActorClient()", () => {
         }
       } as unknown as typeof WebSocket,
     });
+    client.connect();
 
     await new Promise((r) => setTimeout(r, 10));
-    expect(capturedProtocols).toEqual(["token.my-jwt-token"]);
+    expect(capturedProtocols).toEqual(["actor-kit.v1", "auth.my-jwt-token"]);
   });
 
   it("queues messages sent while WebSocket is reconnecting", async () => {
     const instances: FakeWebSocket[] = [];
     const client = createActorClient({
-      url: "wss://example.com/api/counter/test-1",
+      ...baseOptions,
       WebSocketImpl: class extends FakeWebSocket {
         constructor(url: string, protocols?: string | string[]) {
           super(url, protocols);
@@ -267,47 +246,39 @@ describe("createActorClient()", () => {
         }
       } as unknown as typeof WebSocket,
     });
+    client.connect();
 
-    // Wait for initial connection
     await new Promise((r) => setTimeout(r, 10));
     const ws1 = instances[0];
     expect(ws1).toBeDefined();
 
-    // Connect and send a snapshot so client is "connected"
     ws1.receiveMessage(JSON.stringify({ type: "snapshot", role: "user", data: { count: 0 } }));
     expect(client.connectionState).toBe("connected");
 
-    // First send works normally
     client.send({ type: "INCREMENT" });
     expect(ws1.sent).toHaveLength(1);
 
-    // Simulate WebSocket close (triggers reconnection)
     ws1.readyState = 3;
     ws1.fireEvent("close", { code: 1006 });
     expect(client.connectionState).toBe("reconnecting");
 
-    // Send messages while reconnecting — should be queued, not dropped
     client.send({ type: "INCREMENT" });
     client.send({ type: "INCREMENT" });
 
-    // Wait for reconnection timer (delay = 1000 * 2^0 = 1000ms, but in test we can advance)
-    // The reconnection creates a new WebSocket instance
     await new Promise((r) => setTimeout(r, 1100));
     const ws2 = instances[1];
     expect(ws2).toBeDefined();
 
-    // Simulate ws2 open event (already fired by FakeWebSocket setTimeout)
-    // ws2 should have received the queued messages after the "open" event
     expect(ws2.sent).toHaveLength(2);
     expect(JSON.parse(ws2.sent[0])).toEqual({ type: "INCREMENT" });
     expect(JSON.parse(ws2.sent[1])).toEqual({ type: "INCREMENT" });
   });
 
-  it("constructs correct WebSocket URL", async () => {
+  it("constructs WebSocket URL from path + host", async () => {
     let capturedUrl: string | undefined;
-    const _client = createActorClient({
-      url: "wss://example.com/api/counter/test-1",
-      accessToken: "token",
+    const client = createActorClient({
+      ...baseOptions,
+      getToken: () => "token",
       WebSocketImpl: class extends FakeWebSocket {
         constructor(url: string, protocols?: string | string[]) {
           super(url, protocols);
@@ -315,6 +286,7 @@ describe("createActorClient()", () => {
         }
       } as unknown as typeof WebSocket,
     });
+    client.connect();
 
     await new Promise((r) => setTimeout(r, 10));
     expect(capturedUrl).toBe("wss://example.com/api/counter/test-1");

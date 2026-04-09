@@ -5,9 +5,9 @@ import { describe, expect, expectTypeOf, it } from "vitest";
 
 const CounterView = schema({ count: uint32, lastUpdatedBy: string });
 
-type CounterEvent = { type: "INCREMENT" } | { type: "DECREMENT" } | { type: "RESET" };
+type CounterMessage = { type: "INCREMENT" } | { type: "DECREMENT" } | { type: "RESET" };
 
-const CounterClient = actorClient(CounterView).events<CounterEvent>();
+const CounterClient = actorClient(CounterView).messages<CounterMessage>();
 
 describe("actorContext()", () => {
   it("creates a typed React context from factory type", () => {
@@ -31,7 +31,7 @@ describe("actorContext()", () => {
     const CounterCtx = actorContext<typeof CounterClient>();
 
     type SendFn = ReturnType<typeof CounterCtx.useSend>;
-    expectTypeOf<SendFn>().toEqualTypeOf<(event: CounterEvent) => void>();
+    expectTypeOf<SendFn>().toEqualTypeOf<(message: CounterMessage) => void>();
   });
 
   it("useSelector receives typed view", () => {

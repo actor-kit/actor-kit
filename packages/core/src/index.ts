@@ -20,11 +20,16 @@ export { array, boolean, float32, float64, schema, string, uint8, uint16, uint32
 
 // Shared types
 export type {
-  Effect,
-  EmitFn,
+  ExecuteFn,
+  Execution,
+  ForwardCall,
+  ForwardFn,
   GuardContext,
+  LinkedView,
+  LinkFn,
   MessageContext,
   MessageDef,
+  UnlinkFn,
 } from "./types";
 
 // View

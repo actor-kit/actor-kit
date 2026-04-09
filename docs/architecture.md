@@ -94,7 +94,8 @@ type MessageContext = {
   callerType: "user" | "service";  // from identity headers (stable identity, not authorization)
   role: string;                // "owner" — computed from state by role predicates
   env: TEnv;                   // Worker env bindings (queues, AI, secrets, etc.)
-  emit: EmitFn;                // (effect) → void — transactional outbox
+  emit: EmitFn;                // (effect) → void — transactional outbox (legacy)
+  execute: ExecuteFn;           // (service) → void — transactional outbox
 };
 ```
 
@@ -297,6 +298,23 @@ Two mechanisms:
 `tick` only runs when at least one WebSocket is connected. Zero connections = no tick = DO hibernates.
 
 `after` timers are persisted as DO Alarms. They fire even if the DO was evicted and restarted.
+
+**Alarm idempotency:** CF may fire alarms more than once in rare cases. Actor Kit guards against double-transitions by:
+1. Checking `after_fired_keys` before running a handler (idempotency guard)
+2. Deleting `scheduled_alarm` in the same coalesced SQL batch as the state write, so a repeat alarm fire finds no timer to run
+3. Logging a warning when `alarmInfo.retryCount >= 5` (indicates a persistent failure)
+
+### Throughput limits
+
+Each actor (DO instance) is single-threaded. Approximate capacity per actor:
+
+| Operation type | Throughput |
+|---|---|
+| Simple pass-through | ~1,000 msg/sec |
+| Moderate processing (validation, routing) | ~500–750 msg/sec |
+| Complex operations (storage writes, broadcasts) | ~200–500 msg/sec |
+
+Design actors around your coordination boundary — one DO per chat room, game session, document, or user — not one global DO. If a single actor exceeds these limits, shard across multiple actors keyed by a natural partition (room shard, region, etc.).
 
 ## Authentication flow
 

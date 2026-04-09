@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { array, schema, string, uint32, view } from "@actor-kit/core";
-import { createActorClass, defineActor, message } from "@actor-kit/worker";
+import { defineActor, message } from "@actor-kit/worker";
 
 type ChatMessage = { id: string; author: string; text: string; timestamp: number };
 type ChatState = {
@@ -64,4 +64,4 @@ export const ChatRoomContract = defineActor("chat-room", {
   },
 });
 
-export const ChatRoom = createActorClass(ChatRoomContract);
+export type ChatRoomContract = typeof ChatRoomContract;

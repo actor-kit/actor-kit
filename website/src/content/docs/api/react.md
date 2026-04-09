@@ -5,17 +5,31 @@ description: React SDK reference.
 
 The React package (`@actor-kit/react`) provides typed context and hooks for React applications.
 
-## `actorContext(contract)` / `actorContext<typeof Factory>()`
+## `actorContext(contract)` / `actorContext<Contract>()`
 
-Creates a typed React context. Accepts either a contract (from `defineActor()`) or a factory type parameter.
+Creates a typed React context. Accepts either a contract value or a contract type parameter.
 
-### Contract-derived (recommended)
+### Type-only import (recommended for client bundles)
 
-Types are inferred from the contract — no manual generics:
+Use `import type` to keep Zod, handlers, and Cloudflare dependencies out of the browser bundle:
+
+```typescript
+// counter.context.ts
+import { actorClient } from "@actor-kit/client";
+import { actorContext } from "@actor-kit/react";
+import type { CounterContract } from "./counter.contract";
+
+export const CounterClient = actorClient<CounterContract>();
+export const CounterCtx = actorContext<CounterContract>();
+```
+
+### Value import (server-side or when bundle size doesn't matter)
+
+When running on the server (SSR, tests, scripts), you can pass the contract directly:
 
 ```typescript
 import { actorContext } from "@actor-kit/react";
-import { CounterContract } from "./counter";
+import { CounterContract } from "./counter.contract";
 
 const CounterCtx = actorContext(CounterContract);
 ```
@@ -24,9 +38,9 @@ const CounterCtx = actorContext(CounterContract);
 
 ```typescript
 {
-  Provider: (props: { client: ActorClient<TView, TEvent>; children: ReactNode }) => ReactNode;
+  Provider: (props: { client: ActorClient<TView, TMessage>; children: ReactNode }) => ReactNode;
   useView: () => TView | undefined;
-  useSend: () => (event: TEvent) => void;
+  useSend: () => (message: TMessage) => void;
   useRole: () => string | undefined;
   useConnectionState: () => ConnectionState;
   useSelector: <T>(selector: (view: TView | undefined) => T, equalityFn?) => T;
@@ -65,7 +79,7 @@ Create the client in a `useEffect` to avoid WebSocket leaks — `createActorClie
 
 | Prop | Type | Required | Description |
 |------|------|----------|-------------|
-| `client` | `ActorClient<TView, TEvent>` | Yes | Client instance from `Factory.create()` |
+| `client` | `ActorClient<TView, TMessage>` | Yes | Client instance from `Factory.create()` |
 | `children` | `ReactNode` | Yes | Child components |
 
 ## `useView()`
@@ -82,12 +96,12 @@ function Counter() {
 
 ## `useSend()`
 
-Returns a stable `send` function typed to the contract's message events. Never causes re-renders.
+Returns a stable `send` function typed to the contract's messages. Never causes re-renders.
 
 ```tsx
 function IncrementButton() {
   const send = CounterCtx.useSend();
-  // send is (event: CounterEvent) => void — inferred from contract
+  // send is (message: CounterMessage) => void — inferred from contract
   return <button onClick={() => send({ type: "INCREMENT" })}>+</button>;
 }
 ```
@@ -132,14 +146,45 @@ const todos = TodoCtx.useSelector(
 );
 ```
 
+### Role-narrowed `useSelector(role, selector)`
+
+When the contract has multiple views (one per role), the view is a discriminated union with a `role` field. Pass a role as the first argument to narrow the type before selecting:
+
+```tsx
+// Common fields — accessible without narrowing (exists on ALL role variants)
+const players = GameCtx.useSelector((view) => view?.players);
+// type: Player[] | undefined
+
+// Role-specific fields — pass role to narrow
+const revenue = GameCtx.useSelector("admin", (view) => view.revenue);
+// type: number | undefined (undefined if current role isn't "admin")
+
+const myScore = GameCtx.useSelector("player", (view) => view.myScore);
+// type: number | undefined
+```
+
+This is useful when components are already role-gated:
+
+```tsx
+function AdminPanel() {
+  const role = GameCtx.useRole();
+  if (role !== "admin") return null;
+
+  const revenue = GameCtx.useSelector("admin", (v) => v.revenue);
+  const settings = GameCtx.useSelector("admin", (v) => v.settings);
+  return <div>Revenue: {revenue}</div>;
+}
+```
+
 **When to use which hook:**
 
 | Hook | Re-renders on | Use for |
 |------|--------------|---------|
 | `useView()` | Every view update | Small views, debugging |
 | `useSelector(fn)` | Only when derived value changes | Production components, lists, computed values |
+| `useSelector(role, fn)` | Only when derived value changes | Role-specific fields from discriminated union views |
 | `useSend()` | Never | Action buttons, forms |
-| `useRole()` | Role changes only | Conditional UI by permission |
+| `useRole()` | Role changes only | Routing by permission, conditional UI |
 
 ## `useConnectionState()`
 
@@ -152,7 +197,7 @@ function Status() {
 }
 ```
 
-## Low-level: `createActorContext<TView, TEvent>()`
+## Low-level: `createActorContext<TView, TMessage>()`
 
 If you prefer explicit generics over the contract pattern:
 
@@ -160,9 +205,9 @@ If you prefer explicit generics over the contract pattern:
 import { createActorContext } from "@actor-kit/react";
 
 type MyView = { count: number };
-type MyEvent = { type: "INCREMENT" } | { type: "DECREMENT" };
+type MyMessage = { type: "INCREMENT" } | { type: "DECREMENT" };
 
-const MyCtx = createActorContext<MyView, MyEvent>();
+const MyCtx = createActorContext<MyView, MyMessage>();
 ```
 
 The `actorContext(contract)` pattern is preferred — it infers types from the same schema used for binary encoding.

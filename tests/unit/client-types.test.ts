@@ -37,24 +37,30 @@ class FakeWebSocket {
   }
 }
 
+const initialView = { count: 0, lastUpdatedBy: "" };
+
 describe("typed ActorClient", () => {
   it("infers view type from viewSchema", () => {
     const client = createActorClient<typeof CounterView.shape, CounterEvent>({
-      url: "wss://example.com/counter",
-      accessToken: "token",
+      path: "/counter",
+      host: "example.com",
+      initialView,
+      getToken: () => "token",
       viewSchema: CounterView,
       WebSocketImpl: FakeWebSocket as unknown as typeof WebSocket,
     });
 
-    expectTypeOf(client.view).toEqualTypeOf<{ count: number; lastUpdatedBy: string } | undefined>();
+    expectTypeOf(client.view).toEqualTypeOf<{ count: number; lastUpdatedBy: string }>();
 
     client.disconnect();
   });
 
   it("subscribe callback receives typed view", () => {
     const client = createActorClient<typeof CounterView.shape, CounterEvent>({
-      url: "wss://example.com/counter",
-      accessToken: "token",
+      path: "/counter",
+      host: "example.com",
+      initialView,
+      getToken: () => "token",
       viewSchema: CounterView,
       WebSocketImpl: FakeWebSocket as unknown as typeof WebSocket,
     });
@@ -68,8 +74,10 @@ describe("typed ActorClient", () => {
 
   it("send accepts typed event union", () => {
     const client = createActorClient<typeof CounterView.shape, CounterEvent>({
-      url: "wss://example.com/counter",
-      accessToken: "token",
+      path: "/counter",
+      host: "example.com",
+      initialView,
+      getToken: () => "token",
       viewSchema: CounterView,
       WebSocketImpl: FakeWebSocket as unknown as typeof WebSocket,
     });
@@ -84,10 +92,12 @@ describe("typed ActorClient", () => {
     client.disconnect();
   });
 
-  it("client without viewSchema has unknown view", () => {
-    const client = createActorClient({
-      url: "wss://example.com/counter",
-      accessToken: "token",
+  it("client without viewSchema has unknown view (when initialView is unknown)", () => {
+    const client = createActorClient<unknown>({
+      path: "/counter",
+      host: "example.com",
+      initialView: undefined,
+      getToken: () => "token",
       WebSocketImpl: FakeWebSocket as unknown as typeof WebSocket,
     });
 

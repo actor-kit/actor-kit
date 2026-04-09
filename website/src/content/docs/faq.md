@@ -17,9 +17,21 @@ Binary sync is automatic. When your views use `view(schema, fn)`, the framework 
 
 Each actor is a Cloudflare Durable Object. Cloudflare's platform handles scaling — you can have millions of DOs. Each DO is independently addressable and runs in the region closest to the first request that creates it.
 
+### What's the throughput limit per actor?
+
+Each actor is single-threaded. A rough guide:
+
+| Operation type | Throughput |
+|---|---|
+| Simple message routing | ~1,000 msg/sec |
+| Validation + state transitions | ~500–750 msg/sec |
+| Storage writes + broadcasts | ~200–500 msg/sec |
+
+Design actors around your **coordination boundary** — one DO per chat room, game session, document, or user — not one global DO. If a single actor becomes a bottleneck, shard across multiple actors keyed by a natural partition (e.g., per room, per region shard, per entity type).
+
 ### What happens when a Durable Object restarts?
 
-State is automatically restored from SQLite. Any pending outbox entries (from `emit()`) are retried. Connected WebSockets receive a fresh snapshot on reconnect. From the client's perspective, there's a brief disconnect and automatic reconnection.
+State is automatically restored from SQLite. Any pending outbox entries (from `execute()`) are retried. Connected WebSockets receive a fresh snapshot on reconnect. From the client's perspective, there's a brief disconnect and automatic reconnection.
 
 ## State
 
@@ -73,23 +85,21 @@ Yes. Roles are re-evaluated on every state change. If a state change causes a di
 
 ### How is the caller identity determined?
 
-The Worker authenticates the caller and stamps identity using `withCallerIdentity(request, { callerId, callerType })`. The DO reads `callerId` from the `X-Actor-Kit-Caller-Id` header and `callerType` from `X-Actor-Kit-Caller-Type`. The DO trusts the Worker.
-
-For external clients or cross-Worker communication, JWT-based auth is available as a fallback via `@actor-kit/worker/token`. The `sub` claim becomes the caller identity and `act` becomes the `callerType`.
+The Worker authenticates the caller and stamps identity using `withCallerIdentity(request, { callerId, callerType })`. The DO reads `callerId` from the `X-Actor-Kit-Caller-Id` header and `callerType` from `X-Actor-Kit-Caller-Type`. The DO trusts the Worker. All auth logic — session validation, OAuth, API keys — belongs in the Worker, not the DO.
 
 ## Side Effects
 
-### How do I handle async responses from emit()?
+### How do I handle async responses from execute()?
 
-`emit()` is fire-and-forget. For results, the pattern is: emit to a Queue → Queue consumer does the work → consumer sends a message back to the actor. See [Side Effects](/concepts/side-effects/) for the full pattern.
+Define a service with `onDone` and `onError` callbacks. When you call `execute("myService", payload)`, the framework runs the service function asynchronously. If it succeeds, `onDone(state, result, payload)` delivers the result back to your actor's state. If it fails, `onError(state, error, payload)` handles the failure. See [Side Effects](/concepts/side-effects/) for the full pattern.
 
-### What if an emitted effect fails?
+### What if an executed service fails?
 
-Effects retry up to 3 times with backoff (1s, 5s, 25s). After 3 failures, the effect moves to the `emission_failures` SQLite table. It won't retry again automatically — you'd need to handle it manually or build a cleanup process.
+If the service function throws, the execution is marked as failed in SQLite. If the service definition has an `onError` callback, it runs with the error and the original payload, letting you update actor state in response to the failure (e.g., set an error flag, revert optimistic changes). There is no automatic retry — design your services to be idempotent and handle failures explicitly via `onError`.
 
-### Can I emit from `lifecycle.connect` or `lifecycle.disconnect`?
+### Can I execute services from `lifecycle.connect` or `lifecycle.disconnect`?
 
-Yes. Lifecycle handlers receive the same `ctx` as message handlers, including `emit()`.
+Lifecycle handlers receive `execute()` on ctx, but execution persistence for lifecycle hooks is not yet implemented. For now, use message handlers to trigger services.
 
 ## Client
 
@@ -107,7 +117,7 @@ Yes. Create multiple client instances via `Factory.create()`, each pointing to a
 
 Use `testActor()` for most tests. It's fast (pure TypeScript, no I/O) and covers role evaluation, message routing, Zod validation, guards, view projection, and side effect capture. Use `vitest-pool-workers` only when you need to test things that require the Cloudflare runtime: persistence across restarts, actual WebSocket frames, DO Alarms, or outbox drain.
 
-### How do I test that an `emit()` was called?
+### How do I test that an `execute()` was called?
 
 Use `sendWithEffects()` from the test harness:
 
@@ -115,12 +125,12 @@ Use `sendWithEffects()` from the test harness:
 const t = testActor(MyActorContract);
 const state = t.init({ /* ... */ });
 
-const { state: next, emissions } = t.sendWithEffects(
+const { state: next, executions } = await t.sendWithEffects(
   state, "alice", { type: "NOTIFY" }
 );
 
-expect(emissions).toContainEqual(
-  expect.objectContaining({ queue: "NOTIFICATIONS" })
+expect(executions).toContainEqual(
+  expect.objectContaining({ service: "NOTIFICATIONS" })
 );
 ```
 
@@ -143,12 +153,8 @@ At minimum, your Durable Object bindings:
 }
 ```
 
-No secrets are required for the default `withCallerIdentity` auth model. If you use JWT-based auth (via `@actor-kit/worker/token`), you'll also need:
-
-```bash
-npx wrangler secret put ACTOR_KIT_SECRET
-```
+No secrets required. Auth is handled by your Worker via `withCallerIdentity()`.
 
 ### Can actors communicate across different Workers?
 
-Not directly. Actor-to-actor communication via `emit({ actor: ... })` and typed DO stubs requires both actors to be Durable Object bindings in the same Worker. For cross-Worker communication, use `emit({ fetch: ... })` to call an HTTP endpoint on the other Worker.
+Not directly. Actor-to-actor communication via `link()`, services, and typed DO stubs requires both actors to be Durable Object bindings in the same Worker. For cross-Worker communication, define a service whose `fn` calls `fetch()` to an HTTP endpoint on the other Worker.

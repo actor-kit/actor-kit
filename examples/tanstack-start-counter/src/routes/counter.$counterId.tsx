@@ -1,16 +1,9 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
-import { actorClient } from "@actor-kit/client";
-import type { ActorClient, ContractEvents, ContractView } from "@actor-kit/client";
-import { CounterContract } from "../counter";
 import { CounterContext } from "../counter.context";
 import { CounterDisplay } from "../components/Counter";
 import { getActorRuntimeEnv } from "../server-env";
-import { useEffect, useState, useSyncExternalStore } from "react";
-
-type CounterView = ContractView<typeof CounterContract>;
-type CounterEvent = ContractEvents<typeof CounterContract>;
 
 const CounterRouteInputSchema = z.object({
   counterId: z.string().min(1),
@@ -76,8 +69,9 @@ function CounterRouteComponent() {
   );
 }
 
-// Client component: creates a WebSocket client and provides it via React context.
-// Falls back to SSR'd snapshot until the WebSocket connection delivers live state.
+// Client component: creates a WebSocket client via useClient() and provides it
+// through the typed context. The SSR snapshot is the initial view until the
+// WebSocket delivers live state.
 function CounterLive({
   counterId,
   initialSnapshot,
@@ -85,38 +79,15 @@ function CounterLive({
   counterId: string;
   initialSnapshot: { count: number; lastUpdatedBy: string };
 }) {
-  const isHydrated = useHydrated();
-  const [client, setClient] = useState<ActorClient<CounterView, CounterEvent> | null>(null);
-
-  useEffect(() => {
-    // PRODUCTION: use authenticated callerId from session cookie/OAuth.
-    // This demo generates a random ID — NOT safe for production.
-    const callerId = `user-${crypto.randomUUID().slice(0, 8)}`;
-    const protocol = location.protocol === "https:" ? "wss:" : "ws:";
-    const url = `${protocol}//${location.host}/api/counter/${counterId}?callerId=${encodeURIComponent(callerId)}`;
-
-    const CounterClientFactory = actorClient(CounterContract);
-    const c = CounterClientFactory.create({ url });
-    setClient(c);
-
-    return () => {
-      c.disconnect();
-      setClient(null);
-    };
-  }, [counterId]);
-
-  if (!isHydrated || !client) {
-    // SSR or pre-connection: show the server-fetched snapshot
-    return (
-      <CounterDisplay
-        count={initialSnapshot.count}
-        lastUpdatedBy={initialSnapshot.lastUpdatedBy}
-        onIncrement={() => {}}
-        onDecrement={() => {}}
-        disabled
-      />
-    );
-  }
+  // useClient creates the client once (stable across re-renders) and manages
+  // connect/disconnect on mount/unmount. initialView seeds the view before the
+  // socket opens — no undefined state. Cookie-based auth: caller_id is set by
+  // the actor-kit middleware on first request, so no explicit callerId is
+  // needed on the client.
+  const client = CounterContext.useClient({
+    path: `/api/counter/${counterId}`,
+    initialView: { role: "user", ...initialSnapshot },
+  });
 
   return (
     <CounterContext.Provider client={client}>
@@ -132,19 +103,11 @@ function CounterWithHooks() {
 
   return (
     <CounterDisplay
-      count={view?.count ?? 0}
-      lastUpdatedBy={view?.lastUpdatedBy ?? ""}
+      count={view.count}
+      lastUpdatedBy={view.lastUpdatedBy}
       onIncrement={() => send({ type: "INCREMENT" })}
       onDecrement={() => send({ type: "DECREMENT" })}
-      disabled={view === undefined}
+      disabled={false}
     />
-  );
-}
-
-function useHydrated() {
-  return useSyncExternalStore(
-    () => () => {},
-    () => true,
-    () => false,
   );
 }

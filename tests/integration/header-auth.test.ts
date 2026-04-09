@@ -1,9 +1,7 @@
 import { env } from "cloudflare:test";
 import { decode, FrameType, parseFrame, schema, string, uint32 } from "@actor-kit/core";
-import { createAccessToken } from "@actor-kit/worker/token";
 import { describe, expect, it } from "vitest";
 
-const SECRET = "test-secret-for-integration-tests-only";
 const CounterView = schema({ count: uint32, lastCaller: string });
 
 function getStub(name: string) {
@@ -147,76 +145,7 @@ describe("Header-based auth (Worker-trust model)", () => {
     await new Promise((r) => setTimeout(r, 50));
   });
 
-  it("prefers identity headers over token subprotocol", async () => {
-    const { stub, actorId } = getStub("hdr-auth-priority");
-    await stub.spawn({ actorId, caller: "u1", callerType: "user", input: {} });
-
-    // Create a token for a different caller
-    const token = await createAccessToken({
-      actorType: "counter",
-      actorId,
-      callerId: "other-user",
-      callerType: "user",
-      secret: SECRET,
-    });
-
-    // Send both headers AND token — headers should win
-    const response = await stub.fetch(`http://localhost/api/counter/${actorId}`, {
-      headers: {
-        Upgrade: "websocket",
-        "X-Actor-Kit-Caller-Id": "u1",
-        "X-Actor-Kit-Caller-Type": "user",
-        "X-Actor-Kit-Binary": "1",
-        "Sec-WebSocket-Protocol": `token.${token}`,
-      },
-    });
-    expect(response.status).toBe(101);
-
-    const ws = response.webSocket!;
-    ws.accept();
-
-    // Send INCREMENT, then check snapshot — lastCaller should be "u1" (from headers), not "other-user" (from token)
-    await waitForBinaryMessage(ws);
-    ws.send(JSON.stringify({ type: "INCREMENT", amount: 1 }));
-    await waitForBinaryMessage(ws); // consume delta
-
-    ws.close(1000, "done");
-    await new Promise((r) => setTimeout(r, 50));
-
-    // Verify via getSnapshot that caller was "u1"
-    const snap = await stub.getSnapshot("u1", "user");
-    expect(snap.snapshot.lastCaller).toBe("u1");
-  });
-
-  it("falls back to token when identity headers are absent", async () => {
-    const { stub, actorId } = getStub("hdr-auth-fallback");
-    await stub.spawn({ actorId, caller: "u1", callerType: "user", input: {} });
-
-    const token = await createAccessToken({
-      actorType: "counter",
-      actorId,
-      callerId: "u1",
-      callerType: "user",
-      secret: SECRET,
-    });
-
-    // No identity headers, only token subprotocol — should still work (backward compat)
-    const response = await stub.fetch(`http://localhost/api/counter/${actorId}`, {
-      headers: {
-        Upgrade: "websocket",
-        "Sec-WebSocket-Protocol": `token.${token}`,
-      },
-    });
-    expect(response.status).toBe(101);
-
-    if (response.webSocket) {
-      response.webSocket.accept();
-      response.webSocket.close(1000);
-      await new Promise((r) => setTimeout(r, 50));
-    }
-  });
-
-  it("returns 401 when neither headers nor token provided", async () => {
+  it("returns 401 when no identity headers provided", async () => {
     const { stub, actorId } = getStub("hdr-auth-none");
     await stub.spawn({ actorId, caller: "u1", callerType: "user", input: {} });
 

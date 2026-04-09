@@ -1,5 +1,5 @@
 import { withCallerIdentity } from "@actor-kit/worker";
-import { Auction } from "./auction";
+import { Auction } from "./auction.server";
 
 export { Auction };
 
@@ -12,18 +12,20 @@ export default {
     const url = new URL(request.url);
 
     if (url.pathname === "/" || url.pathname === "/index.html") {
-      return new Response(clientHTML(), { headers: { "Content-Type": "text/html" } });
+      const { callerId, setCookie } = resolveCaller(request);
+      const headers = new Headers({ "Content-Type": "text/html" });
+      if (setCookie) headers.set("Set-Cookie", setCookie);
+      return new Response(clientHTML(callerId), { headers });
     }
 
     if (url.pathname.startsWith("/api/auction/")) {
       const auctionId = url.pathname.split("/")[3] ?? "default";
       const item = url.searchParams.get("item") ?? "Mystery Item";
 
-      // Authenticate the caller.
-      // PRODUCTION: validate a session cookie, OAuth token, or similar credential here.
-      // This demo uses a query param for simplicity — NOT safe for production.
-      // CORS/Origin validation is handled at the Worker level (e.g., Hono cors() middleware), not inside the actor.
-      const callerId = url.searchParams.get("user") ?? `bidder-${crypto.randomUUID().slice(0, 6)}`;
+      // Authenticate the caller via session cookie.
+      // PRODUCTION: validate a signed session cookie, OAuth token, or similar credential.
+      // CORS/Origin validation is handled at the Worker level, not inside the actor.
+      const { callerId } = resolveCaller(request);
 
       const id = env.AUCTION.idFromName(auctionId);
       const stub = env.AUCTION.get(id);
@@ -37,7 +39,16 @@ export default {
   },
 };
 
-function clientHTML(): string {
+function resolveCaller(request: Request): { callerId: string; setCookie: string | null } {
+  const cookieHeader = request.headers.get("Cookie") ?? "";
+  const match = cookieHeader.match(/(?:^|;\s*)caller_id=([^;]+)/);
+  if (match?.[1]) return { callerId: decodeURIComponent(match[1]), setCookie: null };
+  const callerId = `bidder-${crypto.randomUUID().slice(0, 6)}`;
+  const setCookie = `caller_id=${encodeURIComponent(callerId)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=31536000`;
+  return { callerId, setCookie };
+}
+
+function clientHTML(callerId: string): string {
   return `<!DOCTYPE html>
 <html>
 <head>
@@ -75,13 +86,13 @@ function clientHTML(): string {
     async function init() {
       const params = new URLSearchParams(location.search);
       const auction = params.get('auction') || 'default';
-      const callerId = params.get('user') || 'bidder-' + crypto.randomUUID().slice(0, 6);
+      const callerId = ${JSON.stringify(callerId)};
       const item = params.get('item') || 'Mystery Item';
 
-      // Connect WebSocket — Worker stamps identity via withCallerIdentity
+      // Connect WebSocket — session cookie is sent automatically; worker stamps identity via withCallerIdentity
       const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
       ws = new WebSocket(
-        protocol + '//' + location.host + '/api/auction/' + auction + '?item=' + encodeURIComponent(item) + '&user=' + encodeURIComponent(callerId)
+        protocol + '//' + location.host + '/api/auction/' + auction + '?item=' + encodeURIComponent(item)
       );
 
       ws.addEventListener('open', () => {

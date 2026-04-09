@@ -39,6 +39,7 @@ function createFakeClient() {
     },
     send: vi.fn(),
     trigger: vi.fn(),
+    connect: vi.fn(),
     disconnect: vi.fn(),
     // Test helpers
     _setView(v: unknown, r: string) {
@@ -85,10 +86,6 @@ describe("createActorContext — React SDK", () => {
         children: React.createElement(Child),
       }),
     );
-
-    // View should be undefined initially
-    const initial = screen.getByTestId("view").textContent ?? "";
-    expect(initial === "" || initial === "undefined" || initial === "null").toBe(true);
 
     // Simulate server sending snapshot
     act(() => {

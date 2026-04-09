@@ -1,39 +1,62 @@
 /**
- * Transactional outbox — collects emit() calls during transitions.
+ * Transactional outbox — collects execute() calls during transitions.
  *
- * After transition, entries are persisted atomically with state (same SQLite tx).
- * Outbox is drained asynchronously — only Queue effects are delivered.
- * Failed entries retry with backoff.
+ * After transition, execution entries are available for test assertions.
+ * Runtime services (when implemented) will persist and replay them.
  */
 
-import type { Effect } from "@actor-kit/core";
+import type { Execution, ForwardCall } from "@actor-kit/core";
 
-// --- Outbox entry ---
+export type { ForwardCall };
 
-export interface OutboxEntry {
+// --- Execution entry ---
+
+export interface ExecutionEntry {
   id: string;
-  payload: Effect;
-  status: "pending" | "sent";
+  service: string;
+  payload: unknown;
+  status: "pending" | "running" | "done" | "failed";
   attempts: number;
   createdAt: number;
 }
 
-// --- Storage interface (implemented by SQLite in runtime, fakes in tests) ---
+// --- Link tracking types ---
 
-export interface OutboxStorage {
-  insertEntries(entries: OutboxEntry[]): void;
-  getPending(): OutboxEntry[];
-  markSent(id: string): void;
-  incrementAttempts(id: string): void;
-  moveToFailures(id: string): void;
+export interface LinkCall {
+  readonly name: string;
+  readonly id: string;
+}
+
+export interface UnlinkCall {
+  readonly name: string;
+  readonly id: string | undefined;
+}
+
+// --- Forward entry ---
+
+export interface ForwardEntry {
+  id: string;
+  linkName: string;
+  targetId: string;
+  message: { type: string; [key: string]: unknown };
+  status: "pending" | "running" | "done" | "failed";
+  attempts: number;
+  createdAt: number;
 }
 
 // --- Outbox collector (used during a transition) ---
 
 interface OutboxCollector {
-  emit(effect: Effect): void;
-  getEmissions(): Effect[];
-  toEntries(): OutboxEntry[];
+  execute(service: string, payload: unknown): void;
+  link(name: string, id: string): void;
+  unlink(name: string, id?: string): void;
+  forward(linkName: string, targetId: string, message: { type: string; [key: string]: unknown }): void;
+  getExecutions(): Execution[];
+  getLinks(): LinkCall[];
+  getUnlinks(): UnlinkCall[];
+  getForwards(): ForwardCall[];
+  toExecutionEntries(): ExecutionEntry[];
+  toForwardEntries(): ForwardEntry[];
 }
 
 let idCounter = 0;
@@ -44,22 +67,63 @@ function generateId(): string {
 }
 
 export function createOutbox(): OutboxCollector {
-  const emissions: Effect[] = [];
+  const executions: Execution[] = [];
+  const links: LinkCall[] = [];
+  const unlinks: UnlinkCall[] = [];
+  const forwards: ForwardCall[] = [];
 
   return {
-    emit(effect: Effect): void {
-      emissions.push(effect);
+    execute(service: string, payload: unknown): void {
+      executions.push({ service, payload });
     },
 
-    getEmissions(): Effect[] {
-      return [...emissions];
+    link(name: string, id: string): void {
+      links.push({ name, id });
     },
 
-    toEntries(): OutboxEntry[] {
+    unlink(name: string, id?: string): void {
+      unlinks.push({ name, id });
+    },
+
+    forward(linkName: string, targetId: string, message: { type: string; [key: string]: unknown }): void {
+      forwards.push({ linkName, targetId, message });
+    },
+
+    getExecutions(): Execution[] {
+      return [...executions];
+    },
+
+    getLinks(): LinkCall[] {
+      return [...links];
+    },
+
+    getUnlinks(): UnlinkCall[] {
+      return [...unlinks];
+    },
+
+    getForwards(): ForwardCall[] {
+      return [...forwards];
+    },
+
+    toExecutionEntries(): ExecutionEntry[] {
       const now = Date.now();
-      return emissions.map((effect) => ({
+      return executions.map((exec) => ({
         id: generateId(),
-        payload: effect,
+        service: exec.service,
+        payload: exec.payload,
+        status: "pending" as const,
+        attempts: 0,
+        createdAt: now,
+      }));
+    },
+
+    toForwardEntries(): ForwardEntry[] {
+      const now = Date.now();
+      return forwards.map((fwd) => ({
+        id: generateId(),
+        linkName: fwd.linkName,
+        targetId: fwd.targetId,
+        message: fwd.message,
         status: "pending" as const,
         attempts: 0,
         createdAt: now,

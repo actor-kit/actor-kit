@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { array, boolean, schema, string, uint32, view } from "@actor-kit/core";
-import { createActorClass, defineActor, message } from "@actor-kit/worker";
+import { defineActor, message } from "@actor-kit/worker";
 
 // --- Types ---
 type Todo = { id: string; text: string; done: boolean };
@@ -99,4 +99,4 @@ export const TodoListContract = defineActor("todo-list", {
   },
 });
 
-export const TodoList = createActorClass(TodoListContract);
+export type TodoListContract = typeof TodoListContract;

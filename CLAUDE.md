@@ -6,7 +6,7 @@ Actors on the edge. Each actor is a Cloudflare Durable Object with a mailbox, pr
 
 - **Language**: TypeScript (strict mode, no `any`, no `as` casts)
 - **Runtime**: Cloudflare Workers + Durable Objects (SQLite storage)
-- **Validation**: Zod (events + input), custom `schema()` builder (views + binary encoding)
+- **Validation**: Zod (messages + input), custom `schema()` builder (views + binary encoding)
 - **State mutations**: Immer `produce()`
 - **Auth**: JWT via `jose` library
 - **Build**: tsdown (esbuild-based)
@@ -75,9 +75,9 @@ Do NOT load all docs upfront. Load only when relevant to the current task.
 
 3. **Binary-first sync** — `schema()` defines the binary wire format. Delta encoding sends only changed fields. Full snapshots only on first connect or schema mismatch. Minimize bytes over the wire.
 
-4. **Deep CF integration** — Embrace Durable Objects: SQLite for persistence, Alarms for durable timers, RPC for actor-to-actor communication, Hibernation for idle actors. No abstraction layers that hide CF capabilities.
+4. **Deep CF integration** — Embrace Durable Objects: SQLite for persistence, Alarms for durable timers, RPC for actor-to-actor communication, Hibernation for idle actors, `ctx.exports` for single-Worker actor discovery (ADR-012). No abstraction layers that hide CF capabilities.
 
-5. **Transactional side effects** — State changes persist atomically. Side effects go through `emit()` → SQLite outbox → at-least-once delivery. Async transitions are for effects that inform state. `emit()` is for fire-and-forget.
+5. **Transactional side effects** — State changes persist atomically. Side effects are declared as `services` and invoked via `ctx.execute(serviceName, payload)` → SQLite outbox → at-least-once delivery. Services define typed input/output with `onDone`/`onError` callbacks routed back to the actor's `on` block.
 
 6. **Parse at the boundary** — All external data (events, input, WebSocket frames) is parsed through a schema before entering application logic. Invalid data is rejected, never coerced. See [docs/adrs/002-parse-at-boundary.md](docs/adrs/002-parse-at-boundary.md).
 
@@ -89,9 +89,9 @@ Do NOT load all docs upfront. Load only when relevant to the current task.
 - **`schema({ field: type })`** — defines binary-encodable view shapes with TypeScript inference.
 - **`view(Schema, fn)`** — pairs a schema with a projection function.
 - **`message(zodSchema, handler)`** or **`message(zodSchema, { guard, handler })`** — pairs a Zod payload schema with a handler. Optional guard rejects before handler runs. Required for all message and RPC handlers.
-- **`ref(env, actorType, actorId)`** — gets a typed stub for DO-to-DO RPC.
-- **`ctx.emit(effect)`** — fire-and-forget side effect via transactional outbox. Effect is `{ queue, body }`, `{ fetch, body }`, or `{ actor, id, message, payload }`.
-- **`ctx.request(config)`** — async side effect with response. Same as emit but adds `onDone`/`onError` message names that get delivered back to the actor's `on` block.
+- **`ref(env, actorType, actorId)`** — gets a typed stub for DO-to-DO RPC. Also supports `createRef(contract, exports, env, actorId)` for `ctx.exports` discovery (ADR-012).
+- **`resolveNamespace(contractName, exports, env)`** — finds a DO namespace by contract name from `ctx.exports`, falls back to env binding.
+- **`ctx.execute(serviceName, payload)`** — invokes a named service defined in the actor's `services` block. Services declare `fn`, optional `onDone`/`onError` handlers. Durable via outbox — persisted atomically with state, retried on crash.
 - **`connect(actorType, opts)`** — client SDK, WebSocket connection with binary decoding.
 - **`testActor(Actor)`** — test helper, runs transitions without CF runtime.
 
@@ -103,23 +103,16 @@ Do NOT load all docs upfront. Load only when relevant to the current task.
 - Role re-evaluated on every message (state changes can change your role).
 - Messages are scoped per role. A role with `{}` is read-only.
 
-### Events and messages
+### Messages
 
-- Messages are defined per role in the `messages` block (or per state × role if using `states`).
+- Messages are defined in the `messages` block as flat handlers.
 - All handlers use `message(zodSchema, handler)` or `message(zodSchema, { guard, handler })`.
-- Handler signature: `(state, payload, ctx) => state | Promise<state>`
-- `ctx` contains `{ caller, callerType, role, env, emit, request }`.
+- Handler signature: `(state, payload, ctx) => state`
+- `ctx` contains `{ caller, callerType, role, env, execute }`.
 - Zod validates message payloads at runtime. Guard evaluates after validation. Invalid/guarded = rejected before handler.
 - Same message name across multiple roles must reference the same `MessageDef` object — enforced by the type system.
-- `on` block handles lifecycle events (`connect`, `disconnect`) AND async callbacks from `request()` (`onDone`/`onError` messages).
-- Actors are always separate DOs. No child actors in the same DO. Use `emit({actor, id, message})` or `request({actor, id, message, onDone, onError})` for actor-to-actor communication.
-
-### States (optional)
-
-Three modes:
-- **No states**: `messages` at top level. All messages always valid (gated only by role + guard).
-- **Sequential states**: `initial` + `states` block. Each state defines its own `messages` per role. `after` for timed transitions.
-- **Parallel states**: `parallel: true` + `regions`. Multiple independent state regions active simultaneously. Message valid if valid in any active region.
+- `lifecycle` block handles `connect`/`disconnect` events.
+- Actors are always separate DOs. No child actors in the same DO. Use `execute(serviceName, payload)` for actor-to-actor communication via services.
 
 ### State and persistence
 
@@ -148,7 +141,7 @@ Three modes:
 - **Unit tests**: `testActor()` — pure transitions, no CF runtime. Fast, TDD-friendly.
 - **Integration tests**: `vitest-pool-workers` — real DO, real WebSocket, real SQLite.
 - **Fakes over mocks**: Use real implementations or fakes. Never mock internals.
-- **Emission capture**: `sendWithEffects()` returns `{ state, emissions }` for asserting side effects.
+- **Emission capture**: `sendWithEffects()` returns `{ state, emissions, executions }` for asserting side effects and service invocations.
 - **TDD**: Red-green-refactor. Write the test first. See it fail. Implement. See it pass.
 
 ## Keeping docs current

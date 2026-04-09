@@ -23,11 +23,11 @@ import { type ReactNode, createElement } from "react";
 import type { ActorClient } from "@actor-kit/client";
 import { createMockClient } from "./mock-client";
 
-interface WithActorKitOptions<TView, TEvent extends { type: string }> {
+interface WithActorKitOptions<TView, TMessage extends { type: string }> {
   /** The actorContext() result — provides Provider */
   context: {
     Provider: (props: {
-      client: ActorClient<TView, TEvent>;
+      client: ActorClient<TView, TMessage>;
       children?: ReactNode;
     }) => ReactNode;
   };
@@ -36,7 +36,7 @@ interface WithActorKitOptions<TView, TEvent extends { type: string }> {
   /** Optional role (default: "user") */
   role?: string;
   /** Optional send handler for interactive stories */
-  onSend?: (event: { type: string; [key: string]: unknown }) => TView | void;
+  onSend?: (message: { type: string; [key: string]: unknown }) => TView | void;
 }
 
 /**
@@ -45,15 +45,15 @@ interface WithActorKitOptions<TView, TEvent extends { type: string }> {
  */
 export function withActorKit<
   TView,
-  TEvent extends { type: string } = { type: string; [key: string]: unknown },
->(options: WithActorKitOptions<TView, TEvent>) {
+  TMessage extends { type: string } = { type: string; [key: string]: unknown },
+>(options: WithActorKitOptions<TView, TMessage>) {
   const { context, view, role, onSend } = options;
 
   // Return a Storybook decorator function
   // Storybook's decorator types vary by version — we use ReactNode for
   // createElement compatibility without depending on @storybook/react internals
   return (Story: () => ReactNode): ReactNode => {
-    const client = createMockClient<TView, TEvent>({
+    const client = createMockClient<TView, TMessage>({
       initialView: view,
       role,
       onSend,

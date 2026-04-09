@@ -12,16 +12,15 @@
  */
 
 import { DurableObject } from "cloudflare:workers";
-import type { Effect, FieldDescriptor, MessageContext, SchemaDefinition } from "@actor-kit/core";
+import type { FieldDescriptor, MessageContext, SchemaDefinition } from "@actor-kit/core";
 import { createDeltaFrame, createSnapshotFrame, encode, encodeDelta } from "@actor-kit/core";
+import { DOQB } from "workers-qb";
 import type { z } from "zod";
-import { getCallerFromToken } from "./auth";
 import { BINARY_SUPPORT_HEADER, CALLER_ID_HEADER, CALLER_TYPE_HEADER } from "./identity";
 import { routeMessage } from "./runtime/message-router";
-import { createOutbox, type OutboxEntry } from "./runtime/outbox";
+import { createOutbox } from "./runtime/outbox";
+import { resolveNamespace } from "./runtime/resolve-namespace";
 import { resolveRole } from "./runtime/roles";
-import { resolveMessagesForState } from "./runtime/states";
-import { parseDuration } from "./runtime/timers";
 
 // --- Actor definition ---
 
@@ -40,9 +39,11 @@ interface ActorMessageSlot {
 
 interface ActorDef {
   input: z.ZodType;
-  init(input: unknown, env: unknown): unknown | Promise<unknown>; // bivariant — optionally async, receives env
+  init(
+    input: unknown,
+    ctx: { env: unknown; link: (name: string, id: string) => Promise<unknown> },
+  ): unknown | Promise<unknown>; // bivariant — optionally async, receives ctx
   version?: number;
-  initial?: string;
   roles: Record<
     string,
     {
@@ -51,28 +52,6 @@ interface ActorDef {
     }
   >;
   messages?: Record<string, Record<string, ActorMessageSlot>>;
-  states?:
-    | Record<
-        string,
-        {
-          messages: Record<string, Record<string, ActorMessageSlot>>;
-        }
-      >
-    | {
-        parallel: true;
-        regions: Record<
-          string,
-          {
-            initial: string;
-            states: Record<
-              string,
-              {
-                messages: Record<string, Record<string, ActorMessageSlot>>;
-              }
-            >;
-          }
-        >;
-      };
   views: Record<
     string,
     {
@@ -84,11 +63,6 @@ interface ActorDef {
     connect?(state: unknown, event: { caller: string; callerType: "user" | "service" }, ctx: unknown): unknown;
     disconnect?(state: unknown, event: { caller: string; callerType: "user" | "service" }, ctx: unknown): unknown;
   };
-  after?: Record<string, (state: unknown) => unknown>;
-  tick?: {
-    frequency: number;
-    handler(state: unknown): unknown;
-  };
   observe?: {
     onTransition?(
       prevState: unknown,
@@ -97,54 +71,163 @@ interface ActorDef {
       ctx: { caller: string; role: string },
     ): void;
   };
+  services?: Record<
+    string,
+    {
+      fn(payload: unknown, env: unknown): Promise<unknown>;
+      onDone?(state: unknown, result: unknown, payload: unknown): unknown;
+      onError?(state: unknown, error: { message: string }, payload: unknown): unknown;
+    }
+  >;
+  links?: Record<
+    string,
+    {
+      contract: { readonly name: string };
+      onUpdate(state: unknown, view: unknown, id?: string): unknown;
+      onError?: ((state: unknown, error: { message: string; code: string }, id?: string) => unknown) | undefined;
+      onUnlink?: ((state: unknown, id?: string) => unknown) | undefined;
+    }
+  >;
   migrate?(persisted: unknown, fromVersion: number): unknown;
   serialize?(state: unknown): unknown;
   restore?(serialized: unknown): unknown;
 }
 
-// --- SQL table creation ---
+// --- SQL migrations ---
+// Tracked by workers-qb in _qb_migrations table.
+// Append new migrations here — never edit existing ones.
 
-const CREATE_TABLES_SQL = `
-  CREATE TABLE IF NOT EXISTS actor_meta (
-    key TEXT PRIMARY KEY,
-    value TEXT
-  );
-  CREATE TABLE IF NOT EXISTS snapshots (
-    id INTEGER PRIMARY KEY CHECK (id = 1),
-    version INTEGER,
-    state TEXT,
-    state_tracker TEXT,
-    actor_id TEXT,
-    checksum TEXT,
-    updated_at INTEGER
-  );
-  CREATE TABLE IF NOT EXISTS outbox (
-    id TEXT PRIMARY KEY,
-    type TEXT,
-    payload TEXT,
-    status TEXT DEFAULT 'pending',
-    attempts INTEGER DEFAULT 0,
-    created_at INTEGER
-  );
-  CREATE TABLE IF NOT EXISTS emission_failures (
-    id TEXT PRIMARY KEY,
-    type TEXT,
-    payload TEXT,
-    error TEXT,
-    failed_at INTEGER
-  );
-`;
+const ACTOR_KIT_MIGRATIONS = [
+  {
+    name: "0001_initial_schema",
+    sql: `
+      CREATE TABLE IF NOT EXISTS actor_meta (
+        key TEXT PRIMARY KEY,
+        value TEXT
+      );
+      CREATE TABLE IF NOT EXISTS snapshots (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        version INTEGER,
+        state TEXT,
+        state_tracker TEXT,
+        actor_id TEXT,
+        checksum TEXT,
+        updated_at INTEGER
+      );
+      CREATE TABLE IF NOT EXISTS outbox (
+        id TEXT PRIMARY KEY,
+        type TEXT,
+        payload TEXT,
+        status TEXT DEFAULT 'pending',
+        attempts INTEGER DEFAULT 0,
+        created_at INTEGER
+      );
+    `,
+  },
+  {
+    name: "0002_outbox_indexes",
+    sql: `
+      CREATE INDEX IF NOT EXISTS idx_outbox_status_created ON outbox(status, created_at);
+    `,
+  },
+  {
+    name: "0003_executions",
+    sql: `
+      CREATE TABLE IF NOT EXISTS executions (
+        id TEXT PRIMARY KEY,
+        service TEXT NOT NULL,
+        payload TEXT NOT NULL,
+        status TEXT DEFAULT 'pending',
+        attempts INTEGER DEFAULT 0,
+        created_at INTEGER
+      );
+      CREATE INDEX IF NOT EXISTS idx_executions_status ON executions(status, created_at);
+    `,
+  },
+  {
+    name: "0004_links",
+    sql: `
+      CREATE TABLE IF NOT EXISTS active_links (
+        target_type TEXT NOT NULL,
+        target_id TEXT NOT NULL,
+        link_name TEXT NOT NULL,
+        version INTEGER DEFAULT 0,
+        created_at INTEGER,
+        PRIMARY KEY (target_type, target_id, link_name)
+      );
+      CREATE TABLE IF NOT EXISTS link_subscribers (
+        subscriber_type TEXT NOT NULL,
+        subscriber_id TEXT NOT NULL,
+        subscribed_at INTEGER,
+        PRIMARY KEY (subscriber_type, subscriber_id)
+      );
+    `,
+  },
+  {
+    name: "0005_forwards",
+    sql: `
+      CREATE TABLE IF NOT EXISTS forwards (
+        id TEXT PRIMARY KEY,
+        link_name TEXT NOT NULL,
+        target_id TEXT NOT NULL,
+        message TEXT NOT NULL,
+        caller TEXT NOT NULL,
+        caller_type TEXT NOT NULL,
+        status TEXT DEFAULT 'pending',
+        attempts INTEGER DEFAULT 0,
+        created_at INTEGER
+      );
+      CREATE INDEX IF NOT EXISTS idx_forwards_status_created ON forwards(status, created_at);
+    `,
+  },
+];
+
+// --- Helpers ---
+
+/**
+ * Safely extract the `exports` map from a DurableObjectState ctx.
+ * In multi-DO Workers, the CF runtime populates ctx.exports with co-located bindings.
+ * We access it via unknown to avoid casting DurableObjectState.
+ */
+function getExports(ctx: unknown): Record<string, unknown> | undefined {
+  if (typeof ctx !== "object" || ctx === null) return undefined;
+  if ("exports" in ctx) {
+    const val: unknown = (ctx as Record<string, unknown>)["exports"];
+    if (typeof val === "object" && val !== null) return val as Record<string, unknown>;
+  }
+  return undefined;
+}
+
+/**
+ * Resolve a DurableObject stub for a given actor type and ID.
+ * Returns undefined if namespace or stub can't be resolved.
+ */
+function resolveStub(
+  contractName: string,
+  targetId: string,
+  ctx: unknown,
+  env: unknown,
+): Record<string, unknown> | undefined {
+  try {
+    const ns = resolveNamespace(contractName, getExports(ctx), env as Record<string, unknown>);
+    // DurableObjectNamespace shape
+    const doNs = ns as { idFromName(name: string): unknown; get(id: unknown): Record<string, unknown> };
+    const doId = doNs.idFromName(targetId);
+    return doNs.get(doId);
+  } catch {
+    return undefined;
+  }
+}
 
 // --- actor() function ---
 
 export function actor(
-  actorName: string,
+  _actorName: string,
   def: ActorDef,
 ): { new (ctx: DurableObjectState, env: Record<string, unknown>): DurableObject } {
-  return class ActorInstance extends DurableObject {
+  const DOClass = class ActorInstance extends DurableObject {
     state: unknown = undefined;
     actorId: string | undefined = undefined; // Human-readable ID (the name passed to idFromName)
-    stateTracker: Record<string, string> | { current: string } | undefined = undefined;
     initialized = false;
     version: number;
     // Keyed by WebSocket (not caller) to support multi-tab/multi-device
@@ -153,7 +236,8 @@ export function actor(
     previousViewData = new Map<WebSocket, Record<string, unknown>>(); // actual view data for delta computation
     connectionChecksums = new Map<WebSocket, string>(); // last checksum sent per connection
     supportsBinary = new Map<WebSocket, boolean>(); // per-connection binary capability
-    draining = false; // Prevents concurrent outbox drains
+    drainingExecutions = false; // Prevents concurrent execution drains
+    previousSubscriberViews = new Map<string, string>(); // dedupe: "type:id" → "role:json"
 
     constructor(ctx: DurableObjectState, env: Record<string, unknown>) {
       super(ctx, env);
@@ -165,24 +249,21 @@ export function actor(
       });
     }
 
-    async ensureTables(): Promise<void> {
-      this.ctx.storage.sql.exec(CREATE_TABLES_SQL);
+    runMigrations(): void {
+      new DOQB(this.ctx.storage.sql).migrations({ migrations: ACTOR_KIT_MIGRATIONS }).apply();
     }
 
     async loadState(): Promise<void> {
       if (this.initialized) return;
 
-      await this.ensureTables();
+      this.runMigrations();
 
-      const rows = this.ctx.storage.sql
-        .exec("SELECT state, version, state_tracker, actor_id FROM snapshots WHERE id = 1")
-        .toArray();
+      const rows = this.ctx.storage.sql.exec("SELECT state, version, actor_id FROM snapshots WHERE id = 1").toArray();
 
       if (rows.length > 0 && rows[0] !== undefined) {
         const row = rows[0] as {
           state: string;
           version: number;
-          state_tracker: string | null;
           actor_id: string | null;
         };
         let parsed: unknown = JSON.parse(row.state);
@@ -195,11 +276,6 @@ export function actor(
         // Restore state
         this.state = def.restore ? def.restore(parsed) : parsed;
 
-        // Restore state tracker
-        if (row.state_tracker !== null) {
-          this.stateTracker = JSON.parse(row.state_tracker);
-        }
-
         // Restore actor ID
         if (row.actor_id !== null) {
           this.actorId = row.actor_id;
@@ -207,37 +283,30 @@ export function actor(
 
         this.initialized = true;
 
-        // Drain any pending outbox entries from before crash/restart
-        this.drainOutbox();
+        // Drain any pending executions from before crash/restart
+        this.drainExecutions();
+
+        // Drain any pending forwards from before crash/restart
+        this.drainForwards();
+
+        // Re-register active link subscriptions
+        if (def.links) {
+          this.reRegisterLinks();
+        }
       } else {
         // No persisted state — try auto-spawn with empty input
         const emptyParsed = def.input.safeParse({});
         if (emptyParsed.success) {
           this.actorId = this.ctx.id.toString();
-          this.state = await def.init(emptyParsed.data, this.env);
+          this.state = await def.init(emptyParsed.data, {
+            env: this.env,
+            link: async () => {
+              throw new Error("link() not available during auto-spawn");
+            },
+          });
           this.initialized = true;
 
-          // Initialize state tracker if using states
-          if (def.states) {
-            const statesDef = def.states;
-            if ("parallel" in statesDef && statesDef.parallel === true) {
-              const tracker: Record<string, string> = {};
-              for (const [regionName, regionDef] of Object.entries(statesDef.regions)) {
-                tracker[regionName] = regionDef.initial;
-              }
-              this.stateTracker = tracker;
-            } else if (def.initial) {
-              this.stateTracker = { current: def.initial };
-            } else {
-              const firstState = Object.keys(statesDef)[0];
-              if (firstState !== undefined) {
-                this.stateTracker = { current: firstState };
-              }
-            }
-          }
-
           this.persistState();
-          this.scheduleAfterTimers();
         }
         // If input requires fields, stay uninitialized — spawn() must be called explicitly
       }
@@ -247,31 +316,15 @@ export function actor(
       const serialized = def.serialize ? def.serialize(this.state) : this.state;
       const json = JSON.stringify(serialized);
       const checksum = this.computeChecksum(json);
-      const stateTrackerJson = this.stateTracker ? JSON.stringify(this.stateTracker) : null;
 
       this.ctx.storage.sql.exec(
-        "INSERT OR REPLACE INTO snapshots (id, version, state, state_tracker, actor_id, checksum, updated_at) VALUES (1, ?, ?, ?, ?, ?, ?)",
+        "INSERT OR REPLACE INTO snapshots (id, version, state, state_tracker, actor_id, checksum, updated_at) VALUES (1, ?, ?, NULL, ?, ?, ?)",
         this.version,
         json,
-        stateTrackerJson,
         this.actorId ?? null,
         checksum,
         Date.now(),
       );
-    }
-
-    persistOutbox(entries: OutboxEntry[]): void {
-      for (const entry of entries) {
-        this.ctx.storage.sql.exec(
-          "INSERT INTO outbox (id, type, payload, status, attempts, created_at) VALUES (?, ?, ?, ?, ?, ?)",
-          entry.id,
-          "emit",
-          JSON.stringify(entry.payload),
-          entry.status,
-          entry.attempts,
-          entry.createdAt,
-        );
-      }
     }
 
     computeChecksum(json: string): string {
@@ -281,6 +334,496 @@ export function actor(
         h = ((h << 5) - h + json.charCodeAt(i)) | 0;
       }
       return (h >>> 0).toString(16);
+    }
+
+    persistExecutions(
+      entries: Array<{
+        id: string;
+        service: string;
+        payload: unknown;
+        status: string;
+        attempts: number;
+        createdAt: number;
+      }>,
+    ): void {
+      for (const entry of entries) {
+        this.ctx.storage.sql.exec(
+          "INSERT INTO executions (id, service, payload, status, attempts, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+          entry.id,
+          entry.service,
+          JSON.stringify(entry.payload),
+          entry.status,
+          entry.attempts,
+          entry.createdAt,
+        );
+      }
+    }
+
+    async drainExecutions(): Promise<void> {
+      if (this.drainingExecutions) return;
+      this.drainingExecutions = true;
+      try {
+        await this.drainExecutionsInner();
+      } finally {
+        this.drainingExecutions = false;
+      }
+    }
+
+    async drainExecutionsInner(): Promise<void> {
+      const rows = this.ctx.storage.sql
+        .exec("SELECT id, service, payload, attempts FROM executions WHERE status = 'pending' ORDER BY created_at")
+        .toArray();
+
+      for (const row of rows) {
+        const entry = row as { id: string; service: string; payload: string; attempts: number };
+        const serviceDef = def.services?.[entry.service];
+
+        if (!serviceDef) {
+          this.ctx.storage.sql.exec("UPDATE executions SET status = 'failed' WHERE id = ?", entry.id);
+          continue;
+        }
+
+        const parsedPayload: unknown = JSON.parse(entry.payload);
+
+        try {
+          const result = await serviceDef.fn(parsedPayload, this.env);
+          this.ctx.storage.sql.exec("UPDATE executions SET status = 'done' WHERE id = ?", entry.id);
+
+          if (serviceDef.onDone) {
+            const nextState = serviceDef.onDone(this.state, result, parsedPayload);
+            if (nextState !== this.state) {
+              this.state = nextState;
+              this.persistState();
+              this.broadcastViews();
+            }
+          }
+        } catch (error) {
+          this.ctx.storage.sql.exec("UPDATE executions SET status = 'failed' WHERE id = ?", entry.id);
+
+          if (serviceDef.onError) {
+            const errorMessage = error instanceof Error ? error.message : String(error);
+            const nextState = serviceDef.onError(this.state, { message: errorMessage }, parsedPayload);
+            if (nextState !== this.state) {
+              this.state = nextState;
+              this.persistState();
+              this.broadcastViews();
+            }
+          }
+        }
+      }
+    }
+
+    // --- Forward processing ---
+
+    drainingForwards = false;
+
+    persistForwards(
+      entries: Array<{
+        id: string;
+        linkName: string;
+        targetId: string;
+        message: { type: string; [key: string]: unknown };
+        status: string;
+        attempts: number;
+        createdAt: number;
+      }>,
+      caller: string,
+      callerType: "user" | "service",
+    ): void {
+      for (const entry of entries) {
+        this.ctx.storage.sql.exec(
+          "INSERT INTO forwards (id, link_name, target_id, message, caller, caller_type, status, attempts, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+          entry.id,
+          entry.linkName,
+          entry.targetId,
+          JSON.stringify(entry.message),
+          caller,
+          callerType,
+          entry.status,
+          entry.attempts,
+          entry.createdAt,
+        );
+      }
+    }
+
+    async drainForwards(): Promise<void> {
+      if (this.drainingForwards) return;
+      this.drainingForwards = true;
+      try {
+        await this.drainForwardsInner();
+      } finally {
+        this.drainingForwards = false;
+      }
+    }
+
+    async drainForwardsInner(): Promise<void> {
+      const rows = this.ctx.storage.sql
+        .exec(
+          "SELECT id, link_name, target_id, message, caller, caller_type FROM forwards WHERE status = 'pending' ORDER BY created_at",
+        )
+        .toArray();
+
+      for (const row of rows) {
+        const entry = row as {
+          id: string;
+          link_name: string;
+          target_id: string;
+          message: string;
+          caller: string;
+          caller_type: string;
+        };
+
+        // Resolve contract name: prefer declared link def, else lowercase the link name.
+        const linkDef = def.links?.[entry.link_name];
+        const contractName = linkDef ? linkDef.contract.name : entry.link_name.toLowerCase().replace(/_/g, "-");
+
+        const stub = resolveStub(contractName, entry.target_id, this.ctx, this.env);
+        if (!stub || typeof stub["send"] !== "function") {
+          this.ctx.storage.sql.exec("UPDATE forwards SET status = 'failed' WHERE id = ?", entry.id);
+          continue;
+        }
+
+        const parsedMessage: unknown = JSON.parse(entry.message);
+        if (
+          typeof parsedMessage !== "object" ||
+          parsedMessage === null ||
+          !("type" in parsedMessage) ||
+          typeof (parsedMessage as Record<string, unknown>)["type"] !== "string"
+        ) {
+          this.ctx.storage.sql.exec("UPDATE forwards SET status = 'failed' WHERE id = ?", entry.id);
+          continue;
+        }
+
+        const callerType: "user" | "service" = entry.caller_type === "service" ? "service" : "user";
+
+        try {
+          const sendFn = stub["send"] as (
+            caller: string,
+            callerType: "user" | "service",
+            message: { type: string; [key: string]: unknown },
+          ) => Promise<unknown>;
+          await sendFn(entry.caller, callerType, parsedMessage as { type: string; [key: string]: unknown });
+          this.ctx.storage.sql.exec("UPDATE forwards SET status = 'done' WHERE id = ?", entry.id);
+        } catch {
+          this.ctx.storage.sql.exec("UPDATE forwards SET status = 'failed' WHERE id = ?", entry.id);
+        }
+      }
+    }
+
+    // --- Link processing (subscriber side) ---
+
+    /**
+     * Process link intents captured during a message handler.
+     * Persists to active_links, then asynchronously registers with target actors.
+     */
+    processLinks(
+      linkCalls: Array<{ name: string; id: string }>,
+      unlinkCalls: Array<{ name: string; id: string | undefined }>,
+    ): void {
+      // Persist link intents atomically (already inside the send() transaction)
+      for (const call of linkCalls) {
+        const linkDef = def.links?.[call.name];
+        if (!linkDef) continue;
+        const targetType = linkDef.contract.name.toUpperCase().replace(/-/g, "_");
+        this.ctx.storage.sql.exec(
+          "INSERT OR IGNORE INTO active_links (target_type, target_id, link_name, version, created_at) VALUES (?, ?, ?, 0, ?)",
+          targetType,
+          call.id,
+          call.name,
+          Date.now(),
+        );
+      }
+
+      // Process unlinks
+      for (const call of unlinkCalls) {
+        const linkDef = def.links?.[call.name];
+        if (!linkDef) continue;
+        const targetType = linkDef.contract.name.toUpperCase().replace(/-/g, "_");
+
+        if (call.id !== undefined) {
+          // Unlink specific target
+          this.ctx.storage.sql.exec(
+            "DELETE FROM active_links WHERE target_type = ? AND target_id = ? AND link_name = ?",
+            targetType,
+            call.id,
+            call.name,
+          );
+
+          // Invoke onUnlink handler if defined
+          if (linkDef.onUnlink) {
+            const nextState = linkDef.onUnlink(this.state, call.id);
+            if (nextState !== this.state) {
+              this.state = nextState;
+            }
+          }
+        } else {
+          // Unlink all for this link name — collect IDs before deleting for onUnlink
+          if (linkDef.onUnlink) {
+            const idRows = this.ctx.storage.sql
+              .exec("SELECT target_id FROM active_links WHERE link_name = ?", call.name)
+              .toArray();
+            for (const row of idRows) {
+              const targetId = row["target_id"] as string;
+              const nextState = linkDef.onUnlink(this.state, targetId);
+              if (nextState !== this.state) {
+                this.state = nextState;
+              }
+            }
+          }
+
+          this.ctx.storage.sql.exec("DELETE FROM active_links WHERE link_name = ?", call.name);
+        }
+      }
+
+      // Async: register subscriptions with target actors (fire-and-forget)
+      if (linkCalls.length > 0) {
+        this.registerSubscriptions(linkCalls);
+      }
+      if (unlinkCalls.length > 0) {
+        this.unregisterSubscriptions(unlinkCalls);
+      }
+    }
+
+    /**
+     * Register this actor as a subscriber on target actors.
+     * Fire-and-forget — if target is unreachable, re-registration happens on restart.
+     */
+    async registerSubscriptions(calls: Array<{ name: string; id: string }>): Promise<void> {
+      for (const call of calls) {
+        const linkDef = def.links?.[call.name];
+        if (!linkDef) continue;
+        try {
+          const stub = resolveStub(linkDef.contract.name, call.id, this.ctx, this.env);
+          if (stub && typeof stub["__linkSubscribe"] === "function") {
+            await (stub["__linkSubscribe"] as (subscriberType: string, subscriberId: string) => Promise<void>)(
+              _actorName.toUpperCase().replace(/-/g, "_"),
+              this.ctx.id.toString(),
+            );
+          }
+        } catch (error) {
+          // Target unreachable — invoke onError if defined, otherwise retry on restart
+          const linkDef2 = def.links?.[call.name];
+          if (linkDef2?.onError) {
+            const errorMessage = error instanceof Error ? error.message : String(error);
+            const nextState = linkDef2.onError(this.state, { message: errorMessage, code: "unreachable" }, call.id);
+            if (nextState !== this.state) {
+              this.state = nextState;
+              this.persistState();
+              this.broadcastViews();
+            }
+          }
+        }
+      }
+    }
+
+    /**
+     * Unregister this actor from target actors.
+     */
+    async unregisterSubscriptions(calls: Array<{ name: string; id: string | undefined }>): Promise<void> {
+      for (const call of calls) {
+        const linkDef = def.links?.[call.name];
+        if (!linkDef) continue;
+
+        // Get affected target IDs
+        let targetIds: string[];
+        if (call.id !== undefined) {
+          targetIds = [call.id];
+        } else {
+          // All targets for this link name were already deleted from active_links
+          // We don't have the IDs anymore, so we can't unsubscribe from them.
+          // This is acceptable — the target will push and the subscriber will ignore.
+          continue;
+        }
+
+        for (const targetId of targetIds) {
+          try {
+            const stub = resolveStub(linkDef.contract.name, targetId, this.ctx, this.env);
+            if (stub && typeof stub["__linkUnsubscribe"] === "function") {
+              await (stub["__linkUnsubscribe"] as (subscriberType: string, subscriberId: string) => Promise<void>)(
+                _actorName.toUpperCase().replace(/-/g, "_"),
+                this.ctx.id.toString(),
+              );
+            }
+          } catch {
+            // Target unreachable — acceptable
+          }
+        }
+      }
+    }
+
+    // --- Source-side RPC methods (called by subscribers) ---
+
+    /** Register a subscriber DO for push updates. */
+    async __linkSubscribe(subscriberType: string, subscriberId: string): Promise<void> {
+      await this.loadState();
+      this.ctx.storage.sql.exec(
+        "INSERT OR REPLACE INTO link_subscribers (subscriber_type, subscriber_id, subscribed_at) VALUES (?, ?, ?)",
+        subscriberType,
+        subscriberId,
+        Date.now(),
+      );
+
+      // Immediately push current view to the new subscriber
+      if (this.initialized) {
+        this.pushToSubscriber(subscriberType, subscriberId);
+      }
+    }
+
+    /** Unregister a subscriber DO. */
+    async __linkUnsubscribe(subscriberType: string, subscriberId: string): Promise<void> {
+      await this.loadState();
+      this.ctx.storage.sql.exec(
+        "DELETE FROM link_subscribers WHERE subscriber_type = ? AND subscriber_id = ?",
+        subscriberType,
+        subscriberId,
+      );
+      // Clean up dedupe state
+      this.previousSubscriberViews.delete(`${subscriberType}:${subscriberId}`);
+    }
+
+    // --- Subscriber-side RPC method (called by source actors) ---
+
+    /**
+     * Receive a link update from a source actor.
+     * Runs onUpdate reducer and broadcasts own views if state changed.
+     */
+    async __receiveLinkUpdate(
+      sourceType: string,
+      sourceId: string,
+      viewData: unknown,
+      role: string,
+      version: number,
+    ): Promise<void> {
+      await this.loadState();
+      if (!this.initialized) return;
+
+      // Find the link handler for this source
+      const rows = this.ctx.storage.sql
+        .exec(
+          "SELECT link_name, version FROM active_links WHERE target_type = ? AND target_id = ?",
+          sourceType,
+          sourceId,
+        )
+        .toArray();
+
+      if (rows.length === 0) return;
+
+      for (const row of rows) {
+        const linkRow = row as { link_name: string; version: number };
+
+        // Monotonic version check
+        if (version <= linkRow.version) continue;
+
+        const linkDef = def.links?.[linkRow.link_name];
+        if (!linkDef) continue;
+
+        // Add role discriminant to view data
+        const viewWithRole = { ...(viewData as Record<string, unknown>), role };
+
+        // Run onUpdate reducer
+        const nextState = linkDef.onUpdate(this.state, viewWithRole, sourceId);
+        if (nextState !== this.state) {
+          this.state = nextState;
+
+          // Update version
+          this.ctx.storage.sql.exec(
+            "UPDATE active_links SET version = ? WHERE target_type = ? AND target_id = ? AND link_name = ?",
+            version,
+            sourceType,
+            sourceId,
+            linkRow.link_name,
+          );
+
+          this.persistState();
+          this.broadcastViews();
+        }
+      }
+    }
+
+    // --- Source-side push to DO subscribers ---
+
+    /**
+     * Push view updates to all DO subscribers.
+     * Called after broadcastViews() to keep DO subscribers in sync.
+     */
+    pushToSubscribers(): void {
+      const rows = this.ctx.storage.sql.exec("SELECT subscriber_type, subscriber_id FROM link_subscribers").toArray();
+
+      for (const row of rows) {
+        const subscriberType = row["subscriber_type"] as string;
+        const subscriberId = row["subscriber_id"] as string;
+        this.pushToSubscriber(subscriberType, subscriberId);
+      }
+    }
+
+    /**
+     * Push view to a single DO subscriber.
+     */
+    pushToSubscriber(subscriberType: string, subscriberId: string): void {
+      // Resolve subscriber's role (same as for WebSocket clients)
+      // For DO subscribers, caller = "actorname:do-id" and callerType = "service"
+      const callerString = `${_actorName}:${subscriberId}`;
+      const role = resolveRole(def.roles, this.state, callerString, { callerType: "service" });
+      if (role === null) return;
+
+      const viewDef = def.views[role];
+      if (viewDef === undefined) return;
+
+      const viewData = viewDef.fn(this.state, callerString);
+      const dedupeKey = `${role}:${JSON.stringify(viewData)}`;
+      const subKey = `${subscriberType}:${subscriberId}`;
+
+      // Skip if unchanged
+      const prev = this.previousSubscriberViews.get(subKey);
+      if (dedupeKey === prev) return;
+      this.previousSubscriberViews.set(subKey, dedupeKey);
+
+      // Resolve subscriber namespace and call __receiveLinkUpdate RPC
+      // This is fire-and-forget — if unreachable, subscriber re-registers on restart
+      const sourceType = _actorName.toUpperCase().replace(/-/g, "_");
+      const sourceId = this.actorId ?? this.ctx.id.toString();
+      const version = Date.now(); // Monotonic version using timestamp
+
+      try {
+        const stub = resolveStub(subscriberType.toLowerCase().replace(/_/g, "-"), subscriberId, this.ctx, this.env);
+        if (stub && typeof stub["__receiveLinkUpdate"] === "function") {
+          // Fire and forget
+          void (
+            stub["__receiveLinkUpdate"] as (
+              sourceType: string,
+              sourceId: string,
+              viewData: unknown,
+              role: string,
+              version: number,
+            ) => Promise<void>
+          )(sourceType, sourceId, viewData, role, version);
+        }
+      } catch {
+        // Subscriber unreachable — skip
+      }
+    }
+
+    // --- Re-registration on restart ---
+
+    /**
+     * Re-register all active links after restart.
+     * Called once after state is loaded from persistence.
+     */
+    reRegisterLinks(): void {
+      const rows = this.ctx.storage.sql.exec("SELECT target_type, target_id, link_name FROM active_links").toArray();
+
+      if (rows.length === 0) return;
+
+      const calls: Array<{ name: string; id: string }> = [];
+      for (const row of rows) {
+        calls.push({
+          name: row["link_name"] as string,
+          id: row["target_id"] as string,
+        });
+      }
+
+      // Fire-and-forget re-registration
+      this.registerSubscriptions(calls);
     }
 
     async spawn(input: {
@@ -301,44 +844,63 @@ export function actor(
       // Store actor ID for JWT validation
       this.actorId = input.actorId ?? this.ctx.id.toString();
 
-      // Create initial state
-      this.state = await def.init(parsed.data, this.env);
+      // Create initial state with link support
+      const initLinks: Array<{ name: string; id: string }> = [];
+      const initCtx = {
+        env: this.env,
+        link: async (name: string, id: string): Promise<unknown> => {
+          const linkDef = def.links?.[name];
+          if (!linkDef) throw new Error(`Link "${name}" not declared in actor definition`);
+
+          const stub = resolveStub(linkDef.contract.name, id, this.ctx, this.env);
+          if (!stub || typeof stub["getSnapshot"] !== "function") {
+            throw new Error(`Link "${name}": target actor unreachable`);
+          }
+
+          const result = await (
+            stub["getSnapshot"] as (caller: string, callerType: string) => Promise<{ snapshot: unknown; role: string }>
+          )("system", "service");
+
+          // Record the link for persistence
+          initLinks.push({ name, id });
+
+          // Return view with role discriminant
+          return { role: result.role, ...(result.snapshot as Record<string, unknown>) };
+        },
+      };
+
+      this.state = await def.init(parsed.data, initCtx);
       this.initialized = true;
 
-      // Initialize state tracker if using states
-      if (def.states) {
-        const statesDef = def.states;
-        if ("parallel" in statesDef && statesDef.parallel === true) {
-          // Parallel: track each region's initial state
-          const tracker: Record<string, string> = {};
-          for (const [regionName, regionDef] of Object.entries(statesDef.regions)) {
-            tracker[regionName] = regionDef.initial;
-          }
-          this.stateTracker = tracker;
-        } else if (def.initial) {
-          // Sequential: use the explicit initial state
-          this.stateTracker = { current: def.initial };
-        } else {
-          // Sequential without explicit initial: use first state key
-          const firstState = Object.keys(statesDef)[0];
-          if (firstState !== undefined) {
-            this.stateTracker = { current: firstState };
+      // Persist state + init links atomically
+      this.ctx.storage.transactionSync(() => {
+        this.persistState();
+        for (const { name, id } of initLinks) {
+          const linkDef = def.links?.[name];
+          if (linkDef) {
+            const targetType = linkDef.contract.name.toUpperCase().replace(/-/g, "_");
+            this.ctx.storage.sql.exec(
+              "INSERT OR REPLACE INTO active_links (target_type, target_id, link_name, version, created_at) VALUES (?, ?, ?, 0, ?)",
+              targetType,
+              id,
+              name,
+              Date.now(),
+            );
           }
         }
+      });
+
+      // Register subscriptions for init links (fire-and-forget)
+      if (initLinks.length > 0) {
+        this.registerSubscriptions(initLinks);
       }
-
-      // Persist
-      this.persistState();
-
-      // Schedule after timers
-      this.scheduleAfterTimers();
     }
 
     async send(
       caller: string,
       callerType: "user" | "service",
       event: { type: string; [key: string]: unknown },
-    ): Promise<{ ok: boolean; error?: string }> {
+    ): Promise<{ ok: boolean; error?: string; detail?: string }> {
       await this.loadState();
       if (!this.initialized) {
         return { ok: false, error: "Actor not initialized" };
@@ -350,11 +912,11 @@ export function actor(
         return { ok: false, error: "No role matched" };
       }
 
-      // Resolve messages for current state
-      const messages = resolveMessagesForState(def.messages, def.states, this.stateTracker);
-      if (messages === undefined) {
+      // Get messages
+      if (def.messages === undefined) {
         return { ok: false, error: "No messages available" };
       }
+      const messages = def.messages;
 
       // Create outbox collector
       const outbox = createOutbox();
@@ -363,14 +925,21 @@ export function actor(
         caller,
         callerType,
         env: this.env,
-        emit: (effect: Effect) => outbox.emit(effect),
+        execute: (service: string, payload: unknown) => outbox.execute(service, payload),
+        link: (name: string, id: string) => outbox.link(name, id),
+        unlink: (name: string, id?: string) => outbox.unlink(name, id),
+        forward: (linkName, targetId, message) => outbox.forward(linkName, targetId, message),
       };
 
       // Route message
       const result = routeMessage(messages, role, this.state, event, ctx);
 
       if (!result.ok) {
-        return { ok: false, error: result.error };
+        const base: { ok: false; error: string; detail?: string } = { ok: false, error: result.error };
+        if (result.detail !== undefined) {
+          base.detail = result.detail;
+        }
+        return base;
       }
 
       // Observability hook
@@ -378,18 +947,6 @@ export function actor(
 
       // Update state
       this.state = result.state;
-
-      // Check if handler triggered a state transition via the state field
-      // Convention: if the state has a `__actorState` field, use it to advance the tracker
-      if (this.stateTracker && typeof this.state === "object" && this.state !== null) {
-        const stateObj = this.state as Record<string, unknown>;
-        if (typeof stateObj["__actorState"] === "string") {
-          const newStateName = stateObj["__actorState"];
-          if ("current" in this.stateTracker) {
-            this.stateTracker = { current: newStateName };
-          }
-        }
-      }
 
       // Fire onTransition if defined
       if (def.observe?.onTransition) {
@@ -400,137 +957,38 @@ export function actor(
         }
       }
 
-      // Persist state + outbox atomically
+      // Persist state + executions + link intents atomically
+      const executionEntries = outbox.toExecutionEntries();
+      const linkCalls = outbox.getLinks();
+      const unlinkCalls = outbox.getUnlinks();
+      const forwardEntries = outbox.toForwardEntries();
       this.ctx.storage.transactionSync(() => {
         this.persistState();
-        this.persistOutbox(outbox.toEntries());
+        if (executionEntries.length > 0) {
+          this.persistExecutions(executionEntries);
+        }
+        if (linkCalls.length > 0 || unlinkCalls.length > 0) {
+          this.processLinks(linkCalls, unlinkCalls);
+        }
+        if (forwardEntries.length > 0) {
+          this.persistForwards(forwardEntries, caller, callerType);
+        }
       });
 
-      // Broadcast views to connected clients
+      // Broadcast views to connected clients and DO subscribers
       this.broadcastViews();
 
-      // Drain outbox asynchronously (don't await — fire and forget)
-      this.drainOutbox();
+      // Drain executions asynchronously
+      if (executionEntries.length > 0) {
+        this.drainExecutions();
+      }
+
+      // Drain forwards asynchronously
+      if (forwardEntries.length > 0) {
+        this.drainForwards();
+      }
 
       return { ok: true };
-    }
-
-    async drainOutbox(): Promise<void> {
-      // Prevent concurrent drains (second message arriving mid-flight would re-process same rows)
-      if (this.draining) return;
-      this.draining = true;
-
-      try {
-        await this.drainOutboxInner();
-      } finally {
-        this.draining = false;
-      }
-    }
-
-    async drainOutboxInner(): Promise<void> {
-      const MAX_ATTEMPTS = 3;
-      const rows = this.ctx.storage.sql
-        .exec("SELECT id, payload, attempts FROM outbox WHERE status = 'pending' ORDER BY created_at")
-        .toArray();
-
-      for (const row of rows) {
-        const entry = row as {
-          id: string;
-          payload: string;
-          attempts: number;
-        };
-        const payload: unknown = JSON.parse(entry.payload);
-
-        try {
-          await this.executeEffect(payload);
-
-          // Mark as sent
-          this.ctx.storage.sql.exec("UPDATE outbox SET status = 'sent' WHERE id = ?", entry.id);
-        } catch (error) {
-          const newAttempts = entry.attempts + 1;
-          if (newAttempts >= MAX_ATTEMPTS) {
-            // Move to failures
-            this.ctx.storage.sql.exec(
-              "INSERT INTO emission_failures (id, type, payload, error, failed_at) VALUES (?, ?, ?, ?, ?)",
-              entry.id,
-              "emit",
-              entry.payload,
-              error instanceof Error ? error.message : String(error),
-              Date.now(),
-            );
-            this.ctx.storage.sql.exec("DELETE FROM outbox WHERE id = ?", entry.id);
-          } else {
-            this.ctx.storage.sql.exec("UPDATE outbox SET attempts = ? WHERE id = ?", newAttempts, entry.id);
-            // Schedule retry — store desired time, then use unified alarm scheduler
-            const retryDelays = [1000, 5000, 25000];
-            const delay = retryDelays[newAttempts - 1] ?? 25000;
-            this.ctx.storage.sql.exec(
-              "INSERT OR REPLACE INTO actor_meta (key, value) VALUES ('outbox_retry_at', ?)",
-              String(Date.now() + delay),
-            );
-            this.scheduleUnifiedAlarm();
-          }
-        }
-      }
-    }
-
-    async executeEffect(payload: unknown): Promise<unknown> {
-      if (typeof payload !== "object" || payload === null) return undefined;
-
-      const effect = payload as Record<string, unknown>;
-
-      if ("queue" in effect && typeof effect["queue"] === "string") {
-        // Queue effect — call env binding
-        const queueName = effect["queue"];
-        const queueBinding = (this.env as Record<string, unknown>)[queueName];
-        if (queueBinding && typeof queueBinding === "object" && "send" in queueBinding) {
-          await (queueBinding as { send: (body: unknown) => Promise<void> }).send(effect["body"]);
-        }
-        return undefined;
-      } else if ("fetch" in effect && typeof effect["fetch"] === "string") {
-        // Fetch effect — check HTTP status, throw on failure
-        const response = await fetch(effect["fetch"], {
-          method: (effect["method"] as string) ?? "POST",
-          body: effect["body"] ? JSON.stringify(effect["body"]) : null,
-          headers: (effect["headers"] as Record<string, string>) ?? { "Content-Type": "application/json" },
-        });
-        if (!response.ok) {
-          throw new Error(`Fetch failed: ${response.status} ${response.statusText}`);
-        }
-        // Return parsed response body
-        try {
-          return await response.json();
-        } catch {
-          return await response.text();
-        }
-      } else if ("actor" in effect && typeof effect["actor"] === "string") {
-        // Actor RPC — use ref() to send message to another DO
-        const targetType = effect["actor"];
-        const targetId = effect["id"];
-        const targetMessage = effect["message"];
-        const targetPayload = effect["payload"];
-        if (typeof targetId !== "string" || typeof targetMessage !== "string") {
-          throw new Error(`Invalid actor RPC effect: missing id or message`);
-        }
-        const namespace = (this.env as Record<string, unknown>)[targetType.toUpperCase()];
-        if (!namespace || typeof namespace !== "object" || !("idFromName" in namespace)) {
-          throw new Error(`DO namespace "${targetType.toUpperCase()}" not found in env`);
-        }
-        const ns = namespace as {
-          idFromName: (name: string) => { toString: () => string };
-          get: (id: unknown) => { send: (c: string, ct: string, e: unknown) => Promise<unknown> };
-        };
-        const doId = ns.idFromName(targetId);
-        const stub = ns.get(doId);
-        await stub.send("system", "service", {
-          type: targetMessage,
-          ...(typeof targetPayload === "object" && targetPayload !== null
-            ? (targetPayload as Record<string, unknown>)
-            : {}),
-        });
-        return undefined;
-      }
-      return undefined;
     }
 
     async getSnapshot(
@@ -644,6 +1102,9 @@ export function actor(
           // Connection may have closed
         }
       }
+
+      // Push to DO subscribers (source-side)
+      this.pushToSubscribers();
     }
 
     async fetch(request: Request): Promise<Response> {
@@ -652,58 +1113,25 @@ export function actor(
         return new Response("Expected WebSocket", { status: 426 });
       }
 
-      // --- Caller identity resolution ---
-      // Priority 1: Identity headers (Worker-trust model).
-      //   The Worker authenticates the caller and stamps identity via withCallerIdentity().
-      //   SECURITY: withCallerIdentity scrubs inbound headers before setting verified ones.
-      //   Workers MUST call withCallerIdentity() before forwarding to the DO — forwarding
-      //   raw client requests (stub.fetch(request)) allows header spoofing.
-      //   CORS/Origin validation is handled at the Worker level (e.g., Hono cors() middleware), not inside the actor.
-      // Priority 2: JWT token in Sec-WebSocket-Protocol (backward compat / external clients).
+      // --- Caller identity resolution (Worker-trust model) ---
+      // The Worker authenticates the caller and stamps identity via withCallerIdentity().
+      // SECURITY: withCallerIdentity scrubs inbound headers before setting verified ones.
+      // Workers MUST call withCallerIdentity() before forwarding to the DO — forwarding
+      // raw client requests (stub.fetch(request)) allows header spoofing.
+      // CORS/Origin validation is handled at the Worker level (e.g., Hono cors() middleware).
       const headerCallerId = request.headers.get(CALLER_ID_HEADER);
       const headerCallerType = request.headers.get(CALLER_TYPE_HEADER);
 
-      // Extract token subprotocol (used as fallback if headers absent)
-      const protocols = request.headers.get("Sec-WebSocket-Protocol") ?? "";
-      const tokenProtocol = protocols
-        .split(",")
-        .map((p) => p.trim())
-        .find((p) => p.startsWith("token."));
-
-      let callerInfo: { caller: string; callerType: "user" | "service" };
-
-      if (headerCallerId && headerCallerType) {
-        // Header-based auth: Worker already authenticated the caller.
-        if (headerCallerType !== "user" && headerCallerType !== "service") {
-          return new Response("Invalid caller type", { status: 401 });
-        }
-        callerInfo = { caller: headerCallerId, callerType: headerCallerType };
-      } else if (tokenProtocol) {
-        // Token fallback: validate JWT from subprotocol.
-        const token = tokenProtocol.slice("token.".length);
-        const secret = (this.env as Record<string, unknown>)["ACTOR_KIT_SECRET"];
-        if (typeof secret !== "string") {
-          return new Response("Server misconfigured", { status: 500 });
-        }
-
-        // Load state to restore actorId for JWT validation
-        await this.loadState();
-        if (!this.initialized) {
-          return new Response("Actor requires input — call spawn({ input }) before connecting", { status: 404 });
-        }
-
-        const actorId = this.actorId ?? this.ctx.id.toString();
-
-        try {
-          callerInfo = await getCallerFromToken(token, actorName, actorId, secret);
-        } catch {
-          return new Response("Invalid token", { status: 401 });
-        }
-      } else {
+      if (!headerCallerId || !headerCallerType) {
         return new Response("Missing caller identity", { status: 401 });
       }
+      if (headerCallerType !== "user" && headerCallerType !== "service") {
+        return new Response("Invalid caller type", { status: 401 });
+      }
+      // TypeScript can't narrow string → "user"|"service" via !== guards alone; use positively-matched union.
+      const callerType: "user" | "service" = headerCallerType === "user" ? "user" : "service";
+      const callerInfo = { caller: headerCallerId, callerType };
 
-      // Load state if not already loaded (header-based auth skips the token path)
       await this.loadState();
       if (!this.initialized) {
         return new Response("Actor requires input — call spawn({ input }) before connecting", { status: 404 });
@@ -714,10 +1142,15 @@ export function actor(
         return new Response("Forbidden", { status: 403 });
       }
 
-      // Detect binary support:
-      // - Token-based connections (SDK direct) always support binary
-      // - Header-based connections (Worker-forwarded) support binary only if opted in
-      const clientSupportsBinary = tokenProtocol ? true : request.headers.get(BINARY_SUPPORT_HEADER) === "1";
+      const clientSupportsBinary = request.headers.get(BINARY_SUPPORT_HEADER) === "1";
+
+      // Read requested WebSocket subprotocols so we can echo one back.
+      // The browser rejects the upgrade unless the server acknowledges one of
+      // the protocols the client requested. The Actor Kit client SDK always
+      // includes "actor-kit.v1" alongside optional "auth.<token>".
+      const reqProtocolHeader = request.headers.get("Sec-WebSocket-Protocol");
+      const requestedProtocols = reqProtocolHeader?.split(",").map((p) => p.trim()) ?? [];
+      const responseProtocol = requestedProtocols.includes("actor-kit.v1") ? "actor-kit.v1" : null;
 
       // Create WebSocket pair
       const pair = new WebSocketPair();
@@ -762,7 +1195,9 @@ export function actor(
           caller: callerInfo.caller,
           callerType: callerInfo.callerType,
           env: this.env,
-          emit: (effect: Effect) => connectOutbox.emit(effect),
+          execute: (service: string, payload: unknown) => connectOutbox.execute(service, payload),
+          forward: (linkName: string, targetId: string, message: { type: string; [key: string]: unknown }) =>
+            connectOutbox.forward(linkName, targetId, message),
         };
         const nextState = def.lifecycle.connect(
           this.state,
@@ -772,25 +1207,32 @@ export function actor(
         if (nextState instanceof Promise) {
           throw new Error("lifecycle.connect returned a Promise. Handlers must be synchronous.");
         }
-        if (nextState !== this.state) {
+        const connectExecutions = connectOutbox.toExecutionEntries();
+        const connectForwards = connectOutbox.toForwardEntries();
+        if (nextState !== this.state || connectExecutions.length > 0 || connectForwards.length > 0) {
           this.state = nextState;
-          const outboxEntries = connectOutbox.toEntries();
           this.ctx.storage.transactionSync(() => {
             this.persistState();
-            if (outboxEntries.length > 0) this.persistOutbox(outboxEntries);
+            if (connectExecutions.length > 0) {
+              this.persistExecutions(connectExecutions);
+            }
+            if (connectForwards.length > 0) {
+              this.persistForwards(connectForwards, callerInfo.caller, callerInfo.callerType);
+            }
           });
           this.broadcastViews();
-          if (outboxEntries.length > 0) this.drainOutbox();
+          if (connectExecutions.length > 0) {
+            this.drainExecutions();
+          }
+          if (connectForwards.length > 0) {
+            this.drainForwards();
+          }
         }
       }
 
-      // Start tick if defined and not already running
-      this.startTick();
-
-      const responseHeaders: HeadersInit = {};
-      if (tokenProtocol) {
-        // Echo back the selected subprotocol — required by WebSocket spec
-        responseHeaders["Sec-WebSocket-Protocol"] = tokenProtocol;
+      const responseHeaders: Record<string, string> = {};
+      if (responseProtocol !== null) {
+        responseHeaders["Sec-WebSocket-Protocol"] = responseProtocol;
       }
 
       return new Response(null, {
@@ -830,7 +1272,11 @@ export function actor(
         const result = await this.send(caller, callerType, event);
         // Send error frame back to client if message was rejected
         if (!result.ok) {
-          ws.send(JSON.stringify({ type: "__error", message: event.type, error: result.error }));
+          const errorPayload: Record<string, unknown> = { type: "__error", message: event.type, error: result.error };
+          if (result.detail !== undefined) {
+            errorPayload["detail"] = result.detail;
+          }
+          ws.send(JSON.stringify(errorPayload));
         }
       } catch {
         ws.send(JSON.stringify({ type: "__error", detail: "Invalid message" }));
@@ -893,244 +1339,48 @@ export function actor(
           caller,
           callerType: info.callerType,
           env: this.env,
-          emit: (effect: Effect) => disconnectOutbox.emit(effect),
+          execute: (service: string, payload: unknown) => disconnectOutbox.execute(service, payload),
+          forward: (linkName: string, targetId: string, message: { type: string; [key: string]: unknown }) =>
+            disconnectOutbox.forward(linkName, targetId, message),
         };
         const nextState = def.lifecycle.disconnect(this.state, { caller, callerType: info.callerType }, disconnectCtx);
         if (nextState instanceof Promise) {
           throw new Error("lifecycle.disconnect returned a Promise. Handlers must be synchronous.");
         }
-        if (nextState !== this.state) {
+        const disconnectExecutions = disconnectOutbox.toExecutionEntries();
+        const disconnectForwards = disconnectOutbox.toForwardEntries();
+        if (nextState !== this.state || disconnectExecutions.length > 0 || disconnectForwards.length > 0) {
           this.state = nextState;
-          const outboxEntries = disconnectOutbox.toEntries();
           this.ctx.storage.transactionSync(() => {
             this.persistState();
-            if (outboxEntries.length > 0) this.persistOutbox(outboxEntries);
+            if (disconnectExecutions.length > 0) {
+              this.persistExecutions(disconnectExecutions);
+            }
+            if (disconnectForwards.length > 0) {
+              this.persistForwards(disconnectForwards, caller, info.callerType);
+            }
           });
           this.broadcastViews();
-          if (outboxEntries.length > 0) this.drainOutbox();
-        }
-      }
-
-      // Stop tick if no connections remain
-      if (this.connections.size === 0) {
-        this.stopTick();
-      }
-    }
-
-    // --- DO Alarms (after timers) ---
-
-    scheduleAfterTimers(): void {
-      if (!def.after) return;
-
-      const createdAt = Date.now();
-
-      // Store creation time so all timers are relative to it (prevents drift)
-      this.ctx.storage.sql.exec(
-        "INSERT OR REPLACE INTO actor_meta (key, value) VALUES ('after_created_at', ?)",
-        String(createdAt),
-      );
-
-      // Find the soonest timer and store it, then use unified scheduler
-      this.pickNextAfterTimer(createdAt);
-      this.scheduleUnifiedAlarm();
-    }
-
-    pickNextAfterTimer(createdAt: number, excludeKeys?: Set<string>): void {
-      if (!def.after) return;
-
-      let soonestAbsoluteTime = Infinity;
-      let soonestKey: string | undefined;
-
-      for (const [durationStr] of Object.entries(def.after)) {
-        if (excludeKeys?.has(durationStr)) continue;
-        const ms = parseDuration(durationStr);
-        const absoluteTime = createdAt + ms;
-        if (absoluteTime < soonestAbsoluteTime) {
-          soonestAbsoluteTime = absoluteTime;
-          soonestKey = durationStr;
-        }
-      }
-
-      if (soonestKey !== undefined) {
-        this.ctx.storage.sql.exec(
-          "INSERT OR REPLACE INTO actor_meta (key, value) VALUES ('scheduled_alarm', ?)",
-          soonestKey,
-        );
-      } else {
-        this.ctx.storage.sql.exec("DELETE FROM actor_meta WHERE key = 'scheduled_alarm'");
-      }
-    }
-
-    async alarm(): Promise<void> {
-      await this.loadState();
-      if (!this.initialized) return;
-
-      // Find which timer fired
-      const rows = this.ctx.storage.sql.exec("SELECT value FROM actor_meta WHERE key = 'scheduled_alarm'").toArray();
-      const scheduledKey = (rows[0] as { value: string } | undefined)?.value;
-
-      if (scheduledKey && def.after) {
-        const handler = def.after[scheduledKey];
-        if (typeof handler === "function") {
-          const nextState = handler(this.state);
-          if (nextState instanceof Promise) {
-            throw new Error(`after["${scheduledKey}"] returned a Promise. Handlers must be synchronous.`);
+          if (disconnectForwards.length > 0) {
+            this.drainForwards();
           }
-          if (nextState !== this.state) {
-            this.state = nextState;
-
-            // Advance sequential state tracker if handler set __actorState
-            if (this.stateTracker && typeof this.state === "object" && this.state !== null) {
-              const stateObj = this.state as Record<string, unknown>;
-              if (typeof stateObj["__actorState"] === "string") {
-                const newStateName = stateObj["__actorState"];
-                if ("current" in this.stateTracker) {
-                  this.stateTracker = { current: newStateName };
-                }
-              }
-            }
-
-            this.persistState();
-            this.broadcastViews();
+          if (disconnectExecutions.length > 0) {
+            this.drainExecutions();
           }
-        }
-
-        // Track fired timer and schedule next (drift-free)
-        this.ctx.storage.sql.exec("DELETE FROM actor_meta WHERE key = 'scheduled_alarm'");
-
-        // Persist fired key so it's never re-picked
-        const firedRows = this.ctx.storage.sql
-          .exec("SELECT value FROM actor_meta WHERE key = 'after_fired_keys'")
-          .toArray();
-        const previouslyFired =
-          firedRows.length > 0 ? (JSON.parse((firedRows[0] as { value: string }).value) as string[]) : [];
-        const allFired = [...previouslyFired, scheduledKey];
-        this.ctx.storage.sql.exec(
-          "INSERT OR REPLACE INTO actor_meta (key, value) VALUES ('after_fired_keys', ?)",
-          JSON.stringify(allFired),
-        );
-
-        const createdRows = this.ctx.storage.sql
-          .exec("SELECT value FROM actor_meta WHERE key = 'after_created_at'")
-          .toArray();
-        const createdAt = Number((createdRows[0] as { value: string } | undefined)?.value ?? Date.now());
-        this.pickNextAfterTimer(createdAt, new Set(allFired));
-      }
-
-      // Check for outbox retry
-      const retryRows = this.ctx.storage.sql
-        .exec("SELECT value FROM actor_meta WHERE key = 'outbox_retry_at'")
-        .toArray();
-      const retryAt = retryRows.length > 0 ? Number((retryRows[0] as { value: string }).value) : undefined;
-      if (retryAt !== undefined && Date.now() >= retryAt) {
-        this.ctx.storage.sql.exec("DELETE FROM actor_meta WHERE key = 'outbox_retry_at'");
-        this.drainOutbox();
-      }
-
-      // Re-schedule unified alarm for any remaining timers/retries
-      this.scheduleUnifiedAlarm();
-    }
-
-    // --- Unified alarm scheduler ---
-    // DOs only have one alarm slot. This method picks the soonest needed
-    // alarm across after timers and outbox retries.
-
-    scheduleUnifiedAlarm(): void {
-      let soonestTime = Infinity;
-
-      // Check after timers
-      if (def.after) {
-        const createdRows = this.ctx.storage.sql
-          .exec("SELECT value FROM actor_meta WHERE key = 'after_created_at'")
-          .toArray();
-        const createdAt = createdRows.length > 0 ? Number((createdRows[0] as { value: string }).value) : undefined;
-
-        if (createdAt !== undefined) {
-          const scheduledRows = this.ctx.storage.sql
-            .exec("SELECT value FROM actor_meta WHERE key = 'scheduled_alarm'")
-            .toArray();
-          const scheduledKey = scheduledRows.length > 0 ? (scheduledRows[0] as { value: string }).value : undefined;
-
-          if (scheduledKey) {
-            const ms = parseDuration(scheduledKey);
-            const absoluteTime = createdAt + ms;
-            if (absoluteTime < soonestTime) {
-              soonestTime = absoluteTime;
-            }
-          }
-        }
-      }
-
-      // Check outbox retry
-      const retryRows = this.ctx.storage.sql
-        .exec("SELECT value FROM actor_meta WHERE key = 'outbox_retry_at'")
-        .toArray();
-      if (retryRows.length > 0) {
-        const retryAt = Number((retryRows[0] as { value: string }).value);
-        if (retryAt < soonestTime) {
-          soonestTime = retryAt;
-        }
-      }
-
-      // Schedule the soonest alarm
-      if (soonestTime < Infinity) {
-        const delay = Math.max(0, soonestTime - Date.now());
-        this.ctx.storage.setAlarm(Date.now() + delay);
-      }
-    }
-
-    // --- Tick (game loop) ---
-
-    tickInterval: ReturnType<typeof setInterval> | undefined = undefined;
-    lastTickPersist = 0;
-    tickRunning = false; // Reentrancy guard for async tick handlers
-
-    startTick(): void {
-      if (!def.tick || this.tickInterval !== undefined) return;
-
-      this.tickInterval = setInterval(async () => {
-        if (!this.initialized) return;
-        if (this.tickRunning) return; // Skip if previous tick is still running
-        this.tickRunning = true;
-
-        try {
-          const handler = def.tick?.handler;
-          if (typeof handler !== "function") return;
-
-          const nextState = handler(this.state);
-          if (nextState instanceof Promise) {
-            throw new Error("tick.handler returned a Promise. Handlers must be synchronous.");
-          }
-          if (nextState !== this.state) {
-            this.state = nextState;
-
-            // Throttle persistence to max 1/second for ticks
-            const now = Date.now();
-            if (now - this.lastTickPersist >= 1000) {
-              this.persistState();
-              this.lastTickPersist = now;
-            }
-
-            this.broadcastViews();
-          }
-        } finally {
-          this.tickRunning = false;
-        }
-      }, def.tick.frequency);
-    }
-
-    stopTick(): void {
-      if (this.tickInterval !== undefined) {
-        clearInterval(this.tickInterval);
-        this.tickInterval = undefined;
-
-        // Persist final state on tick stop
-        if (this.initialized) {
-          this.persistState();
         }
       }
     }
   };
+
+  // Stamp contract name for ctx.exports discovery (ADR-012)
+  Object.defineProperty(DOClass, "__actorKitContractName", {
+    value: _actorName,
+    writable: false,
+    enumerable: false,
+    configurable: false,
+  });
+
+  return DOClass;
 }
 
 // --- createActorClass() ---
@@ -1147,6 +1397,15 @@ function isActorDef(def: unknown): def is ActorDef {
   if (!("init" in def) || typeof def.init !== "function") return false;
   if (!("roles" in def) || typeof def.roles !== "object" || def.roles === null) return false;
   if (!("views" in def) || typeof def.views !== "object" || def.views === null) return false;
+  // Optional links: if present, must be an object with link definitions
+  if ("links" in def && def.links !== undefined) {
+    if (typeof def.links !== "object" || def.links === null) return false;
+    const linksObj = def.links as Record<string, unknown>;
+    for (const val of Object.values(linksObj)) {
+      if (typeof val !== "object" || val === null) return false;
+      if (!("contract" in val) || !("onUpdate" in val)) return false;
+    }
+  }
   return true;
 }
 

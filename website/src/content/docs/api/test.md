@@ -15,7 +15,7 @@ Types for `init()`, `send()`, `view()`, and `role()` are all inferred from the c
 
 ```typescript
 import { testActor } from "@actor-kit/test";
-import { CounterContract } from "./counter";
+import { CounterContract } from "./counter.contract";
 
 const t = testActor(CounterContract);
 ```
@@ -31,13 +31,13 @@ const state = t.init({});
 
 Throws if input is invalid.
 
-### `t.send(state, caller, event, opts?)`
+### `t.send(state, caller, message, opts?)`
 
 Resolves the caller's role, validates the message, runs the handler. Returns the new state.
 
 ```typescript
 let state = t.init({});
-state = t.send(state, "alice", { type: "INCREMENT" });
+state = await t.send(state, "alice", { type: "INCREMENT" });
 ```
 
 Throws if:
@@ -47,17 +47,17 @@ Throws if:
 
 Options: `{ callerType: "service" }` to override the default "user".
 
-### `t.sendWithEffects(state, caller, event, opts?)`
+### `t.sendWithEffects(state, caller, message, opts?)`
 
-Same as `send()` but also returns captured `emit()` calls.
+Same as `send()` but also returns captured `execute()` calls.
 
 ```typescript
-const { state, emissions } = t.sendWithEffects(
+const { state, executions } = await t.sendWithEffects(
   state, "alice", { type: "NOTIFY" }
 );
 
-expect(emissions).toHaveLength(1);
-expect(emissions[0]).toEqual({ queue: "EMAIL", body: { ... } });
+expect(executions).toHaveLength(1);
+expect(executions[0]).toEqual({ service: "EMAIL", payload: { ... } });
 ```
 
 ### `t.view(state, caller, opts?)`

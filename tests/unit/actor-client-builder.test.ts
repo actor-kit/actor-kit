@@ -46,20 +46,24 @@ describe("actorClient builder", () => {
 
   it(".create() returns a client with view type inferred from schema", () => {
     const client = Counter.create({
-      url: "wss://example.com/counter/test",
-      accessToken: "token",
+      path: "/counter/test",
+      host: "example.com",
+      initialView: { count: 0, lastUpdatedBy: "" },
+      getToken: () => "token",
       WebSocketImpl: FakeWebSocket as unknown as typeof WebSocket,
     });
 
-    expectTypeOf(client.view).toEqualTypeOf<{ count: number; lastUpdatedBy: string } | undefined>();
+    expectTypeOf(client.view).toEqualTypeOf<{ count: number; lastUpdatedBy: string }>();
 
     client.disconnect();
   });
 
   it(".create() returns a client with typed send", () => {
     const client = Counter.create({
-      url: "wss://example.com/counter/test",
-      accessToken: "token",
+      path: "/counter/test",
+      host: "example.com",
+      initialView: { count: 0, lastUpdatedBy: "" },
+      getToken: () => "token",
       WebSocketImpl: FakeWebSocket as unknown as typeof WebSocket,
     });
 
@@ -74,11 +78,13 @@ describe("actorClient builder", () => {
     client.disconnect();
   });
 
-  it(".create() connects to the provided URL", () => {
+  it(".create() + connect() opens the configured URL", async () => {
     let capturedUrl = "";
     const client = Counter.create({
-      url: "wss://custom.host/game/counters/abc",
-      accessToken: "token",
+      path: "/game/counters/abc",
+      host: "custom.host",
+      initialView: { count: 0, lastUpdatedBy: "" },
+      getToken: () => "token",
       WebSocketImpl: class extends FakeWebSocket {
         constructor(url: string, protocols?: string | string[]) {
           super(url, protocols);
@@ -86,6 +92,8 @@ describe("actorClient builder", () => {
         }
       } as unknown as typeof WebSocket,
     });
+    client.connect();
+    await new Promise((r) => setTimeout(r, 10));
 
     expect(capturedUrl).toBe("wss://custom.host/game/counters/abc");
     client.disconnect();
@@ -94,13 +102,15 @@ describe("actorClient builder", () => {
   it("works without .events() for loose event typing", () => {
     const LooseCounter = actorClient(CounterView);
     const client = LooseCounter.create({
-      url: "wss://example.com/counter/test",
-      accessToken: "token",
+      path: "/counter/test",
+      host: "example.com",
+      initialView: { count: 0, lastUpdatedBy: "" },
+      getToken: () => "token",
       WebSocketImpl: FakeWebSocket as unknown as typeof WebSocket,
     });
 
     // View is still typed
-    expectTypeOf(client.view).toEqualTypeOf<{ count: number; lastUpdatedBy: string } | undefined>();
+    expectTypeOf(client.view).toEqualTypeOf<{ count: number; lastUpdatedBy: string }>();
 
     // Events are loose — any { type: string } works
     client.send({ type: "ANYTHING" });

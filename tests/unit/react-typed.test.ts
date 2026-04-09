@@ -2,24 +2,24 @@ import { createActorContext } from "@actor-kit/react";
 import { describe, expectTypeOf, it } from "vitest";
 
 type CounterView = { count: number; lastUpdatedBy: string };
-type CounterEvent = { type: "INCREMENT" } | { type: "DECREMENT" } | { type: "RESET" };
+type CounterMessage = { type: "INCREMENT" } | { type: "DECREMENT" } | { type: "RESET" };
 
 describe("typed React context", () => {
   it("useView returns typed view", () => {
-    const Ctx = createActorContext<CounterView, CounterEvent>();
+    const Ctx = createActorContext<CounterView, CounterMessage>();
 
     expectTypeOf(Ctx.useView).returns.toEqualTypeOf<CounterView | undefined>();
   });
 
   it("useSend returns typed send function", () => {
-    const Ctx = createActorContext<CounterView, CounterEvent>();
+    const Ctx = createActorContext<CounterView, CounterMessage>();
 
     type SendFn = ReturnType<typeof Ctx.useSend>;
-    expectTypeOf<SendFn>().toEqualTypeOf<(event: CounterEvent) => void>();
+    expectTypeOf<SendFn>().toEqualTypeOf<(message: CounterMessage) => void>();
   });
 
   it("useSelector receives typed view", () => {
-    const Ctx = createActorContext<CounterView, CounterEvent>();
+    const Ctx = createActorContext<CounterView, CounterMessage>();
 
     type SelectorArg = Parameters<typeof Ctx.useSelector<number>>[0];
     expectTypeOf<SelectorArg>().toEqualTypeOf<(view: CounterView | undefined) => number>();

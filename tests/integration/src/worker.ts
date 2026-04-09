@@ -1,4 +1,4 @@
-import { boolean, schema, string, uint32, view } from "@actor-kit/core";
+import { schema, string, uint32, view } from "@actor-kit/core";
 import { createActorClass, defineActor, message } from "@actor-kit/worker";
 import { z } from "zod";
 
@@ -34,12 +34,26 @@ const notify = message(z.object({}), {
   handler: (
     state: CounterState,
     _payload: Record<string, never>,
-    ctx: { emit: (effect: { queue: string; body: unknown }) => void },
+    ctx: { execute: (service: string, payload: unknown) => void },
   ) => {
-    ctx.emit({ queue: "ANALYTICS", body: { count: state.count } });
+    ctx.execute("ANALYTICS", { count: state.count });
     return state;
   },
 });
+
+const forwardTo = message(
+  z.object({ targetId: z.string() }),
+  (
+    state: CounterState,
+    { targetId }: { targetId: string },
+    ctx: {
+      forward: (linkName: string, targetId: string, message: { type: string; [key: string]: unknown }) => void;
+    },
+  ) => {
+    ctx.forward("COUNTER", targetId, { type: "INCREMENT", amount: 5 });
+    return state;
+  },
+);
 
 const guardedAdd = message(z.object({ amount: z.number().int().positive() }), {
   guard: (state: CounterState, { amount }: { amount: number }) => state.count + amount <= 100,
@@ -64,6 +78,7 @@ const CounterContract = defineActor("counter", {
     RESET: reset,
     NOTIFY: notify,
     GUARDED_ADD: guardedAdd,
+    FORWARD_TO: forwardTo,
   },
   views: {
     admin: view(CounterView, (state: CounterState) => ({
@@ -78,90 +93,6 @@ const CounterContract = defineActor("counter", {
 });
 
 export const Counter = createActorClass(CounterContract);
-
-// --- Timer actor (v3: defineActor + flat messages, after/tick) ---
-
-type TimerState = { expired: boolean; count: number };
-
-const TimerView = schema({ expired: boolean, count: uint32 });
-
-const timerIncrement = message(z.object({}), (state: TimerState) => ({
-  ...state,
-  count: state.count + 1,
-}));
-
-const TimerContract = defineActor("timer", {
-  input: z.object({}),
-  init: (): TimerState => ({ expired: false, count: 0 }),
-  roles: {
-    user: () => true,
-  },
-  messages: {
-    INCREMENT: timerIncrement,
-  },
-  views: {
-    user: view(TimerView, (state: TimerState) => ({
-      expired: state.expired,
-      count: state.count,
-    })),
-  },
-  after: {
-    "1 second": (state: TimerState) => ({ ...state, expired: true }),
-  },
-  tick: {
-    frequency: 50,
-    handler: (state: TimerState) => ({
-      ...state,
-      count: state.count + 1,
-    }),
-  },
-});
-
-export const TimerActor = createActorClass(TimerContract);
-
-// --- Auction actor (v3: defineActor + sequential states) ---
-
-type AuctionState = { bids: number[]; winner: number | null };
-
-const AuctionView = schema({ bidCount: uint32 });
-
-const bid = message(z.object({ amount: z.number() }), (state: AuctionState, { amount }) => ({
-  ...state,
-  bids: [...state.bids, amount],
-}));
-
-const closeAuction = message(z.object({}), (state: AuctionState) => ({
-  ...state,
-  winner: Math.max(...state.bids, 0),
-}));
-
-const AuctionContract = defineActor("auction", {
-  input: z.object({}),
-  initial: "bidding",
-  init: (): AuctionState => ({ bids: [], winner: null }),
-  roles: {
-    user: () => true,
-  },
-  states: {
-    bidding: {
-      messages: {
-        user: { BID: bid, CLOSE: closeAuction },
-      },
-    },
-    closed: {
-      messages: {
-        user: {},
-      },
-    },
-  },
-  views: {
-    user: view(AuctionView, (state: AuctionState) => ({
-      bidCount: state.bids.length,
-    })),
-  },
-});
-
-export const Auction = createActorClass(AuctionContract);
 
 // --- Worker entrypoint ---
 

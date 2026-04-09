@@ -1,74 +1,12 @@
 ---
 title: Timers
-description: Durable timers and game loops.
+description: Using DO alarms and setInterval directly.
 ---
 
-## `after` — Durable Timers
+## DO Alarms
 
-`after` timers use DO Alarms. They survive hibernation and restarts.
+Actor Kit does not provide a built-in timer abstraction. Message handler context (`ctx`) does not expose `ctx.storage`.
 
-```typescript
-export const SessionContract = defineActor("session", {
-  // ...
-  after: {
-    "30 minutes": (state) => ({ ...state, status: "idle" }),
-    "24 hours": (state) => ({ ...state, expired: true }),
-  },
-});
-```
+For scheduling with DO Alarms, access `this.ctx.storage.setAlarm()` directly in a custom DO class that extends the actor class, or use Cloudflare's alarm API outside Actor Kit's abstraction. Services (`fn(payload, env)`) do not have access to `ctx.storage`.
 
-Durations are human-readable strings: `"30 seconds"`, `"5 minutes"`, `"1 hour"`, `"7 days"`.
-
-### How it works
-
-1. On spawn, the framework schedules a DO Alarm for the soonest timer
-2. When the alarm fires, the handler runs as a transition (persists state, broadcasts views)
-3. The next timer is scheduled
-4. Each timer fires exactly once (fired timers are tracked)
-
-### Single Alarm Slot
-
-DOs only have one alarm slot. The framework manages a unified scheduler that picks the soonest alarm across `after` timers and outbox retries.
-
-## `tick` — Game Loop
-
-`tick` uses `setInterval` for high-frequency updates while WebSocket connections exist.
-
-```typescript
-export const ZoneContract = defineActor("zone", {
-  // ...
-  tick: {
-    frequency: 100,  // ms
-    handler: (state) => ({
-      ...state,
-      entities: updatePositions(state.entities),
-    }),
-  },
-});
-```
-
-### Lifecycle
-
-- **Starts** when the first WebSocket connects
-- **Stops** when the last WebSocket disconnects (DO can hibernate)
-- **Resumes** when a new connection opens
-- **Persistence**: throttled to max 1 persist per second (to avoid SQLite write amplification)
-
-### Reentrancy Guard
-
-If a tick handler takes longer than the frequency, the next tick is skipped (not queued). This prevents overlapping updates.
-
-## When to use which
-
-| Use case | Timer type |
-|----------|-----------|
-| Session timeout | `after: { "30 minutes": handler }` |
-| Auto-close auction | `after: { "1 hour": handler }` |
-| Game loop (AI, physics) | `tick: { frequency: 100, handler }` |
-| Scheduled cleanup | `after: { "24 hours": handler }` |
-| Real-time position sync | `tick: { frequency: 50, handler }` |
-
-## Related
-
-- [Side Effects](/concepts/side-effects/) — `emit()` for fire-and-forget effects alongside timers
-- [Sequential & Parallel States](/recipes/sequential-and-parallel-states/) — combine timers with state machines for timed transitions
+See the [Cloudflare Durable Objects Alarms documentation](https://developers.cloudflare.com/durable-objects/api/alarms/) for details.

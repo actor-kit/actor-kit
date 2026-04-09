@@ -27,6 +27,7 @@ export const CounterContract = defineActor("counter", {
   },
   views: { user: view(CounterView, (state) => ({ count: state.count, lastUpdatedBy: state.lastUpdatedBy ?? "" })) },
 });
+export type CounterContract = typeof CounterContract;
 ```
 
 **Parameters:**
@@ -43,9 +44,9 @@ Converts a typed contract into a Durable Object class.
 export const Counter = createActorClass(CounterContract);
 ```
 
-Handles both flat messages (v3) and role-nested messages (sequential/parallel states). For flat messages, wraps them so every role has access — guards handle authorization.
+For flat messages, wraps them so every role has access — guards handle authorization.
 
-**Returns:** A class extending `DurableObject` with `spawn()`, `send()`, `getSnapshot()`, `fetch()`, and `alarm()`.
+**Returns:** A class extending `DurableObject` with `spawn()`, `send()`, `getSnapshot()`, and `fetch()`.
 
 ### Definition fields
 
@@ -54,13 +55,9 @@ Handles both flat messages (v3) and role-nested messages (sequential/parallel st
 | `input` | Yes | Zod schema for spawn input |
 | `init(input)` | Yes | Returns initial state |
 | `roles` | Yes | `Record<string, (state, caller, claims) => boolean>` |
-| `messages` | Yes* | Flat message handlers (or per-role in `states`) |
+| `messages` | Yes | Flat message handlers |
 | `views` | Yes | Per-role view definitions |
 | `version` | No | Number for migration |
-| `initial` | No | Initial state name (sequential states) |
-| `states` | No | Sequential or parallel state definitions |
-| `after` | No | Durable timers (DO Alarms) |
-| `tick` | No | Game loop (setInterval) |
 | `lifecycle` | No | Connection handlers (`connect`, `disconnect`) |
 | `observe` | No | `{ onTransition }` hook |
 | `migrate` | No | `(persisted, fromVersion) => newState` |
@@ -84,7 +81,7 @@ const reset = message(z.object({}), {
 });
 ```
 
-Guard receives `(state, payload, ctx)` where ctx has `{ role, caller, callerType, env, emit }`.
+Guard receives `(state, payload, ctx)` where ctx has `{ role, caller, callerType, env }`.
 
 ## `schema(shape)`
 
@@ -126,41 +123,6 @@ return stub.fetch(stamped);
 **Security:** Scrubs any existing `X-Actor-Kit-Caller-Id` / `X-Actor-Kit-Caller-Type` headers before setting verified values. Always use this instead of forwarding raw client requests.
 
 **Returns:** A new `Request` with identity headers set. The original request's body stream is transferred (standard fetch spec behavior).
-
-## Token Auth (Opt-in)
-
-For external clients, invite links, or cross-Worker communication, JWT-based auth is available via a separate import:
-
-```typescript
-import { createAccessToken, getCallerFromToken } from "@actor-kit/worker/token";
-```
-
-### `createAccessToken(params)`
-
-Creates a JWT for WebSocket authentication. Returns `Promise<string>`.
-
-```typescript
-const token = await createAccessToken({
-  actorType: "counter",
-  actorId: "my-counter",
-  callerId: "user-123",
-  callerType: "user",
-  secret: env.ACTOR_KIT_SECRET,
-});
-```
-
-| Param | Type | Description |
-|-------|------|-------------|
-| `actorType` | `string` | Actor type name (JWT `aud` claim) |
-| `actorId` | `string` | Actor instance ID (JWT `jti` claim) |
-| `callerId` | `string` | Caller identity (JWT `sub` claim) |
-| `callerType` | `"user" \| "service"` | Caller type (JWT `act` claim) |
-| `secret` | `string` | HS256 signing secret |
-| `expiresIn` | `string` | Optional expiry (default: `"30d"`) |
-
-### `getCallerFromToken(token, actorType, actorId, secret)`
-
-Validates a JWT and extracts the caller identity. Returns `Promise<{ caller: string; callerType: "user" | "service" }>`. Throws on invalid/expired tokens or audience/ID mismatch.
 
 ## `parseActorRoute(pathname)`
 

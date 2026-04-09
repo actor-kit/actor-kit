@@ -36,11 +36,13 @@ class FakeWebSocket {
 }
 
 describe("client URL routing", () => {
-  it("connects to the exact url provided", () => {
+  it("builds URL from path + host", async () => {
     let capturedUrl = "";
     const client = createActorClient({
-      url: "wss://custom.host/my/custom/path",
-      accessToken: "test-token",
+      path: "/my/custom/path",
+      host: "custom.host",
+      initialView: undefined,
+      getToken: () => "test-token",
       WebSocketImpl: class extends FakeWebSocket {
         constructor(url: string, protocols?: string | string[]) {
           super(url, protocols);
@@ -48,16 +50,20 @@ describe("client URL routing", () => {
         }
       } as unknown as typeof WebSocket,
     });
+    client.connect();
 
+    await new Promise((r) => setTimeout(r, 10));
     expect(capturedUrl).toBe("wss://custom.host/my/custom/path");
     client.disconnect();
   });
 
-  it("sends auth token via subprotocol", () => {
+  it("sends auth token via subprotocol", async () => {
     let capturedProtocols: string[] = [];
     const client = createActorClient({
-      url: "wss://custom.host/actors/my-actor",
-      accessToken: "my-secret-token",
+      path: "/actors/my-actor",
+      host: "custom.host",
+      initialView: undefined,
+      getToken: () => "my-secret-token",
       WebSocketImpl: class extends FakeWebSocket {
         constructor(url: string, protocols?: string | string[]) {
           super(url, protocols);
@@ -65,16 +71,20 @@ describe("client URL routing", () => {
         }
       } as unknown as typeof WebSocket,
     });
+    client.connect();
 
-    expect(capturedProtocols).toEqual(["token.my-secret-token"]);
+    await new Promise((r) => setTimeout(r, 10));
+    expect(capturedProtocols).toEqual(["actor-kit.v1", "auth.my-secret-token"]);
     client.disconnect();
   });
 
-  it("supports ws:// URLs for local development", () => {
+  it("uses ws:// for localhost", async () => {
     let capturedUrl = "";
     const client = createActorClient({
-      url: "ws://localhost:8787/game/zones/forest",
-      accessToken: "test-token",
+      path: "/game/zones/forest",
+      host: "localhost:8787",
+      initialView: undefined,
+      getToken: () => "test-token",
       WebSocketImpl: class extends FakeWebSocket {
         constructor(url: string, protocols?: string | string[]) {
           super(url, protocols);
@@ -82,7 +92,9 @@ describe("client URL routing", () => {
         }
       } as unknown as typeof WebSocket,
     });
+    client.connect();
 
+    await new Promise((r) => setTimeout(r, 10));
     expect(capturedUrl).toBe("ws://localhost:8787/game/zones/forest");
     client.disconnect();
   });

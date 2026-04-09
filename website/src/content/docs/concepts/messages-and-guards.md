@@ -52,9 +52,9 @@ The Zod schema runs `safeParse` on every incoming payload **before** the handler
 
 - **`state`** — current actor state (immutable — return a new object)
 - **`payload`** — Zod-validated payload
-- **`ctx`** — context with `caller`, `callerType`, `role`, `env`, `emit`
+- **`ctx`** — context with `caller`, `callerType`, `role`, `env`, `execute`
 
-Handlers are synchronous — they return new state, not a Promise. External I/O goes through `emit()` → Queue → message back. See [Side Effects](/concepts/side-effects/).
+Handlers are synchronous — they return new state, not a Promise. External I/O goes through `execute()` → services. See [Side Effects](/concepts/side-effects/).
 
 ## Guards
 
@@ -103,5 +103,5 @@ The actor's state is never modified when a message is rejected.
 
 ## Related
 
-- [Side Effects](/concepts/side-effects/) — `emit()` for triggering effects from message handlers
+- [Side Effects](/concepts/side-effects/) — `execute()` and services for triggering effects from message handlers
 - [Testing](/concepts/testing/) — verify message validation, guards, and handler behavior with `testActor()`

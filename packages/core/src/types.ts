@@ -6,35 +6,56 @@
  */
 
 import type { z } from "zod";
+import type { Infer, SchemaDefinition } from "./schema";
 
-// --- Effect types for emit() ---
+// --- Service execution types for execute() ---
 
-export type Effect =
-  | { queue: string; body: unknown }
-  | { fetch: string; method?: string; body?: unknown; headers?: Record<string, string> }
-  | { actor: string; id: string; message: string; payload: unknown };
+/** Recorded execution from execute() — captured in outbox for durable replay. */
+export interface Execution {
+  readonly service: string;
+  readonly payload: unknown;
+}
 
-export type EmitFn = (effect: Effect) => void;
+/** execute() triggers a named service with a typed payload. */
+export type ExecuteFn = (service: string, payload: unknown) => void;
 
 // --- Message context ---
+
+/** link() records a subscription intent. Fire-and-forget in message handlers. */
+export type LinkFn = (name: string, id: string) => void;
+
+/** unlink() removes a subscription. If id is omitted, removes all for that link name. */
+export type UnlinkFn = (name: string, id?: string) => void;
+
+/** A forwarded message — preserves original caller identity when delivered. */
+export interface ForwardCall {
+  readonly linkName: string;
+  readonly targetId: string;
+  readonly message: { type: string; [key: string]: unknown };
+}
+
+/** forward() delivers a message to another actor with the original caller identity preserved. */
+export type ForwardFn = (linkName: string, targetId: string, message: { type: string; [key: string]: unknown }) => void;
 
 export interface MessageContext<TEnv = unknown> {
   readonly caller: string;
   readonly callerType: "user" | "service";
   readonly role: string;
   readonly env: TEnv;
-  readonly emit: EmitFn;
+  readonly execute: ExecuteFn;
+  readonly link: LinkFn;
+  readonly unlink: UnlinkFn;
+  readonly forward: ForwardFn;
 }
 
 // --- Guard context ---
 
-/** Context available to guards — same as MessageContext (guards are pure predicates). */
+/** Context available to guards — pure predicates, no side effects. */
 export interface GuardContext<TEnv = unknown> {
   readonly role: string;
   readonly caller: string;
   readonly callerType: "user" | "service";
   readonly env: TEnv;
-  readonly emit: EmitFn;
 }
 
 // --- MessageDef ---
@@ -44,3 +65,21 @@ export interface MessageDef<TState = unknown, TPayload = unknown, TEnv = unknown
   readonly handler: (state: TState, payload: TPayload, ctx: MessageContext<TEnv>) => TState;
   readonly guard?: (state: TState, payload: TPayload, ctx: GuardContext<TEnv>) => boolean;
 }
+
+// --- LinkedView ---
+
+/**
+ * Discriminated union of all views from a contract, with `role` as discriminant.
+ * Used by links (actor-to-actor) and React hooks for type-safe view narrowing.
+ */
+export type LinkedView<T> = T extends {
+  def: { views: Record<string, unknown> };
+}
+  ? {
+      [K in keyof T["def"]["views"] & string]: T["def"]["views"][K] extends {
+        schema: SchemaDefinition<infer TShape>;
+      }
+        ? { role: K } & Infer<SchemaDefinition<TShape>>
+        : never;
+    }[keyof T["def"]["views"] & string]
+  : never;

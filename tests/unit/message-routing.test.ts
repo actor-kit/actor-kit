@@ -29,8 +29,7 @@ describe("routeMessage()", () => {
     caller: "alice",
     callerType: "user" as const,
     env: {},
-    emit: () => {},
-    request: () => {},
+    execute: () => {},
   };
 
   it("routes a valid message to the correct handler", async () => {
@@ -131,25 +130,25 @@ describe("routeMessage()", () => {
     expect(receivedRole).toBe("admin");
   });
 
-  it("collects emit calls during handler execution", async () => {
-    const emissions: unknown[] = [];
-    const emitCtx = {
+  it("collects execute calls during handler execution", async () => {
+    const executions: unknown[] = [];
+    const executeCtx = {
       ...baseCtx,
-      emit: (e: unknown) => {
-        emissions.push(e);
+      execute: (service: unknown, payload: unknown) => {
+        executions.push({ service, payload });
       },
     };
 
     const notifyMsg = message(z.object({}), (state: State, _payload, ctx) => {
-      ctx.emit({ queue: "TEST_QUEUE", body: { hello: true } });
+      ctx.execute("TEST_QUEUE", { hello: true });
       return state;
     });
 
     const testRoleMessages = { admin: { NOTIFY: notifyMsg } };
-    await routeMessage(testRoleMessages, "admin", { count: 0, items: [] }, { type: "NOTIFY" }, emitCtx);
+    await routeMessage(testRoleMessages, "admin", { count: 0, items: [] }, { type: "NOTIFY" }, executeCtx);
 
-    expect(emissions).toHaveLength(1);
-    expect(emissions[0]).toEqual({ queue: "TEST_QUEUE", body: { hello: true } });
+    expect(executions).toHaveLength(1);
+    expect(executions[0]).toEqual({ service: "TEST_QUEUE", payload: { hello: true } });
   });
 
   it("handles no-payload messages", async () => {

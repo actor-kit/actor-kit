@@ -5,20 +5,36 @@ description: Browser client SDK reference.
 
 The client package (`@actor-kit/client`) provides the browser-side SDK. No Cloudflare or React dependencies.
 
-## `actorClient(contract)` / `actorClient(viewSchema)`
+## `actorClient(contract)` / `actorClient<Contract>()`
 
-Creates a typed client factory. Accepts either a contract (from `defineActor()`) or a raw view schema.
+Creates a typed client factory. Accepts either a contract value or a contract type parameter.
 
-### Contract-derived (recommended)
+### Type-only import (recommended for client bundles)
 
-Events and views are inferred from the contract — no manual type unions needed:
+Use `import type` to keep Zod, handlers, and Cloudflare dependencies out of the browser bundle. The contract is used purely as a type — no runtime value crosses the boundary:
+
+```typescript
+// counter.client.ts
+import { actorClient } from "@actor-kit/client";
+import type { CounterContract } from "./counter.contract";
+
+export const CounterClient = actorClient<CounterContract>();
+```
+
+### Value import (server-side or when bundle size doesn't matter)
+
+When running on the server (SSR, tests, scripts), you can pass the contract directly:
 
 ```typescript
 import { actorClient } from "@actor-kit/client";
-import { CounterContract } from "./counter";
+import { CounterContract } from "./counter.contract";
 
 export const CounterClient = actorClient(CounterContract);
 ```
+
+### Why type-only?
+
+The contract object returned by `defineActor()` carries Zod schemas, message handlers, and references to `@actor-kit/worker` internals. Importing it as a value pulls all of that into your client bundle — even though the client only needs the *types* for view shapes and message unions. Using `import type` ensures the bundler tree-shakes everything the client doesn't need.
 
 ### `.create(options)`
 
@@ -27,28 +43,28 @@ Creates a runtime WebSocket connection. The client SDK does not handle authentic
 ```typescript
 const client = CounterClient.create({
   url: `wss://${location.host}/api/counter/${encodeURIComponent(counterId)}`,
+  initialView: snapshot,  // from server loader / getSnapshot()
 });
 ```
 
 | Option | Type | Required | Description |
 |--------|------|----------|-------------|
 | `url` | `string` | Yes | Full WebSocket URL (routed through your Worker) |
-| `accessToken` | `string` | No | JWT from `createAccessToken()` (only needed for token-based auth via `@actor-kit/worker/token`) |
-| `roleNames` | `string[]` | No | Role names for binary role index mapping |
+| `initialView` | `TView` | Yes | Initial view from server (SSR snapshot). The client starts with this view immediately. |
 | `maxReconnectAttempts` | `number` | No | Max reconnect attempts (default: 10) |
 | `onRedirect` | `(target: { actorType: string; actorId: string }) => void` | No | Called on redirect |
 | `onError` | `(error: { message: string; error: string }) => void` | No | Called on error |
 
-### Returns: `ActorClient<TView, TEvent>`
+### Returns: `ActorClient<TView, TMessage>`
 
 ```typescript
-interface ActorClient<TView, TEvent> {
+interface ActorClient<TView, TMessage> {
   readonly connectionState: ConnectionState;
-  readonly view: TView | undefined;
+  readonly view: TView;              // always defined — initialView guarantees it
   readonly role: string | undefined;
   subscribe(listener: (view: TView) => void): () => void;
   onStateChange(listener: (state: ConnectionState) => void): () => void;
-  send(event: TEvent): void;
+  send(message: TMessage): void;
   trigger(type: string, payload?: Record<string, unknown>): void;
   disconnect(): void;
 }
@@ -67,9 +83,9 @@ client.subscribe((view) => {
 });
 ```
 
-### `send(event)`
+### `send(message)`
 
-Sends a message to the actor. The event type is validated at compile time:
+Sends a message to the actor. The message type is validated at compile time:
 
 ```typescript
 client.send({ type: "INCREMENT" });  // ✓ compiles

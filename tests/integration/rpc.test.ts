@@ -3,25 +3,25 @@ import { describe, expect, it } from "vitest";
 
 describe("Actor-to-actor RPC (integration)", () => {
   it("one DO can send messages to another DO via send()", async () => {
-    // Create two separate DOs
-    const counterId = env.COUNTER.idFromName("rpc-counter");
-    const counterStub = env.COUNTER.get(counterId);
-    await counterStub.spawn({ actorId: "rpc-counter", caller: "u1", callerType: "user", input: {} });
+    // Create two separate Counter DOs
+    const id1 = env.COUNTER.idFromName("rpc-counter-1");
+    const stub1 = env.COUNTER.get(id1);
+    await stub1.spawn({ actorId: "rpc-counter-1", caller: "u1", callerType: "user", input: {} });
 
-    const timerId = env.TIMER_ACTOR.idFromName("rpc-timer");
-    const timerStub = env.TIMER_ACTOR.get(timerId);
-    await timerStub.spawn({ actorId: "rpc-timer", caller: "u1", callerType: "user", input: {} });
+    const id2 = env.COUNTER.idFromName("rpc-counter-2");
+    const stub2 = env.COUNTER.get(id2);
+    await stub2.spawn({ actorId: "rpc-counter-2", caller: "u1", callerType: "user", input: {} });
 
-    // Send messages to each independently
-    await counterStub.send("u1", "user", { type: "INCREMENT", amount: 5 });
-    await timerStub.send("u1", "user", { type: "INCREMENT" });
+    // Send different amounts to each independently
+    await stub1.send("u1", "user", { type: "INCREMENT", amount: 5 });
+    await stub2.send("u1", "user", { type: "INCREMENT", amount: 10 });
 
     // Verify each has its own state
-    const counterSnap = await counterStub.getSnapshot("u1", "user");
-    const timerSnap = await timerStub.getSnapshot("u1", "user");
+    const snap1 = await stub1.getSnapshot("u1", "user");
+    const snap2 = await stub2.getSnapshot("u1", "user");
 
-    expect((counterSnap.snapshot as { count: number }).count).toBe(5);
-    expect((timerSnap.snapshot as { count: number }).count).toBe(1);
+    expect((snap1.snapshot as { count: number }).count).toBe(5);
+    expect((snap2.snapshot as { count: number }).count).toBe(10);
   });
 
   it("DOs are isolated — changes to one don't affect another", async () => {

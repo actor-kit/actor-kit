@@ -69,6 +69,9 @@ export function createMockClient<
       const event: TEvent = Object.assign({ type }, payload) as TEvent;
       this.send(event);
     },
+    connect() {
+      // no-op for mock
+    },
     disconnect() {
       currentState = "disconnected";
       for (const listener of stateListeners) {

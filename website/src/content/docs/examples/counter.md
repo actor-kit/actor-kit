@@ -15,14 +15,17 @@ The counter is the simplest actor — it demonstrates the contract-first API, fl
 - `schema()` and `view()` for typed view projections
 - Real-time sync: two browsers sharing the same counter
 - Admin vs user roles via `callerType`
-- Contract-derived client: typed `actorClient(contract)` — no manual event unions
+- Contract-derived client: typed `actorClient(contract)` — no manual message unions
 
-## The Actor
+## The Contract
+
+The contract defines state, messages, roles, and views in a single file:
 
 ```typescript
+// counter.contract.ts
 import { z } from "zod";
 import { schema, view, uint32, string } from "@actor-kit/core";
-import { defineActor, createActorClass, message } from "@actor-kit/worker";
+import { defineActor, message } from "@actor-kit/worker";
 
 type CounterState = { count: number; lastUpdatedBy: string | null };
 
@@ -65,6 +68,17 @@ export const CounterContract = defineActor("counter", {
     user: view(CounterView, (state) => ({ count: state.count, lastUpdatedBy: state.lastUpdatedBy ?? "" })),
   },
 });
+export type CounterContract = typeof CounterContract;
+```
+
+## The Server
+
+The server file imports the contract value and creates the Durable Object class:
+
+```typescript
+// counter.server.ts
+import { createActorClass } from "@actor-kit/worker";
+import { CounterContract } from "./counter.contract";
 
 export const Counter = createActorClass(CounterContract);
 ```
@@ -74,24 +88,77 @@ Key points:
 - **`defineActor()`** returns a typed contract — `createActorClass()` converts it to a DO class
 - **Both roles** can see `INCREMENT` and `DECREMENT` — guards are only needed for restricted actions
 - **Views** are the same shape for both roles — in more complex actors, roles would see different projections
+- **The contract is separate from the DO class** — server imports the value, client imports only the type
+
+## The Worker
+
+The Worker is the auth boundary. It derives caller identity from a session cookie (NOT from query params) and stamps it onto the request via `withCallerIdentity()` before forwarding to the DO:
+
+```typescript
+// src/worker.ts
+import { withCallerIdentity } from "@actor-kit/worker";
+import { Counter } from "./counter.server";
+
+export { Counter };
+
+interface Env {
+  COUNTER: DurableObjectNamespace;
+}
+
+export default {
+  async fetch(request: Request, env: Env): Promise<Response> {
+    const url = new URL(request.url);
+
+    if (url.pathname.startsWith("/api/counter/")) {
+      const actorId = url.pathname.split("/")[3] ?? "default";
+
+      // Authenticate via session cookie (PRODUCTION: validate a signed cookie, OAuth, etc.)
+      const { callerId } = resolveCaller(request);
+
+      const id = env.COUNTER.idFromName(actorId);
+      const stub = env.COUNTER.get(id);
+
+      // Spawn idempotently
+      await stub.spawn({ actorId, caller: "system", callerType: "service", input: {} });
+
+      // Stamp verified identity and forward to DO
+      const stamped = withCallerIdentity(request, { callerId, callerType: "user" });
+      return stub.fetch(stamped);
+    }
+
+    return new Response("Not found", { status: 404 });
+  },
+};
+
+function resolveCaller(request: Request): { callerId: string } {
+  const cookieHeader = request.headers.get("Cookie") ?? "";
+  const match = cookieHeader.match(/(?:^|;\s*)caller_id=([^;]+)/);
+  if (match?.[1]) return { callerId: decodeURIComponent(match[1]) };
+  return { callerId: `user-${crypto.randomUUID().slice(0, 8)}` };
+}
+```
+
+Note: `callerId` comes from the cookie — it is never accepted from the URL. Clients connect to `/api/counter/<id>` with no query params; the session cookie is sent automatically by the browser.
 
 ## The Client
 
 ### Vanilla TypeScript
 
-Use `actorClient(contract)` for typed views, automatic reconnection, and binary delta decoding. Event types are inferred from the contract — no manual union needed:
+Client code uses `import type` to import the contract — this keeps Zod, handlers, and Cloudflare dependencies out of the browser bundle. The client takes a `path` (not a full URL) and requires an `initialView` — the server always provides the first snapshot:
 
 ```typescript
 import { actorClient } from "@actor-kit/client";
-import { CounterContract } from "./counter";
+import type { CounterContract } from "./counter.contract";
 
-// Events and views inferred from the contract
-const CounterClient = actorClient(CounterContract);
+// Type-only — no runtime contract value in the bundle
+const CounterClient = actorClient<CounterContract>();
 
-// Create a runtime connection — Worker stamps identity via withCallerIdentity
+// Create a runtime connection — cookie is sent automatically by the browser
 const client = CounterClient.create({
-  url: `ws://localhost:8787/api/counter/default?callerId=user-1`,
+  path: `/api/counter/default`,
+  initialView: { count: 0, lastUpdatedBy: "" }, // or an SSR snapshot
 });
+client.connect();
 
 // view is typed: { count: number; lastUpdatedBy: string }
 client.subscribe((view) => {
@@ -103,26 +170,38 @@ client.send({ type: "INCREMENT" });
 
 ### React
 
+The server fetches the initial snapshot during SSR. `useClient()` creates and manages the client's lifecycle — it opens the WebSocket on mount and closes it on unmount:
+
 ```tsx
-import { actorClient } from "@actor-kit/client";
 import { actorContext } from "@actor-kit/react";
-import { CounterContract } from "./counter";
+import type { CounterContract } from "./counter.contract";
 
-const CounterClient = actorClient(CounterContract);
-const CounterCtx = actorContext(CounterContract);
+// Type-only — no runtime contract value in the bundle
+const CounterCtx = actorContext<typeof CounterContract>();
 
-function App({ counterId, callerId }: { counterId: string; callerId: string }) {
-  const [client, setClient] = useState<ReturnType<typeof CounterClient.create> | null>(null);
+// Server loader: fetch initial snapshot from the Durable Object.
+// Runs on the Worker — direct DO binding access.
+export async function loader({ env, params }: { env: Env; params: { counterId: string } }) {
+  const id = env.COUNTER.idFromName(params.counterId);
+  const stub = env.COUNTER.get(id);
+  await stub.spawn({
+    actorId: params.counterId,
+    caller: "system",
+    callerType: "service",
+    input: {},
+  });
+  const { snapshot } = await stub.getSnapshot("demo-user", "user");
+  return { counterId: params.counterId, snapshot };
+}
 
-  useEffect(() => {
-    const c = CounterClient.create({
-      url: `wss://${location.host}/api/counter/${encodeURIComponent(counterId)}?callerId=${encodeURIComponent(callerId)}`,
-    });
-    setClient(c);
-    return () => c.disconnect();
-  }, [counterId, callerId]);
-
-  if (!client) return null;
+function App({ counterId, snapshot }: { counterId: string; snapshot: { count: number; lastUpdatedBy: string } }) {
+  // useClient creates the client once (stable across re-renders) and manages
+  // connect/disconnect. initialView seeds the view before the socket opens —
+  // no undefined state. Cookies provide auth automatically.
+  const client = CounterCtx.useClient({
+    path: `/api/counter/${counterId}`,
+    initialView: { role: "user", ...snapshot },
+  });
 
   return (
     <CounterCtx.Provider client={client}>
@@ -132,13 +211,12 @@ function App({ counterId, callerId }: { counterId: string; callerId: string }) {
 }
 
 function Counter() {
-  // useSelector — only re-renders when count changes, not on every view update
-  const count = CounterCtx.useSelector((view) => view?.count ?? 0);
-  const send = CounterCtx.useSend();   // (event: CounterEvent) => void — inferred from contract
+  const view = CounterCtx.useView();   // always defined — seeded from initialView
+  const send = CounterCtx.useSend();
 
   return (
     <div>
-      <span>{count}</span>
+      <span>{view.count}</span>
       <button onClick={() => send({ type: "INCREMENT" })}>+</button>
       <button onClick={() => send({ type: "DECREMENT" })}>-</button>
     </div>

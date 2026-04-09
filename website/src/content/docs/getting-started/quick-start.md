@@ -5,19 +5,21 @@ description: Build a real-time counter in under 5 minutes.
 
 Build a shared counter that multiple users can increment in real-time. The full source is in [`examples/counter/`](https://github.com/actor-kit/actor-kit/tree/main/examples/counter).
 
-## 1. Define the Actor
+## 1. Define the Contract
+
+The contract lives in its own file. It defines state, messages, roles, and views — everything both server and client need to know about the actor:
 
 ```typescript
-// src/counter.ts
+// src/counter.contract.ts
 import { z } from "zod";
 import { schema, view, uint32, string } from "@actor-kit/core";
-import { defineActor, createActorClass, message } from "@actor-kit/worker";
+import { defineActor, message } from "@actor-kit/worker";
 
 const CounterView = schema({ count: uint32, lastUpdatedBy: string });
 
 export const CounterContract = defineActor("counter", {
   input: z.object({}),
-  init: () => ({ count: 0, lastUpdatedBy: "" }),
+  init: () => ({ count: 0, lastUpdatedBy: null as string | null }),
 
   roles: {
     user: () => true,
@@ -43,6 +45,15 @@ export const CounterContract = defineActor("counter", {
     })),
   },
 });
+export type CounterContract = typeof CounterContract;
+```
+
+Then the server file imports the contract value and creates the Durable Object class:
+
+```typescript
+// src/counter.server.ts
+import { createActorClass } from "@actor-kit/worker";
+import { CounterContract } from "./counter.contract";
 
 export const Counter = createActorClass(CounterContract);
 ```
@@ -54,6 +65,7 @@ Key things happening:
 - **Messages are flat** — no nesting by role. Guards handle authorization (see [Todo List](/examples/todo-list/))
 - **Handlers are synchronous** — they return new state, no `async`/`await`
 - **`schema()`** defines the view shape for binary encoding and TypeScript inference
+- **The contract file is separate** — server imports the value, client imports only the type (see below)
 
 ## 2. Create the Worker
 
@@ -62,7 +74,7 @@ The Worker is the auth boundary. It authenticates the caller and stamps verified
 ```typescript
 // src/worker.ts
 import { withCallerIdentity } from "@actor-kit/worker";
-import { Counter } from "./counter";
+import { Counter } from "./counter.server";
 
 export { Counter };
 
@@ -78,14 +90,15 @@ export default {
     if (url.pathname.startsWith("/api/counter/")) {
       const actorId = url.pathname.split("/")[3] ?? "default";
 
-      // Authenticate the caller.
-      // PRODUCTION: validate a session cookie, OAuth token, or similar credential here.
-      // This demo uses a query param for simplicity — NOT safe for production.
-      const callerId = url.searchParams.get("callerId")
-        ?? `user-${crypto.randomUUID().slice(0, 8)}`;
+      // Authenticate via session cookie.
+      // PRODUCTION: validate a signed session cookie, OAuth token, or similar credential.
+      const { callerId } = resolveCaller(request);
 
       const id = env.COUNTER.idFromName(actorId);
       const stub = env.COUNTER.get(id);
+
+      // Spawn idempotently
+      await stub.spawn({ actorId, caller: "system", callerType: "service", input: {} });
 
       // Stamp verified identity and forward to DO
       const stamped = withCallerIdentity(request, { callerId, callerType: "user" });
@@ -95,29 +108,40 @@ export default {
     return new Response("Not found", { status: 404 });
   },
 };
+
+function resolveCaller(request: Request): { callerId: string } {
+  const cookieHeader = request.headers.get("Cookie") ?? "";
+  const match = cookieHeader.match(/(?:^|;\s*)caller_id=([^;]+)/);
+  if (match?.[1]) return { callerId: decodeURIComponent(match[1]) };
+  return { callerId: `user-${crypto.randomUUID().slice(0, 8)}` };
+}
 ```
 
 Key things happening:
 - **`withCallerIdentity()`** scrubs any inbound identity headers, then stamps verified `callerId` and `callerType`
-- **No secrets needed** — the Worker authenticates via your own auth system (session cookies, OAuth, etc.)
-- **No token endpoint** — the Worker stamps identity directly, no JWT minting required
-- **Demo only** — the query param approach above is for simplicity. In production, derive `callerId` from a verified session
+- **Cookie-based auth** — caller identity comes from a session cookie sent automatically by the browser. Never from URL query params.
 
 ## 3. Connect from the Browser
 
 ### Vanilla TypeScript
 
+Client code uses `import type` to import the contract — this keeps Zod, handlers, and Cloudflare dependencies out of the browser bundle:
+
 ```typescript
 import { actorClient } from "@actor-kit/client";
-import { CounterContract } from "./counter";
+import type { CounterContract } from "./counter.contract";
 
-// Create a typed client factory — events and views inferred from the contract
-const CounterClient = actorClient(CounterContract);
+// Type-only — no runtime contract value in the bundle
+const CounterClient = actorClient<CounterContract>();
 
-// Create a runtime connection — no token needed, Worker stamps identity
+// Create a runtime connection — the browser sends the session cookie automatically.
+// `path` (not `url`) means "relative to the current host". `host` is optional for
+// overriding (e.g. in native apps).
 const client = CounterClient.create({
-  url: `wss://${location.host}/api/counter/my-counter?callerId=user-1`,
+  path: `/api/counter/my-counter`,
+  initialView: { count: 0, lastUpdatedBy: "" }, // or an SSR snapshot
 });
+client.connect();
 
 // Subscribe to typed views — binary delta decoding is handled transparently
 client.subscribe((view) => {
@@ -125,33 +149,36 @@ client.subscribe((view) => {
   console.log("Count:", view.count);
 });
 
-// Send typed events — inferred from contract messages
+// Send typed messages — inferred from contract
 client.send({ type: "INCREMENT" });
 ```
 
 ### React
 
+The server loader fetches the initial snapshot from the DO. `useClient()` creates the client once and manages connect/disconnect on mount:
+
 ```tsx
-import { useState, useEffect } from "react";
-import { actorClient } from "@actor-kit/client";
 import { actorContext } from "@actor-kit/react";
-import { CounterContract } from "./counter";
+import type { CounterContract } from "./counter.contract";
 
-const CounterClient = actorClient(CounterContract);
-const CounterCtx = actorContext(CounterContract);
+const CounterCtx = actorContext<typeof CounterContract>();
 
-function App({ callerId }: { callerId: string }) {
-  const [client, setClient] = useState<ReturnType<typeof CounterClient.create> | null>(null);
+// Server loader fetches the initial snapshot from the DO
+export async function loader({ env, params, callerId }: { env: Env; params: { counterId: string }; callerId: string }) {
+  const stub = env.COUNTER.get(env.COUNTER.idFromName(params.counterId));
+  await stub.spawn({ actorId: params.counterId, caller: "system", callerType: "service", input: {} });
+  const { snapshot } = await stub.getSnapshot(callerId, "user");
+  return { counterId: params.counterId, snapshot };
+}
 
-  useEffect(() => {
-    const c = CounterClient.create({
-      url: `wss://${location.host}/api/counter/my-counter?callerId=${encodeURIComponent(callerId)}`,
-    });
-    setClient(c);
-    return () => c.disconnect();
-  }, [callerId]);
-
-  if (!client) return null;
+function App({ counterId, snapshot }: { counterId: string; snapshot: { count: number; lastUpdatedBy: string } }) {
+  // useClient creates the client once and manages connect/disconnect on mount.
+  // initialView seeds useView() before the socket opens — no undefined state.
+  // Cookies supply auth automatically.
+  const client = CounterCtx.useClient({
+    path: `/api/counter/${counterId}`,
+    initialView: { role: "user", ...snapshot },
+  });
 
   return (
     <CounterCtx.Provider client={client}>
@@ -161,12 +188,12 @@ function App({ callerId }: { callerId: string }) {
 }
 
 function Counter() {
-  const view = CounterCtx.useView();   // { count: number; lastUpdatedBy: string } | undefined
-  const send = CounterCtx.useSend();   // (event: CounterEvent) => void
+  const view = CounterCtx.useView();   // always defined — never undefined
+  const send = CounterCtx.useSend();
 
   return (
     <div>
-      <span>{view?.count ?? "..."}</span>
+      <span>{view.count}</span>
       <button onClick={() => send({ type: "INCREMENT" })}>+</button>
       <button onClick={() => send({ type: "DECREMENT" })}>-</button>
     </div>
@@ -174,7 +201,7 @@ function Counter() {
 }
 ```
 
-No manual event unions needed — `CounterCtx.useSend()` infers event types from the contract's messages.
+The `initialView` prop is required — the server always provides the first snapshot. `useView()` returns the view directly, no null checks needed. The WebSocket connects and takes over with live updates.
 
 ## 4. Deploy
 

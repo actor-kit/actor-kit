@@ -13,7 +13,7 @@ The chat room demonstrates WebSocket lifecycle events and real-time broadcast to
 - Online user tracking
 - Real-time message broadcast to all connected users
 - Message history (last 50 messages)
-- Contract-derived client: no manual event unions
+- Contract-derived client: no manual message unions
 
 ## Lifecycle Events
 
@@ -57,6 +57,16 @@ export const ChatRoomContract = defineActor("chat-room", {
     }),
   },
 });
+export type ChatRoomContract = typeof ChatRoomContract;
+
+```
+
+The server file imports the contract value and creates the DO class:
+
+```typescript
+// chat-room.server.ts
+import { createActorClass } from "@actor-kit/worker";
+import { ChatRoomContract } from "./chat.contract";
 
 export const ChatRoom = createActorClass(ChatRoomContract);
 ```
@@ -71,19 +81,34 @@ The `.slice(-49)` keeps the last 50 messages — old messages are discarded to b
 
 ### Vanilla TypeScript
 
-Use `actorClient(contract)` for typed views and events. Binary delta decoding is handled transparently — the `subscribe` callback always receives the full, merged view:
+Client code uses `import type` to import the contract — this keeps Zod, handlers, and Cloudflare dependencies out of the browser bundle. Binary delta decoding is handled transparently — the `subscribe` callback always receives the full, merged view:
+
+The Worker authenticates via session cookie and forwards to the DO with `withCallerIdentity()` — caller identity is never taken from URL params:
+
+```typescript
+if (url.pathname.startsWith("/api/chat-room/")) {
+  const roomId = url.pathname.split("/")[3] ?? "general";
+  const { callerId } = resolveCaller(request); // cookie-based
+  const stub = env.CHAT_ROOM.get(env.CHAT_ROOM.idFromName(roomId));
+  await stub.spawn({ actorId: roomId, caller: "system", callerType: "service", input: {} });
+  const stamped = withCallerIdentity(request, { callerId, callerType: "user" });
+  return stub.fetch(stamped);
+}
+```
 
 ```typescript
 import { actorClient } from "@actor-kit/client";
-import { ChatRoomContract } from "./chat";
+import type { ChatRoomContract } from "./chat.contract";
 
-// Events and views inferred from the contract
-const ChatClient = actorClient(ChatRoomContract);
+// Type-only — no runtime contract value in the bundle
+const ChatClient = actorClient<ChatRoomContract>();
 
-// Create a runtime connection — Worker stamps identity via withCallerIdentity
+// Create a runtime connection — cookies provide caller identity automatically
 const client = ChatClient.create({
-  url: `ws://localhost:8787/api/chat-room/general?user=alice`,
+  path: `/api/chat-room/general`,
+  initialView: { role: "user", messages: [], onlineCount: 0 }, // or an SSR snapshot
 });
+client.connect();
 
 // view is typed from the contract's view schemas
 client.subscribe((view) => {
@@ -99,26 +124,28 @@ client.send({ type: "SEND_MESSAGE", text: "Hello!" });
 ### React
 
 ```tsx
-import { useState, useEffect } from "react";
-import { actorClient } from "@actor-kit/client";
+import { useState } from "react";
 import { actorContext } from "@actor-kit/react";
-import { ChatRoomContract } from "./chat";
+import type { ChatRoomContract } from "./chat.contract";
 
-const ChatClient = actorClient(ChatRoomContract);
-const ChatCtx = actorContext(ChatRoomContract);
+// Type-only — no runtime contract value in the bundle
+const ChatCtx = actorContext<typeof ChatRoomContract>();
 
-function ChatApp({ roomId, callerId }: { roomId: string; callerId: string }) {
-  const [client, setClient] = useState<ReturnType<typeof ChatClient.create> | null>(null);
+// Server loader: fetch initial snapshot from the DO
+export async function loader({ env, params, callerId }: { env: Env; params: { roomId: string }; callerId: string }) {
+  const stub = env.CHAT_ROOM.get(env.CHAT_ROOM.idFromName(params.roomId));
+  await stub.spawn({ actorId: params.roomId, caller: "system", callerType: "service", input: {} });
+  const { snapshot } = await stub.getSnapshot(callerId, "user");
+  return { roomId: params.roomId, snapshot };
+}
 
-  useEffect(() => {
-    const c = ChatClient.create({
-      url: `wss://${location.host}/api/chat-room/${encodeURIComponent(roomId)}?user=${encodeURIComponent(callerId)}`,
-    });
-    setClient(c);
-    return () => c.disconnect();
-  }, [roomId, callerId]);
-
-  if (!client) return null;
+function ChatApp({ roomId, snapshot }: { roomId: string; snapshot: { messages: { id: string; author: string; text: string }[]; onlineCount: number } }) {
+  // useClient manages the WebSocket lifecycle. initialView seeds useView() so
+  // there's no undefined loading state. Auth is via cookies — no callerId prop.
+  const client = ChatCtx.useClient({
+    path: `/api/chat-room/${roomId}`,
+    initialView: { role: "user", ...snapshot },
+  });
 
   return (
     <ChatCtx.Provider client={client}>
@@ -128,15 +155,15 @@ function ChatApp({ roomId, callerId }: { roomId: string; callerId: string }) {
 }
 
 function ChatRoom() {
-  const view = ChatCtx.useView();   // typed from contract view schemas
-  const send = ChatCtx.useSend();   // event types inferred from contract
+  const view = ChatCtx.useView();   // typed from contract view schemas — always defined
+  const send = ChatCtx.useSend();   // message types inferred from contract
   const [text, setText] = useState("");
 
   return (
     <div>
-      <div>{view?.onlineCount ?? 0} online</div>
+      <div>{view.onlineCount} online</div>
       <div>
-        {view?.messages.map(m => (
+        {view.messages.map(m => (
           <div key={m.id}><b>{m.author}</b>: {m.text}</div>
         ))}
       </div>

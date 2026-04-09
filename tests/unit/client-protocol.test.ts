@@ -38,11 +38,13 @@ class FakeWebSocket {
 }
 
 describe("client protocol handling", () => {
-  it("connects to ws:// URL for local development", async () => {
+  it("infers ws:// for localhost host", async () => {
     let capturedUrl = "";
     const client = createActorClient({
-      url: "ws://localhost:8787/api/counter/test",
-      accessToken: "token",
+      path: "/api/counter/test",
+      host: "localhost:8787",
+      initialView: undefined,
+      getToken: () => "token",
       WebSocketImpl: class extends FakeWebSocket {
         constructor(url: string, protocols?: string | string[]) {
           super(url, protocols);
@@ -50,17 +52,20 @@ describe("client protocol handling", () => {
         }
       } as unknown as typeof WebSocket,
     });
+    client.connect();
 
     await new Promise((r) => setTimeout(r, 10));
     expect(capturedUrl).toBe("ws://localhost:8787/api/counter/test");
     client.disconnect();
   });
 
-  it("connects to wss:// URL for production", async () => {
+  it("infers wss:// for public host", async () => {
     let capturedUrl = "";
     const client = createActorClient({
-      url: "wss://example.com/api/counter/test",
-      accessToken: "token",
+      path: "/api/counter/test",
+      host: "example.com",
+      initialView: undefined,
+      getToken: () => "token",
       WebSocketImpl: class extends FakeWebSocket {
         constructor(url: string, protocols?: string | string[]) {
           super(url, protocols);
@@ -68,17 +73,20 @@ describe("client protocol handling", () => {
         }
       } as unknown as typeof WebSocket,
     });
+    client.connect();
 
     await new Promise((r) => setTimeout(r, 10));
     expect(capturedUrl).toBe("wss://example.com/api/counter/test");
     client.disconnect();
   });
 
-  it("connects to custom path URL", async () => {
+  it("connects to custom path", async () => {
     let capturedUrl = "";
     const client = createActorClient({
-      url: "wss://example.com/game/zones/forest-north",
-      accessToken: "token",
+      path: "/game/zones/forest-north",
+      host: "example.com",
+      initialView: undefined,
+      getToken: () => "token",
       WebSocketImpl: class extends FakeWebSocket {
         constructor(url: string, protocols?: string | string[]) {
           super(url, protocols);
@@ -86,6 +94,7 @@ describe("client protocol handling", () => {
         }
       } as unknown as typeof WebSocket,
     });
+    client.connect();
 
     await new Promise((r) => setTimeout(r, 10));
     expect(capturedUrl).toBe("wss://example.com/game/zones/forest-north");
@@ -97,8 +106,10 @@ describe("client protocol handling", () => {
     const errors: unknown[] = [];
 
     const client = createActorClient({
-      url: "wss://example.com/api/counter/test",
-      accessToken: "token",
+      path: "/api/counter/test",
+      host: "example.com",
+      initialView: undefined,
+      getToken: () => "token",
       onError: (error) => {
         errors.push(error);
       },
@@ -109,6 +120,7 @@ describe("client protocol handling", () => {
         }
       } as unknown as typeof WebSocket,
     });
+    client.connect();
 
     await new Promise((r) => setTimeout(r, 10));
 

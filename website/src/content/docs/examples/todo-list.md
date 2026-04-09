@@ -101,12 +101,16 @@ The owner and member see the full todo list. The viewer sees only counts — the
 
 ## The Worker
 
-Unlike the counter (which auto-initializes with no input), the todo list requires an `ownerId` at creation time. Use `spawn()` to pass input on first connection:
+Unlike the counter (which auto-initializes with no input), the todo list requires an `ownerId` at creation time. Use `spawn()` to pass input on first connection. Caller identity comes from a session cookie — never from URL query params:
 
 ```typescript
 // Route WebSocket connections to the TodoList DO
 if (url.pathname.startsWith("/api/todo-list/")) {
   const listId = url.pathname.split("/")[3] ?? "default";
+
+  // Authenticate via session cookie (PRODUCTION: signed cookie or OAuth)
+  const { callerId: userId } = resolveCaller(request);
+
   const id = env.TODO_LIST.idFromName(listId);
   const stub = env.TODO_LIST.get(id);
 
@@ -118,7 +122,16 @@ if (url.pathname.startsWith("/api/todo-list/")) {
     input: { ownerId: userId },
   });
 
-  return stub.fetch(request);
+  // Stamp verified identity and forward to DO
+  const stamped = withCallerIdentity(request, { callerId: userId, callerType: "user" });
+  return stub.fetch(stamped);
+}
+
+function resolveCaller(request: Request): { callerId: string } {
+  const cookieHeader = request.headers.get("Cookie") ?? "";
+  const match = cookieHeader.match(/(?:^|;\s*)caller_id=([^;]+)/);
+  if (match?.[1]) return { callerId: decodeURIComponent(match[1]) };
+  return { callerId: `user-${crypto.randomUUID().slice(0, 8)}` };
 }
 ```
 
@@ -128,23 +141,29 @@ The `ownerId` from input flows into `init()`, which sets the initial state. Role
 
 ### Vanilla TypeScript
 
-Use `actorClient(contract)` for typed views and events. Binary delta decoding is handled transparently — the `subscribe` callback always receives the full, merged view:
+Client code uses `import type` to import the contract — this keeps Zod, handlers, and Cloudflare dependencies out of the browser bundle. Binary delta decoding is handled transparently — the `subscribe` callback always receives the full, merged view:
 
 ```typescript
 import { actorClient } from "@actor-kit/client";
-import { TodoListContract } from "./todo";
+import type { TodoListContract } from "./todo.contract";
 
-// Events and views inferred from the contract
-const TodoClient = actorClient(TodoListContract);
+// Type-only — no runtime contract value in the bundle
+const TodoClient = actorClient<TodoListContract>();
 
-// Create a runtime connection — Worker stamps identity via withCallerIdentity
+// Create a runtime connection — the browser sends the session cookie automatically
 const client = TodoClient.create({
-  url: `ws://localhost:8787/api/todo-list/my-list?callerId=alice`,
+  path: `/api/todo-list/my-list`,
+  initialView: { role: "viewer", todoCount: 0, doneCount: 0 }, // or an SSR snapshot
 });
+client.connect();
 
-// view is typed from the contract's view schemas
+// view is a discriminated union — narrow by role before accessing role-specific fields
 client.subscribe((view) => {
-  renderTodos(view.todos);
+  if (view.role === "owner" || view.role === "member") {
+    renderTodos(view.todos);
+  } else {
+    renderCounts(view.todoCount, view.doneCount);
+  }
 });
 
 client.send({ type: "ADD_TODO", text: "Buy milk" });
@@ -153,26 +172,32 @@ client.send({ type: "ADD_TODO", text: "Buy milk" });
 ### React
 
 ```tsx
-import { useState, useEffect } from "react";
-import { actorClient } from "@actor-kit/client";
 import { actorContext } from "@actor-kit/react";
-import { TodoListContract } from "./todo";
+import type { TodoListContract } from "./todo.contract";
 
-const TodoClient = actorClient(TodoListContract);
-const TodoCtx = actorContext(TodoListContract);
+// Type-only — no runtime contract value in the bundle
+const TodoCtx = actorContext<typeof TodoListContract>();
 
-function TodoApp({ listId, callerId }: { listId: string; callerId: string }) {
-  const [client, setClient] = useState<ReturnType<typeof TodoClient.create> | null>(null);
+// Server loader: fetch the initial role-scoped snapshot from the DO
+export async function loader({ env, params, callerId }: { env: Env; params: { listId: string }; callerId: string }) {
+  const stub = env.TODO_LIST.get(env.TODO_LIST.idFromName(params.listId));
+  await stub.spawn({
+    actorId: params.listId,
+    caller: callerId,
+    callerType: "user",
+    input: { ownerId: callerId },
+  });
+  const { snapshot, role } = await stub.getSnapshot(callerId, "user");
+  return { listId: params.listId, snapshot, role };
+}
 
-  useEffect(() => {
-    const c = TodoClient.create({
-      url: `wss://${location.host}/api/todo-list/${encodeURIComponent(listId)}?callerId=${encodeURIComponent(callerId)}`,
-    });
-    setClient(c);
-    return () => c.disconnect();
-  }, [listId, callerId]);
-
-  if (!client) return null;
+function TodoApp({ listId, snapshot, role }: { listId: string; snapshot: unknown; role: string }) {
+  // useClient creates the client once and manages connect/disconnect on mount.
+  // Cookies supply caller identity — no callerId is needed on the client.
+  const client = TodoCtx.useClient({
+    path: `/api/todo-list/${listId}`,
+    initialView: { role, ...(snapshot as object) } as never,
+  });
 
   return (
     <TodoCtx.Provider client={client}>

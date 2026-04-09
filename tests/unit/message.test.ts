@@ -18,12 +18,11 @@ describe("message() helper", () => {
   });
 
   it("handler receives parsed payload and ctx", () => {
-    const emissions: unknown[] = [];
     const increment = message(z.object({ amount: z.number() }), (state: State, { amount }, ctx) => {
       expect(ctx.caller).toBe("alice");
       expect(ctx.callerType).toBe("user");
       expect(ctx.role).toBe("owner");
-      expect(typeof ctx.emit).toBe("function");
+      expect(typeof ctx.execute).toBe("function");
       return { ...state, count: state.count + amount };
     });
 
@@ -32,9 +31,7 @@ describe("message() helper", () => {
       callerType: "user" as const,
       role: "owner",
       env: { ACTOR_KIT_SECRET: "test" },
-      emit: (effect: unknown) => {
-        emissions.push(effect);
-      },
+      execute: () => {},
     };
 
     const result = increment.handler({ count: 0, items: [] }, { amount: 5 }, ctx);
@@ -88,8 +85,8 @@ describe("message() helper", () => {
 
   it("rejects async handlers at type level", () => {
     // @ts-expect-error — async handlers return Promise<State>, not State
-    const fetchData = message(z.object({}), async (state: State, _, { emit }) => {
-      emit({ queue: "EFFECTS", body: { type: "FETCH", url: "https://api.example.com/data" } });
+    const fetchData = message(z.object({}), async (state: State, _, { execute }) => {
+      execute("EFFECTS", { type: "FETCH", url: "https://api.example.com/data" });
       return state;
     });
 

@@ -1,7 +1,6 @@
 import { createActorClient } from "@actor-kit/client";
 import { describe, expect, it } from "vitest";
 
-// Controllable fake WebSocket
 class FakeWebSocket {
   listeners = new Map<string, Set<Function>>();
   sent: string[] = [];
@@ -43,14 +42,20 @@ class FakeWebSocket {
   }
 }
 
+const baseOptions = {
+  path: "/api/counter/test",
+  host: "example.com",
+  initialView: undefined,
+};
+
 describe("client reconnection", () => {
   it("transitions to reconnecting on unexpected close", async () => {
     let fakeWs: FakeWebSocket | undefined;
     const stateChanges: string[] = [];
 
     const client = createActorClient({
-      url: "wss://example.com/api/counter/test",
-      accessToken: "token",
+      ...baseOptions,
+      getToken: () => "token",
       WebSocketImpl: class extends FakeWebSocket {
         constructor(url: string, protocols?: string | string[]) {
           super(url, protocols);
@@ -60,13 +65,13 @@ describe("client reconnection", () => {
     });
 
     client.onStateChange((state) => stateChanges.push(state));
+    client.connect();
 
     await new Promise((r) => setTimeout(r, 10));
     fakeWs?.receiveMessage(JSON.stringify({ type: "snapshot", role: "user", data: { count: 0 } }));
 
     expect(client.connectionState).toBe("connected");
 
-    // Simulate unexpected close (server restart, network blip)
     fakeWs?.fireEvent("close", { code: 1006 });
 
     expect(client.connectionState).toBe("reconnecting");
@@ -77,8 +82,8 @@ describe("client reconnection", () => {
     let fakeWs: FakeWebSocket | undefined;
 
     const client = createActorClient({
-      url: "wss://example.com/api/counter/test",
-      accessToken: "token",
+      ...baseOptions,
+      getToken: () => "token",
       WebSocketImpl: class extends FakeWebSocket {
         constructor(url: string, protocols?: string | string[]) {
           super(url, protocols);
@@ -86,6 +91,7 @@ describe("client reconnection", () => {
         }
       } as unknown as typeof WebSocket,
     });
+    client.connect();
 
     await new Promise((r) => setTimeout(r, 10));
     fakeWs?.receiveMessage(JSON.stringify({ type: "snapshot", role: "user", data: {} }));
@@ -99,8 +105,8 @@ describe("client reconnection", () => {
     const stateChanges: string[] = [];
 
     const client = createActorClient({
-      url: "wss://example.com/api/counter/test",
-      accessToken: "token",
+      ...baseOptions,
+      getToken: () => "token",
       WebSocketImpl: class extends FakeWebSocket {
         constructor(url: string, protocols?: string | string[]) {
           super(url, protocols);
@@ -110,6 +116,7 @@ describe("client reconnection", () => {
     });
 
     client.onStateChange((state) => stateChanges.push(state));
+    client.connect();
 
     await new Promise((r) => setTimeout(r, 10));
     fakeWs?.receiveMessage(JSON.stringify({ type: "snapshot", role: "user", data: {} }));

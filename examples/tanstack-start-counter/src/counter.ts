@@ -57,3 +57,5 @@ export const CounterContract = defineActor("counter", {
     })),
   },
 });
+
+export type CounterContract = typeof CounterContract;

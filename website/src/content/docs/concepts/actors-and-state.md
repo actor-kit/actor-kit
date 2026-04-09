@@ -28,6 +28,7 @@ export const MyActorContract = defineActor("my-actor", {
   messages: { /* ... */ },
   views: { /* ... */ },
 });
+export type MyActorContract = typeof MyActorContract;
 
 export const MyActor = createActorClass(MyActorContract);
 ```
@@ -147,5 +148,4 @@ This is useful for logging, metrics, or debugging. It also fires during `testAct
 
 ## Related
 
-- [Sequential and Parallel States](/recipes/sequential-and-parallel-states/) — multi-phase workflows and independent state regions
-- [Side Effects](/concepts/side-effects/) — `emit()` for fire-and-forget external communication
+- [Side Effects](/concepts/side-effects/) — `execute()` and services for external communication

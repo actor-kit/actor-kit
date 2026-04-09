@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { boolean, schema, string, uint32, view } from "@actor-kit/core";
-import { createActorClass, defineActor, message } from "@actor-kit/worker";
+import { defineActor, message } from "@actor-kit/worker";
 
 type Bid = { bidder: string; amount: number; timestamp: number };
 type AuctionState = {
@@ -92,4 +92,4 @@ export const AuctionContract = defineActor("auction", {
   },
 });
 
-export const Auction = createActorClass(AuctionContract);
+export type AuctionContract = typeof AuctionContract;
