@@ -12,7 +12,7 @@ The counter is the simplest actor — it demonstrates the contract-first API, fl
 - `defineActor()` + `createActorClass()` — contract-first API
 - Flat messages with optional guards
 - `message()` with Zod validation
-- `schema()` and `view()` for typed view projections
+- `schema()` and `view.shared()` for typed view projections
 - Real-time sync: two browsers sharing the same counter
 - Admin vs user roles via `callerType`
 - Contract-derived client: typed `actorClient(contract)` — no manual message unions
@@ -24,12 +24,12 @@ The contract defines state, messages, roles, and views in a single file:
 ```typescript
 // counter.contract.ts
 import { z } from "zod";
-import { schema, view, uint32, string } from "@actor-kit/core";
+import { schema, view, uint32, string, nullable } from "@actor-kit/core";
 import { defineActor, message } from "@actor-kit/worker";
 
 type CounterState = { count: number; lastUpdatedBy: string | null };
 
-const CounterView = schema({ count: uint32, lastUpdatedBy: string });
+const CounterView = schema({ count: uint32, lastUpdatedBy: nullable(string) });
 
 export const CounterContract = defineActor("counter", {
   input: z.object({}),
@@ -64,8 +64,8 @@ export const CounterContract = defineActor("counter", {
   },
 
   views: {
-    admin: view(CounterView, (state) => ({ count: state.count, lastUpdatedBy: state.lastUpdatedBy ?? "" })),
-    user: view(CounterView, (state) => ({ count: state.count, lastUpdatedBy: state.lastUpdatedBy ?? "" })),
+    admin: view.shared(CounterView, (state) => ({ count: state.count, lastUpdatedBy: state.lastUpdatedBy })),
+    user: view.shared(CounterView, (state) => ({ count: state.count, lastUpdatedBy: state.lastUpdatedBy })),
   },
 });
 export type CounterContract = typeof CounterContract;

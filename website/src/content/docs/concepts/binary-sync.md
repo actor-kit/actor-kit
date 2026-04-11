@@ -7,7 +7,7 @@ Actor Kit synchronizes state to connected clients over WebSocket using a binary 
 
 ## How it works
 
-Every actor defines views per role using `schema()` and `view()`:
+Every actor defines views per role using `schema()` and `view.shared()` / `view.perCaller()`:
 
 ```typescript
 import { schema, view, uint32, float32, string, boolean, array } from "@actor-kit/core";
@@ -22,7 +22,7 @@ const PlayerView = schema({
 
 // In the actor definition:
 views: {
-  player: view(PlayerView, (state, caller) => ({
+  player: view.perCaller(PlayerView, (state, caller) => ({
     x: state.positions[caller].x,
     y: state.positions[caller].y,
     health: state.players[caller].health,
@@ -164,9 +164,9 @@ This means a state change that affects the `owner` view but not the `viewer` vie
 
 ## When binary sync is active
 
-Binary sync is automatic when your views use `schema()`. If a view has a schema definition, the framework encodes it as binary frames. If no schema is defined (plain object views without `view(schema, fn)`), the framework falls back to JSON strings.
+Binary sync is automatic when your views use `schema()`. If a view has a schema definition, the framework encodes it as binary frames. If no schema is defined (plain object views without `view.shared(schema, fn)` or `view.perCaller(schema, fn)`), the framework falls back to JSON strings.
 
-In practice, any actor that uses `view(MySchema, fn)` gets binary sync for free.
+In practice, any actor that uses `view.shared(MySchema, fn)` or `view.perCaller(MySchema, fn)` gets binary sync for free.
 
 ## When binary sync matters
 

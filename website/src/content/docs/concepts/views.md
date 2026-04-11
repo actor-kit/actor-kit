@@ -14,11 +14,11 @@ const OwnerView = schema({ todos: array(TodoItem), memberCount: uint32 });
 const ViewerView = schema({ todoCount: uint32, doneCount: uint32 });
 
 views: {
-  owner: view(OwnerView, (state) => ({
+  owner: view.shared(OwnerView, (state) => ({
     todos: state.todos,
     memberCount: state.memberIds.length,
   })),
-  viewer: view(ViewerView, (state) => ({
+  viewer: view.shared(ViewerView, (state) => ({
     todoCount: state.todos.length,
     doneCount: state.todos.filter(t => t.done).length,
   })),
@@ -61,7 +61,7 @@ type PlayerViewType = Infer<typeof PlayerView>;
 
 ## Binary Sync
 
-Views defined with `view(schema, fn)` are automatically encoded as compact binary frames with delta encoding — only changed fields are sent. A position update (3 float32 fields) is 15 bytes as a binary delta vs ~100 bytes as JSON.
+Views defined with `view.shared(schema, fn)` or `view.perCaller(schema, fn)` are automatically encoded as compact binary frames with delta encoding — only changed fields are sent. A position update (3 float32 fields) is 15 bytes as a binary delta vs ~100 bytes as JSON.
 
 See [Binary State Sync](/concepts/binary-sync/) for the full wire protocol, frame format, and reconnection details.
 
@@ -81,9 +81,9 @@ Every view push (to both WebSocket clients and linked actors) includes a `role` 
 
 ```typescript
 views: {
-  admin:     view(AdminView,     (state) => ({ players: state.players, settings: state.settings })),
-  player:    view(PlayerView,    (state, caller) => ({ players: state.players, myScore: state.scores[caller] })),
-  spectator: view(SpectatorView, (state) => ({ players: state.players })),
+  admin:     view.shared(AdminView,     (state) => ({ players: state.players, settings: state.settings })),
+  player:    view.perCaller(PlayerView,    (state, caller) => ({ players: state.players, myScore: state.scores[caller] })),
+  spectator: view.shared(SpectatorView, (state) => ({ players: state.players })),
 }
 
 // LinkedView<GameContract> — auto-derived from the contract:
@@ -149,21 +149,21 @@ const baseProjection = (state: GameState) => ({
 });
 
 views: {
-  admin: view(AdminView, (state) => ({
+  admin: view.shared(AdminView, (state) => ({
     ...baseProjection(state),
     revenue: state.revenue,
     settings: state.settings,
     reports: state.reports,
   })),
-  moderator: view(ModView, (state) => ({
+  moderator: view.shared(ModView, (state) => ({
     ...baseProjection(state),
     reports: state.reports,
   })),
-  player: view(PlayerView, (state, caller) => ({
+  player: view.perCaller(PlayerView, (state, caller) => ({
     ...baseProjection(state),
     myScore: state.scores[caller],
   })),
-  spectator: view(SpectatorView, (state) => baseProjection(state)),
+  spectator: view.shared(SpectatorView, (state) => baseProjection(state)),
 }
 ```
 

@@ -83,8 +83,8 @@ Each role sees a different projection of the state:
 
 ```typescript
 views: {
-  owner: view(OwnerView, (state) => ({ todos: state.todos, settings: state.settings })),
-  viewer: view(ViewerView, (state) => ({ todoCount: state.todos.length })),
+  owner: view.shared(OwnerView, (state) => ({ todos: state.todos, settings: state.settings })),
+  viewer: view.shared(ViewerView, (state) => ({ todoCount: state.todos.length })),
 },
 ```
 

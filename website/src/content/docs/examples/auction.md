@@ -57,7 +57,7 @@ export const AuctionContract = defineActor("auction", {
 
   views: {
     // Auctioneer sees all bids with bidder names + revenue
-    auctioneer: view(AuctioneerView, (state) => ({
+    auctioneer: view.shared(AuctioneerView, (state) => ({
       item: state.item,
       bids: state.bids,
       bidCount: state.bids.length,
@@ -67,7 +67,7 @@ export const AuctionContract = defineActor("auction", {
       winner: state.winner ?? "",
     })),
     // Bidders see bid count and highest bid — not who bid
-    bidder: view(BidderView, (state) => ({
+    bidder: view.shared(BidderView, (state) => ({
       item: state.item,
       bidCount: state.bids.length,
       highestBid: Math.max(0, ...state.bids.map(b => b.amount)),

@@ -96,8 +96,8 @@ export const TodoList = defineActor({
   },
 
   views: {
-    owner: view(OwnerSchema, (state) => ({ todos: state.todos })),
-    viewer: view(ViewerSchema, (state) => ({ count: state.todos.length })),
+    owner: view.shared(OwnerSchema, (state) => ({ todos: state.todos })),
+    viewer: view.shared(ViewerSchema, (state) => ({ count: state.todos.length })),
   },
 });
 ```

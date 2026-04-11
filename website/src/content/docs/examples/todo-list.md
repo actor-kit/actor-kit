@@ -82,15 +82,15 @@ Messages are flat — all defined at the top level. Guards check `ctx.role` to e
 
 ```typescript
 views: {
-  owner: view(OwnerViewSchema, (state) => ({
+  owner: view.shared(OwnerViewSchema, (state) => ({
     todos: state.todos,
     memberCount: state.memberIds.length,
   })),
-  member: view(OwnerViewSchema, (state) => ({
+  member: view.shared(OwnerViewSchema, (state) => ({
     todos: state.todos,
     memberCount: state.memberIds.length,
   })),
-  viewer: view(ViewerViewSchema, (state) => ({
+  viewer: view.shared(ViewerViewSchema, (state) => ({
     todoCount: state.todos.length,
     doneCount: state.todos.filter(t => t.done).length,
   })),

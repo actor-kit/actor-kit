@@ -25,7 +25,7 @@ export const CounterContract = defineActor("counter", {
       ...state, count: state.count + 1, lastUpdatedBy: caller,
     })),
   },
-  views: { user: view(CounterView, (state) => ({ count: state.count, lastUpdatedBy: state.lastUpdatedBy ?? "" })) },
+  views: { user: view.shared(CounterView, (state) => ({ count: state.count, lastUpdatedBy: state.lastUpdatedBy ?? "" })) },
 });
 export type CounterContract = typeof CounterContract;
 ```
@@ -92,12 +92,13 @@ const MyView = schema({ count: uint32, name: string, items: array(ItemSchema) })
 type MyViewType = Infer<typeof MyView>;
 ```
 
-## `view(schema, fn)`
+## `view.shared(schema, fn)` / `view.perCaller(schema, fn)`
 
-Pairs a schema with a projection function.
+Pairs a schema with a projection function. Use `view.shared` when the projection does not depend on the caller, and `view.perCaller` when it does.
 
 ```typescript
-const ownerView = view(OwnerSchema, (state, caller) => ({ ... }));
+const ownerView = view.shared(OwnerSchema, (state) => ({ ... }));
+const playerView = view.perCaller(PlayerSchema, (state, caller) => ({ ... }));
 ```
 
 ## `withCallerIdentity(request, identity)`

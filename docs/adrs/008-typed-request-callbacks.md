@@ -154,7 +154,7 @@ callback("PRICE_RECEIVED", resultSchema, metaSchema)
 ### Negative
 
 - Breaking change to `on` block — all existing actors need to migrate to `lifecycle` + `callbacks`
-- `callback()` is a new concept to learn alongside `message()` and `view()`
+- `callback()` is a new concept to learn alongside `message()` and `view.shared()`/`view.perCaller()`
 - Request callback defs must be declared at the module level (like message defs), not inline
 
 ### Neutral

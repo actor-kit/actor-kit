@@ -39,7 +39,7 @@ export const CounterContract = defineActor("counter", {
   },
 
   views: {
-    user: view(CounterView, (state) => ({
+    user: view.shared(CounterView, (state) => ({
       count: state.count,
       lastUpdatedBy: state.lastUpdatedBy,
     })),

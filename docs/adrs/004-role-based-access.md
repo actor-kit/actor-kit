@@ -42,9 +42,9 @@ The framework validates the message type against the caller's role BEFORE the ha
 
 ```typescript
 views: {
-  owner: view(OwnerView, ownerProjection),
-  member: view(MemberView, memberProjection),
-  viewer: view(ViewerView, viewerProjection),
+  owner: view.shared(OwnerView, ownerProjection),
+  member: view.shared(MemberView, memberProjection),
+  viewer: view.shared(ViewerView, viewerProjection),
 },
 ```
 

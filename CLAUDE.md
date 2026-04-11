@@ -87,7 +87,8 @@ Do NOT load all docs upfront. Load only when relevant to the current task.
 
 - **`actor<Env>(name, def)`** — single function defines an actor. Returns a DO class. `Env` is the only explicit generic (Worker env bindings).
 - **`schema({ field: type })`** — defines binary-encodable view shapes with TypeScript inference.
-- **`view(Schema, fn)`** — pairs a schema with a projection function.
+- **`view.shared(Schema, fn)`** — pairs a schema with a state-only projection function. Cacheable across sockets in the same role.
+- **`view.perCaller(Schema, fn)`** — pairs a schema with a projection that receives `(state, caller)`. Per-caller unique projections (e.g. card game hands).
 - **`message(zodSchema, handler)`** or **`message(zodSchema, { guard, handler })`** — pairs a Zod payload schema with a handler. Optional guard rejects before handler runs. Required for all message and RPC handlers.
 - **`ref(env, actorType, actorId)`** — gets a typed stub for DO-to-DO RPC. Also supports `createRef(contract, exports, env, actorId)` for `ctx.exports` discovery (ADR-012).
 - **`resolveNamespace(contractName, exports, env)`** — finds a DO namespace by contract name from `ctx.exports`, falls back to env binding.
@@ -125,9 +126,10 @@ Do NOT load all docs upfront. Load only when relevant to the current task.
 ### Schema and binary encoding
 
 - Schema primitives: `uint8`, `uint16`, `uint32`, `float32`, `float64`, `string`, `boolean`.
-- Combinators: `array(T)`, `schema({...})` for nesting. Phase 2 adds `map`, `optional`, `enum`.
+- Combinators: `array(T)`, `schema({...})` for nesting, `nullable(T)` for fields that can be `null`.
+- `nullable()` adds a null bitmask to the wire format (1 bit per nullable field). Zero overhead for non-nullable schemas.
 - Schemas implement `StandardSchemaV1` interface for ecosystem interop.
-- Delta frames use bitmask to indicate which fields changed.
+- Delta frames use bitmask to indicate which fields changed. Nullable fields use a parallel null bitmask.
 
 ### Auth
 

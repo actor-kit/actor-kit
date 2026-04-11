@@ -62,7 +62,7 @@ const PlayerContract = defineActor("player", {
   },
 
   views: {
-    user: view(PlayerView, (state) => ({
+    user: view.shared(PlayerView, (state) => ({
       profileName: state.profile?.name ?? "",
       games: Object.keys(state.games),
     })),
@@ -86,9 +86,9 @@ The source actor resolves the subscriber's role on every push — same as for We
 ```typescript
 // GameContract has these views:
 views: {
-  admin:     view(AdminView, (state) => ({ players: state.players, settings: state.settings, revenue: state.revenue })),
-  player:    view(PlayerView, (state) => ({ players: state.players, myScore: state.scores[caller] })),
-  spectator: view(SpectatorView, (state) => ({ players: state.players })),
+  admin:     view.shared(AdminView, (state) => ({ players: state.players, settings: state.settings, revenue: state.revenue })),
+  player:    view.perCaller(PlayerView, (state, caller) => ({ players: state.players, myScore: state.scores[caller] })),
+  spectator: view.shared(SpectatorView, (state) => ({ players: state.players })),
 }
 
 // LinkedView<GameContract> is auto-derived:

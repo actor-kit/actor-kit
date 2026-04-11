@@ -29,15 +29,15 @@ const GameContract = defineActor("game", {
     spectator: () => true,
   },
   views: {
-    service: view(ServiceView, (state) => ({
+    service: view.shared(ServiceView, (state) => ({
       players: state.players,
       settings: state.settings,
       scores: state.scores,
       status: state.status,
     })),
-    admin: view(AdminView, (state) => ({ /* ... */ })),
-    player: view(PlayerView, (state) => ({ /* ... */ })),
-    spectator: view(SpectatorView, (state) => ({ /* ... */ })),
+    admin: view.shared(AdminView, (state) => ({ /* ... */ })),
+    player: view.shared(PlayerView, (state) => ({ /* ... */ })),
+    spectator: view.shared(SpectatorView, (state) => ({ /* ... */ })),
   },
 });
 ```
@@ -76,7 +76,7 @@ const RelayContract = defineActor("relay", {
   },
 
   views: {
-    viewer: view(GameView, (state) => state.currentView),
+    viewer: view.shared(GameView, (state) => state.currentView),
   },
 });
 ```
@@ -118,13 +118,13 @@ const RelayContract = defineActor("relay", {
   },
 
   views: {
-    admin: view(AdminView, (state) => ({
+    admin: view.shared(AdminView, (state) => ({
       players: state.currentView?.players ?? [],
       settings: state.currentView?.settings ?? {},
       scores: state.currentView?.scores ?? {},
       status: state.currentView?.status ?? "waiting",
     })),
-    viewer: view(ViewerView, (state) => ({
+    viewer: view.shared(ViewerView, (state) => ({
       players: state.currentView?.players ?? [],
       status: state.currentView?.status ?? "waiting",
     })),

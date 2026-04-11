@@ -131,8 +131,8 @@ type MyViewType = Infer<typeof MyView>;
 ```typescript
 // Given:
 views: {
-  owner: view(OwnerView, fn),
-  viewer: view(ViewerView, fn),
+  owner: view.shared(OwnerView, fn),
+  viewer: view.shared(ViewerView, fn),
 },
 
 // The framework computes:

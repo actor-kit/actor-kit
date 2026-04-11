@@ -11,7 +11,7 @@ No. The core library (`@actor-kit/core`) and the client SDK (`@actor-kit/client`
 
 ### How does binary sync work?
 
-Binary sync is automatic. When your views use `view(schema, fn)`, the framework encodes them as binary frames with delta encoding. If a view doesn't have a schema, it falls back to JSON strings. You don't need to opt in — just define your views with a schema and binary sync is enabled.
+Binary sync is automatic. When your views use `view.shared(schema, fn)` or `view.perCaller(schema, fn)`, the framework encodes them as binary frames with delta encoding. If a view doesn't have a schema, it falls back to JSON strings. You don't need to opt in — just define your views with a schema and binary sync is enabled.
 
 ### How many actors can I have?
 
