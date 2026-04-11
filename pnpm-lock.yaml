@@ -421,9 +421,6 @@ importers:
       '@actor-kit/core':
         specifier: workspace:*
         version: link:../core
-      '@actor-kit/worker':
-        specifier: workspace:*
-        version: link:../worker
       workers-qb:
         specifier: ^1.13.0
         version: 1.13.0

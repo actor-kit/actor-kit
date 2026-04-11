@@ -8,5 +8,5 @@ export default defineConfig({
   dts: true,
   clean: true,
   hash: false,
-  external: ["@actor-kit/core", "@actor-kit/worker", "workers-qb", "cloudflare:workers"],
+  external: ["@actor-kit/core", "workers-qb", "cloudflare:workers"],
 });
