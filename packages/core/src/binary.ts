@@ -37,13 +37,25 @@ function calculateSize(
   data: Record<string, unknown>,
 ): number {
   let size = 0;
+  // Add null bitmask size if schema has nullable fields
+  if (schemaDef.hasNullable) {
+    const nullableCount = schemaDef.fields.filter((f) => f.type === "nullable").length;
+    size += Math.ceil(nullableCount / 8);
+  }
   for (const field of schemaDef.fields) {
+    if (field.type === "nullable" && data[field.name] === null) {
+      // Null value: zero value bytes (only the bitmask bit)
+      continue;
+    }
     size += calculateFieldSize(field, data[field.name]);
   }
   return size;
 }
 
-function calculateFieldSize(field: { type: string; element?: unknown; schema?: unknown }, value: unknown): number {
+function calculateFieldSize(
+  field: { type: string; innerType?: string; element?: unknown; schema?: unknown },
+  value: unknown,
+): number {
   switch (field.type) {
     case "uint8":
     case "boolean":
@@ -71,6 +83,12 @@ function calculateFieldSize(field: { type: string; element?: unknown; schema?: u
       const nested = field.schema as SchemaDefinition<Record<string, FieldDescriptor>>;
       return calculateSize(nested, (value ?? {}) as Record<string, unknown>);
     }
+    case "nullable": {
+      // Null values handled by caller (calculateSize skips them).
+      // Non-null values: delegate to inner type.
+      const innerField = { type: field.innerType ?? "", element: field.element, schema: field.schema };
+      return calculateFieldSize(innerField, value);
+    }
     default:
       return 0;
   }
@@ -95,8 +113,46 @@ function encodeFields(
   bytes: Uint8Array,
   offset: number,
 ): number {
+  if (schemaDef.hasNullable) {
+    // Write null bitmask: one bit per nullable field
+    const nullableFields = schemaDef.fields.filter((f) => f.type === "nullable");
+    const bitmaskBytes = Math.ceil(nullableFields.length / 8);
+    const bitmaskStart = offset;
+    // Zero out bitmask bytes
+    for (let i = 0; i < bitmaskBytes; i++) {
+      bytes[bitmaskStart + i] = 0;
+    }
+    // Set bits for null values
+    let nullIdx = 0;
+    for (const field of schemaDef.fields) {
+      if (field.type === "nullable") {
+        if (data[field.name] === null) {
+          const byteIndex = Math.floor(nullIdx / 8);
+          const bitIndex = nullIdx % 8;
+          bytes[bitmaskStart + byteIndex] = (bytes[bitmaskStart + byteIndex] ?? 0) | (1 << bitIndex);
+        }
+        nullIdx++;
+      }
+    }
+    offset += bitmaskBytes;
+  }
+
   for (const field of schemaDef.fields) {
-    offset = encodeField(field, data[field.name], view, bytes, offset);
+    if (field.type === "nullable") {
+      if (data[field.name] === null) {
+        continue; // Skip — null bit is set in the bitmask
+      }
+      // Non-null: encode the inner value
+      const innerField = {
+        name: field.name,
+        type: field.innerType ?? "",
+        element: field.element,
+        schema: field.schema,
+      };
+      offset = encodeField(innerField, data[field.name], view, bytes, offset);
+    } else {
+      offset = encodeField(field, data[field.name], view, bytes, offset);
+    }
   }
   return offset;
 }
@@ -184,10 +240,43 @@ function decodeFields(
   offset: number,
 ): [Record<string, unknown>, number] {
   const result: Record<string, unknown> = {};
+
+  // Read null bitmask if schema has nullable fields
+  let nullBitmask: Uint8Array | undefined;
+  if (schemaDef.hasNullable) {
+    const nullableCount = schemaDef.fields.filter((f) => f.type === "nullable").length;
+    const bitmaskBytes = Math.ceil(nullableCount / 8);
+    nullBitmask = bytes.subarray(offset, offset + bitmaskBytes);
+    offset += bitmaskBytes;
+  }
+
+  let nullIdx = 0;
   for (const field of schemaDef.fields) {
-    const [value, newOffset] = decodeField(field, view, bytes, offset);
-    result[field.name] = value;
-    offset = newOffset;
+    if (field.type === "nullable") {
+      const byteIndex = Math.floor(nullIdx / 8);
+      const bitIndex = nullIdx % 8;
+      const isNull = nullBitmask !== undefined && ((nullBitmask[byteIndex] ?? 0) & (1 << bitIndex)) !== 0;
+      nullIdx++;
+
+      if (isNull) {
+        result[field.name] = null;
+      } else {
+        // Decode the inner value
+        const innerField = {
+          name: field.name,
+          type: field.innerType ?? "",
+          element: field.element,
+          schema: field.schema,
+        };
+        const [value, newOffset] = decodeField(innerField, view, bytes, offset);
+        result[field.name] = value;
+        offset = newOffset;
+      }
+    } else {
+      const [value, newOffset] = decodeField(field, view, bytes, offset);
+      result[field.name] = value;
+      offset = newOffset;
+    }
   }
   return [result, offset];
 }
