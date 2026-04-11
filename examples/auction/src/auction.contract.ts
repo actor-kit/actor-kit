@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { boolean, schema, string, uint32, view } from "@actor-kit/core";
+import { boolean, nullable, schema, string, uint32, view } from "@actor-kit/core";
 import { defineActor, message } from "@actor-kit/worker";
 
 type Bid = { bidder: string; amount: number; timestamp: number };
@@ -16,7 +16,7 @@ const AuctionViewSchema = schema({
   bidCount: uint32,
   highestBid: uint32,
   closed: boolean,
-  winner: string,
+  winner: nullable(string),
 });
 
 export const AuctionContract = defineActor("auction", {
@@ -79,7 +79,7 @@ export const AuctionContract = defineActor("auction", {
       highestBid:
         state.bids.length > 0 ? Math.max(...state.bids.map((b) => b.amount)) : 0,
       closed: state.closed,
-      winner: state.winner ?? "",
+      winner: state.winner,
     })),
     bidder: view.shared(AuctionViewSchema, (state: AuctionState) => ({
       item: state.item,
@@ -87,7 +87,7 @@ export const AuctionContract = defineActor("auction", {
       highestBid:
         state.bids.length > 0 ? Math.max(...state.bids.map((b) => b.amount)) : 0,
       closed: state.closed,
-      winner: state.winner ?? "",
+      winner: state.winner,
     })),
   },
 });

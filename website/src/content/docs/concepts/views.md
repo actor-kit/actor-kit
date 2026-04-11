@@ -57,6 +57,7 @@ type PlayerViewType = Infer<typeof PlayerView>;
 ### Combinators
 
 - `array(T)` — array of any schema type
+- `nullable(T)` — field that can be `null` (adds a compact null bitmask to the wire format)
 - Nested `schema({...})` — objects within objects
 
 ## Binary Sync
@@ -74,6 +75,10 @@ Views are computed after every transition. The framework:
 4. If unchanged: skips (no frame sent)
 
 This means views are cheap — if nothing changed for a particular caller, nothing is sent.
+
+### Scalability Impact
+
+The choice between `view.shared` and `view.perCaller` directly affects how many clients a single actor can serve. Shared views encode once regardless of connection count; per-caller views encode once per client. See [Scalability](/concepts/scalability/) for fan-out patterns, partitioning strategies, and practical limits.
 
 ## Discriminated Union Views (`LinkedView`)
 
