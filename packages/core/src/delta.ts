@@ -38,7 +38,7 @@ export function encodeDelta<TShape extends Record<string, FieldDescriptor>>(
   const nextObj = next as Record<string, unknown>;
   const fields = schemaDef.fields;
 
-  // Build bitmask — which fields changed?
+  // Build change bitmask — which fields changed?
   const bitmaskBytes = Math.ceil(fields.length / 8);
   const bitmask = new Uint8Array(bitmaskBytes);
   let anyChanged = false;
@@ -56,14 +56,37 @@ export function encodeDelta<TShape extends Record<string, FieldDescriptor>>(
 
   if (!anyChanged) return null;
 
+  // Build null bitmask for nullable fields (only changed nullable fields)
+  const nullableFields = schemaDef.hasNullable ? fields.filter((f) => f.type === "nullable") : [];
+  const nullBitmaskBytes = nullableFields.length > 0 ? Math.ceil(nullableFields.length / 8) : 0;
+  const nullBitmask = new Uint8Array(nullBitmaskBytes);
+
+  if (schemaDef.hasNullable) {
+    let nullIdx = 0;
+    for (const field of fields) {
+      if (field.type === "nullable") {
+        if (nextObj[field.name] === null) {
+          const byteIndex = Math.floor(nullIdx / 8);
+          const bitIndex = nullIdx % 8;
+          nullBitmask[byteIndex] = (nullBitmask[byteIndex] ?? 0) | (1 << bitIndex);
+        }
+        nullIdx++;
+      }
+    }
+  }
+
   // Calculate size for changed fields
-  let dataSize = bitmaskBytes;
+  let dataSize = bitmaskBytes + nullBitmaskBytes;
   for (let i = 0; i < fields.length; i++) {
     const byteIndex = Math.floor(i / 8);
     const bitIndex = i % 8;
     if (((bitmask[byteIndex] ?? 0) & (1 << bitIndex)) !== 0) {
       const field = fields[i];
       if (field === undefined) continue;
+      // Nullable field that is null: zero value bytes
+      if (field.type === "nullable" && nextObj[field.name] === null) {
+        continue;
+      }
       dataSize += fieldSize(field, nextObj[field.name]);
     }
   }
@@ -73,9 +96,15 @@ export function encodeDelta<TShape extends Record<string, FieldDescriptor>>(
   const view = new DataView(buffer);
   const bytes = new Uint8Array(buffer);
 
-  // Write bitmask
+  // Write change bitmask
   bytes.set(bitmask, 0);
   let offset = bitmaskBytes;
+
+  // Write null bitmask (if applicable)
+  if (nullBitmaskBytes > 0) {
+    bytes.set(nullBitmask, offset);
+    offset += nullBitmaskBytes;
+  }
 
   // Write changed fields
   for (let i = 0; i < fields.length; i++) {
@@ -84,7 +113,16 @@ export function encodeDelta<TShape extends Record<string, FieldDescriptor>>(
     if (((bitmask[byteIndex] ?? 0) & (1 << bitIndex)) !== 0) {
       const field = fields[i];
       if (field === undefined) continue;
-      offset = writeField(field, nextObj[field.name], view, bytes, offset);
+      if (field.type === "nullable") {
+        if (nextObj[field.name] === null) {
+          continue; // Null bit is set, skip value bytes
+        }
+        // Non-null: write inner value
+        const innerField = { type: field.innerType ?? "", element: field.element, schema: field.schema };
+        offset = writeField(innerField, nextObj[field.name], view, bytes, offset);
+      } else {
+        offset = writeField(field, nextObj[field.name], view, bytes, offset);
+      }
     }
   }
 
@@ -103,20 +141,50 @@ export function applyDelta<TShape extends Record<string, FieldDescriptor>>(
   const bitmaskBytes = Math.ceil(fields.length / 8);
 
   const view = new DataView(deltaBytes.buffer, deltaBytes.byteOffset, deltaBytes.byteLength);
-  const bitmask = deltaBytes.subarray(0, bitmaskBytes);
+  const changeBitmask = deltaBytes.subarray(0, bitmaskBytes);
 
-  const result = { ...currentObj };
   let offset = bitmaskBytes;
 
+  // Read null bitmask if schema has nullable fields
+  let nullBitmask: Uint8Array | undefined;
+  if (schemaDef.hasNullable) {
+    const nullableCount = fields.filter((f) => f.type === "nullable").length;
+    const nullBitmaskBytes = Math.ceil(nullableCount / 8);
+    nullBitmask = deltaBytes.subarray(offset, offset + nullBitmaskBytes);
+    offset += nullBitmaskBytes;
+  }
+
+  const result = { ...currentObj };
+
+  let nullIdx = 0;
   for (let i = 0; i < fields.length; i++) {
+    const field = fields[i];
+    if (field === undefined) continue;
+
+    const isNullable = field.type === "nullable";
+    const currentNullIdx = isNullable ? nullIdx++ : -1;
+
     const byteIndex = Math.floor(i / 8);
     const bitIndex = i % 8;
-    if (((bitmask[byteIndex] ?? 0) & (1 << bitIndex)) !== 0) {
-      const field = fields[i];
-      if (field === undefined) continue;
-      const [value, newOffset] = readField(field, view, deltaBytes, offset);
-      result[field.name] = value;
-      offset = newOffset;
+    if (((changeBitmask[byteIndex] ?? 0) & (1 << bitIndex)) !== 0) {
+      if (isNullable) {
+        // Check null bitmask
+        const nullByteIndex = Math.floor(currentNullIdx / 8);
+        const nullBitIndex = currentNullIdx % 8;
+        const isNull = nullBitmask !== undefined && ((nullBitmask[nullByteIndex] ?? 0) & (1 << nullBitIndex)) !== 0;
+        if (isNull) {
+          result[field.name] = null;
+        } else {
+          const innerField = { type: field.innerType ?? "", element: field.element, schema: field.schema };
+          const [value, newOffset] = readField(innerField, view, deltaBytes, offset);
+          result[field.name] = value;
+          offset = newOffset;
+        }
+      } else {
+        const [value, newOffset] = readField(field, view, deltaBytes, offset);
+        result[field.name] = value;
+        offset = newOffset;
+      }
     }
   }
 
@@ -125,7 +193,10 @@ export function applyDelta<TShape extends Record<string, FieldDescriptor>>(
 
 // --- Field size calculation ---
 
-function fieldSize(field: { type: string; element?: unknown; schema?: unknown }, value: unknown): number {
+function fieldSize(
+  field: { type: string; innerType?: string; element?: unknown; schema?: unknown },
+  value: unknown,
+): number {
   switch (field.type) {
     case "uint8":
     case "boolean":
@@ -156,6 +227,11 @@ function fieldSize(field: { type: string; element?: unknown; schema?: unknown },
         size += fieldSize(f, ((value ?? {}) as Record<string, unknown>)[f.name]);
       }
       return size;
+    }
+    case "nullable": {
+      // Null values handled by caller. Non-null: delegate to inner type.
+      const innerField = { type: field.innerType ?? "", element: field.element, schema: field.schema };
+      return fieldSize(innerField, value);
     }
     default:
       return 0;
