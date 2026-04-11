@@ -41,12 +41,25 @@ export function array<E extends FieldDescriptor>(element: E): ArrayDescriptor<E>
   return Object.freeze({ kind: "array" as const, type: "array" as const, element });
 }
 
+// --- Nullable combinator ---
+
+interface NullableDescriptor<F extends FieldDescriptor> {
+  readonly kind: "nullable";
+  readonly type: "nullable";
+  readonly field: F;
+}
+
+export function nullable<F extends FieldDescriptor>(field: F): NullableDescriptor<F> {
+  return Object.freeze({ kind: "nullable" as const, type: "nullable" as const, field });
+}
+
 // --- Schema (nested) descriptor ---
 
 // A FieldDescriptor is anything that can appear as a field value in schema({})
 export type FieldDescriptor =
   | PrimitiveDescriptor<PrimitiveTypeName, unknown>
   | ArrayDescriptor<FieldDescriptor>
+  | NullableDescriptor<FieldDescriptor>
   | SchemaDefinition<Record<string, FieldDescriptor>>;
 
 // --- Schema definition ---
@@ -54,6 +67,7 @@ export type FieldDescriptor =
 interface FieldMeta {
   readonly name: string;
   readonly type: string;
+  readonly innerType?: string;
   readonly element?:
     | FieldMeta
     | { readonly type: string; readonly schema?: SchemaDefinition<Record<string, FieldDescriptor>> };
@@ -65,6 +79,7 @@ export interface SchemaDefinition<TShape extends Record<string, FieldDescriptor>
   readonly type: "schema";
   readonly shape: TShape;
   readonly fields: readonly FieldMeta[];
+  readonly hasNullable: boolean;
 }
 
 function buildFieldMeta(name: string, descriptor: FieldDescriptor): FieldMeta {
@@ -74,6 +89,17 @@ function buildFieldMeta(name: string, descriptor: FieldDescriptor): FieldMeta {
   if (descriptor.kind === "array") {
     const elementMeta = buildElementMeta(descriptor.element);
     return { name, type: "array", element: elementMeta };
+  }
+  if (descriptor.kind === "nullable") {
+    const inner = buildFieldMeta(name, descriptor.field);
+    const meta: FieldMeta = { name, type: "nullable", innerType: inner.type };
+    if (inner.element !== undefined) {
+      return { ...meta, element: inner.element };
+    }
+    if (inner.schema !== undefined) {
+      return { ...meta, schema: inner.schema };
+    }
+    return meta;
   }
   // descriptor.kind === "schema"
   return { name, type: "schema", schema: descriptor };
@@ -96,12 +122,14 @@ function buildElementMeta(descriptor: FieldDescriptor): FieldMeta["element"] & o
 export function schema<TShape extends Record<string, FieldDescriptor>>(shape: TShape): SchemaDefinition<TShape> {
   const entries = Object.entries(shape);
   const fields: FieldMeta[] = entries.map(([name, descriptor]) => buildFieldMeta(name, descriptor as FieldDescriptor));
+  const hasNullable = fields.some((f) => f.type === "nullable");
 
   const def: SchemaDefinition<TShape> = {
     kind: "schema" as const,
     type: "schema" as const,
     shape,
     fields: Object.freeze(fields),
+    hasNullable,
   };
 
   return Object.freeze(def);
@@ -111,13 +139,15 @@ export function schema<TShape extends Record<string, FieldDescriptor>>(shape: TS
 
 // Infer the TypeScript type from a FieldDescriptor
 type InferField<F extends FieldDescriptor> =
-  F extends PrimitiveDescriptor<infer _T, infer V>
-    ? V
-    : F extends ArrayDescriptor<infer E>
-      ? InferField<E>[]
-      : F extends SchemaDefinition<infer S>
-        ? { [K in keyof S]: InferField<S[K]> }
-        : never;
+  F extends NullableDescriptor<infer Inner>
+    ? InferField<Inner> | null
+    : F extends PrimitiveDescriptor<infer _T, infer V>
+      ? V
+      : F extends ArrayDescriptor<infer E>
+        ? InferField<E>[]
+        : F extends SchemaDefinition<infer S>
+          ? { [K in keyof S]: InferField<S[K]> }
+          : never;
 
 // Infer the full TypeScript type from a SchemaDefinition
 export type Infer<S> =

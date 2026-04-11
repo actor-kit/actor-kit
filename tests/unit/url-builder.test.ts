@@ -1,7 +1,7 @@
 /**
  * @vitest-environment node
  */
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import { buildUrl, inferProtocol } from "../../packages/client/src/url";
 
 describe("buildUrl", () => {
