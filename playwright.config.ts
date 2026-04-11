@@ -10,16 +10,12 @@ const chatRoomUrl =
   process.env["DEPLOYED_CHAT_ROOM_URL"] ?? "http://localhost:8801";
 const auctionUrl =
   process.env["DEPLOYED_AUCTION_URL"] ?? "http://localhost:8802";
-const tanstackStartCounterUrl =
-  process.env["DEPLOYED_TANSTACK_START_COUNTER_URL"] ??
-  "http://localhost:8803";
 
 const isDeployed =
   !!process.env["DEPLOYED_COUNTER_URL"] ||
   !!process.env["DEPLOYED_TODO_LIST_URL"] ||
   !!process.env["DEPLOYED_CHAT_ROOM_URL"] ||
-  !!process.env["DEPLOYED_AUCTION_URL"] ||
-  !!process.env["DEPLOYED_TANSTACK_START_COUNTER_URL"];
+  !!process.env["DEPLOYED_AUCTION_URL"];
 
 export default defineConfig({
   testDir: "examples",
@@ -29,66 +25,56 @@ export default defineConfig({
   projects: [
     {
       name: "counter",
-      testMatch: "counter/**/*.e2e.ts",
+      testMatch: "counter/**/*.spec.ts",
       use: { baseURL: counterUrl },
     },
     {
       name: "todo-list",
-      testMatch: "todo-list/**/*.e2e.ts",
+      testMatch: "todo-list/**/*.spec.ts",
       use: { baseURL: todoListUrl },
     },
     {
       name: "chat-room",
-      testMatch: "chat-room/**/*.e2e.ts",
+      testMatch: "chat-room/**/*.spec.ts",
       use: { baseURL: chatRoomUrl },
     },
     {
       name: "auction",
-      testMatch: "auction/**/*.e2e.ts",
+      testMatch: "auction/**/*.spec.ts",
       use: { baseURL: auctionUrl },
     },
-    {
-      name: "tanstack-start-counter",
-      testMatch: "tanstack-start-counter/**/*.spec.ts",
-      use: { baseURL: tanstackStartCounterUrl },
-    },
   ],
-  // Only start local servers when not running against deployed workers
+  // Only start local servers when not running against deployed workers.
+  // All examples are TanStack Start apps — need build + wrangler dev.
   ...(isDeployed
     ? {}
     : {
         webServer: [
           {
-            command: "cd examples/counter && npx wrangler dev --port 8799",
+            command:
+              "cd examples/counter && pnpm build && npx wrangler dev -c .output/server/wrangler.json --port 8799 --inspector-port 0",
             port: 8799,
             reuseExistingServer: true,
-            timeout: 30000,
+            timeout: 60000,
           },
           {
             command:
-              "cd examples/todo-list && npx wrangler dev --port 8800",
+              "cd examples/todo-list && pnpm build && npx wrangler dev -c .output/server/wrangler.json --port 8800 --inspector-port 0",
             port: 8800,
             reuseExistingServer: true,
-            timeout: 30000,
+            timeout: 60000,
           },
           {
             command:
-              "cd examples/chat-room && npx wrangler dev --port 8801",
+              "cd examples/chat-room && pnpm build && npx wrangler dev -c .output/server/wrangler.json --port 8801 --inspector-port 0",
             port: 8801,
             reuseExistingServer: true,
-            timeout: 30000,
+            timeout: 60000,
           },
           {
             command:
-              "cd examples/auction && npx wrangler dev --port 8802",
+              "cd examples/auction && pnpm build && npx wrangler dev -c .output/server/wrangler.json --port 8802 --inspector-port 0",
             port: 8802,
-            reuseExistingServer: true,
-            timeout: 30000,
-          },
-          {
-            command:
-              "cd examples/tanstack-start-counter && pnpm build && npx wrangler dev -c .output/server/wrangler.json --port 8803 --inspector-port 0",
-            port: 8803,
             reuseExistingServer: true,
             timeout: 60000,
           },
