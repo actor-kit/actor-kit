@@ -59,7 +59,7 @@ describe("lifecycle handlers (v3 — no callbacks)", () => {
 
     expect(result.state.count).toBe(5);
     expect(result.executions).toHaveLength(1);
-    expect(result.executions[0]).toEqual({ service: "ANALYTICS", payload: { count: 5 } });
+    expect(result.executions[0]).toEqual({ service: "ANALYTICS", input: { count: 5 } });
     expect(result).not.toHaveProperty("emissions");
   });
 });

@@ -134,8 +134,8 @@ describe("routeMessage()", () => {
     const executions: unknown[] = [];
     const executeCtx = {
       ...baseCtx,
-      execute: (service: unknown, payload: unknown) => {
-        executions.push({ service, payload });
+      execute: (service: unknown, input: unknown) => {
+        executions.push({ service, input });
       },
     };
 
@@ -148,7 +148,7 @@ describe("routeMessage()", () => {
     await routeMessage(testRoleMessages, "admin", { count: 0, items: [] }, { type: "NOTIFY" }, executeCtx);
 
     expect(executions).toHaveLength(1);
-    expect(executions[0]).toEqual({ service: "TEST_QUEUE", payload: { hello: true } });
+    expect(executions[0]).toEqual({ service: "TEST_QUEUE", input: { hello: true } });
   });
 
   it("handles no-payload messages", async () => {

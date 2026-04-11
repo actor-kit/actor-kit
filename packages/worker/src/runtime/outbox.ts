@@ -14,7 +14,7 @@ export type { ForwardCall };
 export interface ExecutionEntry {
   id: string;
   service: string;
-  payload: unknown;
+  input: unknown;
   status: "pending" | "running" | "done" | "failed";
   attempts: number;
   createdAt: number;
@@ -47,7 +47,7 @@ export interface ForwardEntry {
 // --- Outbox collector (used during a transition) ---
 
 interface OutboxCollector {
-  execute(service: string, payload: unknown): void;
+  execute(service: string, input: unknown): void;
   link(name: string, id: string): void;
   unlink(name: string, id?: string): void;
   forward(linkName: string, targetId: string, message: { type: string; [key: string]: unknown }): void;
@@ -73,8 +73,8 @@ export function createOutbox(): OutboxCollector {
   const forwards: ForwardCall[] = [];
 
   return {
-    execute(service: string, payload: unknown): void {
-      executions.push({ service, payload });
+    execute(service: string, input: unknown): void {
+      executions.push({ service, input });
     },
 
     link(name: string, id: string): void {
@@ -110,7 +110,7 @@ export function createOutbox(): OutboxCollector {
       return executions.map((exec) => ({
         id: generateId(),
         service: exec.service,
-        payload: exec.payload,
+        input: exec.input,
         status: "pending" as const,
         attempts: 0,
         createdAt: now,

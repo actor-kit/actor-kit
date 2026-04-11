@@ -34,7 +34,7 @@ const notify = message(z.object({}), {
   handler: (
     state: CounterState,
     _payload: Record<string, never>,
-    ctx: { execute: (service: string, payload: unknown) => void },
+    ctx: { execute: (service: string, input: unknown) => void },
   ) => {
     ctx.execute("ANALYTICS", { count: state.count });
     return state;

@@ -32,7 +32,7 @@ describe("outbox", () => {
       expect(entries[0]?.status).toBe("pending");
       expect(entries[0]?.attempts).toBe(0);
       expect(entries[0]?.service).toBe("EMAIL");
-      expect(entries[0]?.payload).toEqual({ to: "alice" });
+      expect(entries[0]?.input).toEqual({ to: "alice" });
 
       expect(entries[1]?.status).toBe("pending");
       expect(entries[1]?.service).toBe("NOTIFY");
@@ -45,8 +45,8 @@ describe("outbox", () => {
 
       const executions = outbox.getExecutions();
       expect(executions).toHaveLength(2);
-      expect(executions[0]).toEqual({ service: "SVC_A", payload: { x: 1 } });
-      expect(executions[1]).toEqual({ service: "SVC_B", payload: { y: 2 } });
+      expect(executions[0]).toEqual({ service: "SVC_A", input: { x: 1 } });
+      expect(executions[1]).toEqual({ service: "SVC_B", input: { y: 2 } });
     });
 
     it("empty outbox returns empty arrays", () => {

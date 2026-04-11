@@ -77,7 +77,7 @@ Do NOT load all docs upfront. Load only when relevant to the current task.
 
 4. **Deep CF integration** — Embrace Durable Objects: SQLite for persistence, Alarms for durable timers, RPC for actor-to-actor communication, Hibernation for idle actors, `ctx.exports` for single-Worker actor discovery (ADR-012). No abstraction layers that hide CF capabilities.
 
-5. **Transactional side effects** — State changes persist atomically. Side effects are declared as `services` and invoked via `ctx.execute(serviceName, payload)` → SQLite outbox → at-least-once delivery. Services define typed input/output with `onDone`/`onError` callbacks routed back to the actor's `on` block.
+5. **Transactional side effects** — State changes persist atomically. Side effects are declared as `services` and invoked via `ctx.execute(serviceName, input)` → SQLite outbox → at-least-once delivery. Services define typed input/output with `onDone`/`onError` callbacks routed back to the actor's `on` block.
 
 6. **Parse at the boundary** — All external data (events, input, WebSocket frames) is parsed through a schema before entering application logic. Invalid data is rejected, never coerced. See [docs/adrs/002-parse-at-boundary.md](docs/adrs/002-parse-at-boundary.md).
 
@@ -92,7 +92,7 @@ Do NOT load all docs upfront. Load only when relevant to the current task.
 - **`message(zodSchema, handler)`** or **`message(zodSchema, { guard, handler })`** — pairs a Zod payload schema with a handler. Optional guard rejects before handler runs. Required for all message and RPC handlers.
 - **`ref(env, actorType, actorId)`** — gets a typed stub for DO-to-DO RPC. Also supports `createRef(contract, exports, env, actorId)` for `ctx.exports` discovery (ADR-012).
 - **`resolveNamespace(contractName, exports, env)`** — finds a DO namespace by contract name from `ctx.exports`, falls back to env binding.
-- **`ctx.execute(serviceName, payload)`** — invokes a named service defined in the actor's `services` block. Services declare `fn`, optional `onDone`/`onError` handlers. Durable via outbox — persisted atomically with state, retried on crash.
+- **`ctx.execute(serviceName, input)`** — invokes a named service defined in the actor's `services` block. Services declare `fn`, optional `onDone`/`onError` handlers. Durable via outbox — persisted atomically with state, retried on crash.
 - **`connect(actorType, opts)`** — client SDK, WebSocket connection with binary decoding.
 - **`testActor(Actor)`** — test helper, runs transitions without CF runtime.
 
@@ -113,7 +113,7 @@ Do NOT load all docs upfront. Load only when relevant to the current task.
 - Zod validates message payloads at runtime. Guard evaluates after validation. Invalid/guarded = rejected before handler.
 - Same message name across multiple roles must reference the same `MessageDef` object — enforced by the type system.
 - `lifecycle` block handles `connect`/`disconnect` events.
-- Actors are always separate DOs. No child actors in the same DO. Use `execute(serviceName, payload)` for actor-to-actor communication via services.
+- Actors are always separate DOs. No child actors in the same DO. Use `execute(serviceName, input)` for actor-to-actor communication via services.
 
 ### State and persistence
 

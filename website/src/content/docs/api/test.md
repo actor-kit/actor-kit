@@ -57,7 +57,7 @@ const { state, executions } = await t.sendWithEffects(
 );
 
 expect(executions).toHaveLength(1);
-expect(executions[0]).toEqual({ service: "EMAIL", payload: { ... } });
+expect(executions[0]).toEqual({ service: "EMAIL", input: { ... } });
 ```
 
 ### `t.view(state, caller, opts?)`

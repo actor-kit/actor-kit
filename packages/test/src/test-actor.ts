@@ -252,8 +252,8 @@ export function testActor(
       caller,
       callerType,
       env: {},
-      execute: (service: string, payload: unknown) => {
-        executions.push({ service, payload });
+      execute: (service: string, input: unknown) => {
+        executions.push({ service, input });
       },
       link: (name: string, id: string) => {
         links.push({ name, id });

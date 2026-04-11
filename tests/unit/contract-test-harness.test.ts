@@ -158,7 +158,7 @@ describe("contract-derived test harness", () => {
 
     expect(next).toEqual(state);
     expect(executions).toHaveLength(1);
-    expect(executions[0]).toEqual({ service: "NOTIFICATIONS", payload: { count: 0 } });
+    expect(executions[0]).toEqual({ service: "NOTIFICATIONS", input: { count: 0 } });
   });
 
   it("testActor(contract) runtime: role resolution works", () => {

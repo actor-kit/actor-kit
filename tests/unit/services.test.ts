@@ -16,38 +16,38 @@ const CounterContract = defineActor("counter", {
 
   services: {
     fetchCount: {
-      fn: async (payload: { source: string }, env) => {
-        const res = await fetch(`https://api.example.com/count?source=${payload.source}`);
+      fn: async (input: { source: string }, env) => {
+        const res = await fetch(`https://api.example.com/count?source=${input.source}`);
         if (!res.ok) throw new Error(`API error: ${res.status}`);
         return { count: 42 };
       },
-      onDone: (state, result, payload) => ({
+      onDone: (state, result, input) => ({
         ...state,
         count: result.count,
         status: "loaded",
         error: "",
       }),
-      onError: (state, error, payload) => ({
+      onError: (state, error, input) => ({
         ...state,
-        error: `Failed for ${payload.source}: ${error.message}`,
+        error: `Failed for ${input.source}: ${error.message}`,
         status: "failed",
       }),
     },
 
     trackEvent: {
-      fn: async (payload: { event: string }, env) => {
+      fn: async (input: { event: string }, env) => {
         await fetch("https://analytics.example.com/track", {
           method: "POST",
-          body: JSON.stringify(payload),
+          body: JSON.stringify(input),
         });
       },
     },
 
     saveState: {
-      fn: async (payload: { count: number }, env) => {
+      fn: async (input: { count: number }, env) => {
         await fetch("https://api.example.com/save", {
           method: "POST",
-          body: JSON.stringify(payload),
+          body: JSON.stringify(input),
         });
       },
       onError: (state, error) => ({
@@ -103,7 +103,7 @@ describe("services + execute()", () => {
       expect(executions).toHaveLength(1);
       expect(executions[0]).toMatchObject({
         service: "fetchCount",
-        payload: { source: "test" },
+        input: { source: "test" },
       });
     });
 
@@ -119,7 +119,7 @@ describe("services + execute()", () => {
       expect(executions).toHaveLength(1);
       expect(executions[0]).toMatchObject({
         service: "trackEvent",
-        payload: { event: "page_view" },
+        input: { event: "page_view" },
       });
     });
 
@@ -133,7 +133,7 @@ describe("services + execute()", () => {
       expect(executions).toHaveLength(1);
       expect(executions[0]).toMatchObject({
         service: "saveState",
-        payload: { count: 1 },
+        input: { count: 1 },
       });
     });
   });

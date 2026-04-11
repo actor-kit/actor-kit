@@ -25,14 +25,14 @@ const { state: next, executions } = await t.sendWithEffects(
 
 ## Asserting service executions
 
-Each execution has `{ service, payload }`:
+Each execution has `{ service, input }`:
 
 ```typescript
 // Verify a named service was called
 expect(executions).toContainEqual(
   expect.objectContaining({
     service: "ORDER_QUEUE",
-    payload: expect.objectContaining({ items: ["widget"] }),
+    input: expect.objectContaining({ items: ["widget"] }),
   })
 );
 
@@ -40,7 +40,7 @@ expect(executions).toContainEqual(
 expect(executions).toContainEqual(
   expect.objectContaining({
     service: "RESERVE_ITEMS",
-    payload: expect.objectContaining({ warehouse: "warehouse-1" }),
+    input: expect.objectContaining({ warehouse: "warehouse-1" }),
   })
 );
 ```

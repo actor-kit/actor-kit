@@ -13,11 +13,11 @@ import type { Infer, SchemaDefinition } from "./schema";
 /** Recorded execution from execute() — captured in outbox for durable replay. */
 export interface Execution {
   readonly service: string;
-  readonly payload: unknown;
+  readonly input: unknown;
 }
 
-/** execute() triggers a named service with a typed payload. */
-export type ExecuteFn = (service: string, payload: unknown) => void;
+/** execute() triggers a named service with a typed input. */
+export type ExecuteFn = (service: string, input: unknown) => void;
 
 // --- Message context ---
 

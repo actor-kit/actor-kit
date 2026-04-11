@@ -150,11 +150,11 @@ defineActor("zone", {
           playerId, health, inventory,
         });
       },
-      onDone: (state, result, payload) => ({
+      onDone: (state, result, input) => ({
         ...state,
         transferStatus: "confirmed",
       }),
-      onError: (state, error, payload) => ({
+      onError: (state, error, input) => ({
         ...state,
         transferStatus: "failed",
         error: error.message,
@@ -180,7 +180,7 @@ defineActor("zone", {
 });
 ```
 
-Services are durable — the outbox persists the service name and payload atomically with the state change. If the DO crashes, pending services retry on restart.
+Services are durable — the outbox persists the service name and input atomically with the state change. If the DO crashes, pending services retry on restart.
 
 ## Direct RPC with Typed DO Stubs
 

@@ -75,9 +75,9 @@ interface ActorDef {
   services?: Record<
     string,
     {
-      fn(payload: unknown, env: unknown): Promise<unknown>;
-      onDone?(state: unknown, result: unknown, payload: unknown): unknown;
-      onError?(state: unknown, error: { message: string }, payload: unknown): unknown;
+      fn(input: unknown, env: unknown): Promise<unknown>;
+      onDone?(state: unknown, result: unknown, input: unknown): unknown;
+      onError?(state: unknown, error: { message: string }, input: unknown): unknown;
     }
   >;
   links?: Record<
@@ -341,7 +341,7 @@ export function actor(
       entries: Array<{
         id: string;
         service: string;
-        payload: unknown;
+        input: unknown;
         status: string;
         attempts: number;
         createdAt: number;
@@ -352,7 +352,7 @@ export function actor(
           "INSERT INTO executions (id, service, payload, status, attempts, created_at) VALUES (?, ?, ?, ?, ?, ?)",
           entry.id,
           entry.service,
-          JSON.stringify(entry.payload),
+          JSON.stringify(entry.input),
           entry.status,
           entry.attempts,
           entry.createdAt,
@@ -384,14 +384,14 @@ export function actor(
           continue;
         }
 
-        const parsedPayload: unknown = JSON.parse(entry.payload);
+        const parsedInput: unknown = JSON.parse(entry.payload);
 
         try {
-          const result = await serviceDef.fn(parsedPayload, this.env);
+          const result = await serviceDef.fn(parsedInput, this.env);
           this.ctx.storage.sql.exec("UPDATE executions SET status = 'done' WHERE id = ?", entry.id);
 
           if (serviceDef.onDone) {
-            const nextState = serviceDef.onDone(this.state, result, parsedPayload);
+            const nextState = serviceDef.onDone(this.state, result, parsedInput);
             if (nextState !== this.state) {
               this.state = nextState;
               this.persistState();
@@ -403,7 +403,7 @@ export function actor(
 
           if (serviceDef.onError) {
             const errorMessage = error instanceof Error ? error.message : String(error);
-            const nextState = serviceDef.onError(this.state, { message: errorMessage }, parsedPayload);
+            const nextState = serviceDef.onError(this.state, { message: errorMessage }, parsedInput);
             if (nextState !== this.state) {
               this.state = nextState;
               this.persistState();
@@ -926,7 +926,7 @@ export function actor(
         caller,
         callerType,
         env: this.env,
-        execute: (service: string, payload: unknown) => outbox.execute(service, payload),
+        execute: (service: string, input: unknown) => outbox.execute(service, input),
         link: (name: string, id: string) => outbox.link(name, id),
         unlink: (name: string, id?: string) => outbox.unlink(name, id),
         forward: (linkName, targetId, message) => outbox.forward(linkName, targetId, message),
@@ -1196,7 +1196,7 @@ export function actor(
           caller: callerInfo.caller,
           callerType: callerInfo.callerType,
           env: this.env,
-          execute: (service: string, payload: unknown) => connectOutbox.execute(service, payload),
+          execute: (service: string, input: unknown) => connectOutbox.execute(service, input),
           forward: (linkName: string, targetId: string, message: { type: string; [key: string]: unknown }) =>
             connectOutbox.forward(linkName, targetId, message),
         };
@@ -1340,7 +1340,7 @@ export function actor(
           caller,
           callerType: info.callerType,
           env: this.env,
-          execute: (service: string, payload: unknown) => disconnectOutbox.execute(service, payload),
+          execute: (service: string, input: unknown) => disconnectOutbox.execute(service, input),
           forward: (linkName: string, targetId: string, message: { type: string; [key: string]: unknown }) =>
             disconnectOutbox.forward(linkName, targetId, message),
         };

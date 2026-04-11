@@ -209,7 +209,7 @@ describe("testActor()", () => {
 
       expect(nextState).toEqual(state);
       expect(executions).toHaveLength(1);
-      expect(executions[0]).toEqual({ service: "EMAIL", payload: { to: [] } });
+      expect(executions[0]).toEqual({ service: "EMAIL", input: { to: [] } });
     });
   });
 });

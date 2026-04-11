@@ -91,11 +91,11 @@ The Worker authenticates the caller and stamps identity using `withCallerIdentit
 
 ### How do I handle async responses from execute()?
 
-Define a service with `onDone` and `onError` callbacks. When you call `execute("myService", payload)`, the framework runs the service function asynchronously. If it succeeds, `onDone(state, result, payload)` delivers the result back to your actor's state. If it fails, `onError(state, error, payload)` handles the failure. See [Side Effects](/concepts/side-effects/) for the full pattern.
+Define a service with `onDone` and `onError` callbacks. When you call `execute("myService", input)`, the framework runs the service function asynchronously. If it succeeds, `onDone(state, result, input)` delivers the result back to your actor's state. If it fails, `onError(state, error, input)` handles the failure. See [Side Effects](/concepts/side-effects/) for the full pattern.
 
 ### What if an executed service fails?
 
-If the service function throws, the execution is marked as failed in SQLite. If the service definition has an `onError` callback, it runs with the error and the original payload, letting you update actor state in response to the failure (e.g., set an error flag, revert optimistic changes). There is no automatic retry — design your services to be idempotent and handle failures explicitly via `onError`.
+If the service function throws, the execution is marked as failed in SQLite. If the service definition has an `onError` callback, it runs with the error and the original input, letting you update actor state in response to the failure (e.g., set an error flag, revert optimistic changes). There is no automatic retry — design your services to be idempotent and handle failures explicitly via `onError`.
 
 ### Can I execute services from `lifecycle.connect` or `lifecycle.disconnect`?
 

@@ -20,19 +20,19 @@ import { z } from "zod";
 defineActor("cart", {
   services: {
     fetchPrice: {
-      fn: async (payload: { itemId: string }, env) => {
-        const res = await fetch(`https://api.store.com/prices/${payload.itemId}`);
+      fn: async (input: { itemId: string }, env) => {
+        const res = await fetch(`https://api.store.com/prices/${input.itemId}`);
         if (!res.ok) throw new Error(`${res.status}`);
         return res.json() as Promise<{ total: number }>;
       },
-      onDone: (state, result, payload) => ({
+      onDone: (state, result, input) => ({
         ...state,
-        prices: { ...state.prices, [payload.itemId]: result.total },
+        prices: { ...state.prices, [input.itemId]: result.total },
         status: "loaded",
       }),
-      onError: (state, error, payload) => ({
+      onError: (state, error, input) => ({
         ...state,
-        error: `${payload.itemId}: ${error.message}`,
+        error: `${input.itemId}: ${error.message}`,
         status: "failed",
       }),
     },
@@ -53,11 +53,11 @@ defineActor("cart", {
 
 A service has three parts:
 
-- **`fn`** — async function that receives the payload and the Worker `env`. Use any library: `fetch`, CF bindings (Queues, KV, R2), third-party SDKs.
-- **`onDone`** — optional. Pure state transition that receives `(state, result, payload)`. The result type is inferred from `fn`'s return type.
-- **`onError`** — optional. Pure state transition that receives `(state, error, payload)`.
+- **`fn`** — async function that receives the input and the Worker `env`. Use any library: `fetch`, CF bindings (Queues, KV, R2), third-party SDKs.
+- **`onDone`** — optional. Pure state transition that receives `(state, result, input)`. The result type is inferred from `fn`'s return type.
+- **`onError`** — optional. Pure state transition that receives `(state, error, input)`.
 
-All three are declared at module level — no closures, fully serializable, crash-safe. The `payload` argument is the original input passed to `execute()`, available in all three functions.
+All three are declared at module level — no closures, fully serializable, crash-safe. The `input` argument is the original value passed to `execute()`, available in all three functions.
 
 ## Fire-and-Forget
 
@@ -85,19 +85,19 @@ ITEM_ADDED: message(z.object({ itemId: z.string() }), (state, { itemId }, { exec
 ## Framework Execution Model
 
 1. Message handler runs **synchronously** — returns new state (e.g., `{ status: "loading" }`)
-2. State + outbox entry persisted **atomically**: `{ service: "fetchPrice", payload: { itemId } }`
-3. Framework runs `services.fetchPrice.fn(payload, env)` **after commit**
-4. On success: `onDone(currentState, result, payload)` runs, state persisted, views broadcast
-5. On failure: `onError(currentState, error, payload)` runs, state persisted, views broadcast
-6. On crash: restart, re-run from outbox (service name + payload are serialized)
+2. State + outbox entry persisted **atomically**: `{ service: "fetchPrice", input: { itemId } }`
+3. Framework runs `services.fetchPrice.fn(input, env)` **after commit**
+4. On success: `onDone(currentState, result, input)` runs, state persisted, views broadcast
+5. On failure: `onError(currentState, error, input)` runs, state persisted, views broadcast
+6. On crash: restart, re-run from outbox (service name + input are serialized)
 
 Handlers never `await`. State is never stale. Crashes never lose intent.
 
 ## Guarantees
 
-- **At-least-once delivery**: if the DO crashes after commit but before the service completes, the outbox entry survives. On restart, the framework re-runs the service from the persisted payload.
+- **At-least-once delivery**: if the DO crashes after commit but before the service completes, the outbox entry survives. On restart, the framework re-runs the service from the persisted input.
 - **No interleaving**: handlers are synchronous. State cannot change between read and write.
-- **Idempotency is your responsibility**: at-least-once means duplicates are possible. If your downstream service can't handle replays, add an idempotency key to the payload (e.g., `execute("charge", { orderId, idempotencyKey: crypto.randomUUID() })`).
+- **Idempotency is your responsibility**: at-least-once means duplicates are possible. If your downstream service can't handle replays, add an idempotency key to the input (e.g., `execute("charge", { orderId, idempotencyKey: crypto.randomUUID() })`).
 
 ## Everything Goes Through execute()
 
