@@ -30,6 +30,7 @@
       "packages/client/src/**/*.ts",
       "packages/react/src/**/*.ts",
       "packages/test/src/**/*.ts",
+      "packages/studio/src/**/*.ts",
       "tests/**/*.ts"
     ],
     "ignoreUnknown": true

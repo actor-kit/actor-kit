@@ -66,6 +66,51 @@ export interface MessageDef<TState = unknown, TPayload = unknown, TEnv = unknown
   readonly guard?: (state: TState, payload: TPayload, ctx: GuardContext<TEnv>) => boolean;
 }
 
+// --- Timeline types (studio instrumentation) ---
+
+/** Discriminated union of all mutation causes for the timeline. */
+export type MutationCause =
+  | { readonly type: "init" }
+  | { readonly type: "migrate"; readonly fromVersion: number; readonly toVersion: number }
+  | {
+      readonly type: "message";
+      readonly messageType: string;
+      readonly caller: string;
+      readonly callerType: "user" | "service";
+      readonly role: string;
+      readonly payload: unknown;
+    }
+  | {
+      readonly type: "lifecycle.connect";
+      readonly caller: string;
+      readonly callerType: "user" | "service";
+      readonly role: string;
+    }
+  | {
+      readonly type: "lifecycle.disconnect";
+      readonly caller: string;
+      readonly callerType: "user" | "service";
+      readonly role: string;
+    }
+  | { readonly type: "service.onDone"; readonly service: string; readonly input: unknown; readonly result: unknown }
+  | { readonly type: "service.onError"; readonly service: string; readonly input: unknown; readonly error: string }
+  | {
+      readonly type: "link.onUpdate";
+      readonly sourceType: string;
+      readonly sourceId: string;
+      readonly viewData: unknown;
+    }
+  | { readonly type: "link.onError"; readonly sourceType: string; readonly sourceId: string; readonly error: string }
+  | { readonly type: "link.onUnlink"; readonly sourceType: string; readonly sourceId: string };
+
+/** A single entry in the actor's timeline — records a state mutation and its cause. */
+export interface TimelineEntry {
+  readonly cause: MutationCause;
+  readonly stateSnapshot: unknown;
+  readonly checksum: string;
+  readonly createdAt: number;
+}
+
 // --- LinkedView ---
 
 /**

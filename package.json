@@ -7,8 +7,8 @@
     "test:integration": "pnpm build && cd tests/integration && vitest run --config vitest.config.ts && vitest run --config vitest.ws.config.ts",
     "test": "pnpm test:unit && pnpm test:integration",
     "test:e2e": "pnpm build && npx playwright test",
-    "lint": "biome check packages/core/src/ packages/worker/src/ packages/client/src/ packages/react/src/ packages/test/src/ tests/",
-    "lint:fix": "biome check --write packages/core/src/ packages/worker/src/ packages/client/src/ packages/react/src/ packages/test/src/ tests/",
+    "lint": "biome check packages/core/src/ packages/worker/src/ packages/client/src/ packages/react/src/ packages/test/src/ packages/studio/src/ tests/",
+    "lint:fix": "biome check --write packages/core/src/ packages/worker/src/ packages/client/src/ packages/react/src/ packages/test/src/ packages/studio/src/ tests/",
     "build": "pnpm -r run build",
     "prepare": "husky"
   },

@@ -12,7 +12,7 @@
  */
 
 import { DurableObject } from "cloudflare:workers";
-import type { FieldDescriptor, MessageContext, SchemaDefinition } from "@actor-kit/core";
+import type { FieldDescriptor, MessageContext, MutationCause, SchemaDefinition } from "@actor-kit/core";
 import { createDeltaFrame, createSnapshotFrame, encode, encodeDelta } from "@actor-kit/core";
 import { DOQB } from "workers-qb";
 import type { z } from "zod";
@@ -92,6 +92,9 @@ interface ActorDef {
   migrate?(persisted: unknown, fromVersion: number): unknown;
   serialize?(state: unknown): unknown;
   restore?(serialized: unknown): unknown;
+  studio?: {
+    timelineSize?: number;
+  };
 }
 
 // --- SQL migrations ---
@@ -181,6 +184,20 @@ const ACTOR_KIT_MIGRATIONS = [
       CREATE INDEX IF NOT EXISTS idx_forwards_status_created ON forwards(status, created_at);
     `,
   },
+  {
+    name: "0006_timeline",
+    sql: `
+      CREATE TABLE IF NOT EXISTS timeline (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        cause_type TEXT NOT NULL,
+        cause_data TEXT NOT NULL,
+        state_snapshot TEXT NOT NULL,
+        checksum TEXT NOT NULL,
+        created_at INTEGER NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_timeline_created ON timeline(created_at DESC);
+    `,
+  },
 ];
 
 // --- Helpers ---
@@ -240,9 +257,18 @@ export function actor(
     drainingExecutions = false; // Prevents concurrent execution drains
     previousSubscriberViews = new Map<string, string>(); // dedupe: "type:id" → "role:json"
 
+    // --- Timeline (studio instrumentation) ---
+    studioEnabled = false; // Detected from ctx.exports on init
+    pendingCause: MutationCause | null = null; // Set before persistState(), consumed by persistState()
+    timelineSize = 500; // Ring buffer max entries
+    studioConnections = new Set<WebSocket>(); // Studio WebSocket connections (separate from app connections)
+    registryStub: Record<string, unknown> | null = null; // Cached StudioRegistry stub for RPC
+    lastRegistryTouch = 0; // Timestamp of last registry touch (for debouncing)
+
     constructor(ctx: DurableObjectState, env: Record<string, unknown>) {
       super(ctx, env);
       this.version = def.version ?? 1;
+      this.timelineSize = def.studio?.timelineSize ?? 500;
       // Load state before any requests are served.
       // blockConcurrencyWhile ensures no fetch/send/WebSocket during init.
       this.ctx.blockConcurrencyWhile(async () => {
@@ -258,6 +284,9 @@ export function actor(
       if (this.initialized) return;
 
       this.runMigrations();
+
+      // Detect StudioRegistry in ctx.exports — enables timeline instrumentation
+      this.studioEnabled = this.detectStudio();
 
       const rows = this.ctx.storage.sql.exec("SELECT state, version, actor_id FROM snapshots WHERE id = 1").toArray();
 
@@ -307,9 +336,72 @@ export function actor(
           });
           this.initialized = true;
 
+          this.pendingCause = { type: "init" };
           this.persistState();
         }
         // If input requires fields, stay uninitialized — spawn() must be called explicitly
+      }
+    }
+
+    /** Detect StudioRegistry in ctx.exports and cache the stub. */
+    detectStudio(): boolean {
+      const exports = getExports(this.ctx);
+      if (!exports) return false;
+      for (const [, val] of Object.entries(exports)) {
+        if (typeof val === "object" && val !== null && "__actorKitStudioRegistry" in val) {
+          // val is a DurableObjectNamespace — resolve a singleton stub (id = "registry")
+          try {
+            const ns = val as unknown as {
+              idFromName(name: string): unknown;
+              get(id: unknown): Record<string, unknown>;
+            };
+            const doId = ns.idFromName("registry");
+            this.registryStub = ns.get(doId);
+          } catch {
+            // Failed to resolve — studio detection succeeds (for timeline) but no registry
+          }
+          return true;
+        }
+      }
+      return false;
+    }
+
+    /** Fire-and-forget: touch the registry to update last_active_at (debounced 10s). */
+    touchRegistry(): void {
+      if (this.registryStub === null) return;
+      const now = Date.now();
+      if (now - this.lastRegistryTouch < 10_000) return; // Debounce: 10 seconds
+      this.lastRegistryTouch = now;
+
+      try {
+        const stub = this.registryStub;
+        if (typeof stub["touch"] === "function") {
+          void (stub["touch"] as (actorType: string, actorId: string, version: number) => Promise<void>)(
+            _actorName,
+            this.actorId ?? this.ctx.id.toString(),
+            this.version,
+          );
+        }
+      } catch {
+        // Fire and forget — ignore errors
+      }
+    }
+
+    /** Fire-and-forget: update connection count in the registry. */
+    updateRegistryConnections(): void {
+      if (this.registryStub === null) return;
+
+      try {
+        const stub = this.registryStub;
+        if (typeof stub["updateConnections"] === "function") {
+          void (stub["updateConnections"] as (actorType: string, actorId: string, count: number) => Promise<void>)(
+            _actorName,
+            this.actorId ?? this.ctx.id.toString(),
+            this.connections.size,
+          );
+        }
+      } catch {
+        // Fire and forget
       }
     }
 
@@ -317,6 +409,7 @@ export function actor(
       const serialized = def.serialize ? def.serialize(this.state) : this.state;
       const json = JSON.stringify(serialized);
       const checksum = this.computeChecksum(json);
+      const now = Date.now();
 
       this.ctx.storage.sql.exec(
         "INSERT OR REPLACE INTO snapshots (id, version, state, state_tracker, actor_id, checksum, updated_at) VALUES (1, ?, ?, NULL, ?, ?, ?)",
@@ -324,7 +417,51 @@ export function actor(
         json,
         this.actorId ?? null,
         checksum,
-        Date.now(),
+        now,
+      );
+
+      // Timeline instrumentation — write entry if studio is enabled and a cause is pending
+      if (this.studioEnabled && this.pendingCause !== null) {
+        const cause = this.pendingCause;
+        const { type: causeType, ...causeRest } = cause;
+        const causeDataJson = JSON.stringify(causeRest);
+        this.ctx.storage.sql.exec(
+          "INSERT INTO timeline (cause_type, cause_data, state_snapshot, checksum, created_at) VALUES (?, ?, ?, ?, ?)",
+          causeType,
+          causeDataJson,
+          json,
+          checksum,
+          now,
+        );
+        this.pendingCause = null;
+
+        // Ring buffer pruning
+        this.pruneTimeline();
+
+        // Touch registry (debounced)
+        this.touchRegistry();
+
+        // Push to studio connections
+        if (this.studioConnections.size > 0) {
+          this.broadcastToStudio({
+            type: "studio.timeline",
+            entry: {
+              causeType,
+              causeData: causeDataJson,
+              stateSnapshot: json,
+              checksum,
+              createdAt: now,
+            },
+          });
+        }
+      }
+    }
+
+    /** Prune timeline to keep at most timelineSize entries. */
+    pruneTimeline(): void {
+      this.ctx.storage.sql.exec(
+        "DELETE FROM timeline WHERE id NOT IN (SELECT id FROM timeline ORDER BY created_at DESC LIMIT ?)",
+        this.timelineSize,
       );
     }
 
@@ -394,6 +531,12 @@ export function actor(
             const nextState = serviceDef.onDone(this.state, result, parsedInput);
             if (nextState !== this.state) {
               this.state = nextState;
+              this.pendingCause = {
+                type: "service.onDone",
+                service: entry.service,
+                input: parsedInput,
+                result,
+              };
               this.persistState();
               this.broadcastViews();
             }
@@ -406,6 +549,12 @@ export function actor(
             const nextState = serviceDef.onError(this.state, { message: errorMessage }, parsedInput);
             if (nextState !== this.state) {
               this.state = nextState;
+              this.pendingCause = {
+                type: "service.onError",
+                service: entry.service,
+                input: parsedInput,
+                error: errorMessage,
+              };
               this.persistState();
               this.broadcastViews();
             }
@@ -609,6 +758,13 @@ export function actor(
             const nextState = linkDef2.onError(this.state, { message: errorMessage, code: "unreachable" }, call.id);
             if (nextState !== this.state) {
               this.state = nextState;
+              const targetType = linkDef2.contract.name.toUpperCase().replace(/-/g, "_");
+              this.pendingCause = {
+                type: "link.onError",
+                sourceType: targetType,
+                sourceId: call.id,
+                error: errorMessage,
+              };
               this.persistState();
               this.broadcastViews();
             }
@@ -735,6 +891,12 @@ export function actor(
             linkRow.link_name,
           );
 
+          this.pendingCause = {
+            type: "link.onUpdate",
+            sourceType,
+            sourceId,
+            viewData: viewWithRole,
+          };
           this.persistState();
           this.broadcastViews();
         }
@@ -874,6 +1036,7 @@ export function actor(
       this.initialized = true;
 
       // Persist state + init links atomically
+      this.pendingCause = { type: "init" };
       this.ctx.storage.transactionSync(() => {
         this.persistState();
         for (const { name, id } of initLinks) {
@@ -949,6 +1112,17 @@ export function actor(
       // Update state
       this.state = result.state;
 
+      // Timeline: record message cause
+      const { type: _msgType, ...msgPayload } = event;
+      this.pendingCause = {
+        type: "message",
+        messageType: event.type,
+        caller,
+        callerType,
+        role,
+        payload: msgPayload,
+      };
+
       // Fire onTransition if defined
       if (def.observe?.onTransition) {
         try {
@@ -1018,6 +1192,19 @@ export function actor(
       return { checksum, snapshot, role };
     }
 
+    /** Check if a WebSocket is a studio connection (from in-memory set or tags). */
+    isStudioWs(ws: WebSocket): boolean {
+      if (this.studioConnections.has(ws)) return true;
+      // Check tags for hibernation recovery
+      const tags = this.ctx.getTags(ws);
+      const callerTag = tags.find((t: string) => t.startsWith("caller:"));
+      if (callerTag?.slice("caller:".length) === "__studio") {
+        this.studioConnections.add(ws); // Re-populate after hibernation
+        return true;
+      }
+      return false;
+    }
+
     getCallerFromWs(ws: WebSocket): { caller: string; callerType: "user" | "service" } | null {
       // Try in-memory map first (keyed by WebSocket)
       const conn = this.connections.get(ws);
@@ -1043,6 +1230,9 @@ export function actor(
       const roleNames = Object.keys(def.roles);
 
       for (const ws of allSockets) {
+        // Skip studio connections — they don't receive view projections
+        if (this.isStudioWs(ws)) continue;
+
         const info = this.getCallerFromWs(ws);
         if (!info) continue;
         const { caller, callerType: ct } = info;
@@ -1138,6 +1328,11 @@ export function actor(
         return new Response("Actor requires input — call spawn({ input }) before connecting", { status: 404 });
       }
 
+      // Studio WebSocket — bypass role evaluation entirely
+      if (headerCallerId === "__studio") {
+        return this.handleStudioWebSocket(request);
+      }
+
       const role = resolveRole(def.roles, this.state, callerInfo.caller, { callerType: callerInfo.callerType });
       if (role === null) {
         return new Response("Forbidden", { status: 403 });
@@ -1163,6 +1358,18 @@ export function actor(
       if (clientSupportsBinary) tags.push("binary");
       this.ctx.acceptWebSocket(server, tags);
       this.connections.set(server, { caller: callerInfo.caller, callerType: callerInfo.callerType });
+
+      // Notify studio of new connection
+      if (this.studioConnections.size > 0) {
+        this.broadcastToStudio({
+          type: "studio.connection",
+          action: "connect",
+          connection: { caller: callerInfo.caller, callerType: callerInfo.callerType },
+        });
+      }
+
+      // Update registry connection count
+      this.updateRegistryConnections();
       this.supportsBinary.set(server, clientSupportsBinary);
 
       // Send initial snapshot — binary if schema available, JSON fallback
@@ -1212,6 +1419,12 @@ export function actor(
         const connectForwards = connectOutbox.toForwardEntries();
         if (nextState !== this.state || connectExecutions.length > 0 || connectForwards.length > 0) {
           this.state = nextState;
+          this.pendingCause = {
+            type: "lifecycle.connect",
+            caller: callerInfo.caller,
+            callerType: callerInfo.callerType,
+            role,
+          };
           this.ctx.storage.transactionSync(() => {
             this.persistState();
             if (connectExecutions.length > 0) {
@@ -1245,6 +1458,12 @@ export function actor(
 
     async webSocketMessage(ws: WebSocket, data: string | ArrayBuffer): Promise<void> {
       if (typeof data !== "string") return;
+
+      // Studio connections: handle view requests, not app messages
+      if (this.isStudioWs(ws)) {
+        this.handleStudioMessage(ws, data);
+        return;
+      }
 
       const info = this.getCallerFromWs(ws);
       if (!info) return;
@@ -1323,6 +1542,12 @@ export function actor(
     }
 
     async webSocketClose(ws: WebSocket): Promise<void> {
+      // Studio connections — just clean up, no lifecycle
+      if (this.isStudioWs(ws)) {
+        this.studioConnections.delete(ws);
+        return;
+      }
+
       const info = this.getCallerFromWs(ws);
       if (!info) return;
       const { caller } = info;
@@ -1332,6 +1557,18 @@ export function actor(
       this.previousViewData.delete(ws);
       this.connectionChecksums.delete(ws);
       this.supportsBinary.delete(ws);
+
+      // Notify studio of disconnection
+      if (this.studioConnections.size > 0) {
+        this.broadcastToStudio({
+          type: "studio.connection",
+          action: "disconnect",
+          connection: { caller, callerType: info.callerType },
+        });
+      }
+
+      // Update registry connection count
+      this.updateRegistryConnections();
 
       // Run lifecycle.disconnect if defined
       if (def.lifecycle?.disconnect) {
@@ -1352,6 +1589,13 @@ export function actor(
         const disconnectForwards = disconnectOutbox.toForwardEntries();
         if (nextState !== this.state || disconnectExecutions.length > 0 || disconnectForwards.length > 0) {
           this.state = nextState;
+          const disconnectRole = resolveRole(def.roles, this.state, caller, { callerType: info.callerType });
+          this.pendingCause = {
+            type: "lifecycle.disconnect",
+            caller,
+            callerType: info.callerType,
+            role: disconnectRole ?? "unknown",
+          };
           this.ctx.storage.transactionSync(() => {
             this.persistState();
             if (disconnectExecutions.length > 0) {
@@ -1370,6 +1614,277 @@ export function actor(
           }
         }
       }
+    }
+
+    // --- Studio WebSocket handling ---
+
+    /** Handle a studio WebSocket connection — bypasses roles, sends full state + timeline. */
+    handleStudioWebSocket(request: Request): Response {
+      const pair = new WebSocketPair();
+      const [client, server] = [pair[0], pair[1]];
+
+      const tags = ["caller:__studio", "callerType:service"];
+      this.ctx.acceptWebSocket(server, tags);
+      this.studioConnections.add(server);
+
+      // Send initial snapshot
+      const snapshot = this.buildStudioSnapshot();
+      server.send(JSON.stringify(snapshot));
+
+      const reqProtocolHeader = request.headers.get("Sec-WebSocket-Protocol");
+      const requestedProtocols = reqProtocolHeader?.split(",").map((p) => p.trim()) ?? [];
+      const responseProtocol = requestedProtocols.includes("actor-kit.v1") ? "actor-kit.v1" : null;
+      const responseHeaders: Record<string, string> = {};
+      if (responseProtocol !== null) {
+        responseHeaders["Sec-WebSocket-Protocol"] = responseProtocol;
+      }
+
+      return new Response(null, {
+        status: 101,
+        webSocket: client,
+        headers: responseHeaders,
+      });
+    }
+
+    /** Build the initial studio snapshot payload. */
+    buildStudioSnapshot(): Record<string, unknown> {
+      // Connections
+      const connections: Array<{ caller: string; callerType: "user" | "service" }> = [];
+      for (const [, info] of this.connections) {
+        connections.push({ caller: info.caller, callerType: info.callerType });
+      }
+
+      // Timeline entries
+      const timelineRows = this.ctx.storage.sql
+        .exec(
+          "SELECT id, cause_type, cause_data, state_snapshot, checksum, created_at FROM timeline ORDER BY created_at DESC LIMIT 50",
+        )
+        .toArray();
+      const timeline = timelineRows.map((row) => ({
+        id: row["id"] as number,
+        causeType: row["cause_type"] as string,
+        causeData: row["cause_data"] as string,
+        stateSnapshot: row["state_snapshot"] as string,
+        checksum: row["checksum"] as string,
+        createdAt: row["created_at"] as number,
+      }));
+
+      // Outbox
+      const execRows = this.ctx.storage.sql
+        .exec("SELECT id, service, payload, status, attempts, created_at FROM executions ORDER BY created_at DESC")
+        .toArray();
+      const outbox = execRows.map((row) => ({
+        id: row["id"] as string,
+        service: row["service"] as string,
+        payload: row["payload"] as string,
+        status: row["status"] as string,
+        attempts: row["attempts"] as number,
+        createdAt: row["created_at"] as number,
+      }));
+
+      // Links
+      const linkRows = this.ctx.storage.sql
+        .exec("SELECT target_type, target_id, link_name, version FROM active_links")
+        .toArray();
+      const activeLinks = linkRows.map((row) => ({
+        targetType: row["target_type"] as string,
+        targetId: row["target_id"] as string,
+        linkName: row["link_name"] as string,
+        version: row["version"] as number,
+      }));
+
+      const subRows = this.ctx.storage.sql
+        .exec("SELECT subscriber_type, subscriber_id FROM link_subscribers")
+        .toArray();
+      const linkSubscribers = subRows.map((row) => ({
+        subscriberType: row["subscriber_type"] as string,
+        subscriberId: row["subscriber_id"] as string,
+      }));
+
+      return {
+        type: "studio.snapshot",
+        state: this.state,
+        timeline,
+        connections,
+        outbox,
+        activeLinks,
+        linkSubscribers,
+        actorType: _actorName,
+        actorId: this.actorId ?? this.ctx.id.toString(),
+        version: this.version,
+      };
+    }
+
+    /** Handle a message from a studio WebSocket (e.g., view requests). */
+    handleStudioMessage(ws: WebSocket, data: string): void {
+      try {
+        const parsed: unknown = JSON.parse(data);
+        if (typeof parsed !== "object" || parsed === null || !("type" in parsed)) return;
+        const msg = parsed as Record<string, unknown> & { type: string };
+
+        if (msg.type === "studio.requestView") {
+          const role = msg["role"] as string | undefined;
+          const caller = (msg["caller"] as string | undefined) ?? "__studio";
+          if (role === undefined) return;
+
+          const viewDef = def.views[role];
+          if (viewDef === undefined) {
+            ws.send(JSON.stringify({ type: "studio.view", role, error: "No view for role" }));
+            return;
+          }
+
+          const viewData = viewDef.fn(this.state, caller);
+          ws.send(
+            JSON.stringify({
+              type: "studio.view",
+              role,
+              caller: msg["caller"] ?? null,
+              data: viewData,
+            }),
+          );
+        }
+      } catch {
+        // Invalid message — ignore
+      }
+    }
+
+    /** Send a message to all connected studio WebSockets. */
+    broadcastToStudio(message: Record<string, unknown>): void {
+      const json = JSON.stringify(message);
+      for (const ws of this.studioConnections) {
+        try {
+          ws.send(json);
+        } catch {
+          this.studioConnections.delete(ws);
+        }
+      }
+    }
+
+    // --- Studio RPC methods ---
+
+    /** Studio RPC: returns current state + metadata for inspection. */
+    async __inspect(): Promise<{
+      state: unknown;
+      version: number;
+      actorId: string | null;
+      connections: Array<{ caller: string; callerType: "user" | "service" }>;
+      outbox: Array<{
+        id: string;
+        service: string;
+        payload: string;
+        status: string;
+        attempts: number;
+        createdAt: number;
+      }>;
+      activeLinks: Array<{
+        targetType: string;
+        targetId: string;
+        linkName: string;
+        version: number;
+      }>;
+      linkSubscribers: Array<{
+        subscriberType: string;
+        subscriberId: string;
+      }>;
+    }> {
+      await this.loadState();
+
+      // Current connections
+      const connList: Array<{ caller: string; callerType: "user" | "service" }> = [];
+      for (const [, info] of this.connections) {
+        connList.push({ caller: info.caller, callerType: info.callerType });
+      }
+
+      // Outbox / executions
+      const execRows = this.ctx.storage.sql
+        .exec("SELECT id, service, payload, status, attempts, created_at FROM executions ORDER BY created_at DESC")
+        .toArray();
+      const outbox = execRows.map((row) => ({
+        id: row["id"] as string,
+        service: row["service"] as string,
+        payload: row["payload"] as string,
+        status: row["status"] as string,
+        attempts: row["attempts"] as number,
+        createdAt: row["created_at"] as number,
+      }));
+
+      // Active links
+      const linkRows = this.ctx.storage.sql
+        .exec("SELECT target_type, target_id, link_name, version FROM active_links")
+        .toArray();
+      const activeLinks = linkRows.map((row) => ({
+        targetType: row["target_type"] as string,
+        targetId: row["target_id"] as string,
+        linkName: row["link_name"] as string,
+        version: row["version"] as number,
+      }));
+
+      // Subscribers
+      const subRows = this.ctx.storage.sql
+        .exec("SELECT subscriber_type, subscriber_id FROM link_subscribers")
+        .toArray();
+      const linkSubscribers = subRows.map((row) => ({
+        subscriberType: row["subscriber_type"] as string,
+        subscriberId: row["subscriber_id"] as string,
+      }));
+
+      return {
+        state: this.state,
+        version: this.version,
+        actorId: this.actorId ?? null,
+        connections: connList,
+        outbox,
+        activeLinks,
+        linkSubscribers,
+      };
+    }
+
+    /** Studio RPC: returns paginated timeline entries. */
+    async __getTimeline(opts?: { limit?: number; before?: number }): Promise<{
+      entries: Array<{
+        id: number;
+        causeType: string;
+        causeData: string;
+        stateSnapshot: string;
+        checksum: string;
+        createdAt: number;
+      }>;
+      hasMore: boolean;
+    }> {
+      await this.loadState();
+
+      const limit = opts?.limit ?? 50;
+      const before = opts?.before;
+
+      let rows: Record<string, SqlStorageValue>[];
+      if (before !== undefined) {
+        rows = this.ctx.storage.sql
+          .exec(
+            "SELECT id, cause_type, cause_data, state_snapshot, checksum, created_at FROM timeline WHERE id < ? ORDER BY created_at DESC LIMIT ?",
+            before,
+            limit + 1,
+          )
+          .toArray();
+      } else {
+        rows = this.ctx.storage.sql
+          .exec(
+            "SELECT id, cause_type, cause_data, state_snapshot, checksum, created_at FROM timeline ORDER BY created_at DESC LIMIT ?",
+            limit + 1,
+          )
+          .toArray();
+      }
+
+      const hasMore = rows.length > limit;
+      const entries = rows.slice(0, limit).map((row) => ({
+        id: row["id"] as number,
+        causeType: row["cause_type"] as string,
+        causeData: row["cause_data"] as string,
+        stateSnapshot: row["state_snapshot"] as string,
+        checksum: row["checksum"] as string,
+        createdAt: row["created_at"] as number,
+      }));
+
+      return { entries, hasMore };
     }
   };
 
@@ -1480,6 +1995,41 @@ export interface TypedActorClass<TContract> {
       callerType: "user" | "service",
     ): Promise<{ checksum: string; snapshot: unknown; role: string }>;
     fetch(request: Request): Promise<Response>;
+    __inspect(): Promise<{
+      state: unknown;
+      version: number;
+      actorId: string | null;
+      connections: Array<{ caller: string; callerType: "user" | "service" }>;
+      outbox: Array<{
+        id: string;
+        service: string;
+        payload: string;
+        status: string;
+        attempts: number;
+        createdAt: number;
+      }>;
+      activeLinks: Array<{
+        targetType: string;
+        targetId: string;
+        linkName: string;
+        version: number;
+      }>;
+      linkSubscribers: Array<{
+        subscriberType: string;
+        subscriberId: string;
+      }>;
+    }>;
+    __getTimeline(opts?: { limit?: number; before?: number }): Promise<{
+      entries: Array<{
+        id: number;
+        causeType: string;
+        causeData: string;
+        stateSnapshot: string;
+        checksum: string;
+        createdAt: number;
+      }>;
+      hasMore: boolean;
+    }>;
   };
 }
 

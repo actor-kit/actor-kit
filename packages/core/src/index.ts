@@ -29,6 +29,8 @@ export type {
   LinkFn,
   MessageContext,
   MessageDef,
+  MutationCause,
+  TimelineEntry,
   UnlinkFn,
 } from "./types";
 

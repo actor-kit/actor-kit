@@ -7,7 +7,7 @@
  * Accepts either a contract (from defineActor) or a raw TestableActorDef.
  */
 
-import type { Execution, ForwardCall, Infer, MessageContext, SchemaDefinition } from "@actor-kit/core";
+import type { Execution, ForwardCall, Infer, MessageContext, SchemaDefinition, TimelineEntry } from "@actor-kit/core";
 import type { LinkCall, RolePredicate, UnlinkCall } from "@actor-kit/worker/testing";
 import { resolveRole, routeMessage } from "@actor-kit/worker/testing";
 import type { z } from "zod";
@@ -98,6 +98,15 @@ type ContractView<T> = T extends {
 
 // --- Test harness return types ---
 
+interface SendResult<TState> {
+  state: TState;
+  executions: Execution[];
+  links: LinkCall[];
+  unlinks: UnlinkCall[];
+  forwards: ForwardCall[];
+  timeline: TimelineEntry[];
+}
+
 interface TestHarness<TState, TInput> {
   init(input: TInput): TState;
   role(state: TState, caller: string, opts?: { callerType?: "user" | "service" }): string | null;
@@ -106,13 +115,7 @@ interface TestHarness<TState, TInput> {
     caller: string,
     message: { type: string; [key: string]: unknown },
     opts?: { callerType?: "user" | "service" },
-  ): Promise<{
-    state: TState;
-    executions: Execution[];
-    links: LinkCall[];
-    unlinks: UnlinkCall[];
-    forwards: ForwardCall[];
-  }>;
+  ): Promise<SendResult<TState>>;
   view(state: TState, caller: string, opts?: { callerType?: "user" | "service" }): { role: string; data: unknown };
 }
 
@@ -124,13 +127,7 @@ interface ContractTestHarness<TState, TInput, TMessage, TViewData> {
     caller: string,
     message: TMessage,
     opts?: { callerType?: "user" | "service" },
-  ): Promise<{
-    state: TState;
-    executions: Execution[];
-    links: LinkCall[];
-    unlinks: UnlinkCall[];
-    forwards: ForwardCall[];
-  }>;
+  ): Promise<SendResult<TState>>;
   view(state: TState, caller: string, opts?: { callerType?: "user" | "service" }): { role: string; data: TViewData };
 }
 
@@ -183,6 +180,16 @@ function isContract(arg: TestableActorDef<unknown, unknown> | ContractShape): ar
   return "name" in arg && "def" in arg;
 }
 
+// --- Helpers ---
+
+function simpleChecksum(json: string): string {
+  let h = 0;
+  for (let i = 0; i < json.length; i++) {
+    h = ((h << 5) - h + json.charCodeAt(i)) | 0;
+  }
+  return (h >>> 0).toString(16);
+}
+
 // --- Implementation ---
 
 // Overload 1: Contract (from defineActor) — requires roles, messages, views
@@ -222,13 +229,7 @@ export function testActor(
     caller: string,
     event: { type: string; [key: string]: unknown },
     opts?: { callerType?: "user" | "service" },
-  ): Promise<{
-    state: unknown;
-    executions: Execution[];
-    links: LinkCall[];
-    unlinks: UnlinkCall[];
-    forwards: ForwardCall[];
-  }> {
+  ): Promise<SendResult<unknown>> {
     const callerType = opts?.callerType ?? "user";
     const role = resolveRole(def.roles, state, caller, { callerType });
 
@@ -276,7 +277,26 @@ export function testActor(
       def.observe.onTransition(state, result.state, event, { caller, role });
     }
 
-    return { state: result.state, executions, links, unlinks, forwards };
+    // Build timeline entry
+    const { type: messageType, ...payload } = event;
+    const json = JSON.stringify(result.state);
+    const timeline: TimelineEntry[] = [
+      {
+        cause: {
+          type: "message",
+          messageType,
+          caller,
+          callerType,
+          role,
+          payload,
+        },
+        stateSnapshot: result.state,
+        checksum: simpleChecksum(json),
+        createdAt: Date.now(),
+      },
+    ];
+
+    return { state: result.state, executions, links, unlinks, forwards, timeline };
   }
 
   return {
