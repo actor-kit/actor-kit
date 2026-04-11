@@ -1,6 +1,9 @@
+// Chat room actor contract — browser-safe (imports from @actor-kit/worker/testing, no cloudflare:workers).
+// Used by both server (SSR loader, DO class) and client (typed React context, typed client).
+
 import { z } from "zod";
 import { array, schema, string, uint32, view } from "@actor-kit/core";
-import { defineActor, message } from "@actor-kit/worker";
+import { defineActor, message } from "@actor-kit/worker/testing";
 
 type ChatMessage = { id: string; author: string; text: string; timestamp: number };
 type ChatState = {

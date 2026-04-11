@@ -1,10 +1,13 @@
+// Counter actor contract — browser-safe (imports from @actor-kit/worker/testing, no cloudflare:workers).
+// Used by both server (SSR loader, DO class) and client (typed React context, typed client).
+
 import { z } from "zod";
 import { nullable, schema, string, uint32, view } from "@actor-kit/core";
-import { defineActor, message } from "@actor-kit/worker";
+import { defineActor, message } from "@actor-kit/worker/testing";
 
 type CounterState = { count: number; lastUpdatedBy: string | null };
 
-export const CounterView = schema({ count: uint32, lastUpdatedBy: nullable(string) });
+export const CounterViewSchema = schema({ count: uint32, lastUpdatedBy: nullable(string) });
 
 export const CounterContract = defineActor("counter", {
   input: z.object({}),
@@ -44,11 +47,11 @@ export const CounterContract = defineActor("counter", {
   },
 
   views: {
-    admin: view.shared(CounterView, (state: CounterState) => ({
+    admin: view.shared(CounterViewSchema, (state: CounterState) => ({
       count: state.count,
       lastUpdatedBy: state.lastUpdatedBy,
     })),
-    user: view.shared(CounterView, (state: CounterState) => ({
+    user: view.shared(CounterViewSchema, (state: CounterState) => ({
       count: state.count,
       lastUpdatedBy: state.lastUpdatedBy,
     })),
