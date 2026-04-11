@@ -1,10 +1,10 @@
 import { z } from "zod";
-import { schema, string, uint32, view } from "@actor-kit/core";
+import { nullable, schema, string, uint32, view } from "@actor-kit/core";
 import { defineActor, message } from "@actor-kit/worker";
 
 type CounterState = { count: number; lastUpdatedBy: string | null };
 
-export const CounterView = schema({ count: uint32, lastUpdatedBy: string });
+export const CounterView = schema({ count: uint32, lastUpdatedBy: nullable(string) });
 
 export const CounterContract = defineActor("counter", {
   input: z.object({}),
@@ -46,11 +46,11 @@ export const CounterContract = defineActor("counter", {
   views: {
     admin: view(CounterView, (state: CounterState) => ({
       count: state.count,
-      lastUpdatedBy: state.lastUpdatedBy ?? "",
+      lastUpdatedBy: state.lastUpdatedBy,
     })),
     user: view(CounterView, (state: CounterState) => ({
       count: state.count,
-      lastUpdatedBy: state.lastUpdatedBy ?? "",
+      lastUpdatedBy: state.lastUpdatedBy,
     })),
   },
 });
