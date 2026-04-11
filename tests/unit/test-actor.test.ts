@@ -101,7 +101,7 @@ describe("testActor()", () => {
 
     it("resolves member role after invite", async () => {
       let state = t.init({ creator: "alice" });
-      state = await t.send(state, "alice", { type: "INVITE", userId: "bob" });
+      ({ state } = await t.send(state, "alice", { type: "INVITE", userId: "bob" }));
       expect(t.role(state, "bob")).toBe("member");
     });
   });
@@ -109,15 +109,15 @@ describe("testActor()", () => {
   describe("send", () => {
     it("owner can add todo", async () => {
       let state = t.init({ creator: "alice" });
-      state = await t.send(state, "alice", { type: "ADD_TODO", text: "Buy milk" });
+      ({ state } = await t.send(state, "alice", { type: "ADD_TODO", text: "Buy milk" }));
       expect(state.todos).toHaveLength(1);
       expect(state.todos[0]?.text).toBe("Buy milk");
     });
 
     it("member can add todo after being invited", async () => {
       let state = t.init({ creator: "alice" });
-      state = await t.send(state, "alice", { type: "INVITE", userId: "bob" });
-      state = await t.send(state, "bob", { type: "ADD_TODO", text: "From Bob" });
+      ({ state } = await t.send(state, "alice", { type: "INVITE", userId: "bob" }));
+      ({ state } = await t.send(state, "bob", { type: "ADD_TODO", text: "From Bob" }));
       expect(state.todos).toHaveLength(1);
       expect(state.todos[0]?.text).toBe("From Bob");
     });
@@ -129,8 +129,8 @@ describe("testActor()", () => {
 
     it("member cannot delete (not in their role)", async () => {
       let state = t.init({ creator: "alice" });
-      state = await t.send(state, "alice", { type: "INVITE", userId: "bob" });
-      state = await t.send(state, "alice", { type: "ADD_TODO", text: "Test" });
+      ({ state } = await t.send(state, "alice", { type: "INVITE", userId: "bob" }));
+      ({ state } = await t.send(state, "alice", { type: "ADD_TODO", text: "Test" }));
       await expect(t.send(state, "bob", { type: "DELETE_TODO", id: "todo-1" })).rejects.toThrow(/not found/i);
     });
 
@@ -141,9 +141,9 @@ describe("testActor()", () => {
 
     it("toggle works", async () => {
       let state = t.init({ creator: "alice" });
-      state = await t.send(state, "alice", { type: "ADD_TODO", text: "Test" });
+      ({ state } = await t.send(state, "alice", { type: "ADD_TODO", text: "Test" }));
       expect(state.todos[0]?.done).toBe(false);
-      state = await t.send(state, "alice", { type: "TOGGLE", id: "todo-1" });
+      ({ state } = await t.send(state, "alice", { type: "TOGGLE", id: "todo-1" }));
       expect(state.todos[0]?.done).toBe(true);
     });
   });
@@ -151,8 +151,8 @@ describe("testActor()", () => {
   describe("view", () => {
     it("owner view includes todos and memberCount", async () => {
       let state = t.init({ creator: "alice" });
-      state = await t.send(state, "alice", { type: "ADD_TODO", text: "Test" });
-      state = await t.send(state, "alice", { type: "INVITE", userId: "bob" });
+      ({ state } = await t.send(state, "alice", { type: "ADD_TODO", text: "Test" }));
+      ({ state } = await t.send(state, "alice", { type: "INVITE", userId: "bob" }));
 
       const ownerView = t.view(state, "alice");
       expect(ownerView.role).toBe("owner");
@@ -164,9 +164,9 @@ describe("testActor()", () => {
 
     it("viewer view includes counts, not todos", async () => {
       let state = t.init({ creator: "alice" });
-      state = await t.send(state, "alice", { type: "ADD_TODO", text: "A" });
-      state = await t.send(state, "alice", { type: "ADD_TODO", text: "B" });
-      state = await t.send(state, "alice", { type: "TOGGLE", id: "todo-1" });
+      ({ state } = await t.send(state, "alice", { type: "ADD_TODO", text: "A" }));
+      ({ state } = await t.send(state, "alice", { type: "ADD_TODO", text: "B" }));
+      ({ state } = await t.send(state, "alice", { type: "TOGGLE", id: "todo-1" }));
 
       const viewerView = t.view(state, "stranger");
       expect(viewerView.role).toBe("viewer");
@@ -188,7 +188,7 @@ describe("testActor()", () => {
     });
   });
 
-  describe("sendWithEffects", () => {
+  describe("send returns effects", () => {
     it("captures executions from execute()", async () => {
       const notifyMsg = message(z.object({}), (state: State, _payload, ctx) => {
         ctx.execute("EMAIL", { to: state.memberIds });
@@ -205,7 +205,7 @@ describe("testActor()", () => {
 
       const tw = testActor(defWithNotify);
       const state = tw.init({ creator: "alice" });
-      const { state: nextState, executions } = await tw.sendWithEffects(state, "alice", { type: "NOTIFY" });
+      const { state: nextState, executions } = await tw.send(state, "alice", { type: "NOTIFY" });
 
       expect(nextState).toEqual(state);
       expect(executions).toHaveLength(1);

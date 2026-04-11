@@ -96,10 +96,10 @@ describe("testActor — kill survivors", () => {
     expect(v.data).toEqual({ count: 0 });
   });
 
-  it("sendWithEffects returns empty executions for normal handler", async () => {
+  it("send returns empty executions for normal handler", async () => {
     const t = testActor(def);
     const state = t.init({ ownerId: "alice" });
-    const result = await t.sendWithEffects(state, "alice", { type: "INCREMENT", amount: 5 });
+    const result = await t.send(state, "alice", { type: "INCREMENT", amount: 5 });
     expect(result.executions).toHaveLength(0);
     expect(result.state.count).toBe(5);
   });

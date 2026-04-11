@@ -119,13 +119,13 @@ Use `testActor()` for most tests. It's fast (pure TypeScript, no I/O) and covers
 
 ### How do I test that an `execute()` was called?
 
-Use `sendWithEffects()` from the test harness:
+`send()` always returns `{ state, executions, links, unlinks, forwards }`:
 
 ```typescript
 const t = testActor(MyActorContract);
 const state = t.init({ /* ... */ });
 
-const { state: next, executions } = await t.sendWithEffects(
+const { state: next, executions } = await t.send(
   state, "alice", { type: "NOTIFY" }
 );
 

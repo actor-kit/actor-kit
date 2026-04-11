@@ -143,7 +143,7 @@ Do NOT load all docs upfront. Load only when relevant to the current task.
 - **Unit tests**: `testActor()` — pure transitions, no CF runtime. Fast, TDD-friendly.
 - **Integration tests**: `vitest-pool-workers` — real DO, real WebSocket, real SQLite.
 - **Fakes over mocks**: Use real implementations or fakes. Never mock internals.
-- **Emission capture**: `sendWithEffects()` returns `{ state, emissions, executions }` for asserting side effects and service invocations.
+- **Effect capture**: `send()` returns `{ state, executions, links, unlinks, forwards }` for asserting service invocations and actor-to-actor interactions.
 - **TDD**: Red-green-refactor. Write the test first. See it fail. Implement. See it pass.
 
 ## Keeping docs current

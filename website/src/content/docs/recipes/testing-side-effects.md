@@ -7,7 +7,7 @@ Side effects (`execute()`) are recorded during transitions but not executed in `
 
 ## Capturing executions
 
-Use `sendWithEffects()` instead of `send()`:
+`send()` always returns `{ state, executions, links, unlinks, forwards }`:
 
 ```typescript
 import { testActor } from "@actor-kit/test";
@@ -16,7 +16,7 @@ import { OrderContract } from "./order";
 const t = testActor(OrderContract);
 let state = t.init({ items: ["widget"] });
 
-const { state: next, executions } = await t.sendWithEffects(
+const { state: next, executions } = await t.send(
   state, "alice", { type: "PLACE_ORDER" }
 );
 ```
@@ -48,7 +48,7 @@ expect(executions).toContainEqual(
 ## Asserting no side effects
 
 ```typescript
-const { executions } = await t.sendWithEffects(
+const { executions } = await t.send(
   state, "alice", { type: "INCREMENT" }
 );
 
@@ -58,7 +58,7 @@ expect(executions).toHaveLength(0);
 ## Asserting execution counts
 
 ```typescript
-const { executions } = await t.sendWithEffects(
+const { executions } = await t.send(
   state, "alice", { type: "NOTIFY_ALL" }
 );
 

@@ -76,10 +76,10 @@ const t = testActor(CounterContract);
 const state = t.init({});
 ```
 
-**Send messages** and get back the new state:
+**Send messages** and get back the result (state + captured effects):
 
 ```typescript
-const next = await t.send(state, "alice", { type: "INCREMENT" });
+const { state: next } = await t.send(state, "alice", { type: "INCREMENT" });
 ```
 
 **Check which role** a caller resolves to:
@@ -99,7 +99,7 @@ expect(data.count).toBe(0);
 **Capture service calls** without executing them:
 
 ```typescript
-const { state: next, executions } = await t.sendWithEffects(
+const { state: next, executions } = await t.send(
   state, "alice", { type: "NOTIFY_MEMBERS" }
 );
 

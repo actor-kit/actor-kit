@@ -87,18 +87,16 @@ describe("contract-derived test harness", () => {
     expectTypeOf<SendEvent>().toEqualTypeOf<ExpectedEvent>();
   });
 
-  it("testActor(contract).sendWithEffects() accepts typed events", () => {
+  it("testActor(contract).send() returns typed result with effects", () => {
     const t = testActor(Counter);
 
-    type SendEvent = Parameters<typeof t.sendWithEffects>[2];
+    type SendResult = Awaited<ReturnType<typeof t.send>>;
 
-    type ExpectedEvent =
-      | { type: "INCREMENT"; amount: number }
-      | { type: "RESET" }
-      | { type: "RENAME"; newName: string }
-      | { type: "ADMIN_ONLY" };
-
-    expectTypeOf<SendEvent>().toEqualTypeOf<ExpectedEvent>();
+    expectTypeOf<SendResult["state"]>().toEqualTypeOf<CounterState>();
+    expectTypeOf<SendResult["executions"]>().toBeArray();
+    expectTypeOf<SendResult["links"]>().toBeArray();
+    expectTypeOf<SendResult["unlinks"]>().toBeArray();
+    expectTypeOf<SendResult["forwards"]>().toBeArray();
   });
 
   it("testActor(contract).view() returns typed view data", () => {
@@ -117,7 +115,7 @@ describe("contract-derived test harness", () => {
 
     expect(state).toEqual({ count: 0, name: "" });
 
-    const next = await t.send(state, "admin", { type: "INCREMENT", amount: 5 });
+    const { state: next } = await t.send(state, "admin", { type: "INCREMENT", amount: 5 });
     expect(next).toEqual({ count: 5, name: "" });
 
     const viewed = t.view(next, "admin");
@@ -133,7 +131,7 @@ describe("contract-derived test harness", () => {
     await expect(t.send(state, "viewer-user", { type: "ADMIN_ONLY" })).rejects.toThrow("Guard rejected");
   });
 
-  it("testActor(contract) runtime: sendWithEffects captures executions", async () => {
+  it("testActor(contract) runtime: send captures executions", async () => {
     const ExecutingCounter = defineActor("executing", {
       input: z.object({}),
       init: (): CounterState => ({ count: 0, name: "" }),
@@ -154,7 +152,7 @@ describe("contract-derived test harness", () => {
 
     const t = testActor(ExecutingCounter);
     const state = t.init({});
-    const { state: next, executions } = await t.sendWithEffects(state, "anyone", { type: "NOTIFY" });
+    const { state: next, executions } = await t.send(state, "anyone", { type: "NOTIFY" });
 
     expect(next).toEqual(state);
     expect(executions).toHaveLength(1);

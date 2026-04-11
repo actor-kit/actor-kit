@@ -98,7 +98,7 @@ describe("TodoList actor", () => {
 
   it("captures emissions from emit()", () => {
     t.init({ creator: "alice" });
-    const { state, emissions } = t.sendWithEffects("NOTIFY_ALL", {});
+    const { state, emissions } = t.send("NOTIFY_ALL", {});
     expect(emissions).toHaveLength(1);
     expect(emissions[0].type).toBe("queue");
   });

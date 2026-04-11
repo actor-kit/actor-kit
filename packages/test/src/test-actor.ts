@@ -106,12 +106,6 @@ interface TestHarness<TState, TInput> {
     caller: string,
     message: { type: string; [key: string]: unknown },
     opts?: { callerType?: "user" | "service" },
-  ): Promise<TState>;
-  sendWithEffects(
-    state: TState,
-    caller: string,
-    message: { type: string; [key: string]: unknown },
-    opts?: { callerType?: "user" | "service" },
   ): Promise<{
     state: TState;
     executions: Execution[];
@@ -125,8 +119,7 @@ interface TestHarness<TState, TInput> {
 interface ContractTestHarness<TState, TInput, TMessage, TViewData> {
   init(input: TInput): TState;
   role(state: TState, caller: string, opts?: { callerType?: "user" | "service" }): string | null;
-  send(state: TState, caller: string, message: TMessage, opts?: { callerType?: "user" | "service" }): Promise<TState>;
-  sendWithEffects(
+  send(
     state: TState,
     caller: string,
     message: TMessage,
@@ -295,7 +288,7 @@ export function testActor(
       return def.init(parsed.data, {
         env: {},
         link: async () => {
-          throw new Error("link() not available in test harness init — use sendWithEffects() for link testing");
+          throw new Error("link() not available in test harness init — use send() for link testing");
         },
       });
     },
@@ -306,17 +299,7 @@ export function testActor(
       });
     },
 
-    async send(
-      state: unknown,
-      caller: string,
-      event: { type: string; [key: string]: unknown },
-      opts?: { callerType?: "user" | "service" },
-    ): Promise<unknown> {
-      const { state: nextState } = await sendWithEffectsImpl(state, caller, event, opts);
-      return nextState;
-    },
-
-    sendWithEffects: sendWithEffectsImpl,
+    send: sendWithEffectsImpl,
 
     view(state: unknown, caller: string, opts?: { callerType?: "user" | "service" }): { role: string; data: unknown } {
       const callerType = opts?.callerType ?? "user";

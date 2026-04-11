@@ -16,7 +16,7 @@ packages/
 ├── worker/            defineActor(), createActorClass(), message(), DO runtime, identity
 ├── client/            actorClient(contract).create(), subscribe, send, reconnection
 ├── react/             actorContext(contract), useView(), useSend(), useRole(), Provider
-├── test/              testActor(contract), sendWithEffects(), view assertions
+├── test/              testActor(contract), send() with effect capture, view assertions
 └── storybook/         withActorKit() Storybook decorator, mock client
 ```
 

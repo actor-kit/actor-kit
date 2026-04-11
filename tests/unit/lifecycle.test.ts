@@ -48,11 +48,11 @@ describe("lifecycle handlers (v3 — no callbacks)", () => {
     expect(state.count).toBe(0);
   });
 
-  it("sendWithEffects returns executions from execute()", async () => {
+  it("send returns executions from execute()", async () => {
     const t = testActor(appDef);
     const state = t.init({});
 
-    const result = await t.sendWithEffects(state, "alice", {
+    const result = await t.send(state, "alice", {
       type: "INCREMENT",
       amount: 5,
     });

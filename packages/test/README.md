@@ -23,8 +23,8 @@ t.init();
 t.send("increment", {});
 expect(t.view("anyone").count).toBe(1);
 
-// Capture side effects
-const { state, emissions } = t.sendWithEffects("increment", {});
+// send() always returns { state, executions, links, unlinks, forwards }
+const { state } = t.send("increment", {});
 expect(state.count).toBe(2);
 ```
 

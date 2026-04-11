@@ -49,8 +49,8 @@ describe("observe.onTransition", () => {
 
     const t = testActor(def);
     let state = t.init({});
-    state = await t.send(state, "alice", { type: "INCREMENT", amount: 5 });
-    state = await t.send(state, "bob", { type: "INCREMENT", amount: 3 });
+    ({ state } = await t.send(state, "alice", { type: "INCREMENT", amount: 5 }));
+    ({ state } = await t.send(state, "bob", { type: "INCREMENT", amount: 3 }));
 
     expect(transitions).toHaveLength(2);
 

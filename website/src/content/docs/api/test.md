@@ -33,11 +33,22 @@ Throws if input is invalid.
 
 ### `t.send(state, caller, message, opts?)`
 
-Resolves the caller's role, validates the message, runs the handler. Returns the new state.
+Resolves the caller's role, validates the message, runs the handler. Returns `{ state, executions, links, unlinks, forwards }`.
 
 ```typescript
 let state = t.init({});
-state = await t.send(state, "alice", { type: "INCREMENT" });
+({ state } = await t.send(state, "alice", { type: "INCREMENT" }));
+```
+
+Capture side effects:
+
+```typescript
+const { state: next, executions } = await t.send(
+  state, "alice", { type: "NOTIFY" }
+);
+
+expect(executions).toHaveLength(1);
+expect(executions[0]).toEqual({ service: "EMAIL", input: { ... } });
 ```
 
 Throws if:
@@ -46,19 +57,6 @@ Throws if:
 - Guard returns false
 
 Options: `{ callerType: "service" }` to override the default "user".
-
-### `t.sendWithEffects(state, caller, message, opts?)`
-
-Same as `send()` but also returns captured `execute()` calls.
-
-```typescript
-const { state, executions } = await t.sendWithEffects(
-  state, "alice", { type: "NOTIFY" }
-);
-
-expect(executions).toHaveLength(1);
-expect(executions[0]).toEqual({ service: "EMAIL", input: { ... } });
-```
 
 ### `t.view(state, caller, opts?)`
 

@@ -90,11 +90,11 @@ const CounterContract = defineActor("counter", {
 
 describe("services + execute()", () => {
   describe("execute captures service invocations", () => {
-    it("captures execute() calls in sendWithEffects", async () => {
+    it("captures execute() calls in send", async () => {
       const t = testActor(CounterContract);
       const state = t.init({});
 
-      const { state: next, executions } = await t.sendWithEffects(state, "alice", {
+      const { state: next, executions } = await t.send(state, "alice", {
         type: "FETCH_COUNT",
         source: "test",
       });
@@ -111,7 +111,7 @@ describe("services + execute()", () => {
       const t = testActor(CounterContract);
       const state = t.init({});
 
-      const { executions } = await t.sendWithEffects(state, "alice", {
+      const { executions } = await t.send(state, "alice", {
         type: "TRACK",
         event: "page_view",
       });
@@ -126,9 +126,9 @@ describe("services + execute()", () => {
     it("captures execute with only onError", async () => {
       const t = testActor(CounterContract);
       let state = t.init({});
-      state = await t.send(state, "alice", { type: "INCREMENT" });
+      ({ state } = await t.send(state, "alice", { type: "INCREMENT" }));
 
-      const { executions } = await t.sendWithEffects(state, "alice", { type: "SAVE" });
+      const { executions } = await t.send(state, "alice", { type: "SAVE" });
 
       expect(executions).toHaveLength(1);
       expect(executions[0]).toMatchObject({
@@ -142,7 +142,7 @@ describe("services + execute()", () => {
     it("sync message works without execute", async () => {
       const t = testActor(CounterContract);
       const state = t.init({});
-      const next = await t.send(state, "alice", { type: "INCREMENT" });
+      const { state: next } = await t.send(state, "alice", { type: "INCREMENT" });
 
       expect(next.count).toBe(1);
     });
@@ -152,7 +152,7 @@ describe("services + execute()", () => {
     it("execute does not block the handler", async () => {
       const t = testActor(CounterContract);
       const state = t.init({});
-      const next = await t.send(state, "alice", { type: "FETCH_COUNT", source: "test" });
+      const { state: next } = await t.send(state, "alice", { type: "FETCH_COUNT", source: "test" });
 
       // Handler returns immediately with loading state
       expect(next.status).toBe("loading");

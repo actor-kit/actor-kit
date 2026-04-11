@@ -279,11 +279,11 @@ describe("testActor with links", () => {
     },
   });
 
-  it("captures link() calls in sendWithEffects", async () => {
+  it("captures link() calls in send", async () => {
     const t = testActor(PlayerContract);
     const state = t.init({ profileId: "p1" });
 
-    const { state: next, links } = await t.sendWithEffects(state, "owner", {
+    const { state: next, links } = await t.send(state, "owner", {
       type: "JOIN_GAME",
       gameId: "game-1",
     });
@@ -293,7 +293,7 @@ describe("testActor with links", () => {
     expect(next).toBe(state); // state unchanged — link is async
   });
 
-  it("captures unlink() with specific id in sendWithEffects", async () => {
+  it("captures unlink() with specific id in send", async () => {
     const t = testActor(PlayerContract);
     const state: PlayerState = {
       profileId: "p1",
@@ -301,7 +301,7 @@ describe("testActor with links", () => {
       games: { "game-1": { role: "player", count: 5, score: 42 } },
     };
 
-    const { unlinks } = await t.sendWithEffects(state, "owner", {
+    const { unlinks } = await t.send(state, "owner", {
       type: "LEAVE_GAME",
       gameId: "game-1",
     });
@@ -310,7 +310,7 @@ describe("testActor with links", () => {
     expect(unlinks[0]).toEqual({ name: "game", id: "game-1" });
   });
 
-  it("captures unlink() without id (unlink all) in sendWithEffects", async () => {
+  it("captures unlink() without id (unlink all) in send", async () => {
     const t = testActor(PlayerContract);
     const state: PlayerState = {
       profileId: "p1",
@@ -318,7 +318,7 @@ describe("testActor with links", () => {
       games: { "game-1": { role: "player", count: 5, score: 42 } },
     };
 
-    const { unlinks } = await t.sendWithEffects(state, "owner", {
+    const { unlinks } = await t.send(state, "owner", {
       type: "LEAVE_ALL",
     });
 
@@ -359,7 +359,7 @@ describe("testActor with links", () => {
     const t = testActor(MultiLinkContract);
     const state = t.init({});
 
-    const { links } = await t.sendWithEffects(state, "alice", {
+    const { links } = await t.send(state, "alice", {
       type: "JOIN_MANY",
       ids: ["game-1", "game-2", "game-3"],
     });
@@ -370,16 +370,17 @@ describe("testActor with links", () => {
     expect(links[2]).toEqual({ name: "game", id: "game-3" });
   });
 
-  it("send() still works (ignores link/unlink captures)", async () => {
+  it("send() returns links alongside state", async () => {
     const t = testActor(PlayerContract);
     const state = t.init({ profileId: "p1" });
 
-    // send() returns state only, doesn't expose link captures
-    const next = await t.send(state, "owner", {
+    const { state: next, links } = await t.send(state, "owner", {
       type: "JOIN_GAME",
       gameId: "game-1",
     });
 
     expect(next).toBe(state);
+    expect(links).toHaveLength(1);
+    expect(links[0]).toEqual({ name: "game", id: "game-1" });
   });
 });

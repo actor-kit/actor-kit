@@ -70,10 +70,10 @@ const ForwardContract = defineActor("forwarder", {
 });
 
 describe("forward() in message handlers", () => {
-  it("captures a single forward call in sendWithEffects.forwards", async () => {
+  it("captures a single forward call in send.forwards", async () => {
     const actor = testActor(ForwardContract);
     const state = actor.init({});
-    const result = await actor.sendWithEffects(state, "u1", { type: "FORWARD_ONE", targetId: "t1" });
+    const result = await actor.send(state, "u1", { type: "FORWARD_ONE", targetId: "t1" });
     expect(result.forwards).toHaveLength(1);
     expect(result.forwards[0]).toEqual({
       linkName: "COUNTER",
@@ -85,7 +85,7 @@ describe("forward() in message handlers", () => {
   it("captures multiple forward calls from a single handler", async () => {
     const actor = testActor(ForwardContract);
     const state = actor.init({});
-    const result = await actor.sendWithEffects(state, "u1", {
+    const result = await actor.send(state, "u1", {
       type: "FORWARD_MANY",
       targets: ["a", "b", "c"],
     });
@@ -96,14 +96,14 @@ describe("forward() in message handlers", () => {
   it("preserves the full message shape", async () => {
     const actor = testActor(ForwardContract);
     const state = actor.init({});
-    const result = await actor.sendWithEffects(state, "u1", { type: "FORWARD_ONE", targetId: "x" });
+    const result = await actor.send(state, "u1", { type: "FORWARD_ONE", targetId: "x" });
     expect(result.forwards[0]?.message).toEqual({ type: "INCREMENT", amount: 5 });
   });
 
   it("captures different link names", async () => {
     const actor = testActor(ForwardContract);
     const state = actor.init({});
-    const result = await actor.sendWithEffects(state, "u1", { type: "FORWARD_LINKS" });
+    const result = await actor.send(state, "u1", { type: "FORWARD_LINKS" });
     expect(result.forwards).toHaveLength(2);
     expect(result.forwards.map((f) => f.linkName)).toEqual(["PROFILE", "ROOM"]);
   });
