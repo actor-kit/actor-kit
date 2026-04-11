@@ -11,6 +11,14 @@ compatibility_flags = []
 name = "COUNTER"
 class_name = "Counter"
 
+[[durable_objects.bindings]]
+name = "NULLABLE_COUNTER"
+class_name = "NullableCounter"
+
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["Counter"]
+
+[[migrations]]
+tag = "v2"
+new_sqlite_classes = ["NullableCounter"]

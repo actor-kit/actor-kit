@@ -11,7 +11,7 @@
 
 type PrimitiveTypeName = "uint8" | "uint16" | "uint32" | "float32" | "float64" | "string" | "boolean";
 
-interface PrimitiveDescriptor<T extends PrimitiveTypeName, V> {
+export interface PrimitiveDescriptor<T extends PrimitiveTypeName, V> {
   readonly kind: "primitive";
   readonly type: T;
   readonly _phantom: V;
@@ -31,7 +31,7 @@ export const boolean: PrimitiveDescriptor<"boolean", boolean> = primitive("boole
 
 // --- Array combinator ---
 
-interface ArrayDescriptor<E extends FieldDescriptor> {
+export interface ArrayDescriptor<E extends FieldDescriptor> {
   readonly kind: "array";
   readonly type: "array";
   readonly element: E;
@@ -43,13 +43,20 @@ export function array<E extends FieldDescriptor>(element: E): ArrayDescriptor<E>
 
 // --- Nullable combinator ---
 
-interface NullableDescriptor<F extends FieldDescriptor> {
+// A BaseFieldDescriptor is anything that can be wrapped in nullable() — excludes NullableDescriptor
+// to prevent nullable(nullable(x)) and avoid infinite type recursion.
+export type BaseFieldDescriptor =
+  | PrimitiveDescriptor<PrimitiveTypeName, unknown>
+  | ArrayDescriptor<BaseFieldDescriptor>
+  | SchemaDefinition<Record<string, FieldDescriptor>>;
+
+export interface NullableDescriptor<F extends BaseFieldDescriptor> {
   readonly kind: "nullable";
   readonly type: "nullable";
   readonly field: F;
 }
 
-export function nullable<F extends FieldDescriptor>(field: F): NullableDescriptor<F> {
+export function nullable<F extends BaseFieldDescriptor>(field: F): NullableDescriptor<F> {
   return Object.freeze({ kind: "nullable" as const, type: "nullable" as const, field });
 }
 
@@ -58,8 +65,8 @@ export function nullable<F extends FieldDescriptor>(field: F): NullableDescripto
 // A FieldDescriptor is anything that can appear as a field value in schema({})
 export type FieldDescriptor =
   | PrimitiveDescriptor<PrimitiveTypeName, unknown>
-  | ArrayDescriptor<FieldDescriptor>
-  | NullableDescriptor<FieldDescriptor>
+  | ArrayDescriptor<BaseFieldDescriptor>
+  | NullableDescriptor<BaseFieldDescriptor>
   | SchemaDefinition<Record<string, FieldDescriptor>>;
 
 // --- Schema definition ---
@@ -138,16 +145,28 @@ export function schema<TShape extends Record<string, FieldDescriptor>>(shape: TS
 // --- Type inference ---
 
 // Infer the TypeScript type from a FieldDescriptor
-type InferField<F extends FieldDescriptor> =
+// Use a helper that avoids deep recursion by splitting nullable from non-nullable
+// inference. NullableDescriptor<T> unwraps T which is BaseFieldDescriptor (no
+// nested nullable), so recursion depth is bounded.
+type InferField<F> =
   F extends NullableDescriptor<infer Inner>
-    ? InferField<Inner> | null
+    ? InferNonNullable<Inner> | null
     : F extends PrimitiveDescriptor<infer _T, infer V>
       ? V
       : F extends ArrayDescriptor<infer E>
-        ? InferField<E>[]
+        ? InferNonNullable<E>[]
         : F extends SchemaDefinition<infer S>
           ? { [K in keyof S]: InferField<S[K]> }
           : never;
+
+type InferNonNullable<F> =
+  F extends PrimitiveDescriptor<infer _T, infer V>
+    ? V
+    : F extends ArrayDescriptor<infer E>
+      ? InferNonNullable<E>[]
+      : F extends SchemaDefinition<infer S>
+        ? { [K in keyof S]: InferField<S[K]> }
+        : never;
 
 // Infer the full TypeScript type from a SchemaDefinition
 export type Infer<S> =

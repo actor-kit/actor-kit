@@ -1,4 +1,4 @@
-import { schema, string, uint32, view } from "@actor-kit/core";
+import { nullable, schema, string, uint32, view } from "@actor-kit/core";
 import { createActorClass, defineActor, message } from "@actor-kit/worker";
 import { z } from "zod";
 
@@ -93,6 +93,45 @@ const CounterContract = defineActor("counter", {
 });
 
 export const Counter = createActorClass(CounterContract);
+
+// --- NullableCounter actor (tests nullable schema fields) ---
+
+type NullableCounterState = { count: number; lastUpdatedBy: string | null };
+
+const NullableCounterView = schema({ count: uint32, lastUpdatedBy: nullable(string) });
+
+const setCount = message(
+  z.object({ value: z.number().int() }),
+  (state: NullableCounterState, { value }, { caller }) => ({
+    count: value,
+    lastUpdatedBy: caller,
+  }),
+);
+
+const clearUpdater = message(z.object({}), (state: NullableCounterState) => ({
+  ...state,
+  lastUpdatedBy: null,
+}));
+
+const NullableCounterContract = defineActor("nullable-counter", {
+  input: z.object({}),
+  init: (): NullableCounterState => ({ count: 0, lastUpdatedBy: null }),
+  roles: {
+    user: () => true,
+  },
+  messages: {
+    SET_COUNT: setCount,
+    CLEAR_UPDATER: clearUpdater,
+  },
+  views: {
+    user: view(NullableCounterView, (state: NullableCounterState) => ({
+      count: state.count,
+      lastUpdatedBy: state.lastUpdatedBy,
+    })),
+  },
+});
+
+export const NullableCounter = createActorClass(NullableCounterContract);
 
 // --- Worker entrypoint ---
 
