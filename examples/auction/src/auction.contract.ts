@@ -73,7 +73,7 @@ export const AuctionContract = defineActor("auction", {
   },
 
   views: {
-    auctioneer: view(AuctionViewSchema, (state: AuctionState) => ({
+    auctioneer: view.shared(AuctionViewSchema, (state: AuctionState) => ({
       item: state.item,
       bidCount: state.bids.length,
       highestBid:
@@ -81,7 +81,7 @@ export const AuctionContract = defineActor("auction", {
       closed: state.closed,
       winner: state.winner ?? "",
     })),
-    bidder: view(AuctionViewSchema, (state: AuctionState) => ({
+    bidder: view.shared(AuctionViewSchema, (state: AuctionState) => ({
       item: state.item,
       bidCount: state.bids.length,
       highestBid:

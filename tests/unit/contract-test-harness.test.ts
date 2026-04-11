@@ -37,11 +37,11 @@ const Counter = defineActor("counter", {
     }),
   },
   views: {
-    admin: view(CounterView, (state: CounterState) => ({
+    admin: view.shared(CounterView, (state: CounterState) => ({
       count: state.count,
       name: state.name,
     })),
-    viewer: view(SummaryView, (state: CounterState) => ({
+    viewer: view.shared(SummaryView, (state: CounterState) => ({
       total: state.count,
     })),
   },
@@ -145,7 +145,7 @@ describe("contract-derived test harness", () => {
         }),
       },
       views: {
-        user: view(CounterView, (state: CounterState) => ({
+        user: view.shared(CounterView, (state: CounterState) => ({
           count: state.count,
           name: state.name,
         })),

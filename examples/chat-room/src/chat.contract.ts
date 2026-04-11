@@ -36,7 +36,7 @@ export const ChatRoomContract = defineActor("chat-room", {
   },
 
   views: {
-    user: view(ChatViewSchema, (state: ChatState) => ({
+    user: view.shared(ChatViewSchema, (state: ChatState) => ({
       messages: state.messages.map((m) => ({
         id: m.id,
         author: m.author,

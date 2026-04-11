@@ -33,5 +33,5 @@ export type {
 } from "./types";
 
 // View
-export type { ViewDef } from "./view";
+export type { PerCallerViewDef, SharedViewDef, ViewDef } from "./view";
 export { view } from "./view";

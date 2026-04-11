@@ -21,7 +21,7 @@ describe("testActor with guards", () => {
     roles: { user: () => true },
     messages: { user: { INCREMENT: increment, RESET: reset } },
     views: {
-      user: view(CountView, (state: State) => ({ count: state.count })),
+      user: view.shared(CountView, (state: State) => ({ count: state.count })),
     },
   };
 

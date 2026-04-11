@@ -19,11 +19,11 @@ const ProfileContract = defineActor("profile", {
   },
   messages: {},
   views: {
-    self: view(ProfileView, (state: { name: string; level: number }) => ({
+    self: view.shared(ProfileView, (state: { name: string; level: number }) => ({
       name: state.name,
       level: state.level,
     })),
-    actor: view(ProfilePublicView, (state: { name: string }) => ({
+    actor: view.shared(ProfilePublicView, (state: { name: string }) => ({
       name: state.name,
     })),
   },
@@ -43,15 +43,15 @@ const GameContract = defineActor("game", {
   },
   messages: {},
   views: {
-    admin: view(AdminGameView, (state: { count: number; revenue: number }) => ({
+    admin: view.shared(AdminGameView, (state: { count: number; revenue: number }) => ({
       count: state.count,
       revenue: state.revenue,
     })),
-    player: view(PlayerGameView, (state: { count: number; score: number }) => ({
+    player: view.shared(PlayerGameView, (state: { count: number; score: number }) => ({
       count: state.count,
       score: state.score,
     })),
-    spectator: view(SpectatorGameView, (state: { count: number }) => ({
+    spectator: view.shared(SpectatorGameView, (state: { count: number }) => ({
       count: state.count,
     })),
   },
@@ -183,7 +183,7 @@ describe("links in actor definition", () => {
       }),
     },
     views: {
-      owner: view(schema({ profileId: string }), (state: PlayerState) => ({ profileId: state.profileId })),
+      owner: view.shared(schema({ profileId: string }), (state: PlayerState) => ({ profileId: state.profileId })),
     },
     links: {
       profile: link(ProfileContract, {
@@ -261,7 +261,7 @@ describe("testActor with links", () => {
       }),
     },
     views: {
-      owner: view(schema({ profileId: string }), (state: PlayerState) => ({ profileId: state.profileId })),
+      owner: view.shared(schema({ profileId: string }), (state: PlayerState) => ({ profileId: state.profileId })),
     },
     links: {
       profile: link(ProfileContract, {
@@ -344,7 +344,7 @@ describe("testActor with links", () => {
         ),
       },
       views: {
-        user: view(schema({ count: uint32 }), () => ({ count: 0 })),
+        user: view.shared(schema({ count: uint32 }), () => ({ count: 0 })),
       },
       links: {
         game: link(GameContract, {

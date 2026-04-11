@@ -55,7 +55,8 @@ interface ActorDef {
   views: Record<
     string,
     {
-      fn(state: unknown, caller: string): unknown; // bivariant
+      kind?: "shared" | "perCaller"; // undefined = legacy (treated as perCaller)
+      fn(state: unknown, caller: string): unknown; // bivariant — shared views ignore caller
       schema?: { fields: readonly { name: string; type: string }[] }; // optional schema for binary encoding
     }
   >;

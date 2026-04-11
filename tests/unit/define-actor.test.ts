@@ -39,11 +39,11 @@ const Counter = defineActor("counter", {
     user: { INCREMENT: increment },
   },
   views: {
-    admin: view(CounterView, (state: CounterState) => ({
+    admin: view.shared(CounterView, (state: CounterState) => ({
       count: state.count,
       lastCaller: state.lastCaller ?? "",
     })),
-    user: view(CounterView, (state: CounterState) => ({
+    user: view.shared(CounterView, (state: CounterState) => ({
       count: state.count,
       lastCaller: state.lastCaller ?? "",
     })),

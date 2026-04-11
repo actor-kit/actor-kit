@@ -55,15 +55,15 @@ const todoActorDef = {
     viewer: {},
   },
   views: {
-    owner: view(OwnerView, (state: State) => ({
+    owner: view.shared(OwnerView, (state: State) => ({
       todos: state.todos,
       memberCount: state.memberIds.length,
     })),
-    member: view(OwnerView, (state: State) => ({
+    member: view.shared(OwnerView, (state: State) => ({
       todos: state.todos,
       memberCount: state.memberIds.length,
     })),
-    viewer: view(ViewerView, (state: State) => ({
+    viewer: view.shared(ViewerView, (state: State) => ({
       todoCount: state.todos.length,
       doneCount: state.todos.filter((t) => t.done).length,
     })),

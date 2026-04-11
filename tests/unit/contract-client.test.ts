@@ -28,7 +28,7 @@ const Counter = defineActor("counter", {
     })),
   },
   views: {
-    user: view(CounterView, (state: CounterState) => ({
+    user: view.shared(CounterView, (state: CounterState) => ({
       count: state.count,
       name: state.name,
     })),
@@ -171,11 +171,11 @@ describe("contract-derived client", () => {
         INC: message(z.object({}), (state: CounterState) => state),
       },
       views: {
-        admin: view(CounterView, (state: CounterState) => ({
+        admin: view.shared(CounterView, (state: CounterState) => ({
           count: state.count,
           name: state.name,
         })),
-        viewer: view(MultiViewSchema, (state: CounterState) => ({
+        viewer: view.shared(MultiViewSchema, (state: CounterState) => ({
           total: state.count,
         })),
       },

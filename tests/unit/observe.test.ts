@@ -27,7 +27,7 @@ describe("observe.onTransition", () => {
       roles: { user: () => true },
       messages: { user: { INCREMENT: increment } },
       views: {
-        user: view(CountView, (state: State) => ({ count: state.count })),
+        user: view.shared(CountView, (state: State) => ({ count: state.count })),
       },
       observe: {
         onTransition(
@@ -76,7 +76,7 @@ describe("observe.onTransition", () => {
       },
       messages: { admin: { INCREMENT: increment } },
       views: {
-        admin: view(CountView, (state: State) => ({ count: state.count })),
+        admin: view.shared(CountView, (state: State) => ({ count: state.count })),
       },
       observe: {
         onTransition() {

@@ -21,7 +21,7 @@ describe("testActor — kill survivors", () => {
     },
     messages: { owner: { INCREMENT: increment } },
     views: {
-      owner: view(CountView, (state: State) => ({ count: state.count })),
+      owner: view.shared(CountView, (state: State) => ({ count: state.count })),
     },
   };
 
@@ -73,8 +73,8 @@ describe("testActor — kill survivors", () => {
         owner: { INCREMENT: increment },
       },
       views: {
-        service: view(CountView, (state: State) => ({ count: state.count })),
-        owner: view(CountView, (state: State) => ({ count: state.count })),
+        service: view.shared(CountView, (state: State) => ({ count: state.count })),
+        owner: view.shared(CountView, (state: State) => ({ count: state.count })),
       },
     };
     const t = testActor(defWithService);

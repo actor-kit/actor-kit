@@ -23,16 +23,16 @@ const GameContract = defineActor("game", {
     INC: message(z.object({}), (state: GameState) => state),
   },
   views: {
-    admin: view(AdminView, (state: GameState) => ({
+    admin: view.shared(AdminView, (state: GameState) => ({
       count: state.count,
       revenue: state.revenue,
       name: state.name,
     })),
-    player: view(PlayerView, (state: GameState) => ({
+    player: view.shared(PlayerView, (state: GameState) => ({
       count: state.count,
       score: state.score,
     })),
-    spectator: view(SpectatorView, (state: GameState) => ({
+    spectator: view.shared(SpectatorView, (state: GameState) => ({
       count: state.count,
     })),
   },

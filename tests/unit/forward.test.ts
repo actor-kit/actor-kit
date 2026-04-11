@@ -65,7 +65,7 @@ const ForwardContract = defineActor("forwarder", {
     FORWARD_LINKS: forwardDifferentLinks,
   },
   views: {
-    user: view(CounterView, (s: CounterState) => ({ count: s.count, label: "" })),
+    user: view.shared(CounterView, (s: CounterState) => ({ count: s.count, label: "" })),
   },
 });
 

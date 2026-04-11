@@ -81,11 +81,11 @@ const CounterContract = defineActor("counter", {
     FORWARD_TO: forwardTo,
   },
   views: {
-    admin: view(CounterView, (state: CounterState) => ({
+    admin: view.shared(CounterView, (state: CounterState) => ({
       count: state.count,
       lastCaller: state.lastCaller ?? "",
     })),
-    user: view(CounterView, (state: CounterState) => ({
+    user: view.shared(CounterView, (state: CounterState) => ({
       count: state.count,
       lastCaller: state.lastCaller ?? "",
     })),
@@ -124,7 +124,7 @@ const NullableCounterContract = defineActor("nullable-counter", {
     CLEAR_UPDATER: clearUpdater,
   },
   views: {
-    user: view(NullableCounterView, (state: NullableCounterState) => ({
+    user: view.shared(NullableCounterView, (state: NullableCounterState) => ({
       count: state.count,
       lastUpdatedBy: state.lastUpdatedBy,
     })),

@@ -84,15 +84,15 @@ export const TodoListContract = defineActor("todo-list", {
   },
 
   views: {
-    owner: view(OwnerViewSchema, (state: TodoState) => ({
+    owner: view.shared(OwnerViewSchema, (state: TodoState) => ({
       todos: state.todos,
       memberCount: state.memberIds.length,
     })),
-    member: view(OwnerViewSchema, (state: TodoState) => ({
+    member: view.shared(OwnerViewSchema, (state: TodoState) => ({
       todos: state.todos,
       memberCount: state.memberIds.length,
     })),
-    viewer: view(ViewerViewSchema, (state: TodoState) => ({
+    viewer: view.shared(ViewerViewSchema, (state: TodoState) => ({
       todoCount: state.todos.length,
       doneCount: state.todos.filter((t) => t.done).length,
     })),
