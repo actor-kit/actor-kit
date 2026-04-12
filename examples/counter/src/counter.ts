@@ -56,6 +56,8 @@ export const CounterContract = defineActor("counter", {
       lastUpdatedBy: state.lastUpdatedBy,
     })),
   },
+
+  studio: { enabled: true },
 });
 
 export type CounterContract = typeof CounterContract;

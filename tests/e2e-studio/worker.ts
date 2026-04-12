@@ -1,0 +1,87 @@
+/**
+ * Minimal Worker for Studio E2E testing.
+ * Exports a Counter actor with studio enabled + studio middleware.
+ */
+
+import { nullable, schema, string, uint32, view } from "@actor-kit/core";
+import { actorKitStudio, StudioRegistry } from "@actor-kit/studio";
+import { createActorClass, defineActor, message, withCallerIdentity } from "@actor-kit/worker";
+import { z } from "zod";
+
+// --- Counter actor ---
+
+type CounterState = { count: number; lastUpdatedBy: string | null };
+
+const CounterViewSchema = schema({ count: uint32, lastUpdatedBy: nullable(string) });
+
+const CounterContract = defineActor("counter", {
+  input: z.object({}),
+  init: (): CounterState => ({ count: 0, lastUpdatedBy: null }),
+  roles: { user: () => true },
+  messages: {
+    INCREMENT: message(z.object({}), (state: CounterState, _payload, { caller }) => ({
+      ...state,
+      count: state.count + 1,
+      lastUpdatedBy: caller,
+    })),
+  },
+  views: {
+    user: view.shared(CounterViewSchema, (state: CounterState) => ({
+      count: state.count,
+      lastUpdatedBy: state.lastUpdatedBy,
+    })),
+  },
+  studio: { enabled: true },
+});
+
+export const Counter = createActorClass(CounterContract);
+export { StudioRegistry };
+
+// --- Worker fetch ---
+
+export default {
+  async fetch(request: Request, env: Record<string, unknown>, ctx: ExecutionContext): Promise<Response> {
+    // Studio middleware first
+    const studioResponse = actorKitStudio(request, env, ctx);
+    if (studioResponse) return studioResponse;
+
+    const url = new URL(request.url);
+
+    // Seed endpoint: creates an actor and sends messages
+    if (url.pathname === "/seed" && request.method === "POST") {
+      const body = (await request.json()) as { actorId: string; count: number };
+      const ns = env["COUNTER"] as { idFromName(name: string): unknown; get(id: unknown): Record<string, unknown> };
+      const id = ns.idFromName(body.actorId);
+      const stub = ns.get(id);
+
+      // Spawn
+      await (stub["spawn"] as Function)({
+        actorId: body.actorId,
+        caller: "e2e-test",
+        callerType: "user",
+        input: {},
+      });
+
+      // Increment N times
+      for (let i = 0; i < body.count; i++) {
+        await (stub["send"] as Function)("e2e-test", "user", { type: "INCREMENT" });
+      }
+
+      return Response.json({ ok: true, actorId: body.actorId, count: body.count });
+    }
+
+    // WebSocket upgrade for counter (for testing with real clients)
+    if (url.pathname.startsWith("/api/counter/") && request.headers.get("Upgrade") === "websocket") {
+      const actorId = url.pathname.split("/")[3];
+      if (!actorId) return new Response("Missing actor ID", { status: 400 });
+
+      const ns = env["COUNTER"] as { idFromName(name: string): unknown; get(id: unknown): Record<string, unknown> };
+      const id = ns.idFromName(actorId);
+      const stub = ns.get(id);
+      const stampedRequest = withCallerIdentity(request, { callerId: "e2e-user", callerType: "user" });
+      return (stub["fetch"] as Function)(stampedRequest) as Promise<Response>;
+    }
+
+    return new Response("Studio E2E test worker", { status: 200 });
+  },
+};
