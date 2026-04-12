@@ -10,6 +10,8 @@
  * - Serving the bundled SPA
  */
 
+import { getAsset } from "./ui-assets";
+
 // Identity header constants (duplicated from @actor-kit/worker to avoid cloudflare:workers dependency)
 const CALLER_ID_HEADER = "X-Actor-Kit-Caller-Id";
 const CALLER_TYPE_HEADER = "X-Actor-Kit-Caller-Type";
@@ -150,10 +152,19 @@ export function actorKitStudio(
     return handleStudioWebSocket(request, wsMatch[1], decodeURIComponent(wsMatch[2]), env);
   }
 
-  // SPA fallback — serve index.html for all other studio routes
-  return new Response("<!-- Actor Kit Studio -->", {
-    headers: { "Content-Type": "text/html" },
-  });
+  // Serve embedded UI assets (SPA with fallback to index.html)
+  const asset = getAsset(path || "/index.html");
+  if (asset) {
+    return new Response(asset.body, {
+      headers: {
+        "Content-Type": asset.contentType,
+        "Cache-Control": asset.contentType === "text/html" ? "no-cache" : "public, max-age=31536000, immutable",
+      },
+    });
+  }
+
+  // Final fallback
+  return new Response("Not found", { status: 404 });
 }
 
 // --- Auth ---

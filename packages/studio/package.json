@@ -9,15 +9,23 @@
     }
   },
   "scripts": {
-    "typecheck": "tsc --noEmit",
-    "build": "tsdown"
+    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p ui/tsconfig.json",
+    "build:ui": "cd ui && npx vite build && cd .. && npx tsx scripts/embed-ui.ts",
+    "build": "pnpm build:ui && tsdown"
   },
   "dependencies": {
     "@actor-kit/core": "workspace:*",
     "workers-qb": "^1.13.0"
   },
   "devDependencies": {
-    "@cloudflare/workers-types": "^4.20250310.0"
+    "@cloudflare/workers-types": "^4.20250310.0",
+    "@tailwindcss/vite": "^4.1.18",
+    "@tanstack/react-router": "1.166.7",
+    "@vitejs/plugin-react": "^5.1.4",
+    "react": "^19.2.5",
+    "react-dom": "^19.2.5",
+    "tailwindcss": "^4.1.18",
+    "vite": "^7.3.1"
   },
   "license": "MIT",
   "author": "Jonathan Mumm",
