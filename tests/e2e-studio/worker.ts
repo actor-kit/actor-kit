@@ -50,21 +50,28 @@ export default {
     // Seed endpoint: creates an actor and sends messages
     if (url.pathname === "/seed" && request.method === "POST") {
       const body = (await request.json()) as { actorId: string; count: number };
-      const ns = env["COUNTER"] as { idFromName(name: string): unknown; get(id: unknown): Record<string, unknown> };
-      const id = ns.idFromName(body.actorId);
-      const stub = ns.get(id);
+      const ns = env["COUNTER"] as DurableObjectNamespace;
+      const stub = ns.get(ns.idFromName(body.actorId));
 
-      // Spawn
-      await (stub["spawn"] as Function)({
-        actorId: body.actorId,
-        caller: "e2e-test",
-        callerType: "user",
-        input: {},
-      });
+      // Spawn via RPC
+      const spawnFn = (stub as Record<string, unknown>)["spawn"];
+      if (typeof spawnFn === "function") {
+        await (spawnFn as (input: Record<string, unknown>) => Promise<void>)({
+          actorId: body.actorId,
+          caller: "e2e-test",
+          callerType: "user",
+          input: {},
+        });
+      }
 
-      // Increment N times
-      for (let i = 0; i < body.count; i++) {
-        await (stub["send"] as Function)("e2e-test", "user", { type: "INCREMENT" });
+      // Increment N times via RPC
+      const sendFn = (stub as Record<string, unknown>)["send"];
+      if (typeof sendFn === "function") {
+        for (let i = 0; i < body.count; i++) {
+          await (sendFn as (c: string, t: string, e: Record<string, unknown>) => Promise<unknown>)("e2e-test", "user", {
+            type: "INCREMENT",
+          });
+        }
       }
 
       return Response.json({ ok: true, actorId: body.actorId, count: body.count });
@@ -75,11 +82,10 @@ export default {
       const actorId = url.pathname.split("/")[3];
       if (!actorId) return new Response("Missing actor ID", { status: 400 });
 
-      const ns = env["COUNTER"] as { idFromName(name: string): unknown; get(id: unknown): Record<string, unknown> };
-      const id = ns.idFromName(actorId);
-      const stub = ns.get(id);
+      const ns = env["COUNTER"] as DurableObjectNamespace;
+      const stub = ns.get(ns.idFromName(actorId));
       const stampedRequest = withCallerIdentity(request, { callerId: "e2e-user", callerType: "user" });
-      return (stub["fetch"] as Function)(stampedRequest) as Promise<Response>;
+      return stub.fetch(stampedRequest);
     }
 
     return new Response("Studio E2E test worker", { status: 200 });

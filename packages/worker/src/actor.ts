@@ -22,6 +22,34 @@ import { createOutbox } from "./runtime/outbox";
 import { resolveNamespace } from "./runtime/resolve-namespace";
 import { resolveRole } from "./runtime/roles";
 
+// --- Studio registry helpers ---
+
+/**
+ * Runtime type guard for DurableObjectNamespace.
+ * Used to detect StudioRegistry in env bindings without compile-time knowledge of the binding.
+ */
+function looksLikeDONamespace(val: unknown): boolean {
+  if (typeof val !== "object" || val === null) return false;
+  return "idFromName" in val && "get" in val;
+}
+
+/**
+ * Resolve a singleton DO stub from a namespace-like binding.
+ * Returns a stub with fire-and-forget RPC methods, or null if resolution fails.
+ * The caller must use bracket-notation RPC since the stub type is not statically known.
+ */
+function resolveSingletonStub(binding: unknown, name: string): DurableObjectStub | null {
+  if (!looksLikeDONamespace(binding)) return null;
+  try {
+    // Runtime: binding is a DurableObjectNamespace from CF. Call its methods directly.
+    const ns = binding as DurableObjectNamespace;
+    const doId = ns.idFromName(name);
+    return ns.get(doId);
+  } catch {
+    return null;
+  }
+}
+
 // --- Actor definition ---
 
 // Runtime actor definition — uses structural types that erase generics.
@@ -250,6 +278,8 @@ export function actor(
     actorId: string | undefined = undefined; // Human-readable ID (the name passed to idFromName)
     initialized = false;
     version: number;
+    /** env stored with index signature — the base DurableObject.env lacks it. */
+    envBindings: Record<string, unknown>;
     // Keyed by WebSocket (not caller) to support multi-tab/multi-device
     connections = new Map<WebSocket, { caller: string; callerType: "user" | "service" }>();
     previousViews = new Map<WebSocket, string>(); // dedupe key: "role:json"
@@ -264,11 +294,12 @@ export function actor(
     pendingCause: MutationCause | null = null; // Set before persistState(), consumed by persistState()
     timelineSize = 500; // Ring buffer max entries
     studioConnections = new Set<WebSocket>(); // Studio WebSocket connections (separate from app connections)
-    registryStub: Record<string, unknown> | null = null; // Cached StudioRegistry stub for RPC
+    registryStub: DurableObjectStub | null = null; // Cached StudioRegistry stub for RPC
     lastRegistryTouch = 0; // Timestamp of last registry touch (for debouncing)
 
     constructor(ctx: DurableObjectState, env: Record<string, unknown>) {
       super(ctx, env);
+      this.envBindings = env;
       this.version = def.version ?? 1;
       this.timelineSize = def.studio?.timelineSize ?? 500;
       // Load state before any requests are served.
@@ -345,26 +376,28 @@ export function actor(
       }
     }
 
-    /** Detect StudioRegistry in ctx.exports and cache the stub. */
+    /** Detect StudioRegistry in ctx.exports or env and cache the stub. */
     detectStudio(): boolean {
+      // Try ctx.exports first (production with enable_ctx_exports)
       const exports = getExports(this.ctx);
-      if (!exports) return false;
-      for (const [, val] of Object.entries(exports)) {
-        if (typeof val === "object" && val !== null && "__actorKitStudioRegistry" in val) {
-          // val is a DurableObjectNamespace — resolve a singleton stub (id = "registry")
-          try {
-            const ns = val as unknown as {
-              idFromName(name: string): unknown;
-              get(id: unknown): Record<string, unknown>;
-            };
-            const doId = ns.idFromName("registry");
-            this.registryStub = ns.get(doId);
-          } catch {
-            // Failed to resolve — studio detection succeeds (for timeline) but no registry
+      if (exports) {
+        for (const [, val] of Object.entries(exports)) {
+          if (typeof val === "object" && val !== null && "__actorKitStudioRegistry" in val) {
+            const stub = resolveSingletonStub(val, "registry");
+            if (stub) this.registryStub = stub;
+            return true;
           }
-          return true;
         }
       }
+
+      // Fall back to env.STUDIO_REGISTRY binding (works in wrangler dev)
+      const registryBinding: unknown = this.envBindings["STUDIO_REGISTRY"];
+      if (looksLikeDONamespace(registryBinding)) {
+        const stub = resolveSingletonStub(registryBinding, "registry");
+        if (stub) this.registryStub = stub;
+        return true;
+      }
+
       return false;
     }
 
@@ -376,16 +409,18 @@ export function actor(
       this.lastRegistryTouch = now;
 
       try {
-        const stub = this.registryStub;
-        if (typeof stub["touch"] === "function") {
-          void (stub["touch"] as (actorType: string, actorId: string, version: number) => Promise<void>)(
+        // RPC via Cloudflare's stub proxy — touch() is defined on StudioRegistry DO class
+        const stub: Record<string, unknown> = this.registryStub;
+        const touchFn = stub["touch"];
+        if (typeof touchFn === "function") {
+          void (touchFn as (t: string, id: string, v: number) => Promise<void>)(
             _actorName,
             this.actorId ?? this.ctx.id.toString(),
             this.version,
           );
         }
       } catch {
-        // Fire and forget — ignore errors
+        // Fire and forget
       }
     }
 
@@ -394,9 +429,10 @@ export function actor(
       if (this.registryStub === null) return;
 
       try {
-        const stub = this.registryStub;
-        if (typeof stub["updateConnections"] === "function") {
-          void (stub["updateConnections"] as (actorType: string, actorId: string, count: number) => Promise<void>)(
+        const stub: Record<string, unknown> = this.registryStub;
+        const updateFn = stub["updateConnections"];
+        if (typeof updateFn === "function") {
+          void (updateFn as (t: string, id: string, c: number) => Promise<void>)(
             _actorName,
             this.actorId ?? this.ctx.id.toString(),
             this.connections.size,
