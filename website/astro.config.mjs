@@ -66,6 +66,13 @@ export default defineConfig({
             { slug: "recipes/storybook" },
           ],
         },
+        {
+          label: "Studio",
+          items: [
+            { slug: "studio/overview" },
+            { slug: "studio/setup" },
+          ],
+        },
         { slug: "faq", label: "FAQ" },
         {
           label: "API Reference",
@@ -75,6 +82,7 @@ export default defineConfig({
             { slug: "api/react", label: "react" },
             { slug: "api/test", label: "test" },
             { slug: "api/storybook", label: "storybook" },
+            { slug: "api/studio", label: "studio" },
           ],
         },
       ],

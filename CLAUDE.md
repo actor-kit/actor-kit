@@ -26,7 +26,8 @@ actor-kit-2/
 │   ├── client/            → @actor-kit/client: actorClient(), WebSocket connection, binary decoding
 │   ├── react/             → @actor-kit/react: actorContext(), useView(), useSend(), useRole()
 │   ├── test/              → @actor-kit/test: testActor(), emission capture, view assertions
-│   └── storybook/         → @actor-kit/storybook: withActorKit(), createMockClient()
+│   ├── storybook/         → @actor-kit/storybook: withActorKit(), createMockClient()
+│   └── studio/            → @actor-kit/studio: actorKitStudio(), StudioRegistry, introspection
 ├── tests/
 │   ├── unit/              → Pure logic tests (no CF runtime)
 │   └── integration/       → vitest-pool-workers (full DO lifecycle)
@@ -154,6 +155,7 @@ Do NOT load all docs upfront. Load only when relevant to the current task.
 | Binary encoding (`src/schema/`) | [docs/binary-protocol.md](docs/binary-protocol.md) |
 | DO runtime (`src/runtime/`) | [docs/architecture.md](docs/architecture.md) § Runtime |
 | Test infrastructure | [docs/testing-strategy.md](docs/testing-strategy.md) |
+| Studio instrumentation | [docs/specs/actor-kit-studio.md](docs/specs/actor-kit-studio.md) |
 | Any architectural decision | Create new ADR in [docs/adrs/](docs/adrs/) |
 
 ## Off-limits
