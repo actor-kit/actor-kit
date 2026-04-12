@@ -93,6 +93,8 @@ interface ActorDef {
   serialize?(state: unknown): unknown;
   restore?(serialized: unknown): unknown;
   studio?: {
+    /** Force-enable timeline recording regardless of ctx.exports detection. */
+    enabled?: boolean;
     timelineSize?: number;
   };
 }
@@ -285,8 +287,8 @@ export function actor(
 
       this.runMigrations();
 
-      // Detect StudioRegistry in ctx.exports — enables timeline instrumentation
-      this.studioEnabled = this.detectStudio();
+      // Enable timeline instrumentation: explicit config OR StudioRegistry detected in ctx.exports
+      this.studioEnabled = def.studio?.enabled === true || this.detectStudio();
 
       const rows = this.ctx.storage.sql.exec("SELECT state, version, actor_id FROM snapshots WHERE id = 1").toArray();
 
@@ -460,7 +462,7 @@ export function actor(
     /** Prune timeline to keep at most timelineSize entries. */
     pruneTimeline(): void {
       this.ctx.storage.sql.exec(
-        "DELETE FROM timeline WHERE id NOT IN (SELECT id FROM timeline ORDER BY created_at DESC LIMIT ?)",
+        "DELETE FROM timeline WHERE id NOT IN (SELECT id FROM timeline ORDER BY id DESC LIMIT ?)",
         this.timelineSize,
       );
     }
@@ -1657,7 +1659,7 @@ export function actor(
       // Timeline entries
       const timelineRows = this.ctx.storage.sql
         .exec(
-          "SELECT id, cause_type, cause_data, state_snapshot, checksum, created_at FROM timeline ORDER BY created_at DESC LIMIT 50",
+          "SELECT id, cause_type, cause_data, state_snapshot, checksum, created_at FROM timeline ORDER BY id DESC LIMIT 50",
         )
         .toArray();
       const timeline = timelineRows.map((row) => ({
@@ -1671,7 +1673,7 @@ export function actor(
 
       // Outbox
       const execRows = this.ctx.storage.sql
-        .exec("SELECT id, service, payload, status, attempts, created_at FROM executions ORDER BY created_at DESC")
+        .exec("SELECT id, service, payload, status, attempts, created_at FROM executions ORDER BY id DESC")
         .toArray();
       const outbox = execRows.map((row) => ({
         id: row["id"] as string,
@@ -1797,7 +1799,7 @@ export function actor(
 
       // Outbox / executions
       const execRows = this.ctx.storage.sql
-        .exec("SELECT id, service, payload, status, attempts, created_at FROM executions ORDER BY created_at DESC")
+        .exec("SELECT id, service, payload, status, attempts, created_at FROM executions ORDER BY id DESC")
         .toArray();
       const outbox = execRows.map((row) => ({
         id: row["id"] as string,
@@ -1860,7 +1862,7 @@ export function actor(
       if (before !== undefined) {
         rows = this.ctx.storage.sql
           .exec(
-            "SELECT id, cause_type, cause_data, state_snapshot, checksum, created_at FROM timeline WHERE id < ? ORDER BY created_at DESC LIMIT ?",
+            "SELECT id, cause_type, cause_data, state_snapshot, checksum, created_at FROM timeline WHERE id < ? ORDER BY id DESC LIMIT ?",
             before,
             limit + 1,
           )
@@ -1868,7 +1870,7 @@ export function actor(
       } else {
         rows = this.ctx.storage.sql
           .exec(
-            "SELECT id, cause_type, cause_data, state_snapshot, checksum, created_at FROM timeline ORDER BY created_at DESC LIMIT ?",
+            "SELECT id, cause_type, cause_data, state_snapshot, checksum, created_at FROM timeline ORDER BY id DESC LIMIT ?",
             limit + 1,
           )
           .toArray();

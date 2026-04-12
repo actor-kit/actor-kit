@@ -19,6 +19,7 @@ export default defineWorkersConfig({
       "reconnect.test.ts",
       "views.test.ts",
       "nullable-views.test.ts",
+      "studio.test.ts",
     ],
   },
 });

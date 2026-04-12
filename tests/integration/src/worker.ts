@@ -90,6 +90,7 @@ const CounterContract = defineActor("counter", {
       lastCaller: state.lastCaller ?? "",
     })),
   },
+  studio: { enabled: true },
 });
 
 export const Counter = createActorClass(CounterContract);
