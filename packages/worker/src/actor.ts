@@ -318,8 +318,10 @@ export function actor(
 
       this.runMigrations();
 
-      // Enable timeline instrumentation: explicit config OR StudioRegistry detected in ctx.exports
-      this.studioEnabled = def.studio?.enabled === true || this.detectStudio();
+      // Enable timeline instrumentation: always try to detect registry (for auto-registration),
+      // then OR with explicit config flag
+      const registryDetected = this.detectStudio();
+      this.studioEnabled = registryDetected || def.studio?.enabled === true;
 
       const rows = this.ctx.storage.sql.exec("SELECT state, version, actor_id FROM snapshots WHERE id = 1").toArray();
 
