@@ -1,6 +1,7 @@
 import { Link, useParams } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { type InspectResult, type TimelineEntry, fetchInspect, fetchTimeline } from "../api";
+import { JsonDiff } from "../components/json-diff";
 import { JsonTree } from "../components/json-tree";
 
 const CAUSE_LABELS: Record<string, { label: string; color: string }> = {
@@ -136,9 +137,13 @@ export function ActorDetailPage() {
       {activeTab === "timeline" && (
         <div className="space-y-1" data-testid="timeline-panel">
           {timeline.length === 0 && <p className="text-zinc-500">No timeline entries.</p>}
-          {timeline.map((entry) => {
+          {timeline.map((entry, idx) => {
             const cause = CAUSE_LABELS[entry.causeType] ?? { label: entry.causeType, color: "bg-zinc-700" };
             const isExpanded = expandedEntry === entry.id;
+            // Previous state is the next entry in the array (timeline is newest-first)
+            const prevEntry = timeline[idx + 1];
+            const prevState = prevEntry ? JSON.parse(prevEntry.stateSnapshot) : null;
+            const currentState = JSON.parse(entry.stateSnapshot);
             return (
               <div key={entry.id} className="border border-zinc-800 rounded">
                 <button
@@ -152,6 +157,14 @@ export function ActorDetailPage() {
                 </button>
                 {isExpanded && (
                   <div className="px-3 pb-3 border-t border-zinc-800/50 space-y-2">
+                    {prevState && (
+                      <div>
+                        <p className="text-xs text-zinc-500 mb-1">Changes:</p>
+                        <div className="bg-zinc-950 rounded p-2 text-xs">
+                          <JsonDiff before={prevState} after={currentState} />
+                        </div>
+                      </div>
+                    )}
                     <div>
                       <p className="text-xs text-zinc-500 mb-1">Cause data:</p>
                       <div className="bg-zinc-950 rounded p-2 text-xs">
@@ -161,7 +174,7 @@ export function ActorDetailPage() {
                     <div>
                       <p className="text-xs text-zinc-500 mb-1">State after:</p>
                       <div className="bg-zinc-950 rounded p-2 text-xs">
-                        <JsonTree data={JSON.parse(entry.stateSnapshot)} />
+                        <JsonTree data={currentState} />
                       </div>
                     </div>
                   </div>

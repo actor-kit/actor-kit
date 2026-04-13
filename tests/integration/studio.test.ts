@@ -362,6 +362,62 @@ describe("Studio instrumentation (integration)", () => {
       await new Promise((r) => setTimeout(r, 50));
     });
   });
+
+  describe("ring buffer pruning", () => {
+    it("caps timeline entries at the configured timelineSize (default 500)", async () => {
+      const actorId = `ring-buffer-${Date.now()}`;
+      const id = env.COUNTER.idFromName(actorId);
+      const stub = env.COUNTER.get(id);
+
+      await stub.spawn({ actorId, caller: "user-1", callerType: "user", input: {} });
+
+      // Send enough messages to exceed the 500 default limit
+      // init(1) + 510 messages = 511 total, should be pruned to 500
+      for (let i = 0; i < 510; i++) {
+        await stub.send("user-1", "user", { type: "INCREMENT", amount: 1 });
+      }
+
+      const result = (await stub.__getTimeline({ limit: 600 })) as {
+        entries: Array<{ id: number; causeType: string }>;
+        hasMore: boolean;
+      };
+
+      // Should be capped at 500 (the default timelineSize)
+      expect(result.entries.length).toBeLessThanOrEqual(500);
+      expect(result.entries.length).toBeGreaterThanOrEqual(490); // allow small variance from pruning timing
+
+      // The oldest entry should NOT be init (it was pruned)
+      const oldest = result.entries[result.entries.length - 1];
+      expect(oldest?.causeType).toBe("message");
+    });
+  });
+
+  describe("registry auto-registration", () => {
+    it("registers actors in the StudioRegistry via env.STUDIO_REGISTRY", async () => {
+      const actorId = `registry-${Date.now()}`;
+      const id = env.COUNTER.idFromName(actorId);
+      const stub = env.COUNTER.get(id);
+
+      await stub.spawn({ actorId, caller: "user-1", callerType: "user", input: {} });
+      await stub.send("user-1", "user", { type: "INCREMENT", amount: 1 });
+
+      // Give the debounced registry touch time to fire
+      await new Promise((r) => setTimeout(r, 100));
+
+      // Query the registry directly
+      const registryId = env.STUDIO_REGISTRY.idFromName("registry");
+      const registryStub = env.STUDIO_REGISTRY.get(registryId);
+      const actors = (await registryStub.listActors({})) as Array<{
+        actorType: string;
+        actorId: string;
+      }>;
+
+      // Our actor should be in the registry
+      expect(actors.length).toBeGreaterThanOrEqual(1);
+      const found = actors.some((a) => a.actorType === "counter");
+      expect(found).toBe(true);
+    });
+  });
 });
 
 // --- Helper ---

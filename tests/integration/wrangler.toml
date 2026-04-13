@@ -15,6 +15,10 @@ class_name = "Counter"
 name = "NULLABLE_COUNTER"
 class_name = "NullableCounter"
 
+[[durable_objects.bindings]]
+name = "STUDIO_REGISTRY"
+class_name = "StudioRegistry"
+
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["Counter"]
@@ -22,3 +26,7 @@ new_sqlite_classes = ["Counter"]
 [[migrations]]
 tag = "v2"
 new_sqlite_classes = ["NullableCounter"]
+
+[[migrations]]
+tag = "v3"
+new_sqlite_classes = ["StudioRegistry"]

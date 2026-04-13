@@ -1,6 +1,9 @@
 import { nullable, schema, string, uint32, view } from "@actor-kit/core";
+import { StudioRegistry } from "@actor-kit/studio";
 import { createActorClass, defineActor, message } from "@actor-kit/worker";
 import { z } from "zod";
+
+export { StudioRegistry };
 
 // --- Counter actor (v3: defineActor + flat messages + guards) ---
 
