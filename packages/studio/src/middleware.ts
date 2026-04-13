@@ -25,13 +25,20 @@ function looksLikeDONamespace(val: unknown): boolean {
   return typeof val === "object" && val !== null && "idFromName" in val && "get" in val;
 }
 
-/** Resolve a DO stub from an env binding. Returns null if binding doesn't exist or isn't a DO namespace. */
+/** Check if a string looks like a hex DO ID (64 hex chars). */
+function isHexId(id: string): boolean {
+  return /^[0-9a-f]{64}$/i.test(id);
+}
+
+/** Resolve a DO stub from an env binding. Accepts both human names and hex DO IDs. */
 function resolveStub(env: Record<string, unknown>, bindingName: string, actorId: string): DurableObjectStub | null {
   const binding: unknown = env[bindingName];
   if (!looksLikeDONamespace(binding)) return null;
   try {
     const ns = binding as DurableObjectNamespace;
-    return ns.get(ns.idFromName(actorId));
+    // If the actorId is a hex DO ID, use idFromString to avoid double-hashing
+    const doId = isHexId(actorId) ? ns.idFromString(actorId) : ns.idFromName(actorId);
+    return ns.get(doId);
   } catch {
     return null;
   }
