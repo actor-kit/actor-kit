@@ -1,1 +1,1 @@
-export { ChatRoom } from "./src/worker";
+export { ChatRoom, StudioRegistry } from "./src/worker";

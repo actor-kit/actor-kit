@@ -14,6 +14,7 @@
   "dependencies": {
     "@actor-kit/client": "workspace:*",
     "@actor-kit/core": "workspace:*",
+    "@actor-kit/studio": "workspace:*",
     "@actor-kit/react": "workspace:*",
     "@actor-kit/worker": "workspace:*",
     "@tailwindcss/vite": "^4.1.18",

@@ -5,8 +5,6 @@ description: Introspect and debug your actors in real-time with Actor Kit Studio
 
 Actor Kit Studio is a built-in debugging tool for actor-kit. Connect to any running actor and see its state, timeline, connections, outbox, and views — all updating in real-time.
 
-Think Drizzle Studio, but for actors.
-
 ## What you can see
 
 - **Current state** — live-updating JSON view of the actor's state

@@ -49,6 +49,8 @@ export const ChatRoomContract = defineActor("chat-room", {
     })),
   },
 
+  studio: { enabled: true },
+
   lifecycle: {
     connect: (
       state: ChatState,

@@ -2,7 +2,7 @@
 
 ## Goal
 
-A production-ready introspection and debugging tool for actor-kit. Developers connect to running actors and see a live timeline of every state mutation, current state, connections, outbox, links, and view projections. Think Drizzle Studio, but for actors.
+A production-ready introspection and debugging tool for actor-kit. Developers connect to running actors and see a live timeline of every state mutation, current state, connections, outbox, links, and view projections.
 
 ## Package
 

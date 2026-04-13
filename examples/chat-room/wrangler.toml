@@ -6,9 +6,17 @@ compatibility_flags = ["nodejs_compat"]
 name = "CHAT_ROOM"
 class_name = "ChatRoom"
 
+[[durable_objects.bindings]]
+name = "STUDIO_REGISTRY"
+class_name = "StudioRegistry"
+
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["ChatRoom"]
+
+[[migrations]]
+tag = "v2"
+new_sqlite_classes = ["StudioRegistry"]
 
 [env.preview]
 name = "actor-kit-chat-example-preview"
