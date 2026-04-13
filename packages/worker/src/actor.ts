@@ -1688,10 +1688,12 @@ export function actor(
 
     /** Build the initial studio snapshot payload. */
     buildStudioSnapshot(): Record<string, unknown> {
-      // Connections
+      // Connections — use getWebSockets() which survives DO hibernation
       const connections: Array<{ caller: string; callerType: "user" | "service" }> = [];
-      for (const [, info] of this.connections) {
-        connections.push({ caller: info.caller, callerType: info.callerType });
+      for (const ws of this.ctx.getWebSockets()) {
+        if (this.isStudioWs(ws)) continue;
+        const info = this.getCallerFromWs(ws);
+        if (info) connections.push({ caller: info.caller, callerType: info.callerType });
       }
 
       // Timeline entries
@@ -1829,10 +1831,12 @@ export function actor(
     }> {
       await this.loadState();
 
-      // Current connections
+      // Current connections — use getWebSockets() which survives DO hibernation
       const connList: Array<{ caller: string; callerType: "user" | "service" }> = [];
-      for (const [, info] of this.connections) {
-        connList.push({ caller: info.caller, callerType: info.callerType });
+      for (const ws of this.ctx.getWebSockets()) {
+        if (this.isStudioWs(ws)) continue; // Don't count studio connections
+        const info = this.getCallerFromWs(ws);
+        if (info) connList.push({ caller: info.caller, callerType: info.callerType });
       }
 
       // Outbox / executions
