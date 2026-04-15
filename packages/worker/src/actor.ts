@@ -1831,12 +1831,21 @@ export function actor(
     }> {
       await this.loadState();
 
-      // Current connections — use getWebSockets() which survives DO hibernation
+      // Current connections — try getWebSockets() (survives hibernation in production),
+      // fall back to in-memory connections map (works in wrangler dev/miniflare)
       const connList: Array<{ caller: string; callerType: "user" | "service" }> = [];
-      for (const ws of this.ctx.getWebSockets()) {
-        if (this.isStudioWs(ws)) continue; // Don't count studio connections
-        const info = this.getCallerFromWs(ws);
-        if (info) connList.push({ caller: info.caller, callerType: info.callerType });
+      const allWs = this.ctx.getWebSockets();
+      if (allWs.length > 0) {
+        for (const ws of allWs) {
+          if (this.isStudioWs(ws)) continue;
+          const info = this.getCallerFromWs(ws);
+          if (info) connList.push({ caller: info.caller, callerType: info.callerType });
+        }
+      } else {
+        // Fallback: in-memory map (populated when not hibernated)
+        for (const [, info] of this.connections) {
+          connList.push({ caller: info.caller, callerType: info.callerType });
+        }
       }
 
       // Outbox / executions
