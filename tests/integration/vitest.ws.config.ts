@@ -20,6 +20,7 @@ export default defineWorkersConfig({
       "views.test.ts",
       "nullable-views.test.ts",
       "studio.test.ts",
+      "studio-actor-id.test.ts",
     ],
   },
 });

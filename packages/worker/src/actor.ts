@@ -1036,7 +1036,18 @@ export function actor(
       input: unknown;
     }): Promise<void> {
       await this.loadState();
-      if (this.initialized) return; // Idempotent
+      if (this.initialized) {
+        // Already initialized (auto-spawn or prior spawn call).
+        // Update actorId if a human-readable name was provided and we only have the hex ID.
+        if (input.actorId && this.actorId !== input.actorId) {
+          this.actorId = input.actorId;
+          this.ctx.storage.sql.exec("UPDATE snapshots SET actor_id = ? WHERE id = 1", this.actorId);
+          // Force registry touch with the correct name (bypass debounce)
+          this.lastRegistryTouch = 0;
+          this.touchRegistry();
+        }
+        return;
+      }
 
       // Validate input
       const parsed = def.input.safeParse(input.input);
