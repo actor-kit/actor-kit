@@ -228,6 +228,17 @@ const ACTOR_KIT_MIGRATIONS = [
       CREATE INDEX IF NOT EXISTS idx_timeline_created ON timeline(created_at DESC);
     `,
   },
+  {
+    name: "0007_studio_connections",
+    sql: `
+      CREATE TABLE IF NOT EXISTS studio_connections (
+        caller TEXT NOT NULL,
+        caller_type TEXT NOT NULL,
+        connected_at INTEGER NOT NULL,
+        PRIMARY KEY (caller, caller_type)
+      );
+    `,
+  },
 ];
 
 // --- Helpers ---
@@ -1410,6 +1421,16 @@ export function actor(
       this.ctx.acceptWebSocket(server, tags);
       this.connections.set(server, { caller: callerInfo.caller, callerType: callerInfo.callerType });
 
+      // Persist connection to SQLite (survives hibernation)
+      if (this.studioEnabled) {
+        this.ctx.storage.sql.exec(
+          "INSERT OR REPLACE INTO studio_connections (caller, caller_type, connected_at) VALUES (?, ?, ?)",
+          callerInfo.caller,
+          callerInfo.callerType,
+          Date.now(),
+        );
+      }
+
       // Notify studio of new connection
       if (this.studioConnections.size > 0) {
         this.broadcastToStudio({
@@ -1609,6 +1630,15 @@ export function actor(
       this.connectionChecksums.delete(ws);
       this.supportsBinary.delete(ws);
 
+      // Remove connection from SQLite
+      if (this.studioEnabled) {
+        this.ctx.storage.sql.exec(
+          "DELETE FROM studio_connections WHERE caller = ? AND caller_type = ?",
+          caller,
+          info.callerType,
+        );
+      }
+
       // Notify studio of disconnection
       if (this.studioConnections.size > 0) {
         this.broadcastToStudio({
@@ -1699,13 +1729,14 @@ export function actor(
 
     /** Build the initial studio snapshot payload. */
     buildStudioSnapshot(): Record<string, unknown> {
-      // Connections — use getWebSockets() which survives DO hibernation
-      const connections: Array<{ caller: string; callerType: "user" | "service" }> = [];
-      for (const ws of this.ctx.getWebSockets()) {
-        if (this.isStudioWs(ws)) continue;
-        const info = this.getCallerFromWs(ws);
-        if (info) connections.push({ caller: info.caller, callerType: info.callerType });
-      }
+      // Connections — read from SQLite (survives hibernation)
+      const connRows = this.ctx.storage.sql
+        .exec("SELECT caller, caller_type FROM studio_connections ORDER BY connected_at")
+        .toArray();
+      const connections = connRows.map((row) => ({
+        caller: row["caller"] as string,
+        callerType: row["caller_type"] as "user" | "service",
+      }));
 
       // Timeline entries
       const timelineRows = this.ctx.storage.sql
@@ -1842,22 +1873,16 @@ export function actor(
     }> {
       await this.loadState();
 
-      // Current connections — try getWebSockets() (survives hibernation in production),
-      // fall back to in-memory connections map (works in wrangler dev/miniflare)
-      const connList: Array<{ caller: string; callerType: "user" | "service" }> = [];
-      const allWs = this.ctx.getWebSockets();
-      if (allWs.length > 0) {
-        for (const ws of allWs) {
-          if (this.isStudioWs(ws)) continue;
-          const info = this.getCallerFromWs(ws);
-          if (info) connList.push({ caller: info.caller, callerType: info.callerType });
-        }
-      } else {
-        // Fallback: in-memory map (populated when not hibernated)
-        for (const [, info] of this.connections) {
-          connList.push({ caller: info.caller, callerType: info.callerType });
-        }
-      }
+      // Current connections — read from SQLite (survives hibernation)
+      const connRows = this.studioEnabled
+        ? this.ctx.storage.sql
+            .exec("SELECT caller, caller_type FROM studio_connections ORDER BY connected_at")
+            .toArray()
+        : [];
+      const connList = connRows.map((row) => ({
+        caller: row["caller"] as string,
+        callerType: row["caller_type"] as "user" | "service",
+      }));
 
       // Outbox / executions
       const execRows = this.ctx.storage.sql

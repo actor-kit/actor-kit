@@ -363,6 +363,46 @@ describe("Studio instrumentation (integration)", () => {
     });
   });
 
+  describe("persisted connections", () => {
+    it("__inspect() shows connections from SQLite after WebSocket connect", async () => {
+      const actorId = `conn-persist-${Date.now()}`;
+      const id = env.COUNTER.idFromName(actorId);
+      const stub = env.COUNTER.get(id);
+
+      await stub.spawn({ actorId, caller: "user-1", callerType: "user", input: {} });
+
+      // Connect a WebSocket client
+      const response = await stub.fetch(`http://localhost/api/counter/${actorId}`, {
+        headers: {
+          Upgrade: "websocket",
+          "X-Actor-Kit-Caller-Id": "user-test",
+          "X-Actor-Kit-Caller-Type": "user",
+        },
+      });
+      expect(response.status).toBe(101);
+      const ws = response.webSocket;
+      ws?.accept();
+
+      // Inspect should show 1 connection (persisted to SQLite)
+      const result = (await stub.__inspect()) as {
+        connections: Array<{ caller: string; callerType: string }>;
+      };
+      expect(result.connections.length).toBe(1);
+      expect(result.connections[0]?.caller).toBe("user-test");
+      expect(result.connections[0]?.callerType).toBe("user");
+
+      // Disconnect
+      ws?.close(1000, "done");
+      await new Promise((r) => setTimeout(r, 50));
+
+      // Inspect should show 0 connections
+      const result2 = (await stub.__inspect()) as {
+        connections: Array<{ caller: string; callerType: string }>;
+      };
+      expect(result2.connections.length).toBe(0);
+    });
+  });
+
   describe("ring buffer pruning", () => {
     it("caps timeline entries at the configured timelineSize (default 500)", async () => {
       const actorId = `ring-buffer-${Date.now()}`;
