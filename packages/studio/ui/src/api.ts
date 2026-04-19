@@ -50,6 +50,19 @@ export interface TimelineEntry {
   createdAt: number;
 }
 
+/** Parse a JSON response, throwing on non-OK status or server-side errors. */
+async function parseJson<T>(res: Response): Promise<T> {
+  if (!res.ok) {
+    const text = await res.text().catch(() => `HTTP ${res.status}`);
+    throw new Error(text);
+  }
+  const data = (await res.json()) as T & { error?: string };
+  if (data.error) {
+    throw new Error(data.error);
+  }
+  return data;
+}
+
 export async function fetchActors(opts?: {
   type?: string;
   search?: string;
@@ -59,13 +72,13 @@ export async function fetchActors(opts?: {
   if (opts?.search) params.set("search", opts.search);
   const url = `${BASE}/actors${params.toString() ? `?${params}` : ""}`;
   const res = await fetch(url, { headers: getHeaders() });
-  const data = (await res.json()) as { actors: ActorEntry[] };
+  const data = await parseJson<{ actors: ActorEntry[] }>(res);
   return data.actors;
 }
 
 export async function fetchActorTypes(): Promise<string[]> {
   const res = await fetch(`${BASE}/actors/types`, { headers: getHeaders() });
-  const data = (await res.json()) as { types: string[] };
+  const data = await parseJson<{ types: string[] }>(res);
   return data.types;
 }
 
@@ -76,7 +89,7 @@ export async function fetchInspect(
   const res = await fetch(`${BASE}/actors/${actorType}/${encodeURIComponent(actorId)}`, {
     headers: getHeaders(),
   });
-  return (await res.json()) as InspectResult;
+  return parseJson<InspectResult>(res);
 }
 
 export async function fetchTimeline(
@@ -89,5 +102,5 @@ export async function fetchTimeline(
   if (opts?.before) params.set("before", String(opts.before));
   const url = `${BASE}/actors/${actorType}/${encodeURIComponent(actorId)}/timeline${params.toString() ? `?${params}` : ""}`;
   const res = await fetch(url, { headers: getHeaders() });
-  return (await res.json()) as { entries: TimelineEntry[]; hasMore: boolean };
+  return parseJson<{ entries: TimelineEntry[]; hasMore: boolean }>(res);
 }

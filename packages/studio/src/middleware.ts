@@ -54,7 +54,7 @@ export function actorKitStudio(
   request: Request,
   env: Record<string, unknown>,
   _ctx: ExecutionContext,
-): Response | null {
+): Response | Promise<Response> | null {
   const url = new URL(request.url);
 
   if (!url.pathname.startsWith(STUDIO_PREFIX)) {
@@ -147,30 +147,18 @@ function callRpc(stub: DurableObjectStub, method: string, ...args: unknown[]): P
   return (fn as (...a: unknown[]) => Promise<unknown>)(...args);
 }
 
-/** Stream a JSON response from an async operation. */
-function jsonStream(fn: () => Promise<unknown>, fallback: unknown): Response {
-  return new Response(
-    new ReadableStream({
-      async start(controller) {
-        try {
-          const result = await fn();
-          controller.enqueue(new TextEncoder().encode(JSON.stringify(result)));
-        } catch (err) {
-          const message = err instanceof Error ? err.message : "Unknown error";
-          controller.enqueue(
-            new TextEncoder().encode(
-              JSON.stringify({ ...((fallback ?? {}) as Record<string, unknown>), error: message }),
-            ),
-          );
-        }
-        controller.close();
-      },
-    }),
-    { headers: { "Content-Type": "application/json" } },
-  );
+/** Execute an async operation and return JSON. Returns 500 with error on failure. */
+async function asyncJson(fn: () => Promise<unknown>): Promise<Response> {
+  try {
+    const result = await fn();
+    return Response.json(result);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Unknown error";
+    return Response.json({ error: message }, { status: 500 });
+  }
 }
 
-function handleListActors(url: URL, env: Record<string, unknown>): Response {
+function handleListActors(url: URL, env: Record<string, unknown>): Response | Promise<Response> {
   const registry = resolveStub(env, "STUDIO_REGISTRY", "registry");
   if (registry === null) {
     return Response.json({ actors: [], error: "StudioRegistry not found in env bindings" }, { status: 503 });
@@ -184,29 +172,34 @@ function handleListActors(url: URL, env: Record<string, unknown>): Response {
   if (url.searchParams.has("limit")) opts.limit = Number(url.searchParams.get("limit"));
   if (url.searchParams.has("offset")) opts.offset = Number(url.searchParams.get("offset"));
 
-  return jsonStream(async () => ({ actors: await callRpc(registry, "listActors", opts) }), { actors: [] });
+  return asyncJson(async () => ({ actors: await callRpc(registry, "listActors", opts) }));
 }
 
-function handleActorTypes(env: Record<string, unknown>): Response {
+function handleActorTypes(env: Record<string, unknown>): Response | Promise<Response> {
   const registry = resolveStub(env, "STUDIO_REGISTRY", "registry");
   if (registry === null) {
     return Response.json({ types: [], error: "StudioRegistry not found in env bindings" }, { status: 503 });
   }
 
-  return jsonStream(async () => ({ types: await callRpc(registry, "getActorTypes") }), { types: [] });
+  return asyncJson(async () => ({ types: await callRpc(registry, "getActorTypes") }));
 }
 
-function handleInspect(actorType: string, actorId: string, env: Record<string, unknown>): Response {
+function handleInspect(actorType: string, actorId: string, env: Record<string, unknown>): Response | Promise<Response> {
   const bindingName = actorType.toUpperCase().replace(/-/g, "_");
   const stub = resolveStub(env, bindingName, actorId);
   if (stub === null) {
     return Response.json({ error: `Actor type "${actorType}" not found in env bindings` }, { status: 404 });
   }
 
-  return jsonStream(() => callRpc(stub, "__inspect"), {});
+  return asyncJson(() => callRpc(stub, "__inspect"));
 }
 
-function handleTimeline(actorType: string, actorId: string, url: URL, env: Record<string, unknown>): Response {
+function handleTimeline(
+  actorType: string,
+  actorId: string,
+  url: URL,
+  env: Record<string, unknown>,
+): Response | Promise<Response> {
   const bindingName = actorType.toUpperCase().replace(/-/g, "_");
   const stub = resolveStub(env, bindingName, actorId);
   if (stub === null) {
@@ -217,7 +210,7 @@ function handleTimeline(actorType: string, actorId: string, url: URL, env: Recor
   if (url.searchParams.has("limit")) timelineOpts.limit = Number(url.searchParams.get("limit"));
   if (url.searchParams.has("before")) timelineOpts.before = Number(url.searchParams.get("before"));
 
-  return jsonStream(() => callRpc(stub, "__getTimeline", timelineOpts), { entries: [] });
+  return asyncJson(() => callRpc(stub, "__getTimeline", timelineOpts));
 }
 
 function handleStudioWebSocket(
