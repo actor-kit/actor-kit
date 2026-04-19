@@ -1,6 +1,7 @@
 import { Link, useParams } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
-import { type InspectResult, type TimelineEntry, fetchInspect, fetchTimeline } from "../api";
+import { useState } from "react";
+import type { TimelineEntry } from "../api";
+import { useStudioWs } from "../hooks/use-studio-ws";
 import { JsonDiff } from "../components/json-diff";
 import { JsonTree } from "../components/json-tree";
 
@@ -51,37 +52,19 @@ type Tab = "state" | "timeline" | "connections" | "outbox" | "links";
 
 export function ActorDetailPage() {
   const { actorType, actorId } = useParams({ from: "/actors/$actorType/$actorId" });
-  const [inspect, setInspect] = useState<InspectResult | null>(null);
-  const [timeline, setTimeline] = useState<TimelineEntry[]>([]);
+  const { inspect, timeline, connected } = useStudioWs(actorType, actorId);
   const [activeTab, setActiveTab] = useState<Tab>("state");
   const [expandedEntry, setExpandedEntry] = useState<number | null>(null);
-  const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    setError(null);
-    Promise.all([fetchInspect(actorType, actorId), fetchTimeline(actorType, actorId)])
-      .then(([inspectResult, timelineResult]) => {
-        setInspect(inspectResult);
-        setTimeline(timelineResult.entries);
-      })
-      .catch((err) => {
-        setError(err instanceof Error ? err.message : "Failed to load actor");
-      });
-  }, [actorType, actorId]);
-
-  if (error) {
+  if (!inspect) {
     return (
       <div className="max-w-4xl mx-auto">
-        <p className="text-red-400">{error}</p>
+        <p className="text-zinc-500">{connected ? "Loading..." : "Connecting..."}</p>
         <Link to="/" className="text-sky-400 hover:underline text-sm mt-2 inline-block">
           Back to dashboard
         </Link>
       </div>
     );
-  }
-
-  if (!inspect) {
-    return <p className="text-zinc-500">Loading...</p>;
   }
 
   const tabs: { key: Tab; label: string; count?: number }[] = [
@@ -103,7 +86,15 @@ export function ActorDetailPage() {
           <span className="bg-zinc-800 text-zinc-300 px-2 py-0.5 rounded text-sm mr-2">{actorType}</span>
           {actorId}
         </h1>
-        <p className="text-zinc-500 text-sm mt-1">Version {inspect.version}</p>
+        <p className="text-zinc-500 text-sm mt-1">
+          Version {inspect.version}
+          {connected && (
+            <span className="ml-2 inline-flex items-center gap-1 text-emerald-400">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+              Live
+            </span>
+          )}
+        </p>
       </div>
 
       {/* Tabs */}
