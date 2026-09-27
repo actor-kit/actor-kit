@@ -109,6 +109,8 @@ describe("TodoList actor", () => {
 
 **What**: Full DO lifecycle — WebSocket connection, binary frames, persistence, reconnection, outbox drain.
 **How**: `@cloudflare/vitest-pool-workers`. Real Durable Objects, real SQLite, real WebSocket.
+
+`tests/integration` is its own workspace package (`@actor-kit/integration-tests`) pinned to Vitest 4, because `@cloudflare/vitest-pool-workers` supports `vitest ^4.1` only; unit tests at the root run on Vitest 5. One config (`cloudflareTest()` plugin) runs every file, WebSocket tests included — the old isolated/WebSocket split is gone. Run with `pnpm test:integration`.
 **Speed**: ~50-200ms per test.
 **Location**: `tests/integration/`
 

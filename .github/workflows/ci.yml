@@ -40,11 +40,8 @@ jobs:
       - name: Unit tests
         run: pnpm test:unit
 
-      - name: Integration tests (isolated storage)
-        run: cd tests/integration && vitest run --config vitest.config.ts
-
-      - name: Integration tests (WebSocket)
-        run: cd tests/integration && vitest run --config vitest.ws.config.ts
+      - name: Integration tests
+        run: pnpm --filter @actor-kit/integration-tests test
 
   e2e:
     runs-on: ubuntu-latest
