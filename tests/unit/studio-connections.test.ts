@@ -29,6 +29,23 @@ describe("toStudioConnections", () => {
     ]);
   });
 
+  it("passes callerType to role predicates", () => {
+    const byType = {
+      auctioneer: (_s: State, _c: string, { callerType }: { callerType: "user" | "service" }) =>
+        callerType === "service",
+      bidder: () => true,
+    };
+    const rows = [
+      { caller: "system", caller_type: "service", connected_at: 1 },
+      { caller: "alice", caller_type: "user", connected_at: 2 },
+    ];
+
+    expect(toStudioConnections(rows, byType, { ownerId: "alice" }).map((c) => c.role)).toEqual([
+      "auctioneer",
+      "bidder",
+    ]);
+  });
+
   it("rejects rows with an unknown caller_type instead of coercing", () => {
     const rows = [{ caller: "eve", caller_type: "admin", connected_at: 1 }];
     expect(() => toStudioConnections(rows, roles, { ownerId: "alice" })).toThrow();

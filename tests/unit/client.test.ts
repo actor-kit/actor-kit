@@ -318,6 +318,11 @@ describe("createActorClient() — role before first frame", () => {
     expect(client.role).toBeUndefined();
   });
 
+  it("leaves role undefined when initialView is null", () => {
+    const client = createActorClient({ ...noSocket, initialView: null });
+    expect(client.role).toBeUndefined();
+  });
+
   it("leaves role undefined when initialView is undefined", () => {
     const client = createActorClient({ ...noSocket, initialView: undefined });
     expect(client.role).toBeUndefined();

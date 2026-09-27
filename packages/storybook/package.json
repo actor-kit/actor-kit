@@ -36,7 +36,7 @@
     "@storybook/react": "^10.6.0",
     "@types/react": "^19.3.0",
     "storybook": "^10.6.0",
-    "typescript": "^5.7.0"
+    "typescript": "^7.0.2"
   },
   "license": "MIT",
   "author": "Jonathan Mumm",
