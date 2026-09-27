@@ -320,7 +320,7 @@ class ActorInstance extends DurableObject {
 - Search input (searches actor ID)
 - Each row: actor type badge, actor ID, last active (relative time), connection count
 - Click row → actor detail page
-- Manual "Connect to actor" input (type + ID) for when registry is unavailable
+- Manual "Connect to actor" input (type + ID), always shown — the registry is debounced and may be unavailable
 
 #### Actor Detail (`/__studio/actors/:type/:id`)
 

@@ -16,11 +16,18 @@ export interface ActorEntry {
   connectionCount: number;
 }
 
+export interface StudioConnectionInfo {
+  caller: string;
+  callerType: "user" | "service";
+  connectedAt: number;
+  role: string | null;
+}
+
 export interface InspectResult {
   state: unknown;
   version: number;
   actorId: string | null;
-  connections: Array<{ caller: string; callerType: "user" | "service" }>;
+  connections: StudioConnectionInfo[];
   outbox: Array<{
     id: string;
     service: string;

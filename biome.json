@@ -31,7 +31,8 @@
       "packages/react/src/**/*.ts",
       "packages/test/src/**/*.ts",
       "packages/studio/src/**/*.ts",
-      "tests/**/*.ts"
+      "tests/**/*.ts",
+      "!**/.wrangler"
     ],
     "ignoreUnknown": true
   },

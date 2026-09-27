@@ -1,11 +1,18 @@
 import { useEffect, useRef, useState } from "react";
 import type { InspectResult, TimelineEntry } from "../api";
 
+export interface StudioConnection {
+  caller: string;
+  callerType: "user" | "service";
+  connectedAt: number;
+  role: string | null;
+}
+
 interface StudioSnapshot {
   type: "studio.snapshot";
   state: unknown;
   timeline: TimelineEntry[];
-  connections: Array<{ caller: string; callerType: "user" | "service" }>;
+  connections: StudioConnection[];
   outbox: Array<{
     id: string;
     service: string;
@@ -29,7 +36,7 @@ interface StudioTimelineMsg {
 interface StudioConnectionMsg {
   type: "studio.connection";
   action: "connect" | "disconnect";
-  connection: { caller: string; callerType: "user" | "service" };
+  connection: StudioConnection;
 }
 
 type StudioMessage = StudioSnapshot | StudioTimelineMsg | StudioConnectionMsg;

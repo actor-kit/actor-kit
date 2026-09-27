@@ -77,15 +77,36 @@ export default {
       return Response.json({ ok: true, actorId: body.actorId, count: body.count });
     }
 
-    // WebSocket upgrade for counter (for testing with real clients)
+    // WebSocket upgrade for counter (for testing with real clients).
+    // Caller identity comes from ?caller=<id> query (defaults to "e2e-user").
     if (url.pathname.startsWith("/api/counter/") && request.headers.get("Upgrade") === "websocket") {
       const actorId = url.pathname.split("/")[3];
       if (!actorId) return new Response("Missing actor ID", { status: 400 });
 
+      const callerId = url.searchParams.get("caller") ?? "e2e-user";
+
       const ns = env["COUNTER"] as DurableObjectNamespace;
       const stub = ns.get(ns.idFromName(actorId));
-      const stampedRequest = withCallerIdentity(request, { callerId: "e2e-user", callerType: "user" });
+      const stampedRequest = withCallerIdentity(request, { callerId, callerType: "user" });
       return stub.fetch(stampedRequest);
+    }
+
+    // RPC: send an INCREMENT to the actor as a specific caller (so it shows up in timeline).
+    if (url.pathname.startsWith("/send/") && request.method === "POST") {
+      const actorId = url.pathname.split("/")[2];
+      if (!actorId) return new Response("Missing actor ID", { status: 400 });
+      const body = (await request.json()) as { caller?: string };
+      const callerId = body.caller ?? "e2e-test";
+
+      const ns = env["COUNTER"] as DurableObjectNamespace;
+      const stub = ns.get(ns.idFromName(actorId));
+      const sendFn = (stub as Record<string, unknown>)["send"];
+      if (typeof sendFn === "function") {
+        await (sendFn as (c: string, t: string, e: Record<string, unknown>) => Promise<unknown>)(callerId, "user", {
+          type: "INCREMENT",
+        });
+      }
+      return Response.json({ ok: true });
     }
 
     return new Response("Studio E2E test worker", { status: 200 });

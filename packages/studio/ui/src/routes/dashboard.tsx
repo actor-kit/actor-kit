@@ -81,39 +81,43 @@ export function DashboardPage() {
       {loading && <p className="text-zinc-500">Loading...</p>}
       {error && <p className="text-red-400">{error}</p>}
 
-      {!loading && actors.length === 0 && (
-        <div className="text-zinc-500 border border-zinc-800 rounded p-6 text-center">
-          <p className="mb-4">No actors found.</p>
-          {/* Manual connect */}
-          <div className="text-left max-w-md mx-auto">
-            <p className="text-zinc-400 text-sm mb-2">Connect manually:</p>
-            <div className="flex gap-2">
-              <input
-                type="text"
-                placeholder="Actor type"
-                value={manualType}
-                onChange={(e) => setManualType(e.target.value)}
-                className="bg-zinc-900 border border-zinc-700 rounded px-2 py-1 text-sm flex-1"
-                data-testid="manual-type"
-              />
-              <input
-                type="text"
-                placeholder="Actor ID"
-                value={manualId}
-                onChange={(e) => setManualId(e.target.value)}
-                className="bg-zinc-900 border border-zinc-700 rounded px-2 py-1 text-sm flex-1"
-                data-testid="manual-id"
-              />
-              <Link
-                to="/actors/$actorType/$actorId"
-                params={{ actorType: manualType, actorId: manualId }}
-                className="bg-zinc-700 hover:bg-zinc-600 px-3 py-1 rounded text-sm"
-                data-testid="manual-connect"
-              >
-                Connect
-              </Link>
-            </div>
+      {/* Manual connect — always available: the registry is debounced and may
+          not list an actor yet, or may be unavailable entirely. */}
+      {!loading && (
+        <div className="mb-6 max-w-md">
+          <p className="text-zinc-400 text-sm mb-2">Connect manually:</p>
+          <div className="flex gap-2">
+            <input
+              type="text"
+              placeholder="Actor type"
+              value={manualType}
+              onChange={(e) => setManualType(e.target.value)}
+              className="bg-zinc-900 border border-zinc-700 rounded px-2 py-1 text-sm flex-1"
+              data-testid="manual-type"
+            />
+            <input
+              type="text"
+              placeholder="Actor ID"
+              value={manualId}
+              onChange={(e) => setManualId(e.target.value)}
+              className="bg-zinc-900 border border-zinc-700 rounded px-2 py-1 text-sm flex-1"
+              data-testid="manual-id"
+            />
+            <Link
+              to="/actors/$actorType/$actorId"
+              params={{ actorType: manualType, actorId: manualId }}
+              className="bg-zinc-700 hover:bg-zinc-600 px-3 py-1 rounded text-sm"
+              data-testid="manual-connect"
+            >
+              Connect
+            </Link>
           </div>
+        </div>
+      )}
+
+      {!loading && actors.length === 0 && (
+        <div className="text-zinc-500 border border-zinc-800 rounded p-6 text-center mb-6">
+          <p>No actors found.</p>
         </div>
       )}
 

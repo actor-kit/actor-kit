@@ -14,3 +14,4 @@ test-results/
 .ralph/
 reports/
 workers-qb/
+.DS_Store

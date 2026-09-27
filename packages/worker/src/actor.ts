@@ -21,6 +21,7 @@ import { routeMessage } from "./runtime/message-router";
 import { createOutbox } from "./runtime/outbox";
 import { resolveNamespace } from "./runtime/resolve-namespace";
 import { resolveRole } from "./runtime/roles";
+import { toStudioConnections } from "./runtime/studio-connections";
 
 // --- Studio registry helpers ---
 
@@ -492,8 +493,8 @@ export function actor(
         // Touch registry (debounced)
         this.touchRegistry();
 
-        // Push to studio connections
-        if (this.studioConnections.size > 0) {
+        // Push to studio connections (covers hibernated sockets too)
+        if (this.hasStudioWs()) {
           this.broadcastToStudio({
             type: "studio.timeline",
             entry: {
@@ -1267,6 +1268,15 @@ export function actor(
       return false;
     }
 
+    /** True if any studio WebSocket is currently attached, including hibernated ones. */
+    hasStudioWs(): boolean {
+      if (this.studioConnections.size > 0) return true;
+      for (const ws of this.ctx.getWebSockets()) {
+        if (this.isStudioWs(ws)) return true;
+      }
+      return false;
+    }
+
     getCallerFromWs(ws: WebSocket): { caller: string; callerType: "user" | "service" } | null {
       // Try in-memory map first (keyed by WebSocket)
       const conn = this.connections.get(ws);
@@ -1422,21 +1432,27 @@ export function actor(
       this.connections.set(server, { caller: callerInfo.caller, callerType: callerInfo.callerType });
 
       // Persist connection to SQLite (survives hibernation)
+      const connectedAt = Date.now();
       if (this.studioEnabled) {
         this.ctx.storage.sql.exec(
           "INSERT OR REPLACE INTO studio_connections (caller, caller_type, connected_at) VALUES (?, ?, ?)",
           callerInfo.caller,
           callerInfo.callerType,
-          Date.now(),
+          connectedAt,
         );
       }
 
-      // Notify studio of new connection
-      if (this.studioConnections.size > 0) {
+      // Notify studio of new connection (covers hibernated sockets too)
+      if (this.hasStudioWs()) {
         this.broadcastToStudio({
           type: "studio.connection",
           action: "connect",
-          connection: { caller: callerInfo.caller, callerType: callerInfo.callerType },
+          connection: {
+            caller: callerInfo.caller,
+            callerType: callerInfo.callerType,
+            connectedAt,
+            role,
+          },
         });
       }
 
@@ -1639,8 +1655,8 @@ export function actor(
         );
       }
 
-      // Notify studio of disconnection
-      if (this.studioConnections.size > 0) {
+      // Notify studio of disconnection (covers hibernated sockets too)
+      if (this.hasStudioWs()) {
         this.broadcastToStudio({
           type: "studio.connection",
           action: "disconnect",
@@ -1731,12 +1747,9 @@ export function actor(
     buildStudioSnapshot(): Record<string, unknown> {
       // Connections — read from SQLite (survives hibernation)
       const connRows = this.ctx.storage.sql
-        .exec("SELECT caller, caller_type FROM studio_connections ORDER BY connected_at")
+        .exec("SELECT caller, caller_type, connected_at FROM studio_connections ORDER BY connected_at")
         .toArray();
-      const connections = connRows.map((row) => ({
-        caller: row["caller"] as string,
-        callerType: row["caller_type"] as "user" | "service",
-      }));
+      const connections = toStudioConnections(connRows, def.roles, this.state);
 
       // Timeline entries
       const timelineRows = this.ctx.storage.sql
@@ -1832,10 +1845,13 @@ export function actor(
       }
     }
 
-    /** Send a message to all connected studio WebSockets. */
+    /** Send a message to all connected studio WebSockets.
+     * Iterates ctx.getWebSockets() so it survives DO hibernation —
+     * the in-memory studioConnections set is repopulated lazily by isStudioWs(). */
     broadcastToStudio(message: Record<string, unknown>): void {
       const json = JSON.stringify(message);
-      for (const ws of this.studioConnections) {
+      for (const ws of this.ctx.getWebSockets()) {
+        if (!this.isStudioWs(ws)) continue;
         try {
           ws.send(json);
         } catch {
@@ -1876,13 +1892,10 @@ export function actor(
       // Current connections — read from SQLite (survives hibernation)
       const connRows = this.studioEnabled
         ? this.ctx.storage.sql
-            .exec("SELECT caller, caller_type FROM studio_connections ORDER BY connected_at")
+            .exec("SELECT caller, caller_type, connected_at FROM studio_connections ORDER BY connected_at")
             .toArray()
         : [];
-      const connList = connRows.map((row) => ({
-        caller: row["caller"] as string,
-        callerType: row["caller_type"] as "user" | "service",
-      }));
+      const connList = toStudioConnections(connRows, def.roles, this.state);
 
       // Outbox / executions
       const execRows = this.ctx.storage.sql

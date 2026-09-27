@@ -32,3 +32,5 @@ export { resolveRole } from "./runtime/roles";
 // Route parsing
 export type { ActorRoute } from "./runtime/route-to-actor";
 export { parseActorRoute } from "./runtime/route-to-actor";
+// Studio connection row parsing (pure)
+export { toStudioConnections } from "./runtime/studio-connections";

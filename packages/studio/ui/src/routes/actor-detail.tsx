@@ -186,13 +186,25 @@ export function ActorDetailPage() {
                 <tr className="border-b border-zinc-800 text-zinc-400">
                   <th className="text-left px-4 py-2">Caller</th>
                   <th className="text-left px-4 py-2">Type</th>
+                  <th className="text-left px-4 py-2">Role</th>
+                  <th className="text-left px-4 py-2">Connected</th>
                 </tr>
               </thead>
               <tbody>
                 {inspect.connections.map((conn, i) => (
-                  <tr key={i} className="border-b border-zinc-800/50">
-                    <td className="px-4 py-2">{conn.caller}</td>
+                  <tr key={`${conn.caller}:${conn.callerType}:${i}`} className="border-b border-zinc-800/50">
+                    <td className="px-4 py-2 font-mono">{conn.caller}</td>
                     <td className="px-4 py-2 text-zinc-400">{conn.callerType}</td>
+                    <td className="px-4 py-2">
+                      {conn.role !== null ? (
+                        <span className="bg-sky-900/40 text-sky-300 px-1.5 py-0.5 rounded text-xs">{conn.role}</span>
+                      ) : (
+                        <span className="text-zinc-600 text-xs">—</span>
+                      )}
+                    </td>
+                    <td className="px-4 py-2 text-zinc-400" title={new Date(conn.connectedAt).toISOString()}>
+                      {relativeTime(conn.connectedAt)}
+                    </td>
                   </tr>
                 ))}
               </tbody>
