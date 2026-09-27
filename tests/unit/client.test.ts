@@ -292,3 +292,34 @@ describe("createActorClient()", () => {
     expect(capturedUrl).toBe("wss://example.com/api/counter/test-1");
   });
 });
+
+describe("createActorClient() — role before first frame", () => {
+  const noSocket = {
+    path: "/api/todo-list/l1",
+    host: "example.com",
+    WebSocketImpl: FakeWebSocket as unknown as typeof WebSocket,
+  };
+
+  it("seeds role from initialView.role so SSR renders the right role branch", () => {
+    const client = createActorClient({
+      ...noSocket,
+      initialView: { role: "viewer", todoCount: 0, doneCount: 0 },
+    });
+    expect(client.role).toBe("viewer");
+  });
+
+  it("leaves role undefined when initialView has no role", () => {
+    const client = createActorClient({ ...noSocket, initialView: { count: 0 } });
+    expect(client.role).toBeUndefined();
+  });
+
+  it("ignores a non-string initialView.role", () => {
+    const client = createActorClient({ ...noSocket, initialView: { role: 7 } });
+    expect(client.role).toBeUndefined();
+  });
+
+  it("leaves role undefined when initialView is undefined", () => {
+    const client = createActorClient({ ...noSocket, initialView: undefined });
+    expect(client.role).toBeUndefined();
+  });
+});

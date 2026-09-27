@@ -93,7 +93,9 @@ export function createActorClient(options: ClientOptions<unknown>): ActorClient<
 
   let connectionState: ConnectionState = "disconnected";
   let currentView: unknown = initialView;
-  let currentRole: string | undefined;
+  // Seed from initialView's role discriminant so role-branching UIs render the
+  // correct branch during SSR / before the first frame arrives.
+  let currentRole: string | undefined = roleFromView(initialView);
   const listeners = new Set<(view: unknown) => void>();
   const stateListeners = new Set<(state: ConnectionState) => void>();
   let ws: InstanceType<typeof WebSocketImpl> | undefined;
@@ -352,4 +354,9 @@ export function createActorClient(options: ClientOptions<unknown>): ActorClient<
       ws = undefined;
     },
   };
+}
+
+function roleFromView(view: unknown): string | undefined {
+  if (typeof view !== "object" || view === null || !("role" in view)) return undefined;
+  return typeof view.role === "string" ? view.role : undefined;
 }
