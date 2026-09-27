@@ -18,7 +18,7 @@ const ViewSnapshotSchema = z.object({
 // Server function: fetch initial snapshot from the Durable Object.
 // Runs on the Worker — has direct access to DO bindings.
 const loadCounter = createServerFn({ method: "GET" })
-  .inputValidator((input: unknown) => CounterRouteInputSchema.parse(input))
+  .validator(CounterRouteInputSchema)
   .handler(async ({ data }) => {
     const env = getActorRuntimeEnv();
     const counterId = data.counterId;

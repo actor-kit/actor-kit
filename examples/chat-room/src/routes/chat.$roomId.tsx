@@ -26,7 +26,7 @@ const ViewSnapshotSchema = z.object({
 // Server function: fetch initial snapshot from the Durable Object.
 // Runs on the Worker — has direct access to DO bindings.
 const loadChatRoom = createServerFn({ method: "GET" })
-  .inputValidator((input: unknown) => ChatRouteInputSchema.parse(input))
+  .validator(ChatRouteInputSchema)
   .handler(async ({ data }) => {
     const env = getActorRuntimeEnv();
     const roomId = data.roomId;

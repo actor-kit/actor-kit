@@ -22,7 +22,7 @@ const ViewSnapshotSchema = z.object({
 // Server function: fetch initial snapshot from the Durable Object.
 // Runs on the Worker — has direct access to DO bindings.
 const loadAuction = createServerFn({ method: "GET" })
-  .inputValidator((input: unknown) => AuctionRouteInputSchema.parse(input))
+  .validator(AuctionRouteInputSchema)
   .handler(async ({ data }) => {
     const env = getActorRuntimeEnv();
     const auctionId = data.auctionId;

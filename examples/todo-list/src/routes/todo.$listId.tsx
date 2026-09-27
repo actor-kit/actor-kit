@@ -37,7 +37,7 @@ const RoleSchema = z.enum(["owner", "member", "viewer"]);
 // Server function: fetch initial snapshot from the Durable Object.
 // Uses the REAL callerId (from cookie) so the DO returns the correct role-based view.
 const loadTodoList = createServerFn({ method: "GET" })
-  .inputValidator((input: unknown) => TodoRouteInputSchema.parse(input))
+  .validator(TodoRouteInputSchema)
   .handler(async ({ data }): Promise<LoaderData> => {
     const env = getActorRuntimeEnv();
     const listId = data.listId;
