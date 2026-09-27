@@ -21,11 +21,11 @@
     "@cloudflare/workers-types": "^5.20260927.1",
     "@tailwindcss/vite": "^4.3.3",
     "@tanstack/react-router": "1.170.39",
-    "@vitejs/plugin-react": "^5.1.4",
+    "@vitejs/plugin-react": "^6.1.1",
     "react": "^19.3.0",
     "react-dom": "^19.3.0",
     "tailwindcss": "^4.3.3",
-    "vite": "^7.3.1"
+    "vite": "^8.3.1"
   },
   "license": "MIT",
   "author": "Jonathan Mumm",

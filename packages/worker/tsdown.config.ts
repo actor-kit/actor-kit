@@ -7,6 +7,8 @@ export default defineConfig({
     token: "src/token.ts",
   },
   format: "esm",
+  // Keep .js/.d.ts output (tsdown >=0.15 defaults to .mjs) — package.json exports point at .js.
+  fixedExtension: false,
   dts: true,
   clean: true,
   hash: false,
