@@ -10,7 +10,7 @@
   },
   "scripts": {
     "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p ui/tsconfig.json",
-    "build:ui": "cd ui && npx vite build && cd .. && npx tsx scripts/embed-ui.ts",
+    "build:ui": "vite build ui && tsx scripts/embed-ui.ts",
     "build": "pnpm build:ui && tsdown"
   },
   "dependencies": {
@@ -25,6 +25,7 @@
     "react": "^19.3.0",
     "react-dom": "^19.3.0",
     "tailwindcss": "^4.3.3",
+    "tsx": "^4.23.15",
     "vite": "^8.3.1"
   },
   "license": "MIT",

@@ -61,7 +61,7 @@ export default defineConfig({
         webServer: [
           {
             command:
-              "cd tests/e2e-studio && npx wrangler dev --port 8810 --inspector-port 0",
+              "cd tests/e2e-studio && pnpm dev",
             port: 8810,
             reuseExistingServer: true,
             timeout: 30000,

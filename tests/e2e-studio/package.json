@@ -1,0 +1,18 @@
+{
+  "name": "@actor-kit/e2e-studio",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev --persist-to .wrangler/state --port 8810 --inspector-port 0"
+  },
+  "dependencies": {
+    "@actor-kit/core": "workspace:*",
+    "@actor-kit/studio": "workspace:*",
+    "@actor-kit/worker": "workspace:*",
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20260927.1",
+    "wrangler": "^4.141.0"
+  }
+}

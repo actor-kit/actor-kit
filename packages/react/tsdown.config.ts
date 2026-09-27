@@ -10,5 +10,5 @@ export default defineConfig({
   dts: true,
   clean: true,
   hash: false,
-  external: ["@actor-kit/client", "react"],
+  external: ["@actor-kit/client", "@actor-kit/core", "react"],
 });
