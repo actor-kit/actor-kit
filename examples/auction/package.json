@@ -6,10 +6,11 @@
     "#/*": "./src/*"
   },
   "scripts": {
-    "dev": "pnpm build && wrangler dev -c .output/server/wrangler.json --port 8802 --inspector-port 0",
+    "dev": "pnpm build && wrangler dev -c .output/server/wrangler.json --persist-to .wrangler/state --port 8802 --inspector-port 0",
     "build": "vite build",
     "deploy": "pnpm build && wrangler deploy -c .output/server/wrangler.json",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@actor-kit/client": "workspace:*",

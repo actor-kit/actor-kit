@@ -3,7 +3,7 @@ import { expect, test } from "@playwright/test";
 
 async function createAuction(page: Page, item = "Rare Sword") {
   await page.goto("/");
-  await page.locator("#item-input").fill(item);
+  await page.locator("#item-name").fill(item);
   await page.getByRole("button", { name: "Start Auction" }).click();
   await expect(page.locator("#item")).toBeVisible({ timeout: 10_000 });
   return page.url();

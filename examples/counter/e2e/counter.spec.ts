@@ -142,10 +142,12 @@ test.describe("Navigation", () => {
   test("each New Counter creates a unique counter", async ({ page }) => {
     await page.goto("/");
     await page.getByRole("button", { name: "New Counter" }).click();
+    await page.waitForURL(/\/counter\/.+/);
     const firstUrl = page.url();
 
     await page.goto("/");
     await page.getByRole("button", { name: "New Counter" }).click();
+    await page.waitForURL(/\/counter\/.+/);
     const secondUrl = page.url();
 
     expect(firstUrl).not.toEqual(secondUrl);

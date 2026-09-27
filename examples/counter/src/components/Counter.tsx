@@ -6,7 +6,7 @@ export function CounterDisplay({
   disabled,
 }: {
   count: number;
-  lastUpdatedBy: string;
+  lastUpdatedBy: string | null;
   onIncrement: () => void;
   onDecrement: () => void;
   disabled: boolean;

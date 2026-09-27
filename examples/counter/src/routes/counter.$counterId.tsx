@@ -12,7 +12,7 @@ const CounterRouteInputSchema = z.object({
 // Parse the DO snapshot at the server function boundary.
 const ViewSnapshotSchema = z.object({
   count: z.number(),
-  lastUpdatedBy: z.string(),
+  lastUpdatedBy: z.string().nullable(),
 });
 
 // Server function: fetch initial snapshot from the Durable Object.
@@ -77,7 +77,7 @@ function CounterLive({
   initialSnapshot,
 }: {
   counterId: string;
-  initialSnapshot: { count: number; lastUpdatedBy: string };
+  initialSnapshot: { count: number; lastUpdatedBy: string | null };
 }) {
   // useClient creates the client once (stable across re-renders) and manages
   // connect/disconnect on mount/unmount. initialView seeds the view before the
@@ -100,6 +100,9 @@ function CounterLive({
 function CounterWithHooks() {
   const view = CounterContext.useView();
   const send = CounterContext.useSend();
+  // Disabled until the socket is live: during SSR / pre-hydration a click has
+  // no handler, and before connect() a send would be dropped.
+  const connectionState = CounterContext.useConnectionState();
 
   return (
     <CounterDisplay
@@ -107,7 +110,7 @@ function CounterWithHooks() {
       lastUpdatedBy={view.lastUpdatedBy}
       onIncrement={() => send({ type: "INCREMENT" })}
       onDecrement={() => send({ type: "DECREMENT" })}
-      disabled={false}
+      disabled={connectionState !== "connected"}
     />
   );
 }

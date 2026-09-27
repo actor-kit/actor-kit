@@ -52,8 +52,10 @@ const AuctionSearchSchema = z.object({
 
 export const Route = createFileRoute("/auction/$auctionId")({
   validateSearch: (search) => AuctionSearchSchema.parse(search),
-  loader: ({ params, search }) =>
-    loadAuction({ data: { auctionId: params.auctionId, item: search.item } }),
+  // Loaders don't receive search params directly — declare them as deps.
+  loaderDeps: ({ search }) => ({ item: search.item }),
+  loader: ({ params, deps }) =>
+    loadAuction({ data: { auctionId: params.auctionId, item: deps.item } }),
   component: AuctionRouteComponent,
 });
 

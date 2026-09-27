@@ -1,4 +1,4 @@
-import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { createFileRoute, useHydrated, useNavigate } from "@tanstack/react-router";
 
 export const Route = createFileRoute("/")({
   component: HomePage,
@@ -6,6 +6,9 @@ export const Route = createFileRoute("/")({
 
 function HomePage() {
   const navigate = useNavigate();
+  // Client-side navigation: the button is inert until hydrated, so disable it
+  // rather than let pre-hydration clicks silently do nothing.
+  const hydrated = useHydrated();
 
   return (
     <main className="flex min-h-screen items-center justify-center px-4 py-12">
@@ -30,6 +33,7 @@ function HomePage() {
             })
           }
           type="button"
+          disabled={!hydrated}
         >
           New Todo List
         </button>

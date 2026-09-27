@@ -1,5 +1,6 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { createServerFn } from "@tanstack/react-start";
+import { getCookie, setCookie } from "@tanstack/react-start/server";
 import { z } from "zod";
 import { ChatRoomContext } from "../chat.context";
 import { ChatRoomDisplay } from "../components/ChatRoom";
@@ -29,6 +30,17 @@ const loadChatRoom = createServerFn({ method: "GET" })
   .handler(async ({ data }) => {
     const env = getActorRuntimeEnv();
     const roomId = data.roomId;
+
+    // Persist a caller_id on first visit so the WS upgrade presents the same
+    // identity (the middleware reads it). Demo-only: production would use a
+    // signed session cookie or JWT.
+    if (getCookie("caller_id") === undefined) {
+      setCookie("caller_id", `user-${crypto.randomUUID().slice(0, 8)}`, {
+        path: "/",
+        sameSite: "lax",
+        maxAge: 60 * 60 * 24 * 30,
+      });
+    }
 
     const doId = env.CHAT_ROOM.idFromName(roomId);
     const stub = env.CHAT_ROOM.get(doId);

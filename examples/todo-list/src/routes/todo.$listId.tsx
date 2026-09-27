@@ -1,6 +1,6 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { createServerFn } from "@tanstack/react-start";
-import { getRequestHeader } from "@tanstack/react-start/server";
+import { getCookie, setCookie } from "@tanstack/react-start/server";
 import { z } from "zod";
 import { TodoListContext } from "../todo.context";
 import { TodoOwner } from "../components/TodoOwner";
@@ -28,8 +28,11 @@ type OwnerSnapshot = z.infer<typeof OwnerSnapshotSchema>;
 type ViewerSnapshot = z.infer<typeof ViewerSnapshotSchema>;
 
 type LoaderData =
-  | { listId: string; role: "owner" | "member"; snapshot: OwnerSnapshot }
+  | { listId: string; role: "owner"; snapshot: OwnerSnapshot }
+  | { listId: string; role: "member"; snapshot: OwnerSnapshot }
   | { listId: string; role: "viewer"; snapshot: ViewerSnapshot };
+
+const RoleSchema = z.enum(["owner", "member", "viewer"]);
 
 // Server function: fetch initial snapshot from the Durable Object.
 // Uses the REAL callerId (from cookie) so the DO returns the correct role-based view.
@@ -42,12 +45,15 @@ const loadTodoList = createServerFn({ method: "GET" })
     const doId = env.TODO_LIST.idFromName(listId);
     const stub = env.TODO_LIST.get(doId);
 
-    // Read caller from cookie — must match the identity used for WebSocket
-    const cookieHeader = getRequestHeader("Cookie") ?? "";
-    const cookieMatch = cookieHeader.match(/(?:^|;\s*)caller_id=([^;]+)/);
-    const callerId = cookieMatch?.[1]
-      ? decodeURIComponent(cookieMatch[1])
-      : `user-${crypto.randomUUID().slice(0, 8)}`;
+    // Read caller from cookie — must match the identity used for WebSocket.
+    // Mint + persist one on first visit so the WS upgrade (and every later
+    // request) presents the same identity. Demo-only: production would use a
+    // signed session cookie or JWT.
+    const existingCallerId = getCookie("caller_id");
+    const callerId = existingCallerId ?? `user-${crypto.randomUUID().slice(0, 8)}`;
+    if (existingCallerId === undefined) {
+      setCookie("caller_id", callerId, { path: "/", sameSite: "lax", maxAge: 60 * 60 * 24 * 30 });
+    }
 
     // Spawn with creator — first visitor becomes the owner
     await stub.spawn({
@@ -59,15 +65,15 @@ const loadTodoList = createServerFn({ method: "GET" })
 
     // Get snapshot with real caller for correct role-based view
     const result = await stub.getSnapshot(callerId, "user");
-    const role = result.role as string;
+    const role = RoleSchema.parse(result.role);
 
-    if (role === "owner" || role === "member") {
-      const snapshot = OwnerSnapshotSchema.parse(result.snapshot);
-      return { listId, role, snapshot };
+    switch (role) {
+      case "owner":
+      case "member":
+        return { listId, role, snapshot: OwnerSnapshotSchema.parse(result.snapshot) };
+      case "viewer":
+        return { listId, role, snapshot: ViewerSnapshotSchema.parse(result.snapshot) };
     }
-
-    const snapshot = ViewerSnapshotSchema.parse(result.snapshot);
-    return { listId, role: "viewer", snapshot };
   });
 
 export const Route = createFileRoute("/todo/$listId")({
@@ -104,7 +110,12 @@ function TodoRouteComponent() {
 function TodoListLive({ loaderData }: { loaderData: LoaderData }) {
   const client = TodoListContext.useClient({
     path: `/api/todo-list/${loaderData.listId}`,
-    initialView: { role: loaderData.role, ...loaderData.snapshot },
+    initialView:
+      loaderData.role === "viewer"
+        ? { role: loaderData.role, ...loaderData.snapshot }
+        : loaderData.role === "owner"
+          ? { role: loaderData.role, ...loaderData.snapshot }
+          : { role: loaderData.role, ...loaderData.snapshot },
   });
 
   return (

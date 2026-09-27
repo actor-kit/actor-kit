@@ -52,7 +52,9 @@ export default defineConfig({
     },
   ],
   // Only start local servers when not running against deployed workers.
-  // All examples are TanStack Start apps — need build + wrangler dev.
+  // All examples are TanStack Start apps — `pnpm dev` builds then runs wrangler
+  // dev with --persist-to outside .output/ (state inside the watched build dir
+  // triggers reload loops that drop every WebSocket).
   ...(isDeployed
     ? {}
     : {
@@ -66,28 +68,28 @@ export default defineConfig({
           },
           {
             command:
-              "cd examples/counter && pnpm build && npx wrangler dev -c .output/server/wrangler.json --port 8799 --inspector-port 0",
+              "cd examples/counter && pnpm dev",
             port: 8799,
             reuseExistingServer: true,
             timeout: 60000,
           },
           {
             command:
-              "cd examples/todo-list && pnpm build && npx wrangler dev -c .output/server/wrangler.json --port 8800 --inspector-port 0",
+              "cd examples/todo-list && pnpm dev",
             port: 8800,
             reuseExistingServer: true,
             timeout: 60000,
           },
           {
             command:
-              "cd examples/chat-room && pnpm build && npx wrangler dev -c .output/server/wrangler.json --port 8801 --inspector-port 0",
+              "cd examples/chat-room && pnpm dev",
             port: 8801,
             reuseExistingServer: true,
             timeout: 60000,
           },
           {
             command:
-              "cd examples/auction && pnpm build && npx wrangler dev -c .output/server/wrangler.json --port 8802 --inspector-port 0",
+              "cd examples/auction && pnpm dev",
             port: 8802,
             reuseExistingServer: true,
             timeout: 60000,

@@ -35,18 +35,12 @@ export function AuctionDisplay({
         {item}
       </h2>
 
-      <div
-        id="highest-bid"
-        className="text-7xl font-bold tabular-nums text-[var(--sea-ink)]"
-      >
-        ${highestBid}
+      <div className="text-7xl font-bold tabular-nums text-[var(--sea-ink)]">
+        $<span id="highest-bid">{highestBid}</span>
       </div>
 
-      <p
-        id="bid-count"
-        className="text-sm text-[var(--sea-ink-soft)]"
-      >
-        {bidCount} {bidCount === 1 ? "bid" : "bids"}
+      <p className="text-sm text-[var(--sea-ink-soft)]">
+        <span id="bid-count">{bidCount}</span> {bidCount === 1 ? "bid" : "bids"}
       </p>
 
       {!closed ? (
