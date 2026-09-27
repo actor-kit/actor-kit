@@ -20,6 +20,7 @@ export { array, boolean, float32, float64, nullable, schema, string, uint8, uint
 
 // Shared types
 export type {
+  ContractMessages,
   ExecuteFn,
   Execution,
   ForwardCall,
@@ -29,6 +30,7 @@ export type {
   LinkFn,
   MessageContext,
   MessageDef,
+  MessageEvent,
   MutationCause,
   TimelineEntry,
   UnlinkFn,

@@ -12,7 +12,13 @@
  */
 
 import { DurableObject } from "cloudflare:workers";
-import type { FieldDescriptor, MessageContext, MutationCause, SchemaDefinition } from "@actor-kit/core";
+import type {
+  ContractMessages,
+  FieldDescriptor,
+  MessageContext,
+  MutationCause,
+  SchemaDefinition,
+} from "@actor-kit/core";
 import { createDeltaFrame, createSnapshotFrame, encode, encodeDelta } from "@actor-kit/core";
 import { DOQB } from "workers-qb";
 import type { z } from "zod";
@@ -2060,17 +2066,6 @@ function wrapFlatMessages(
 // --- Type helpers for createActorClass return type ---
 
 /** Extract event union from a contract's flat messages. */
-type ContractEvents<T> = T extends {
-  def: { messages: Record<string, { schema: { _output: unknown } }> };
-}
-  ? {
-      [K in keyof T["def"]["messages"] & string]: T["def"]["messages"][K] extends {
-        schema: { _output: infer P };
-      }
-        ? { type: K } & P
-        : { type: K };
-    }[keyof T["def"]["messages"] & string]
-  : { type: string; [key: string]: unknown };
 
 /** Extract input type from a contract's Zod schema. */
 type ContractInput<T> = T extends { def: { input: { _input: infer I } } } ? I : unknown;
@@ -2090,7 +2085,7 @@ export interface TypedActorClass<TContract> {
     send(
       caller: string,
       callerType: "user" | "service",
-      event: ContractEvents<TContract>,
+      event: ContractMessages<TContract>,
     ): Promise<{ ok: boolean; error?: string }>;
     getSnapshot(
       caller: string,

@@ -7,7 +7,15 @@
  * Accepts either a contract (from defineActor) or a raw TestableActorDef.
  */
 
-import type { Execution, ForwardCall, Infer, MessageContext, SchemaDefinition, TimelineEntry } from "@actor-kit/core";
+import type {
+  ContractMessages,
+  Execution,
+  ForwardCall,
+  Infer,
+  MessageContext,
+  SchemaDefinition,
+  TimelineEntry,
+} from "@actor-kit/core";
 import type { LinkCall, RolePredicate, UnlinkCall } from "@actor-kit/worker/testing";
 import { resolveRole, routeMessage } from "@actor-kit/worker/testing";
 import type { z } from "zod";
@@ -68,17 +76,6 @@ type ContractInput<T> = T extends { def: { input: { _input: infer I } } } ? I : 
  * Each message name K becomes { type: K } & payload.
  * Only matches flat messages (values have `schema` property).
  */
-type ContractMessages<T> = T extends {
-  def: { messages: Record<string, { schema: { _output: unknown } }> };
-}
-  ? {
-      [K in keyof T["def"]["messages"] & string]: T["def"]["messages"][K] extends {
-        schema: { _output: infer P };
-      }
-        ? { type: K } & P
-        : { type: K };
-    }[keyof T["def"]["messages"] & string]
-  : { type: string; [key: string]: unknown };
 
 /**
  * Extract the view union from a contract's views.

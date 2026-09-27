@@ -45,23 +45,26 @@ interface GuardedHandler<TState, TPayload, TEnv = unknown> {
 
 // --- message() function ---
 
+// Generic over the payload (the schema's output), not the schema type — the
+// payload is inferred from the schema and flows into the handler and MessageDef.
+
 // Overload 1: bare handler (no guard)
-export function message<TSchema extends z.ZodType, TState, TEnv = unknown>(
-  zodSchema: TSchema,
-  handler: MessageHandler<TState, z.infer<TSchema>, TEnv>,
-): MessageDef<TState, z.infer<TSchema>, TEnv>;
+export function message<TPayload, TState, TEnv = unknown>(
+  zodSchema: z.ZodType<TPayload>,
+  handler: MessageHandler<TState, TPayload, TEnv>,
+): MessageDef<TState, TPayload, TEnv>;
 
 // Overload 2: guarded handler
-export function message<TSchema extends z.ZodType, TState, TEnv = unknown>(
-  zodSchema: TSchema,
-  config: GuardedHandler<TState, z.infer<TSchema>, TEnv>,
-): MessageDef<TState, z.infer<TSchema>, TEnv>;
+export function message<TPayload, TState, TEnv = unknown>(
+  zodSchema: z.ZodType<TPayload>,
+  config: GuardedHandler<TState, TPayload, TEnv>,
+): MessageDef<TState, TPayload, TEnv>;
 
 // Implementation
-export function message<TSchema extends z.ZodType, TState, TEnv = unknown>(
-  zodSchema: TSchema,
-  handlerOrConfig: MessageHandler<TState, z.infer<TSchema>, TEnv> | GuardedHandler<TState, z.infer<TSchema>, TEnv>,
-): MessageDef<TState, z.infer<TSchema>, TEnv> {
+export function message<TPayload, TState, TEnv = unknown>(
+  zodSchema: z.ZodType<TPayload>,
+  handlerOrConfig: MessageHandler<TState, TPayload, TEnv> | GuardedHandler<TState, TPayload, TEnv>,
+): MessageDef<TState, TPayload, TEnv> {
   if (typeof handlerOrConfig === "function") {
     return {
       schema: zodSchema,

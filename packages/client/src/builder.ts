@@ -17,7 +17,7 @@
  *   client.connect();
  */
 
-import type { FieldDescriptor, Infer, SchemaDefinition } from "@actor-kit/core";
+import type { ContractMessages, FieldDescriptor, Infer, SchemaDefinition } from "@actor-kit/core";
 import { type ActorClient, createActorClient } from "./client";
 
 /** Runtime options for creating a client connection. */
@@ -58,17 +58,7 @@ export type InferEvent<T> = T extends ActorClientFactory<infer _V, infer E> ? E 
 
 // --- Contract type inference helpers ---
 
-export type ContractEvents<T> = T extends {
-  def: { messages: Record<string, { schema: { _output: unknown } }> };
-}
-  ? {
-      [K in keyof T["def"]["messages"] & string]: T["def"]["messages"][K] extends {
-        schema: { _output: infer P };
-      }
-        ? { type: K } & P
-        : { type: K };
-    }[keyof T["def"]["messages"] & string]
-  : { type: string; [key: string]: unknown };
+export type ContractEvents<T> = ContractMessages<T>;
 
 export type ContractView<T> = T extends {
   def: { views: Record<string, unknown> };

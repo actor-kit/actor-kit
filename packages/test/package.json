@@ -15,7 +15,7 @@
   "dependencies": {
     "@actor-kit/core": "workspace:*",
     "@actor-kit/worker": "workspace:*",
-    "zod": "^3.24.0"
+    "zod": "^4.6.5"
   },
   "license": "MIT",
   "author": "Jonathan Mumm",

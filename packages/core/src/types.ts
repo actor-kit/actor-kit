@@ -66,6 +66,29 @@ export interface MessageDef<TState = unknown, TPayload = unknown, TEnv = unknown
   readonly guard?: (state: TState, payload: TPayload, ctx: GuardContext<TEnv>) => boolean;
 }
 
+// --- Contract message union ---
+
+/**
+ * One message as sent over the wire: `{ type: K }` plus its payload fields.
+ * An empty payload schema (`z.object({})`) infers as `Record<string, never>`
+ * in Zod 4 — intersecting that would make `type` itself `never`, so a payload
+ * whose keys are an index signature collapses to just `{ type: K }`.
+ */
+export type MessageEvent<K extends string, P> = string extends keyof P ? { type: K } : { type: K } & P;
+
+/** Discriminated union of every message a contract accepts. */
+export type ContractMessages<T> = T extends {
+  def: { messages: Record<string, { schema: { _output: unknown } }> };
+}
+  ? {
+      [K in keyof T["def"]["messages"] & string]: T["def"]["messages"][K] extends {
+        schema: { _output: infer P };
+      }
+        ? MessageEvent<K, P>
+        : { type: K };
+    }[keyof T["def"]["messages"] & string]
+  : { type: string; [key: string]: unknown };
+
 // --- Timeline types (studio instrumentation) ---
 
 /** Discriminated union of all mutation causes for the timeline. */

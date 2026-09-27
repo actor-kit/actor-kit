@@ -23,7 +23,7 @@
   "dependencies": {
     "@actor-kit/core": "workspace:*",
     "workers-qb": "^1.15.0",
-    "zod": "^3.24.0"
+    "zod": "^4.6.5"
   },
   "peerDependencies": {
     "jose": "^6.0.0"

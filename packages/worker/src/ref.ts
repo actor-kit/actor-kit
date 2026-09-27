@@ -10,6 +10,7 @@
  *   await zone.send("service-1", "service", { type: "ACCEPT_TRANSFER", ... });
  */
 
+import type { ContractMessages } from "@actor-kit/core";
 import type { ActorContract } from "./define";
 import { resolveNamespace } from "./runtime/resolve-namespace";
 
@@ -54,17 +55,6 @@ export type LocationHint = "wnam" | "enam" | "sam" | "weur" | "eeur" | "apac" | 
  * Only matches flat messages (values have `schema` property).
  * Nested role-based messages fall through to loose message typing.
  */
-type ContractMessages<T> = T extends {
-  def: { messages: Record<string, { schema: { _output: unknown } }> };
-}
-  ? {
-      [K in keyof T["def"]["messages"] & string]: T["def"]["messages"][K] extends {
-        schema: { _output: infer P };
-      }
-        ? { type: K } & P
-        : { type: K };
-    }[keyof T["def"]["messages"] & string]
-  : { type: string; [key: string]: unknown };
 
 /** Type guard: is this an ActorContract (has name + def)? */
 function isActorContract(value: unknown): value is ActorContract {
