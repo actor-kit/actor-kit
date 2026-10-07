@@ -6,7 +6,7 @@
  */
 import { act, cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { FakeWebSocket, type FetchRoute, fetchCalls, installFakes, renderAt } from "./studio-ui-pages.helpers";
+import { FakeWebSocket, type FetchRoute, fetchCalls, fetchInits, installFakes, renderAt } from "./studio-ui-pages.helpers";
 
 function actor(actorType: string, actorId: string) {
   return { actorType, actorId, lastActiveAt: Date.now(), version: 1, connectionCount: 0 };
@@ -162,21 +162,18 @@ describe("Dashboard error states", () => {
     await waitFor(() => expect(screen.getByRole("alert").textContent).toMatch(/Malformed response/));
   });
 
-  it("prompts for the studio key on 401 and retries with it", async () => {
-    installFakes((url) => {
-      // Test-only key value, not a real secret.
-      const ok = fetchCalls.at(-1) !== undefined && localStorage.getItem("actor-kit-studio-key") === "test-key";
-      if (!ok) return new Response("Unauthorized", { status: 401 });
-      return url.pathname.endsWith("/types")
-        ? Response.json({ types: ["counter"] })
-        : Response.json({ actors: [actor("counter", "c1")] });
-    });
+  // ADR-014: replaced "prompts for the studio key on 401 and retries with it" when the shared
+  // key header was removed. Access signs people in with a cookie, so the UI only needs to send
+  // them back through the Access login.
+  it("offers to sign in again through Cloudflare Access on 401, and sends no key header", async () => {
+    installFakes(() => Response.json({ error: "Sign in through Cloudflare Access to use Studio" }, { status: 401 }));
     renderAt("/");
-    await waitFor(() => expect(screen.getByRole("alert").textContent).toMatch(/Unauthorized/));
-    fireEvent.change(screen.getByTestId("studio-key-input"), { target: { value: "test-key" } });
-    fireEvent.click(screen.getByTestId("studio-key-save"));
-    await waitFor(() => expect(actorIds()).toEqual(["c1"]));
-    expect(screen.getByRole("option", { name: "counter" })).toBeTruthy();
+    await waitFor(() => expect(screen.getByRole("alert").textContent).toMatch(/Cloudflare Access/));
+    expect(screen.getByTestId("studio-sign-in").getAttribute("href")).toBe("/__studio/");
+    expect(screen.queryByTestId("studio-key-input")).toBeNull();
+    for (const init of fetchInits) {
+      expect(new Headers(init?.headers).has("X-Actor-Kit-Studio-Key")).toBe(false);
+    }
   });
 });
 

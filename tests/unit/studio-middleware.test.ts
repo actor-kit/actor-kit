@@ -1,6 +1,9 @@
+import { createLocalJWKSet, exportJWK, generateKeyPair, SignJWT } from "jose";
 import { describe, expect, it } from "vitest";
 // Import middleware directly to avoid cloudflare:workers dependency
-import { actorKitStudio } from "../../packages/studio/src/middleware";
+import { actorKitStudio, createActorKitStudio } from "../../packages/studio/src/middleware";
+
+const ACCESS_ENV = { STUDIO_ACCESS_TEAM_DOMAIN: "team.cloudflareaccess.com", STUDIO_ACCESS_AUD: "aud" };
 
 // --- Helpers ---
 
@@ -77,28 +80,36 @@ describe("actorKitStudio middleware", () => {
       expect(result?.status).toBe(403);
     });
 
-    it("rejects with wrong secret", () => {
+    // ADR-014: these two replaced "rejects with wrong secret" / "allows with correct secret"
+    // when the shared X-Actor-Kit-Studio-Key header was removed in favour of Cloudflare Access.
+    it("rejects an invalid Access token", async () => {
       const result = actorKitStudio(
         makeRequest("/__studio/", {
           hostname: "example.com",
-          headers: { "X-Actor-Kit-Studio-Key": "wrong" },
+          headers: { "Cf-Access-Jwt-Assertion": "wrong" },
         }),
-        { ACTOR_KIT_STUDIO_SECRET: "correct-secret" },
+        ACCESS_ENV,
         fakeCtx,
       );
-      expect(result?.status).toBe(401);
+      expect((await result)?.status).toBe(401);
     });
 
-    it("allows with correct secret", () => {
-      const result = actorKitStudio(
-        makeRequest("/__studio/", {
-          hostname: "example.com",
-          headers: { "X-Actor-Kit-Studio-Key": "my-secret" },
-        }),
-        { ACTOR_KIT_STUDIO_SECRET: "my-secret" },
+    it("allows a valid Access token", async () => {
+      const { publicKey, privateKey } = await generateKeyPair("RS256");
+      const jwks = createLocalJWKSet({ keys: [{ ...(await exportJWK(publicKey)), kid: "k", alg: "RS256" }] });
+      const token = await new SignJWT({ sub: "u", email: "jon@example.com" })
+        .setProtectedHeader({ alg: "RS256", kid: "k" })
+        .setIssuer("https://team.cloudflareaccess.com")
+        .setAudience("aud")
+        .setExpirationTime("5m")
+        .sign(privateKey);
+      const studio = createActorKitStudio({ access: { keysFor: () => jwks }, log: () => {} });
+      const result = studio(
+        makeRequest("/__studio/", { hostname: "example.com", headers: { "Cf-Access-Jwt-Assertion": token } }),
+        ACCESS_ENV,
         fakeCtx,
       );
-      expect(result?.status).toBe(200);
+      expect((await result)?.status).toBe(200);
     });
   });
 

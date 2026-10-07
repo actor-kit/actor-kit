@@ -16,7 +16,6 @@ import {
 export type { ActorEntry, InspectResult, StudioConnectionInfo, TimelineItem } from "./protocol";
 
 const BASE = "/__studio/api";
-export const STUDIO_KEY_STORAGE = "actor-kit-studio-key";
 
 export type StudioApiErrorKind =
   | "bad-request"
@@ -46,30 +45,6 @@ export class StudioApiError extends Error {
   }
 }
 
-function readStoredKey(): string | null {
-  try {
-    return localStorage.getItem(STUDIO_KEY_STORAGE);
-  } catch {
-    return null;
-  }
-}
-
-/** Store (or clear, with an empty string) the studio key sent with every API call. */
-export function saveStudioKey(key: string): void {
-  try {
-    if (key === "") localStorage.removeItem(STUDIO_KEY_STORAGE);
-    else localStorage.setItem(STUDIO_KEY_STORAGE, key);
-  } catch {
-    // Storage unavailable (private mode); the key just isn't remembered.
-  }
-}
-
-function getHeaders(): HeadersInit {
-  const key = readStoredKey();
-  if (key) return { "X-Actor-Kit-Studio-Key": key };
-  return {};
-}
-
 function kindForStatus(status: number): StudioApiErrorKind {
   if (status === 400) return "bad-request";
   if (status === 401) return "unauthorized";
@@ -96,7 +71,8 @@ function errorMessage(status: number, text: string): string {
 async function request<S extends z.ZodType>(url: string, schema: S, signal?: AbortSignal): Promise<z.output<S>> {
   let res: Response;
   try {
-    res = await fetch(url, signal === undefined ? { headers: getHeaders() } : { headers: getHeaders(), signal });
+    // Production auth is the Cloudflare Access cookie (ADR-014), sent automatically on same-origin requests.
+    res = await fetch(url, signal === undefined ? {} : { signal });
   } catch (err) {
     if (err instanceof DOMException && err.name === "AbortError") throw err;
     throw new StudioApiError("network", "Network error: could not reach the Studio API", null);

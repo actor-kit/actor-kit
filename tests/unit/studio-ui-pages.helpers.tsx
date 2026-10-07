@@ -52,14 +52,18 @@ export type FetchRoute = (url: URL) => Response | Promise<Response>;
 
 /** Every fetch the page makes, as parsed URLs (for asserting query params). */
 export const fetchCalls: URL[] = [];
+/** The init (headers etc.) of every fetch, in the same order as fetchCalls. */
+export const fetchInits: Array<RequestInit | undefined> = [];
 
 export function installFakes(route: FetchRoute): void {
   FakeWebSocket.instances = [];
   fetchCalls.length = 0;
+  fetchInits.length = 0;
   vi.stubGlobal("WebSocket", FakeWebSocket);
-  vi.stubGlobal("fetch", (input: string) => {
+  vi.stubGlobal("fetch", (input: string, init?: RequestInit) => {
     const url = new URL(String(input), "http://localhost");
     fetchCalls.push(url);
+    fetchInits.push(init);
     return Promise.resolve().then(() => route(url));
   });
 }
