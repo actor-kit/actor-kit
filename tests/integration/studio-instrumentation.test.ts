@@ -819,7 +819,10 @@ describe("studio disabled (studio: { enabled: false })", () => {
 
     const counts = await runInDurableObject(stub, (_instance, state) => ({
       timeline: state.storage.sql.exec("SELECT COUNT(*) AS n FROM timeline").one()["n"],
-      connections: state.storage.sql.exec("SELECT COUNT(*) AS n FROM studio_connections").one()["n"],
+      // Connections are no longer persisted (migration 0008 drops studio_connections): no such table may exist.
+      connections: state.storage.sql
+        .exec("SELECT COUNT(*) AS n FROM sqlite_master WHERE type = 'table' AND name = 'studio_connections'")
+        .one()["n"],
     }));
     expect(counts).toEqual({ timeline: 0, connections: 0 });
     await settle(100);

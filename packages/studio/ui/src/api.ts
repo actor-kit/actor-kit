@@ -17,6 +17,7 @@ export interface ActorEntry {
 }
 
 export interface StudioConnectionInfo {
+  connectionId: string;
   caller: string;
   callerType: "user" | "service";
   connectedAt: number;

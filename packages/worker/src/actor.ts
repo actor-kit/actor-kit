@@ -23,11 +23,16 @@ import { createDeltaFrame, createSnapshotFrame, encode, encodeDelta } from "@act
 import { DOQB } from "workers-qb";
 import type { z } from "zod";
 import { BINARY_SUPPORT_HEADER, CALLER_ID_HEADER, CALLER_TYPE_HEADER } from "./identity";
+import {
+  isStudioSocket,
+  type LiveConnection,
+  readConnectionAttachment,
+  toLiveConnections,
+} from "./runtime/live-connections";
 import { routeMessage } from "./runtime/message-router";
 import { createOutbox } from "./runtime/outbox";
 import { resolveNamespace } from "./runtime/resolve-namespace";
 import { resolveRole } from "./runtime/roles";
-import { toStudioConnections } from "./runtime/studio-connections";
 import {
   handleStudioFrame,
   parseTimelineOptions,
@@ -261,6 +266,13 @@ const ACTOR_KIT_MIGRATIONS = [
       );
     `,
   },
+  {
+    // Connections are read from the sockets the DO holds (exact across
+    // hibernation and restart); this persisted copy went stale on restart and
+    // merged two sockets of the same caller into one row.
+    name: "0008_drop_studio_connections",
+    sql: "DROP TABLE IF EXISTS studio_connections;",
+  },
 ];
 
 // --- Helpers ---
@@ -413,6 +425,10 @@ export function actor(
 
       this.initialized = true;
 
+      // Re-sync the registry's connection count: a restart drops every socket
+      // without running webSocketClose, a hibernation wake keeps them.
+      this.updateRegistryConnections();
+
       // Persist the migrated state once (stamped with the new version) and record it on the timeline.
       if (migrated) {
         this.pendingCause = { type: "migrate", fromVersion: row.version, toVersion: this.version };
@@ -515,14 +531,23 @@ export function actor(
       }
     }
 
+    /** App connections from the sockets this DO holds right now (survives hibernation, empty after restart). */
+    liveConnections(exclude?: WebSocket): LiveConnection[] {
+      const sockets = this.ctx
+        .getWebSockets()
+        .filter((ws) => ws !== exclude)
+        .map((ws) => ({ tags: this.ctx.getTags(ws), attachment: ws.deserializeAttachment() }));
+      return toLiveConnections(sockets, def.roles, this.state);
+    }
+
     /**
      * Fire-and-forget: update connection count in the registry.
-     * Counts hibernation-surviving app sockets (ctx.getWebSockets() via appSockets()), not the
-     * in-memory map, which is empty after a wake. `closing` is excluded from the count.
+     * Counts the live app connections (one per socket, read from ctx.getWebSockets()), so it
+     * survives hibernation and matches what Studio lists. `closing` is excluded from the count.
      */
     updateRegistryConnections(closing?: WebSocket): void {
       if (this.registryStub === null) return;
-      const count = this.appSockets(closing).length;
+      const count = this.liveConnections(closing).length;
 
       try {
         const stub: Record<string, unknown> = this.registryStub;
@@ -1333,9 +1358,7 @@ export function actor(
     isStudioWs(ws: WebSocket): boolean {
       if (this.studioConnections.has(ws)) return true;
       // Check tags for hibernation recovery
-      const tags = this.ctx.getTags(ws);
-      const callerTag = tags.find((t: string) => t.startsWith("caller:"));
-      if (callerTag?.slice("caller:".length) === STUDIO_CALLER_ID) {
+      if (isStudioSocket(this.ctx.getTags(ws))) {
         this.studioConnections.add(ws); // Re-populate after hibernation
         return true;
       }
@@ -1349,19 +1372,6 @@ export function actor(
         if (this.isStudioWs(ws)) return true;
       }
       return false;
-    }
-
-    /** Open app (non-studio) sockets, read from ctx.getWebSockets() so it survives hibernation. */
-    appSockets(exclude?: WebSocket): WebSocket[] {
-      return this.ctx.getWebSockets().filter((ws) => ws !== exclude && !this.isStudioWs(ws));
-    }
-
-    /** Open app sockets for one caller identity (multi-tab / multi-device), excluding `exclude`. */
-    socketsForCaller(caller: string, callerType: "user" | "service", exclude: WebSocket): WebSocket[] {
-      return this.appSockets(exclude).filter((ws) => {
-        const tags = this.ctx.getTags(ws);
-        return tags.includes(`caller:${caller}`) && tags.includes(`callerType:${callerType}`);
-      });
     }
 
     getCallerFromWs(ws: WebSocket): { caller: string; callerType: "user" | "service" } | null {
@@ -1525,27 +1535,19 @@ export function actor(
       this.ctx.acceptWebSocket(server, tags);
       this.connections.set(server, { caller: callerInfo.caller, callerType: callerInfo.callerType });
 
-      // The studio connection list is per caller identity: only the first socket for a
-      // caller (multi-tab / multi-device) adds the row and notifies the studio.
+      // Per-socket identity for Studio: survives hibernation with the socket and
+      // disappears with it on restart, and tells two tabs of one caller apart.
       const connectedAt = Date.now();
-      const firstForCaller = this.socketsForCaller(callerInfo.caller, callerInfo.callerType, server).length === 0;
-
-      // Persist connection to SQLite (survives hibernation)
-      if (this.studioEnabled && firstForCaller) {
-        this.ctx.storage.sql.exec(
-          "INSERT OR REPLACE INTO studio_connections (caller, caller_type, connected_at) VALUES (?, ?, ?)",
-          callerInfo.caller,
-          callerInfo.callerType,
-          connectedAt,
-        );
-      }
+      const connectionId = crypto.randomUUID();
+      server.serializeAttachment({ connectionId, connectedAt });
 
       // Notify studio of new connection (covers hibernated sockets too)
-      if (firstForCaller && this.hasStudioWs()) {
+      if (this.hasStudioWs()) {
         this.broadcastToStudio({
           type: "studio.connection",
           action: "connect",
           connection: {
+            connectionId,
             caller: callerInfo.caller,
             callerType: callerInfo.callerType,
             connectedAt,
@@ -1747,24 +1749,13 @@ export function actor(
       this.connectionChecksums.delete(ws);
       this.supportsBinary.delete(ws);
 
-      // Only the caller's last open socket removes it from the studio connection list.
-      const lastForCaller = this.socketsForCaller(caller, info.callerType, ws).length === 0;
-
-      // Remove connection from SQLite
-      if (this.studioEnabled && lastForCaller) {
-        this.ctx.storage.sql.exec(
-          "DELETE FROM studio_connections WHERE caller = ? AND caller_type = ?",
-          caller,
-          info.callerType,
-        );
-      }
-
       // Notify studio of disconnection (covers hibernated sockets too)
-      if (lastForCaller && this.hasStudioWs()) {
+      const attachment = readConnectionAttachment(ws.deserializeAttachment());
+      if (attachment !== null && this.hasStudioWs()) {
         this.broadcastToStudio({
           type: "studio.connection",
           action: "disconnect",
-          connection: { caller, callerType: info.callerType },
+          connection: { connectionId: attachment.connectionId, caller, callerType: info.callerType },
         });
       }
 
@@ -1849,11 +1840,8 @@ export function actor(
 
     /** Build the initial studio snapshot payload. */
     buildStudioSnapshot(): Record<string, unknown> {
-      // Connections — read from SQLite (survives hibernation)
-      const connRows = this.ctx.storage.sql
-        .exec("SELECT caller, caller_type, connected_at FROM studio_connections ORDER BY connected_at")
-        .toArray();
-      const connections = toStudioConnections(connRows, def.roles, this.state);
+      // Connections — the app sockets held right now (survives hibernation)
+      const connections = this.liveConnections();
 
       // Timeline entries
       const timelineRows = this.ctx.storage.sql
@@ -1950,7 +1938,7 @@ export function actor(
       state: unknown;
       version: number;
       actorId: string | null;
-      connections: Array<{ caller: string; callerType: "user" | "service" }>;
+      connections: LiveConnection[];
       outbox: Array<{
         id: string;
         service: string;
@@ -1988,11 +1976,8 @@ export function actor(
         };
       }
 
-      // Current connections — read from SQLite (survives hibernation)
-      const connRows = this.ctx.storage.sql
-        .exec("SELECT caller, caller_type, connected_at FROM studio_connections ORDER BY connected_at")
-        .toArray();
-      const connList = toStudioConnections(connRows, def.roles, this.state);
+      // Current connections — the app sockets held right now (survives hibernation)
+      const connList = this.liveConnections();
 
       // Outbox / executions
       const execRows = this.ctx.storage.sql
@@ -2177,7 +2162,7 @@ export interface TypedActorClass<TContract> {
       state: unknown;
       version: number;
       actorId: string | null;
-      connections: Array<{ caller: string; callerType: "user" | "service" }>;
+      connections: LiveConnection[];
       outbox: Array<{
         id: string;
         service: string;

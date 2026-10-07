@@ -41,13 +41,13 @@ export { StudioRegistry };
 
 Actors auto-register with the registry when they detect it in `ctx.exports`. The registry provides:
 
-### `touch(actorType, actorId, version)`
+### `touch(actorType, actorId, version, previousActorId?, doId?)`
 
-Called by actors (fire-and-forget) to register or update their `last_active_at`. Debounced at 10 seconds per actor instance.
+Called by actors (fire-and-forget) to register or update their `last_active_at`. Debounced at 10 seconds per actor instance. When an actor auto-spawned under its hex DO ID is later named by `spawn({ actorId })`, it passes the hex ID as `previousActorId` and the row is re-keyed, so the actor is listed once, under its name. `doId` records the DO hex ID so the Studio can still find the actor by it.
 
 ### `updateConnections(actorType, actorId, count)`
 
-Called by actors when WebSocket connections change.
+Called by actors when WebSocket connections change, and on every cold start. The count is the number of app sockets the actor holds, so it stays exact across hibernation and restarts.
 
 ### `listActors(opts)`
 
@@ -170,6 +170,7 @@ The studio WebSocket bypasses role evaluation. It uses the reserved caller ID `_
 {
   type: "studio.timeline";
   entry: {
+    id: number;          // same id as the snapshot and __getTimeline()
     causeType: string;
     causeData: string;
     stateSnapshot: string;
@@ -185,9 +186,13 @@ The studio WebSocket bypasses role evaluation. It uses the reserved caller ID `_
 {
   type: "studio.connection";
   action: "connect" | "disconnect";
-  connection: { caller: string; callerType: "user" | "service" };
+  // connect: { connectionId, caller, callerType, connectedAt, role }
+  // disconnect: { connectionId, caller, callerType }
+  connection: { connectionId: string; caller: string; callerType: "user" | "service" };
 }
 ```
+
+`connectionId` is unique per socket: two tabs of one caller are two connections.
 
 ### Messages from client
 

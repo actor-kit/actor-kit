@@ -103,8 +103,8 @@ The `actor()` runtime detects `StudioRegistry` in `ctx.exports` on initializatio
 
 - **On `init()`**: INSERT into registry with `last_active_at = now`.
 - **On state change**: touch `last_active_at` via fire-and-forget RPC, **debounced at 10 seconds** per actor instance. A timestamp that's 10s stale is acceptable for a dashboard sorted by recency.
-- **On connect/disconnect**: update `connection_count`, counted from `ctx.getWebSockets()` (excluding studio sockets) so it stays correct after hibernation.
-- **On `spawn()` naming an auto-spawned actor**: re-key the registry row from the hex DO ID to the name.
+- **On connect/disconnect**: update `connection_count`. The count is the number of app connections the DO holds (one per socket from `ctx.getWebSockets()`, minus Studio sockets), so it stays exact across hibernation, and is re-synced on every cold start (a restart drops sockets without `webSocketClose`).
+- **On `spawn()` naming an auto-spawned actor**: re-key the registry row from the hex DO ID to the name (`touch(..., previousActorId)`), so it is listed once, under its name.
 - Every row also records the actor's DO hex id (`do_id`), passed by the actor on `touch`/`updateConnections` and carried over on re-key, so `hasActor()` finds a named actor by its hex id too.
 
 Registry inputs are Zod-parsed. Invalid fire-and-forget writes are dropped; invalid `listActors` options (negative, fractional or NaN `limit`/`offset`) throw. `search` matches `actor_id` as a case-insensitive (ASCII) substring with `%`/`_` taken literally. Results are ordered by `last_active_at DESC`, then type and ID.
@@ -212,6 +212,12 @@ The middleware resolves the DO namespace via `ctx.exports`, stamps `withCallerId
 The actor runtime detects `callerId === "__studio"` (reserved) and **bypasses role evaluation entirely**. Studio connections do not appear in the actor's `connections` map, do not trigger `lifecycle.connect/disconnect`, and do not receive view projections.
 
 Studio connections are tracked in a separate `studioConnections` set.
+
+### Connections and timeline identity
+
+- Every app socket gets a `connectionId` (UUID) and `connectedAt` in its WebSocket attachment (`serializeAttachment`). `ConnectionInfo` is `{ connectionId, caller, callerType, connectedAt, role }`, read from the sockets the DO holds, so two tabs of one caller are two connections, hibernation keeps them, and a restart clears them. `studio.connection` disconnect events carry the `connectionId`.
+- Live `studio.timeline` entries carry the row `id`, the same id `__getTimeline()` and the snapshot use. A Studio that reconnects replaces its timeline with the snapshot and merges live entries by `id`, so nothing is duplicated.
+- The Studio UI reconnects its WebSocket with backoff (restart, network drop, or an actor that does not exist yet) and takes the fresh snapshot as the truth.
 
 ### Messages from DO → Studio
 
@@ -399,14 +405,14 @@ The `@actor-kit/worker` package gains the timeline instrumentation and `__studio
 
 Pinned by `tests/integration/studio-instrumentation.test.ts` and `tests/unit/studio-protocol.test.ts`.
 
-- **Opt-out**: `studio: { enabled: false }` disables instrumentation even when a registry is bound: no timeline, no `studio_connections` rows, no registry registration. `__inspect` / `__getTimeline` throw `Studio is not enabled for this actor`; the studio WebSocket gets `404`.
+- **Opt-out**: `studio: { enabled: false }` disables instrumentation even when a registry is bound: no timeline, no registry registration. `__inspect` / `__getTimeline` throw `Studio is not enabled for this actor`; the studio WebSocket gets `404`.
 - **`timelineSize`** must be a positive integer; `actor()` throws at definition time otherwise. Pruning keeps the newest `timelineSize` entries by `id` (not `created_at`).
 - **Migration**: loading a snapshot whose version differs from `version` (with `migrate` defined) persists the migrated state immediately and records a `migrate` timeline entry `{ fromVersion, toVersion }`.
 - **Live pushes**: `studio.timeline.entry` has the same shape as `__getTimeline` entries, including `id`.
 - **`__getTimeline(opts)`**: `limit` (positive integer, default 50) and `before` (positive integer, exclusive entry-ID cursor) are validated; anything else throws `Invalid timeline options: …`. Because the cursor is the unique `id`, equal timestamps never cause duplicates or gaps.
 - **Read-only lookups**: `__inspect` / `__getTimeline` never auto-spawn, persist or register an actor. For an ID that was never persisted, `__inspect` returns `{ initialized: false, state: null, actorId: null, connections: [], outbox: [], activeLinks: [], linkSubscribers: [] }` and `__getTimeline` returns `{ entries: [], hasMore: false }`. `__inspect` always includes `initialized`.
 - **Reserved caller**: `__studio` is honoured only with `callerType: "service"`; a `user` caller with that ID gets `403`.
-- **Connections list** is per caller identity: with several sockets for one caller (multi-tab), the first adds the row and sends `studio.connection` `connect`; only the last close removes it and sends `disconnect`. The registry `connection_count` counts open app sockets from `ctx.getWebSockets()` (so it is correct after hibernation) and excludes studio sockets.
+- **Connections list** is per socket: two tabs of one caller are two connections, each with its own `connectionId`, its own `studio.connection` `connect`, and its own `disconnect` when that tab closes. The registry `connection_count` counts the same app sockets (from `ctx.getWebSockets()`, so it is correct after hibernation) and excludes studio sockets.
 - **Registry**: an app client connecting counts as activity and touches the registry (debounced), so an actor persisted before the registry knew it still appears. Studio sockets never touch the registry.
 - **Studio → DO frames**: `studio.requestView` takes `{ role, caller?, callerType? }`. Replies are `studio.view` with `{ role, caller, callerRole, data }` (`callerRole` is the caller's actual role, or `null` — the view is still computed so the UI can preview it), or `studio.view` with `{ role, caller, error }` for an unknown role (own properties only), a perCaller view without `caller`, or a throwing projection. Invalid JSON, malformed requests and any other frame type (app messages included) get `{ type: "studio.error", error }`.
 
