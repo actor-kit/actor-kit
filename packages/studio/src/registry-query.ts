@@ -12,14 +12,22 @@ const ActorKey = z.object({
   actorId: z.string().min(1),
 });
 
+/** The actor's Durable Object hex id (`ctx.id.toString()`), stored so lookups by hex id work after re-keying. */
+const DoId = z.string().regex(/^[0-9a-f]{64}$/i);
+
 export const TouchArgs = ActorKey.extend({
   version: z.number().int(),
   previousActorId: z.string().min(1).optional(),
+  doId: DoId.optional(),
 });
 
 export const ConnectionArgs = ActorKey.extend({
   count: z.number().int().nonnegative(),
+  doId: DoId.optional(),
 });
+
+/** Exact lookup by registered actor id or by DO hex id. */
+export const LookupArgs = ActorKey;
 
 export const ListOptionsSchema = z.object({
   type: z.string().optional(),

@@ -105,6 +105,7 @@ The `actor()` runtime detects `StudioRegistry` in `ctx.exports` on initializatio
 - **On state change**: touch `last_active_at` via fire-and-forget RPC, **debounced at 10 seconds** per actor instance. A timestamp that's 10s stale is acceptable for a dashboard sorted by recency.
 - **On connect/disconnect**: update `connection_count`, counted from `ctx.getWebSockets()` (excluding studio sockets) so it stays correct after hibernation.
 - **On `spawn()` naming an auto-spawned actor**: re-key the registry row from the hex DO ID to the name.
+- Every row also records the actor's DO hex id (`do_id`), passed by the actor on `touch`/`updateConnections` and carried over on re-key, so `hasActor()` finds a named actor by its hex id too.
 
 Registry inputs are Zod-parsed. Invalid fire-and-forget writes are dropped; invalid `listActors` options (negative, fractional or NaN `limit`/`offset`) throw. `search` matches `actor_id` as a case-insensitive (ASCII) substring with `%`/`_` taken literally. Results are ordered by `last_active_at DESC`, then type and ID.
 
@@ -115,10 +116,14 @@ If the registry is not in `ctx.exports`, no registration occurs. Zero overhead f
 ```typescript
 class StudioRegistry extends DurableObject {
   // Called by actors (fire-and-forget)
-  // previousActorId re-keys a row (hex DO ID → spawn() name), keeping its connection count
-  touch(actorType: string, actorId: string, version: number, previousActorId?: string): void;
+  // previousActorId re-keys a row (hex DO ID → spawn() name), keeping its connection count and do_id
+  // doId is the actor's DO hex id (ctx.id.toString())
+  touch(actorType: string, actorId: string, version: number, previousActorId?: string, doId?: string): void;
   // Upserts: a connect is real activity, so an unregistered actor is registered here
-  updateConnections(actorType: string, actorId: string, count: number): void;
+  updateConnections(actorType: string, actorId: string, count: number, doId?: string): void;
+
+  // Called by studio middleware: exact match on actor_id OR do_id
+  hasActor(actorType: string, actorId: string): Promise<boolean>;
 
   // Called by studio middleware
   listActors(opts: {

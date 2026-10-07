@@ -436,7 +436,13 @@ export function actor(
         const stub: Record<string, unknown> = this.registryStub;
         const touchFn = stub["touch"];
         if (typeof touchFn === "function") {
-          void touchFn(_actorName, this.actorId ?? this.ctx.id.toString(), this.version, previousActorId);
+          void touchFn(
+            _actorName,
+            this.actorId ?? this.ctx.id.toString(),
+            this.version,
+            previousActorId,
+            this.ctx.id.toString(),
+          );
         }
       } catch {
         // Fire and forget
@@ -456,7 +462,7 @@ export function actor(
         const stub: Record<string, unknown> = this.registryStub;
         const updateFn = stub["updateConnections"];
         if (typeof updateFn === "function") {
-          void updateFn(_actorName, this.actorId ?? this.ctx.id.toString(), count);
+          void updateFn(_actorName, this.actorId ?? this.ctx.id.toString(), count, this.ctx.id.toString());
         }
       } catch {
         // Fire and forget
