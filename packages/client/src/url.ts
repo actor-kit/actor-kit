@@ -1,17 +1,21 @@
 /**
  * URL builder — turns (path, host?) into a full ws:// or wss:// URL.
  *
- * Browser default: host falls back to window.location.host.
+ * Browser default: host falls back to window.location.host, and the scheme follows the page
+ * (https → wss, http → ws).
  * Protocol inference: localhost / IPv4 / IPv6 → ws, everything else → wss.
  */
 
 export function buildUrl(path: string, host?: string): string {
-  const resolvedHost = host ?? (typeof window !== "undefined" && window.location ? window.location.host : null);
+  const location = typeof window !== "undefined" && window.location ? window.location : null;
+  const resolvedHost = host ?? location?.host ?? null;
   if (!resolvedHost) {
     throw new Error("host is required when window.location is not available (server-side, tests)");
   }
 
-  const protocol = inferProtocol(resolvedHost);
+  // Same-origin: the page's own scheme decides (an https page must use wss, even on a LAN IP).
+  const pageScheme = host === undefined ? location?.protocol : undefined;
+  const protocol = pageScheme === "https:" ? "wss" : pageScheme === "http:" ? "ws" : inferProtocol(resolvedHost);
   const normalizedPath = path.startsWith("/") ? path : `/${path}`;
   return `${protocol}://${resolvedHost}${normalizedPath}`;
 }
