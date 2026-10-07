@@ -7,6 +7,7 @@
     "test:integration": "pnpm build && pnpm --filter @actor-kit/integration-tests test",
     "test": "pnpm test:unit && pnpm test:integration",
     "test:e2e": "pnpm build && pnpm exec playwright test",
+    "test:e2e-agent": "pnpm build && pnpm --filter actor-kit-chat-example build && E2E_TELEMETRY_DISABLED=1 pnpm --filter @actor-kit/e2e-agent test:e2e",
     "lint": "biome check packages/core/src/ packages/worker/src/ packages/client/src/ packages/react/src/ packages/test/src/ packages/studio/src/ tests/",
     "lint:fix": "biome check --write packages/core/src/ packages/worker/src/ packages/client/src/ packages/react/src/ packages/test/src/ packages/studio/src/ tests/",
     "build": "pnpm -r run build",

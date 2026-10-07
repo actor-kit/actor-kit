@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from "react";
 import type { InspectResult, TimelineEntry } from "../api";
 
 export interface StudioConnection {
+  /** Unique per app socket: two tabs of one caller are two connections. */
+  connectionId: string;
   caller: string;
   callerType: "user" | "service";
   connectedAt: number;
@@ -107,9 +109,8 @@ export function useStudioWs(actorType: string, actorId: string): StudioWsState {
             }
             return {
               ...prev,
-              connections: prev.connections.filter(
-                (c) => c.caller !== msg.connection.caller || c.callerType !== msg.connection.callerType,
-              ),
+              // Remove only the socket that closed, not every socket of that caller.
+              connections: prev.connections.filter((c) => c.connectionId !== msg.connection.connectionId),
             };
           });
         }

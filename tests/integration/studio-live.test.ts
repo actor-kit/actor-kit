@@ -329,12 +329,15 @@ describe("Studio live scenarios (integration)", () => {
     await closeAndSettle(studio.ws);
   });
 
-  it("Studio opened before the actor is spawned by name: one registry entry, under the name", async () => {
+  it("actor auto-spawned under its hex ID, then spawned by name: one registry entry, under the name", async () => {
     const actorId = uniqueName("before-exists");
     const stub = counterStub(actorId);
     const hexId = env.COUNTER.idFromName(actorId).toString();
 
-    // Studio connects first — the actor does not exist yet.
+    // An RPC reaches the DO before the app spawned it by name: auto-spawn
+    // registers it under its hex DO ID. (Studio itself no longer does this
+    // once the middleware 404s unknown actors; any other RPC still can.)
+    await rpc(stub, "getSnapshot", "early-bird", "user");
     const studio = await StudioObserver.open(stub);
     const [snap] = await studio.waitFor(isSnapshot);
     expect(snap?.connections).toEqual([]);
