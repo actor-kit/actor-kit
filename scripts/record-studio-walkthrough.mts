@@ -503,37 +503,62 @@ async function walkthrough(browser: Browser, studio: Page): Promise<void> {
   );
   await pause(2000);
 
-  await caption(studio, "3. Timeline: its diff: onlineUsers[1] changed bob to carol, [2] removed");
+  await caption(studio, '3. Timeline: its diff: one red removed row, onlineUsers[1] "bob"');
   await timelineRows.first().click();
+  const openEntry = timelinePanel.locator("div.border").first();
   await expectOnCamera(
     studio,
-    "a changed row (onlineUsers[1]) and a removed row (onlineUsers[2])",
+    'exactly one diff row: onlineUsers[1] removed "bob"',
     async () => {
-      await timelinePanel.locator("[data-diff-row]", { hasText: "onlineUsers[1]" }).waitFor({ timeout: 3000 });
-      await timelinePanel.locator("[data-diff-row]", { hasText: "onlineUsers[2]" }).waitFor({ timeout: 3000 });
+      await openEntry
+        .locator('[data-diff-row][data-diff-type="removed"]', { hasText: "onlineUsers[1]" })
+        .filter({ hasText: '"bob"' })
+        .waitFor({ timeout: 3000 });
+      const rowCount = await openEntry.locator("[data-diff-row]").count();
+      if (rowCount !== 1) throw new Error(`${rowCount} rows`);
     },
-    textOf(timelinePanel.locator("div.border").first()),
+    textOf(openEntry),
   );
-  const changedRow = timelinePanel.locator("[data-diff-row]", { hasText: "onlineUsers[1]" });
-  const changedColour = await changedRow
-    .locator("span")
-    .last()
-    .evaluate((el) => getComputedStyle(el).color)
-    .catch(() => "unknown");
   await pause(3000);
-  await shot(studio, "timeline-diff-changed-removed");
-  // Spec (docs/specs/actor-kit-studio.md, Timeline panel): changed=yellow.
+  await shot(studio, "timeline-diff-removed");
+  await timelineRows.first().click();
+  await pause(800);
+
+  // chat.ts keeps the last 50 messages, so once 'lobby' is full each new message drops the
+  // oldest: same-length arrays of objects are diffed by index, so every slot shows as changed.
+  await caption(studio, "3. Timeline: carol fills 'lobby' to its 50-message cap (chat.ts keeps the last 50)");
+  for (let i = 1; i <= 50; i++) await say(carolLobby, `filler ${String(i).padStart(2, "0")} of 50`);
+  await caption(studio, "3. Timeline: one more message at the cap shifts every slot: changed rows, in yellow");
+  await say(carolLobby, "one past the cap");
   await expectOnCamera(
     studio,
-    "a yellow 'changed' diff row (spec: added=green, removed=red, changed=yellow)",
-    async () => {
-      const yellowish = await changedRow.evaluate((row) =>
-        Array.from(row.querySelectorAll("span")).some((s) => /yellow|amber/.test(s.className)),
-      );
-      if (!yellowish) throw new Error("no yellow");
-    },
-    async () => `old value red strikethrough, new value green (${changedColour}); no yellow`,
+    "a top entry 'carol sent SEND_MESSAGE'",
+    () => timelineRows.first().filter({ hasText: "carol sent SEND_MESSAGE" }).waitFor({ timeout: 8000 }),
+    textOf(timelineRows.first()),
   );
+  await timelineRows.first().click();
+  const changedValue = openEntry.locator('[data-diff-row][data-diff-type="changed"]').first().locator("span").last();
+  const changedColour = () => changedValue.evaluate((el) => getComputedStyle(el).color);
+  // Spec (docs/specs/actor-kit-studio.md, Timeline panel): added=green, removed=red, changed=yellow.
+  await expectOnCamera(
+    studio,
+    "yellow 'changed' diff rows (spec: added=green, removed=red, changed=yellow)",
+    async () => {
+      await changedValue.waitFor({ timeout: 3000 });
+      const isAmber = await changedValue.evaluate((el) => {
+        const probe = document.createElement("span");
+        probe.style.color = "var(--color-amber-300)";
+        document.body.append(probe);
+        const amber = getComputedStyle(probe).color;
+        probe.remove();
+        return getComputedStyle(el).color === amber;
+      });
+      if (!isAmber) throw new Error("not amber");
+    },
+    async () => `changed value colour ${await changedColour().catch(() => "unknown")}`,
+  );
+  await pause(3000);
+  await shot(studio, "timeline-diff-changed");
   await timelineRows.first().click();
   await pause(800);
 
@@ -605,6 +630,25 @@ async function walkthrough(browser: Browser, studio: Page): Promise<void> {
   );
   await pause(3000);
   await shot(studio, "connections-tab-closed");
+
+  // Lifecycle hooks fire per socket; chat.ts only drops a user when their last socket closes.
+  await caption(studio, "4. Presence: alice still has a tab open, so she stays online");
+  await studio.getByTestId("tab-state").click();
+  // Collapse the 50 messages so onlineUsers is on screen.
+  await statePanel.getByRole("button", { name: "[", exact: true }).first().click();
+  await expectOnCamera(
+    studio,
+    "'alice' still in onlineUsers and carol's chat header still '3 online' (alice, carol, dave)",
+    async () => {
+      await carolLobby.locator("#info", { hasText: "3 online" }).waitFor({ timeout: 5000 });
+      await statePanel.getByText('"alice"').first().waitFor({ timeout: 3000 });
+    },
+    async () => `carol's header ${await textOf(carolLobby.locator("#info"))()}`,
+  );
+  await pause(3000);
+  await shot(studio, "presence-alice-still-online");
+  await connTab.click();
+  await pause(800);
 
   // --- 5. Outbox and links ---------------------------------------------------------
   // chat.ts declares no `services` and no `links`, so both panels are empty for real.
