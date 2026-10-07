@@ -37,7 +37,13 @@ import {
   handleStudioFrame,
   parseTimelineOptions,
   resolveTimelineSize,
+  type StudioActiveLink,
+  type StudioLinkSubscriber,
+  type StudioOutboxEntry,
   type StudioTimelineEntry,
+  toActiveLink,
+  toLinkSubscriber,
+  toOutboxEntry,
   toTimelineEntry,
 } from "./runtime/studio-protocol";
 
@@ -686,6 +692,7 @@ export function actor(
 
         if (!serviceDef) {
           this.ctx.storage.sql.exec("UPDATE executions SET status = 'failed' WHERE id = ?", entry.id);
+          this.pushStudioOutbox();
           continue;
         }
 
@@ -694,6 +701,7 @@ export function actor(
         try {
           const result = await serviceDef.fn(parsedInput, this.env);
           this.ctx.storage.sql.exec("UPDATE executions SET status = 'done' WHERE id = ?", entry.id);
+          this.pushStudioOutbox();
 
           if (serviceDef.onDone) {
             const nextState = serviceDef.onDone(this.state, result, parsedInput);
@@ -711,6 +719,7 @@ export function actor(
           }
         } catch (error) {
           this.ctx.storage.sql.exec("UPDATE executions SET status = 'failed' WHERE id = ?", entry.id);
+          this.pushStudioOutbox();
 
           if (serviceDef.onError) {
             const errorMessage = error instanceof Error ? error.message : String(error);
@@ -903,6 +912,14 @@ export function actor(
     }
 
     /**
+     * The ID a target uses to reach this actor back. Targets resolve it with
+     * idFromName(), so it must be the actor's name, not the hex Durable Object ID.
+     */
+    subscriberId(): string {
+      return this.actorId ?? this.ctx.id.toString();
+    }
+
+    /**
      * Register this actor as a subscriber on target actors.
      * Fire-and-forget — if target is unreachable, re-registration happens on restart.
      */
@@ -915,7 +932,7 @@ export function actor(
           if (stub && typeof stub["__linkSubscribe"] === "function") {
             await (stub["__linkSubscribe"] as (subscriberType: string, subscriberId: string) => Promise<void>)(
               _actorName.toUpperCase().replace(/-/g, "_"),
-              this.ctx.id.toString(),
+              this.subscriberId(),
             );
           }
         } catch (error) {
@@ -966,7 +983,7 @@ export function actor(
             if (stub && typeof stub["__linkUnsubscribe"] === "function") {
               await (stub["__linkUnsubscribe"] as (subscriberType: string, subscriberId: string) => Promise<void>)(
                 _actorName.toUpperCase().replace(/-/g, "_"),
-                this.ctx.id.toString(),
+                this.subscriberId(),
               );
             }
           } catch {
@@ -987,6 +1004,7 @@ export function actor(
         subscriberId,
         Date.now(),
       );
+      this.pushStudioLinks();
 
       // Immediately push current view to the new subscriber
       if (this.initialized) {
@@ -1004,6 +1022,7 @@ export function actor(
       );
       // Clean up dedupe state
       this.previousSubscriberViews.delete(`${subscriberType}:${subscriberId}`);
+      this.pushStudioLinks();
     }
 
     // --- Subscriber-side RPC method (called by source actors) ---
@@ -1058,6 +1077,7 @@ export function actor(
             sourceId,
             linkRow.link_name,
           );
+          this.pushStudioLinks();
 
           this.pendingCause = {
             type: "link.onUpdate",
@@ -1332,6 +1352,14 @@ export function actor(
 
       // Broadcast views to connected clients and DO subscribers
       this.broadcastViews();
+
+      // Studio: new executions are pending, links may have changed
+      if (executionEntries.length > 0) {
+        this.pushStudioOutbox();
+      }
+      if (linkCalls.length > 0 || unlinkCalls.length > 0) {
+        this.pushStudioLinks();
+      }
 
       // Drain executions asynchronously
       if (executionEntries.length > 0) {
@@ -1873,37 +1901,8 @@ export function actor(
         .toArray();
       const timeline = timelineRows.map(toTimelineEntry);
 
-      // Outbox
-      const execRows = this.ctx.storage.sql
-        .exec("SELECT id, service, payload, status, attempts, created_at FROM executions ORDER BY id DESC")
-        .toArray();
-      const outbox = execRows.map((row) => ({
-        id: row["id"] as string,
-        service: row["service"] as string,
-        payload: row["payload"] as string,
-        status: row["status"] as string,
-        attempts: row["attempts"] as number,
-        createdAt: row["created_at"] as number,
-      }));
-
-      // Links
-      const linkRows = this.ctx.storage.sql
-        .exec("SELECT target_type, target_id, link_name, version FROM active_links")
-        .toArray();
-      const activeLinks = linkRows.map((row) => ({
-        targetType: row["target_type"] as string,
-        targetId: row["target_id"] as string,
-        linkName: row["link_name"] as string,
-        version: row["version"] as number,
-      }));
-
-      const subRows = this.ctx.storage.sql
-        .exec("SELECT subscriber_type, subscriber_id FROM link_subscribers")
-        .toArray();
-      const linkSubscribers = subRows.map((row) => ({
-        subscriberType: row["subscriber_type"] as string,
-        subscriberId: row["subscriber_id"] as string,
-      }));
+      const outbox = this.readOutbox();
+      const { activeLinks, linkSubscribers } = this.readLinks();
 
       return {
         type: "studio.snapshot",
@@ -1917,6 +1916,39 @@ export function actor(
         actorId: this.actorId ?? this.ctx.id.toString(),
         version: this.version,
       };
+    }
+
+    /** Outbox executions, newest first. */
+    readOutbox(): StudioOutboxEntry[] {
+      return this.ctx.storage.sql
+        .exec("SELECT id, service, payload, status, attempts, created_at FROM executions ORDER BY id DESC")
+        .toArray()
+        .map(toOutboxEntry);
+    }
+
+    /** Links this actor holds (activeLinks) and actors linked to it (linkSubscribers). */
+    readLinks(): { activeLinks: StudioActiveLink[]; linkSubscribers: StudioLinkSubscriber[] } {
+      const activeLinks = this.ctx.storage.sql
+        .exec("SELECT target_type, target_id, link_name, version FROM active_links")
+        .toArray()
+        .map(toActiveLink);
+      const linkSubscribers = this.ctx.storage.sql
+        .exec("SELECT subscriber_type, subscriber_id FROM link_subscribers")
+        .toArray()
+        .map(toLinkSubscriber);
+      return { activeLinks, linkSubscribers };
+    }
+
+    /** Push the whole outbox to studio sockets after an execution is added or settles. */
+    pushStudioOutbox(): void {
+      if (!this.hasStudioWs()) return;
+      this.broadcastToStudio({ type: "studio.outbox", outbox: this.readOutbox() });
+    }
+
+    /** Push links + subscribers to studio sockets after either table changes. */
+    pushStudioLinks(): void {
+      if (!this.hasStudioWs()) return;
+      this.broadcastToStudio({ type: "studio.links", ...this.readLinks() });
     }
 
     /** Handle a frame from a studio WebSocket: view requests only; app messages are refused. */
@@ -2001,38 +2033,8 @@ export function actor(
       // Current connections — the app sockets held right now (survives hibernation)
       const connList = this.liveConnections();
 
-      // Outbox / executions
-      const execRows = this.ctx.storage.sql
-        .exec("SELECT id, service, payload, status, attempts, created_at FROM executions ORDER BY id DESC")
-        .toArray();
-      const outbox = execRows.map((row) => ({
-        id: row["id"] as string,
-        service: row["service"] as string,
-        payload: row["payload"] as string,
-        status: row["status"] as string,
-        attempts: row["attempts"] as number,
-        createdAt: row["created_at"] as number,
-      }));
-
-      // Active links
-      const linkRows = this.ctx.storage.sql
-        .exec("SELECT target_type, target_id, link_name, version FROM active_links")
-        .toArray();
-      const activeLinks = linkRows.map((row) => ({
-        targetType: row["target_type"] as string,
-        targetId: row["target_id"] as string,
-        linkName: row["link_name"] as string,
-        version: row["version"] as number,
-      }));
-
-      // Subscribers
-      const subRows = this.ctx.storage.sql
-        .exec("SELECT subscriber_type, subscriber_id FROM link_subscribers")
-        .toArray();
-      const linkSubscribers = subRows.map((row) => ({
-        subscriberType: row["subscriber_type"] as string,
-        subscriberId: row["subscriber_id"] as string,
-      }));
+      const outbox = this.readOutbox();
+      const { activeLinks, linkSubscribers } = this.readLinks();
 
       return {
         initialized: this.initialized,

@@ -5,8 +5,9 @@
 
 import { nullable, schema, string, uint32, view } from "@actor-kit/core";
 import { actorKitStudio, StudioRegistry } from "@actor-kit/studio";
-import { createActorClass, defineActor, message, withCallerIdentity } from "@actor-kit/worker";
+import { createActorClass, createRef, defineActor, message, withCallerIdentity } from "@actor-kit/worker";
 import { z } from "zod";
+import { AuctionRoom, Lobby } from "./effects-actors";
 
 // --- Counter actor ---
 
@@ -35,7 +36,42 @@ const CounterContract = defineActor("counter", {
 });
 
 export const Counter = createActorClass(CounterContract);
-export { StudioRegistry };
+export { AuctionRoom, Lobby, StudioRegistry };
+
+// --- Effects endpoints (spawn / send for the Outbox + Links actors) ---
+
+const EffectsTarget = z.object({ type: z.enum(["lobby", "auction-room"]), actorId: z.string().min(1) });
+const EffectsSpawnBody = EffectsTarget.extend({ input: z.record(z.string(), z.unknown()) });
+const EffectsSendBody = EffectsTarget.extend({
+  caller: z.string().default("e2e-test"),
+  message: z.object({ type: z.string() }).catchall(z.unknown()),
+});
+
+const EFFECTS_BINDINGS = { lobby: "LOBBY", "auction-room": "AUCTION_ROOM" } satisfies Record<
+  z.infer<typeof EffectsTarget>["type"],
+  string
+>;
+
+/** Untyped ref: the message was parsed above and the actor's own Zod schema validates its payload. */
+function effectsRef(env: Record<string, unknown>, target: z.infer<typeof EffectsTarget>) {
+  return createRef(env, EFFECTS_BINDINGS[target.type], target.actorId);
+}
+
+async function handleEffects(request: Request, env: Record<string, unknown>, path: string): Promise<Response> {
+  const json: unknown = await request.json();
+  if (path === "/effects/spawn") {
+    const body = EffectsSpawnBody.parse(json);
+    await effectsRef(env, body).spawn({
+      actorId: body.actorId,
+      caller: "e2e-test",
+      callerType: "user",
+      input: body.input,
+    });
+    return Response.json({ ok: true });
+  }
+  const body = EffectsSendBody.parse(json);
+  return Response.json(await effectsRef(env, body).send(body.caller, "user", body.message));
+}
 
 // --- Worker fetch ---
 
@@ -46,6 +82,10 @@ export default {
     if (studioResponse) return studioResponse;
 
     const url = new URL(request.url);
+
+    if ((url.pathname === "/effects/spawn" || url.pathname === "/effects/send") && request.method === "POST") {
+      return handleEffects(request, env, url.pathname);
+    }
 
     // Seed endpoint: creates an actor and sends messages
     if (url.pathname === "/seed" && request.method === "POST") {

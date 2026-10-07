@@ -79,6 +79,72 @@ export function toTimelineEntry(raw: unknown): StudioTimelineEntry {
   };
 }
 
+// --- Outbox and links (shared by __inspect, the snapshot and live pushes) ---
+
+const OutboxRowSchema = z.object({
+  id: z.string(),
+  service: z.string(),
+  payload: z.string(),
+  status: z.string(),
+  attempts: z.number(),
+  created_at: z.number(),
+});
+
+export interface StudioOutboxEntry {
+  id: string;
+  service: string;
+  payload: string;
+  status: string;
+  attempts: number;
+  createdAt: number;
+}
+
+/** Parse an `executions` SQLite row into the studio wire shape. */
+export function toOutboxEntry(raw: unknown): StudioOutboxEntry {
+  const row = OutboxRowSchema.parse(raw);
+  return {
+    id: row.id,
+    service: row.service,
+    payload: row.payload,
+    status: row.status,
+    attempts: row.attempts,
+    createdAt: row.created_at,
+  };
+}
+
+const ActiveLinkRowSchema = z.object({
+  target_type: z.string(),
+  target_id: z.string(),
+  link_name: z.string(),
+  version: z.number(),
+});
+
+export interface StudioActiveLink {
+  targetType: string;
+  targetId: string;
+  linkName: string;
+  version: number;
+}
+
+/** Parse an `active_links` SQLite row into the studio wire shape. */
+export function toActiveLink(raw: unknown): StudioActiveLink {
+  const row = ActiveLinkRowSchema.parse(raw);
+  return { targetType: row.target_type, targetId: row.target_id, linkName: row.link_name, version: row.version };
+}
+
+const LinkSubscriberRowSchema = z.object({ subscriber_type: z.string(), subscriber_id: z.string() });
+
+export interface StudioLinkSubscriber {
+  subscriberType: string;
+  subscriberId: string;
+}
+
+/** Parse a `link_subscribers` SQLite row into the studio wire shape. */
+export function toLinkSubscriber(raw: unknown): StudioLinkSubscriber {
+  const row = LinkSubscriberRowSchema.parse(raw);
+  return { subscriberType: row.subscriber_type, subscriberId: row.subscriber_id };
+}
+
 // --- Studio WebSocket frames ---
 
 const StudioFrameSchema = z.object({ type: z.string() });
