@@ -376,6 +376,21 @@ The `@actor-kit/worker` package gains the timeline instrumentation and `__studio
 - The `__studio` caller ID is reserved but doesn't affect existing role evaluation
 - New RPC methods (`__inspect`, `__getTimeline`) are internal to the DO class
 
+## Actor-side behaviour (as implemented)
+
+Pinned by `tests/integration/studio-instrumentation.test.ts` and `tests/unit/studio-protocol.test.ts`.
+
+- **Opt-out**: `studio: { enabled: false }` disables instrumentation even when a registry is bound: no timeline, no `studio_connections` rows, no registry registration. `__inspect` / `__getTimeline` throw `Studio is not enabled for this actor`; the studio WebSocket gets `404`.
+- **`timelineSize`** must be a positive integer; `actor()` throws at definition time otherwise. Pruning keeps the newest `timelineSize` entries by `id` (not `created_at`).
+- **Migration**: loading a snapshot whose version differs from `version` (with `migrate` defined) persists the migrated state immediately and records a `migrate` timeline entry `{ fromVersion, toVersion }`.
+- **Live pushes**: `studio.timeline.entry` has the same shape as `__getTimeline` entries, including `id`.
+- **`__getTimeline(opts)`**: `limit` (positive integer, default 50) and `before` (positive integer, exclusive entry-ID cursor) are validated; anything else throws `Invalid timeline options: …`. Because the cursor is the unique `id`, equal timestamps never cause duplicates or gaps.
+- **Read-only lookups**: `__inspect` / `__getTimeline` never auto-spawn, persist or register an actor. For an ID that was never persisted, `__inspect` returns `{ initialized: false, state: null, actorId: null, connections: [], outbox: [], activeLinks: [], linkSubscribers: [] }` and `__getTimeline` returns `{ entries: [], hasMore: false }`. `__inspect` always includes `initialized`.
+- **Reserved caller**: `__studio` is honoured only with `callerType: "service"`; a `user` caller with that ID gets `403`.
+- **Connections list** is per caller identity: with several sockets for one caller (multi-tab), the first adds the row and sends `studio.connection` `connect`; only the last close removes it and sends `disconnect`. The registry `connection_count` counts open app sockets from `ctx.getWebSockets()` (so it is correct after hibernation) and excludes studio sockets.
+- **Registry**: an app client connecting counts as activity and touches the registry (debounced), so an actor persisted before the registry knew it still appears. Studio sockets never touch the registry.
+- **Studio → DO frames**: `studio.requestView` takes `{ role, caller?, callerType? }`. Replies are `studio.view` with `{ role, caller, callerRole, data }` (`callerRole` is the caller's actual role, or `null` — the view is still computed so the UI can preview it), or `studio.view` with `{ role, caller, error }` for an unknown role (own properties only), a perCaller view without `caller`, or a throwing projection. Invalid JSON, malformed requests and any other frame type (app messages included) get `{ type: "studio.error", error }`.
+
 ## Open items for implementation
 
 - [ ] Exact JSON diff library choice for the UI (jsondiffpatch? fast-json-patch?)

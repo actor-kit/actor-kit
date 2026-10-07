@@ -34,3 +34,11 @@ export type { ActorRoute } from "./runtime/route-to-actor";
 export { parseActorRoute } from "./runtime/route-to-actor";
 // Studio connection row parsing (pure)
 export { toStudioConnections } from "./runtime/studio-connections";
+// Studio protocol (pure): timeline options, timeline rows, studio WebSocket frames
+export type { StudioReply, StudioTimelineEntry, TimelineQuery } from "./runtime/studio-protocol";
+export {
+  handleStudioFrame,
+  parseTimelineOptions,
+  resolveTimelineSize,
+  toTimelineEntry,
+} from "./runtime/studio-protocol";

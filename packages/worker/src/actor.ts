@@ -28,6 +28,16 @@ import { createOutbox } from "./runtime/outbox";
 import { resolveNamespace } from "./runtime/resolve-namespace";
 import { resolveRole } from "./runtime/roles";
 import { toStudioConnections } from "./runtime/studio-connections";
+import {
+  handleStudioFrame,
+  parseTimelineOptions,
+  resolveTimelineSize,
+  type StudioTimelineEntry,
+  toTimelineEntry,
+} from "./runtime/studio-protocol";
+
+/** Reserved caller ID for studio WebSocket connections (stamped by the studio middleware). */
+const STUDIO_CALLER_ID = "__studio";
 
 // --- Studio registry helpers ---
 
@@ -128,8 +138,13 @@ interface ActorDef {
   serialize?(state: unknown): unknown;
   restore?(serialized: unknown): unknown;
   studio?: {
-    /** Force-enable timeline recording regardless of ctx.exports detection. */
+    /**
+     * true: force-enable timeline recording regardless of registry detection.
+     * false: opt out — no timeline, no registry registration, every studio entry point is rejected.
+     * undefined: enabled when a StudioRegistry is detected.
+     */
     enabled?: boolean;
+    /** Timeline ring-buffer size (positive integer, default 500). */
     timelineSize?: number;
   };
 }
@@ -291,6 +306,9 @@ export function actor(
   _actorName: string,
   def: ActorDef,
 ): { new (ctx: DurableObjectState, env: Record<string, unknown>): DurableObject } {
+  // Validate studio config at definition time, not on the first mutation.
+  const configuredTimelineSize = resolveTimelineSize(def.studio?.timelineSize);
+
   const DOClass = class ActorInstance extends DurableObject {
     state: unknown = undefined;
     actorId: string | undefined = undefined; // Human-readable ID (the name passed to idFromName)
@@ -310,20 +328,25 @@ export function actor(
     // --- Timeline (studio instrumentation) ---
     studioEnabled = false; // Detected from ctx.exports on init
     pendingCause: MutationCause | null = null; // Set before persistState(), consumed by persistState()
-    timelineSize = 500; // Ring buffer max entries
+    timelineSize = configuredTimelineSize; // Ring buffer max entries
     studioConnections = new Set<WebSocket>(); // Studio WebSocket connections (separate from app connections)
     registryStub: DurableObjectStub | null = null; // Cached StudioRegistry stub for RPC
     lastRegistryTouch = 0; // Timestamp of last registry touch (for debouncing)
+
+    persistedLoaded = false; // loadPersisted() has run against existing storage
+    studioDetected = false; // detectStudioConfig() has run
+    autoSpawning: Promise<void> | null = null; // in-flight auto-spawn (prevents double init)
 
     constructor(ctx: DurableObjectState, env: Record<string, unknown>) {
       super(ctx, env);
       this.envBindings = env;
       this.version = def.version ?? 1;
-      this.timelineSize = def.studio?.timelineSize ?? 500;
-      // Load state before any requests are served.
+      // Restore persisted state before any requests are served (hibernation wake / restart).
       // blockConcurrencyWhile ensures no fetch/send/WebSocket during init.
+      // Never creates storage: a DO that was never written stays empty until an entry
+      // point that may create the actor (fetch/send/getSnapshot/spawn) calls loadState().
       this.ctx.blockConcurrencyWhile(async () => {
-        await this.loadState();
+        this.loadPersisted({ create: false });
       });
     }
 
@@ -331,69 +354,112 @@ export function actor(
       new DOQB(this.ctx.storage.sql).migrations({ migrations: ACTOR_KIT_MIGRATIONS }).apply();
     }
 
-    async loadState(): Promise<void> {
-      if (this.initialized) return;
+    /** Resolve studio enablement once: registry detection OR'd with the config flag; `enabled: false` opts out. */
+    detectStudioConfig(): void {
+      if (this.studioDetected) return;
+      this.studioDetected = true;
+      if (def.studio?.enabled === false) {
+        this.studioEnabled = false;
+        return;
+      }
+      const registryDetected = this.detectStudio();
+      this.studioEnabled = registryDetected || def.studio?.enabled === true;
+    }
+
+    /** True if this DO has ever persisted actor state (read-only check, writes nothing). */
+    hasActorStorage(): boolean {
+      return (
+        this.ctx.storage.sql
+          .exec("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'snapshots'")
+          .toArray().length > 0
+      );
+    }
+
+    /**
+     * Load persisted state (running SQL migrations and version migration). Never auto-spawns.
+     * With `create: false`, a DO with no actor storage is left untouched (no tables, no rows).
+     */
+    loadPersisted({ create }: { create: boolean }): void {
+      this.detectStudioConfig();
+      if (this.persistedLoaded) return;
+      if (!create && !this.hasActorStorage()) return;
+      this.persistedLoaded = true;
 
       this.runMigrations();
 
-      // Enable timeline instrumentation: always try to detect registry (for auto-registration),
-      // then OR with explicit config flag
-      const registryDetected = this.detectStudio();
-      this.studioEnabled = registryDetected || def.studio?.enabled === true;
-
       const rows = this.ctx.storage.sql.exec("SELECT state, version, actor_id FROM snapshots WHERE id = 1").toArray();
+      if (rows.length === 0 || rows[0] === undefined) return;
 
-      if (rows.length > 0 && rows[0] !== undefined) {
-        const row = rows[0] as {
-          state: string;
-          version: number;
-          actor_id: string | null;
-        };
-        let parsed: unknown = JSON.parse(row.state);
+      const row = rows[0] as {
+        state: string;
+        version: number;
+        actor_id: string | null;
+      };
+      let parsed: unknown = JSON.parse(row.state);
 
-        // Run migration if needed
-        if (def.migrate && row.version !== this.version) {
-          parsed = def.migrate(parsed, row.version);
-        }
-
-        // Restore state
-        this.state = def.restore ? def.restore(parsed) : parsed;
-
-        // Restore actor ID
-        if (row.actor_id !== null) {
-          this.actorId = row.actor_id;
-        }
-
-        this.initialized = true;
-
-        // Drain any pending executions from before crash/restart
-        this.drainExecutions();
-
-        // Drain any pending forwards from before crash/restart
-        this.drainForwards();
-
-        // Re-register active link subscriptions
-        if (def.links) {
-          this.reRegisterLinks();
-        }
-      } else {
-        // No persisted state — try auto-spawn with empty input
-        const emptyParsed = def.input.safeParse({});
-        if (emptyParsed.success) {
-          this.actorId = this.ctx.id.toString();
-          this.state = await def.init(emptyParsed.data, {
-            env: this.env,
-            link: async () => {
-              throw new Error("link() not available during auto-spawn");
-            },
-          });
-          this.initialized = true;
-
-          this.pendingCause = { type: "init" };
-          this.persistState();
-        }
-        // If input requires fields, stay uninitialized — spawn() must be called explicitly
+      // Run migration if needed
+      const migrated = def.migrate !== undefined && row.version !== this.version;
+      if (def.migrate && migrated) {
+        parsed = def.migrate(parsed, row.version);
       }
+
+      // Restore state
+      this.state = def.restore ? def.restore(parsed) : parsed;
+
+      // Restore actor ID
+      if (row.actor_id !== null) {
+        this.actorId = row.actor_id;
+      }
+
+      this.initialized = true;
+
+      // Persist the migrated state once (stamped with the new version) and record it on the timeline.
+      if (migrated) {
+        this.pendingCause = { type: "migrate", fromVersion: row.version, toVersion: this.version };
+        this.ctx.storage.transactionSync(() => {
+          this.persistState();
+        });
+      }
+
+      // Drain any pending executions from before crash/restart
+      this.drainExecutions();
+
+      // Drain any pending forwards from before crash/restart
+      this.drainForwards();
+
+      // Re-register active link subscriptions
+      if (def.links) {
+        this.reRegisterLinks();
+      }
+    }
+
+    /** Load persisted state, auto-spawning with empty input if the actor doesn't exist yet. */
+    async loadState(): Promise<void> {
+      this.loadPersisted({ create: true });
+      if (this.initialized) return;
+      this.autoSpawning ??= this.autoSpawn().finally(() => {
+        this.autoSpawning = null;
+      });
+      await this.autoSpawning;
+    }
+
+    /** No persisted state — try auto-spawn with empty input. */
+    async autoSpawn(): Promise<void> {
+      const emptyParsed = def.input.safeParse({});
+      // If input requires fields, stay uninitialized — spawn() must be called explicitly
+      if (!emptyParsed.success) return;
+
+      this.actorId = this.ctx.id.toString();
+      this.state = await def.init(emptyParsed.data, {
+        env: this.env,
+        link: async () => {
+          throw new Error("link() not available during auto-spawn");
+        },
+      });
+      this.initialized = true;
+
+      this.pendingCause = { type: "init" };
+      this.persistState();
     }
 
     /** Detect StudioRegistry in ctx.exports or env and cache the stub. */
@@ -444,9 +510,12 @@ export function actor(
       }
     }
 
-    /** Fire-and-forget: update connection count in the registry. */
-    updateRegistryConnections(): void {
+    /** Fire-and-forget: update connection count in the registry.
+     * Counts open app sockets via ctx.getWebSockets() (survives hibernation; the in-memory
+     * `connections` map is only repopulated lazily). `closing` is excluded from the count. */
+    updateRegistryConnections(closing?: WebSocket): void {
       if (this.registryStub === null) return;
+      const count = this.appSockets(closing).length;
 
       try {
         const stub: Record<string, unknown> = this.registryStub;
@@ -455,7 +524,7 @@ export function actor(
           void (updateFn as (t: string, id: string, c: number) => Promise<void>)(
             _actorName,
             this.actorId ?? this.ctx.id.toString(),
-            this.connections.size,
+            count,
           );
         }
       } catch {
@@ -479,19 +548,23 @@ export function actor(
       );
 
       // Timeline instrumentation — write entry if studio is enabled and a cause is pending
-      if (this.studioEnabled && this.pendingCause !== null) {
-        const cause = this.pendingCause;
+      const cause = this.pendingCause;
+      this.pendingCause = null;
+      if (this.studioEnabled && cause !== null) {
         const { type: causeType, ...causeRest } = cause;
         const causeDataJson = JSON.stringify(causeRest);
-        this.ctx.storage.sql.exec(
-          "INSERT INTO timeline (cause_type, cause_data, state_snapshot, checksum, created_at) VALUES (?, ?, ?, ?, ?)",
-          causeType,
-          causeDataJson,
-          json,
-          checksum,
-          now,
+        const entry = toTimelineEntry(
+          this.ctx.storage.sql
+            .exec(
+              "INSERT INTO timeline (cause_type, cause_data, state_snapshot, checksum, created_at) VALUES (?, ?, ?, ?, ?) RETURNING id, cause_type, cause_data, state_snapshot, checksum, created_at",
+              causeType,
+              causeDataJson,
+              json,
+              checksum,
+              now,
+            )
+            .one(),
         );
-        this.pendingCause = null;
 
         // Ring buffer pruning
         this.pruneTimeline();
@@ -501,16 +574,7 @@ export function actor(
 
         // Push to studio connections (covers hibernated sockets too)
         if (this.hasStudioWs()) {
-          this.broadcastToStudio({
-            type: "studio.timeline",
-            entry: {
-              causeType,
-              causeData: causeDataJson,
-              stateSnapshot: json,
-              checksum,
-              createdAt: now,
-            },
-          });
+          this.broadcastToStudio({ type: "studio.timeline", entry });
         }
       }
     }
@@ -1267,7 +1331,7 @@ export function actor(
       // Check tags for hibernation recovery
       const tags = this.ctx.getTags(ws);
       const callerTag = tags.find((t: string) => t.startsWith("caller:"));
-      if (callerTag?.slice("caller:".length) === "__studio") {
+      if (callerTag?.slice("caller:".length) === STUDIO_CALLER_ID) {
         this.studioConnections.add(ws); // Re-populate after hibernation
         return true;
       }
@@ -1281,6 +1345,19 @@ export function actor(
         if (this.isStudioWs(ws)) return true;
       }
       return false;
+    }
+
+    /** Open app (non-studio) sockets, read from ctx.getWebSockets() so it survives hibernation. */
+    appSockets(exclude?: WebSocket): WebSocket[] {
+      return this.ctx.getWebSockets().filter((ws) => ws !== exclude && !this.isStudioWs(ws));
+    }
+
+    /** Open app sockets for one caller identity (multi-tab / multi-device), excluding `exclude`. */
+    socketsForCaller(caller: string, callerType: "user" | "service", exclude: WebSocket): WebSocket[] {
+      return this.appSockets(exclude).filter((ws) => {
+        const tags = this.ctx.getTags(ws);
+        return tags.includes(`caller:${caller}`) && tags.includes(`callerType:${callerType}`);
+      });
     }
 
     getCallerFromWs(ws: WebSocket): { caller: string; callerType: "user" | "service" } | null {
@@ -1406,8 +1483,15 @@ export function actor(
         return new Response("Actor requires input — call spawn({ input }) before connecting", { status: 404 });
       }
 
-      // Studio WebSocket — bypass role evaluation entirely
-      if (headerCallerId === "__studio") {
+      // Studio WebSocket — bypass role evaluation entirely.
+      // The reserved ID is only honoured for service callers (the studio middleware stamps "service").
+      if (headerCallerId === STUDIO_CALLER_ID) {
+        if (callerType !== "service") {
+          return new Response(`Caller ID "${STUDIO_CALLER_ID}" is reserved`, { status: 403 });
+        }
+        if (!this.studioEnabled) {
+          return new Response("Studio is not enabled for this actor", { status: 404 });
+        }
         return this.handleStudioWebSocket(request);
       }
 
@@ -1437,9 +1521,13 @@ export function actor(
       this.ctx.acceptWebSocket(server, tags);
       this.connections.set(server, { caller: callerInfo.caller, callerType: callerInfo.callerType });
 
-      // Persist connection to SQLite (survives hibernation)
+      // The studio connection list is per caller identity: only the first socket for a
+      // caller (multi-tab / multi-device) adds the row and notifies the studio.
       const connectedAt = Date.now();
-      if (this.studioEnabled) {
+      const firstForCaller = this.socketsForCaller(callerInfo.caller, callerInfo.callerType, server).length === 0;
+
+      // Persist connection to SQLite (survives hibernation)
+      if (this.studioEnabled && firstForCaller) {
         this.ctx.storage.sql.exec(
           "INSERT OR REPLACE INTO studio_connections (caller, caller_type, connected_at) VALUES (?, ?, ?)",
           callerInfo.caller,
@@ -1449,7 +1537,7 @@ export function actor(
       }
 
       // Notify studio of new connection (covers hibernated sockets too)
-      if (this.hasStudioWs()) {
+      if (firstForCaller && this.hasStudioWs()) {
         this.broadcastToStudio({
           type: "studio.connection",
           action: "connect",
@@ -1462,7 +1550,10 @@ export function actor(
         });
       }
 
-      // Update registry connection count
+      // An app client connecting is real activity: register/touch the actor (debounced) so actors
+      // persisted before the registry knew them still appear, then update the connection count.
+      // (Studio sockets never reach this path, so a studio lookup never registers an actor.)
+      this.touchRegistry();
       this.updateRegistryConnections();
       this.supportsBinary.set(server, clientSupportsBinary);
 
@@ -1652,8 +1743,11 @@ export function actor(
       this.connectionChecksums.delete(ws);
       this.supportsBinary.delete(ws);
 
+      // Only the caller's last open socket removes it from the studio connection list.
+      const lastForCaller = this.socketsForCaller(caller, info.callerType, ws).length === 0;
+
       // Remove connection from SQLite
-      if (this.studioEnabled) {
+      if (this.studioEnabled && lastForCaller) {
         this.ctx.storage.sql.exec(
           "DELETE FROM studio_connections WHERE caller = ? AND caller_type = ?",
           caller,
@@ -1662,7 +1756,7 @@ export function actor(
       }
 
       // Notify studio of disconnection (covers hibernated sockets too)
-      if (this.hasStudioWs()) {
+      if (lastForCaller && this.hasStudioWs()) {
         this.broadcastToStudio({
           type: "studio.connection",
           action: "disconnect",
@@ -1670,8 +1764,8 @@ export function actor(
         });
       }
 
-      // Update registry connection count
-      this.updateRegistryConnections();
+      // Update registry connection count (the closing socket may still be listed)
+      this.updateRegistryConnections(ws);
 
       // Run lifecycle.disconnect if defined
       if (def.lifecycle?.disconnect) {
@@ -1726,7 +1820,7 @@ export function actor(
       const pair = new WebSocketPair();
       const [client, server] = [pair[0], pair[1]];
 
-      const tags = ["caller:__studio", "callerType:service"];
+      const tags = [`caller:${STUDIO_CALLER_ID}`, "callerType:service"];
       this.ctx.acceptWebSocket(server, tags);
       this.studioConnections.add(server);
 
@@ -1763,14 +1857,7 @@ export function actor(
           "SELECT id, cause_type, cause_data, state_snapshot, checksum, created_at FROM timeline ORDER BY id DESC LIMIT 50",
         )
         .toArray();
-      const timeline = timelineRows.map((row) => ({
-        id: row["id"] as number,
-        causeType: row["cause_type"] as string,
-        causeData: row["cause_data"] as string,
-        stateSnapshot: row["state_snapshot"] as string,
-        checksum: row["checksum"] as string,
-        createdAt: row["created_at"] as number,
-      }));
+      const timeline = timelineRows.map(toTimelineEntry);
 
       // Outbox
       const execRows = this.ctx.storage.sql
@@ -1818,36 +1905,20 @@ export function actor(
       };
     }
 
-    /** Handle a message from a studio WebSocket (e.g., view requests). */
+    /** Handle a frame from a studio WebSocket: view requests only; app messages are refused. */
     handleStudioMessage(ws: WebSocket, data: string): void {
+      const reply = handleStudioFrame(data, { views: def.views, roles: def.roles, state: this.state });
       try {
-        const parsed: unknown = JSON.parse(data);
-        if (typeof parsed !== "object" || parsed === null || !("type" in parsed)) return;
-        const msg = parsed as Record<string, unknown> & { type: string };
-
-        if (msg.type === "studio.requestView") {
-          const role = msg["role"] as string | undefined;
-          const caller = (msg["caller"] as string | undefined) ?? "__studio";
-          if (role === undefined) return;
-
-          const viewDef = def.views[role];
-          if (viewDef === undefined) {
-            ws.send(JSON.stringify({ type: "studio.view", role, error: "No view for role" }));
-            return;
-          }
-
-          const viewData = viewDef.fn(this.state, caller);
-          ws.send(
-            JSON.stringify({
-              type: "studio.view",
-              role,
-              caller: msg["caller"] ?? null,
-              data: viewData,
-            }),
-          );
-        }
+        ws.send(JSON.stringify(reply));
       } catch {
-        // Invalid message — ignore
+        // Socket closed while handling
+      }
+    }
+
+    /** Throws when studio instrumentation is off — every studio RPC entry point calls this. */
+    assertStudioEnabled(): void {
+      if (!this.studioEnabled) {
+        throw new Error("Studio is not enabled for this actor");
       }
     }
 
@@ -1869,7 +1940,9 @@ export function actor(
     // --- Studio RPC methods ---
 
     /** Studio RPC: returns current state + metadata for inspection. */
-    async __inspect(): Promise<{
+    __inspect(): {
+      /** false when no actor has ever been persisted under this ID (studio lookups never create one). */
+      initialized: boolean;
       state: unknown;
       version: number;
       actorId: string | null;
@@ -1892,15 +1965,29 @@ export function actor(
         subscriberType: string;
         subscriberId: string;
       }>;
-    }> {
-      await this.loadState();
+    } {
+      // Studio lookups are read-only: never auto-spawn, persist or register an actor.
+      this.loadPersisted({ create: false });
+      this.assertStudioEnabled();
+
+      if (!this.persistedLoaded) {
+        // No actor has ever been persisted under this ID.
+        return {
+          initialized: false,
+          state: null,
+          version: this.version,
+          actorId: null,
+          connections: [],
+          outbox: [],
+          activeLinks: [],
+          linkSubscribers: [],
+        };
+      }
 
       // Current connections — read from SQLite (survives hibernation)
-      const connRows = this.studioEnabled
-        ? this.ctx.storage.sql
-            .exec("SELECT caller, caller_type, connected_at FROM studio_connections ORDER BY connected_at")
-            .toArray()
-        : [];
+      const connRows = this.ctx.storage.sql
+        .exec("SELECT caller, caller_type, connected_at FROM studio_connections ORDER BY connected_at")
+        .toArray();
       const connList = toStudioConnections(connRows, def.roles, this.state);
 
       // Outbox / executions
@@ -1937,6 +2024,7 @@ export function actor(
       }));
 
       return {
+        initialized: this.initialized,
         state: this.state,
         version: this.version,
         actorId: this.actorId ?? null,
@@ -1947,50 +2035,37 @@ export function actor(
       };
     }
 
-    /** Studio RPC: returns paginated timeline entries. */
-    async __getTimeline(opts?: { limit?: number; before?: number }): Promise<{
-      entries: Array<{
-        id: number;
-        causeType: string;
-        causeData: string;
-        stateSnapshot: string;
-        checksum: string;
-        createdAt: number;
-      }>;
+    /** Studio RPC: returns paginated timeline entries, newest first.
+     * `before` is an exclusive entry-ID cursor; IDs are unique, so equal timestamps
+     * never cause gaps or duplicates at page boundaries. Invalid options are rejected. */
+    __getTimeline(opts?: { limit?: number; before?: number }): {
+      entries: StudioTimelineEntry[];
       hasMore: boolean;
-    }> {
-      await this.loadState();
+    } {
+      // Studio lookups are read-only: never auto-spawn, persist or register an actor.
+      this.loadPersisted({ create: false });
+      this.assertStudioEnabled();
+      const { limit, before } = parseTimelineOptions(opts);
+      if (!this.persistedLoaded) return { entries: [], hasMore: false };
 
-      const limit = opts?.limit ?? 50;
-      const before = opts?.before;
-
-      let rows: Record<string, SqlStorageValue>[];
-      if (before !== undefined) {
-        rows = this.ctx.storage.sql
-          .exec(
-            "SELECT id, cause_type, cause_data, state_snapshot, checksum, created_at FROM timeline WHERE id < ? ORDER BY id DESC LIMIT ?",
-            before,
-            limit + 1,
-          )
-          .toArray();
-      } else {
-        rows = this.ctx.storage.sql
-          .exec(
-            "SELECT id, cause_type, cause_data, state_snapshot, checksum, created_at FROM timeline ORDER BY id DESC LIMIT ?",
-            limit + 1,
-          )
-          .toArray();
-      }
+      const rows =
+        before !== undefined
+          ? this.ctx.storage.sql
+              .exec(
+                "SELECT id, cause_type, cause_data, state_snapshot, checksum, created_at FROM timeline WHERE id < ? ORDER BY id DESC LIMIT ?",
+                before,
+                limit + 1,
+              )
+              .toArray()
+          : this.ctx.storage.sql
+              .exec(
+                "SELECT id, cause_type, cause_data, state_snapshot, checksum, created_at FROM timeline ORDER BY id DESC LIMIT ?",
+                limit + 1,
+              )
+              .toArray();
 
       const hasMore = rows.length > limit;
-      const entries = rows.slice(0, limit).map((row) => ({
-        id: row["id"] as number,
-        causeType: row["cause_type"] as string,
-        causeData: row["cause_data"] as string,
-        stateSnapshot: row["state_snapshot"] as string,
-        checksum: row["checksum"] as string,
-        createdAt: row["created_at"] as number,
-      }));
+      const entries = rows.slice(0, limit).map(toTimelineEntry);
 
       return { entries, hasMore };
     }
@@ -2093,6 +2168,8 @@ export interface TypedActorClass<TContract> {
     ): Promise<{ checksum: string; snapshot: unknown; role: string }>;
     fetch(request: Request): Promise<Response>;
     __inspect(): Promise<{
+      /** false when no actor has ever been persisted under this ID (studio lookups never create one). */
+      initialized: boolean;
       state: unknown;
       version: number;
       actorId: string | null;
