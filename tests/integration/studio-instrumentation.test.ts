@@ -559,31 +559,61 @@ describe("__studio role bypass", () => {
     expect(res.webSocket).toBeNull();
   });
 
-  it("multi-tab: closing one of two sockets for the same caller keeps the caller listed", async () => {
+  it("multi-tab: each socket is its own connection — one connect per tab, one disconnect per closed tab", async () => {
     const stub = await spawnProbe(uniqueName("bypass-multitab"));
     const studio = await connectStudio(stub);
+    const SocketConnectionSchema = z.object({
+      connectionId: z.string().min(1),
+      caller: z.string(),
+      callerType: z.enum(["user", "service"]),
+    });
+    const SocketNoticeSchema = StudioConnectionMsgSchema.extend({ connection: SocketConnectionSchema });
+    const InspectSocketsSchema = z.object({ connections: z.array(SocketConnectionSchema) });
+    const notices = (from = 0) =>
+      studio
+        .messages()
+        .slice(from)
+        .filter((m) => m.type === "studio.connection")
+        .map((m) => SocketNoticeSchema.parse(m));
+    const listed = async () => InspectSocketsSchema.parse(await stub.__inspect()).connections;
+
     const tab1 = await connect(stub, "member-1");
     const tab2 = await connect(stub, "member-1");
     await tab1.next((m) => m.type === "snapshot");
     await tab2.next((m) => m.type === "snapshot");
 
-    const connectNotices = studio.messages().filter((m) => m.type === "studio.connection");
-    expect(connectNotices).toHaveLength(1);
+    // Two tabs of one caller: two connect notices with distinct connectionIds, two listed connections.
+    const connects = notices();
+    expect(connects.map((n) => n.action)).toEqual(["connect", "connect"]);
+    expect(connects.map((n) => n.connection.caller)).toEqual(["member-1", "member-1"]);
+    const [id1, id2] = connects.map((n) => n.connection.connectionId);
+    if (id1 === undefined || id2 === undefined) throw new Error("expected two connect notices");
+    expect(id1).not.toBe(id2);
+    expect((await listed()).map((c) => c.connectionId).sort()).toEqual([id1, id2].sort());
 
+    // Closing tab 1: exactly one disconnect, for tab 1's connectionId; tab 2 stays listed.
     const from = studio.frames.length;
     await closeAndSettle(tab1);
-    expect((await inspect(stub)).connections.map((c) => c.caller)).toEqual(["member-1"]);
-    expect(
-      studio
-        .messages()
-        .slice(from)
-        .filter((m) => m.type === "studio.connection"),
-    ).toEqual([]);
+    await studio.next((m) => m.type === "studio.connection", from);
+    const afterFirst = notices(from);
+    expect(afterFirst).toHaveLength(1);
+    expect(afterFirst[0]).toMatchObject({
+      action: "disconnect",
+      connection: { connectionId: id1, caller: "member-1" },
+    });
+    expect(await listed()).toEqual([{ connectionId: id2, caller: "member-1", callerType: "user" }]);
 
+    // Closing tab 2: one disconnect for tab 2's connectionId; the caller is gone entirely.
+    const from2 = studio.frames.length;
     await closeAndSettle(tab2);
-    expect((await inspect(stub)).connections).toEqual([]);
-    const notice = StudioConnectionMsgSchema.parse(await studio.next((m) => m.type === "studio.connection", from));
-    expect(notice).toMatchObject({ action: "disconnect", connection: { caller: "member-1" } });
+    await studio.next((m) => m.type === "studio.connection", from2);
+    const afterSecond = notices(from2);
+    expect(afterSecond).toHaveLength(1);
+    expect(afterSecond[0]).toMatchObject({
+      action: "disconnect",
+      connection: { connectionId: id2, caller: "member-1" },
+    });
+    expect(await listed()).toEqual([]);
     await closeAndSettle(studio);
   });
 });
