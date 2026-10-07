@@ -18,6 +18,31 @@ export { createRef } from "./ref";
 export type { ChangeEntry } from "./runtime/cdc";
 export { createChangeEntry } from "./runtime/cdc";
 export { getTokenFromRequest } from "./runtime/get-token";
+// Actor journal (ADR-013): facts, events, replay
+export type {
+  FactSources,
+  Facts,
+  Journal,
+  JournalCauseType,
+  JournalCheckpoint,
+  JournalConfig,
+  JournalDraft,
+  JournalEvent,
+  JournalOption,
+  JournalSql,
+  LiveFacts,
+  ReplayableDef,
+  ReplayFacts,
+} from "./runtime/journal";
+export {
+  applyJournalEvent,
+  checksumState,
+  createLiveFacts,
+  createReplayFacts,
+  JournalNondeterminismError,
+  readJournal,
+  resolveJournalConfig,
+} from "./runtime/journal";
 // Live app connections from held sockets (pure)
 export type { ConnectionAttachment, LiveConnection, SocketRecord } from "./runtime/live-connections";
 export { isStudioSocket, readConnectionAttachment, toLiveConnections } from "./runtime/live-connections";

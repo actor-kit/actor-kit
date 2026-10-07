@@ -96,8 +96,13 @@ type MessageContext = {
   env: TEnv;                   // Worker env bindings (queues, AI, secrets, etc.)
   emit: EmitFn;                // (effect) → void — transactional outbox (legacy)
   execute: ExecuteFn;           // (service) → void — transactional outbox
+  now(): number;                // one timestamp per transition, recorded in the journal
+  id(): string;                 // fresh UUID, recorded in the journal
+  random(): number;             // [0, 1), recorded in the journal
 };
 ```
+
+`now`/`id`/`random` (`DeterministicContext`) are also passed to `init`, lifecycle handlers, and as a trailing `ctx` argument to `onDone`, `onError`, `link.onUpdate`, `link.onError` and `link.onUnlink`. Handlers must use them instead of `Date.now()`, `Math.random()` or `crypto.randomUUID()` so the journal can replay them (ADR-013).
 
 ### RolePredicate
 
@@ -246,6 +251,30 @@ CREATE TABLE emission_failures (
   failed_at INTEGER
 );
 ```
+
+### Event journal (ADR-013)
+
+The `snapshots` row is a cache. Every transition that persists state goes through `commit()`, which in one `transactionSync` runs the outbox/link writes, writes the snapshot and appends one row to `events` (`runtime/journal.ts`):
+
+```sql
+CREATE TABLE events (
+  seq INTEGER PRIMARY KEY AUTOINCREMENT,
+  cause_type TEXT NOT NULL,   -- init | message | lifecycle.* | service.onDone/onError | link.onUpdate/onError | migrate
+  name TEXT,                  -- message type, service name or link name
+  payload TEXT NOT NULL,      -- parsed payload / input / { input, result } / { sourceId, view } ...
+  caller TEXT, caller_type TEXT, role TEXT,
+  facts TEXT NOT NULL,        -- { now, ids, randoms, unlinked, linkViews } read by the handler
+  code_version INTEGER NOT NULL,
+  state_checksum TEXT NOT NULL, -- xxh64 of the persisted after-state JSON
+  created_at INTEGER NOT NULL
+);
+CREATE TABLE journal_checkpoints (seq INTEGER PRIMARY KEY, version INTEGER, state TEXT, checksum TEXT);
+```
+
+- A failed commit writes nothing and puts the in-memory state back.
+- A checkpoint (after-state) is written every `checkpointEvery` events (default 100).
+- `journal: false` turns it off; `journal: { keep }` prunes events at or below the newest checkpoint `<= lastSeq - keep`.
+- `readJournal(sql)` and `applyJournalEvent()` (`@actor-kit/worker/testing`) and `replayJournal()` (`@actor-kit/test`) read and fold it. Replay never runs guards or side effects.
 
 ### Transactional outbox
 

@@ -3,6 +3,7 @@ import { StudioRegistry } from "@actor-kit/studio";
 import { createActorClass, defineActor, message } from "@actor-kit/worker";
 import { z } from "zod";
 
+export { JournalKeep, JournalOff, JournalProbe, NotAnActor } from "./journal-actors";
 export { StudioOff, StudioProbe } from "./studio-probe";
 export { StudioRegistry };
 

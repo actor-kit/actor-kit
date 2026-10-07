@@ -14,7 +14,7 @@
  */
 
 import type { FieldDescriptor, Infer, SchemaDefinition } from "@actor-kit/core";
-import { applyDelta, decode, FrameType, parseFrame } from "@actor-kit/core";
+import { applyDelta, decode, FrameType, parseFrame, xxh64 } from "@actor-kit/core";
 import { buildUrl } from "./url";
 
 export type ConnectionState = "connecting" | "connected" | "disconnected" | "reconnecting";
@@ -108,11 +108,7 @@ export function createActorClient(options: ClientOptions<unknown>): ActorClient<
   const messageQueue: Array<{ type: string; [key: string]: unknown }> = [];
 
   function computeChecksum(json: string): string {
-    let h = 0;
-    for (let i = 0; i < json.length; i++) {
-      h = ((h << 5) - h + json.charCodeAt(i)) | 0;
-    }
-    return (h >>> 0).toString(16);
+    return xxh64(json);
   }
 
   function notifyListeners() {

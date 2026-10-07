@@ -15,7 +15,7 @@ import type { z } from "zod";
 // --- Route result ---
 
 export type RouteResult<TState> =
-  | { ok: true; state: TState }
+  | { ok: true; state: TState; payload: unknown }
   | { ok: false; error: "message_not_found" | "validation_failed" | "guard_failed"; detail?: string };
 
 // --- Minimal shape for the router ---
@@ -95,5 +95,5 @@ export function routeMessage<TState>(
     );
   }
 
-  return { ok: true, state: nextState };
+  return { ok: true, state: nextState, payload: parseResult.data };
 }

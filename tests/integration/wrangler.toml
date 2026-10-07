@@ -42,3 +42,23 @@ new_sqlite_classes = ["StudioRegistry"]
 [[migrations]]
 tag = "v4"
 new_sqlite_classes = ["StudioProbe", "StudioOff"]
+
+[[durable_objects.bindings]]
+name = "JOURNAL_PROBE"
+class_name = "JournalProbe"
+
+[[durable_objects.bindings]]
+name = "JOURNAL_OFF"
+class_name = "JournalOff"
+
+[[durable_objects.bindings]]
+name = "JOURNAL_KEEP"
+class_name = "JournalKeep"
+
+[[durable_objects.bindings]]
+name = "NOT_AN_ACTOR"
+class_name = "NotAnActor"
+
+[[migrations]]
+tag = "v5"
+new_sqlite_classes = ["JournalProbe", "JournalOff", "JournalKeep", "NotAnActor"]

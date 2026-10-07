@@ -1,5 +1,5 @@
 import { env } from "cloudflare:test";
-import { decode, FrameType, parseFrame, schema, string, uint32 } from "@actor-kit/core";
+import { decode, FrameType, parseFrame, schema, string, uint32, xxh64 } from "@actor-kit/core";
 import { describe, expect, it } from "vitest";
 
 const CounterView = schema({ count: uint32, lastCaller: string });
@@ -36,11 +36,7 @@ function waitForMessage(ws: WebSocket): Promise<{ binary: boolean; data: ArrayBu
 }
 
 function computeChecksum(json: string): string {
-  let h = 0;
-  for (let i = 0; i < json.length; i++) {
-    h = ((h << 5) - h + json.charCodeAt(i)) | 0;
-  }
-  return (h >>> 0).toString(16);
+  return xxh64(json);
 }
 
 describe("Reconnection with checksum (integration)", () => {
