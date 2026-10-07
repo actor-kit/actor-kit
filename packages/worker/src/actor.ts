@@ -255,6 +255,24 @@ const ACTOR_KIT_MIGRATIONS = [
  * In multi-DO Workers, the CF runtime populates ctx.exports with co-located bindings.
  * We access it via unknown to avoid casting DurableObjectState.
  */
+/**
+ * Complete the WebSocket close handshake from the server side.
+ * Codes 1005/1006 (and anything outside the sendable ranges) can't be sent
+ * back, so they are answered with 1000. Already-closed sockets are ignored.
+ */
+function answerClose(ws: WebSocket, code: number | undefined, reason: string | undefined): void {
+  const sendable =
+    code !== undefined &&
+    (code === 1000 ||
+      (code >= 1001 && code <= 1014 && code !== 1005 && code !== 1006) ||
+      (code >= 3000 && code <= 4999));
+  try {
+    ws.close(sendable ? code : 1000, reason ?? "");
+  } catch {
+    // Socket already closed
+  }
+}
+
 function getExports(ctx: unknown): Record<string, unknown> | undefined {
   if (typeof ctx !== "object" || ctx === null) return undefined;
   if ("exports" in ctx) {
@@ -483,14 +501,17 @@ export function actor(
         const cause = this.pendingCause;
         const { type: causeType, ...causeRest } = cause;
         const causeDataJson = JSON.stringify(causeRest);
-        this.ctx.storage.sql.exec(
-          "INSERT INTO timeline (cause_type, cause_data, state_snapshot, checksum, created_at) VALUES (?, ?, ?, ?, ?)",
-          causeType,
-          causeDataJson,
-          json,
-          checksum,
-          now,
-        );
+        const inserted = this.ctx.storage.sql
+          .exec(
+            "INSERT INTO timeline (cause_type, cause_data, state_snapshot, checksum, created_at) VALUES (?, ?, ?, ?, ?) RETURNING id",
+            causeType,
+            causeDataJson,
+            json,
+            checksum,
+            now,
+          )
+          .one();
+        const entryId = Number(inserted["id"]);
         this.pendingCause = null;
 
         // Ring buffer pruning
@@ -504,6 +525,7 @@ export function actor(
           this.broadcastToStudio({
             type: "studio.timeline",
             entry: {
+              id: entryId,
               causeType,
               causeData: causeDataJson,
               stateSnapshot: json,
@@ -1635,7 +1657,11 @@ export function actor(
       }
     }
 
-    async webSocketClose(ws: WebSocket): Promise<void> {
+    async webSocketClose(ws: WebSocket, code?: number, reason?: string): Promise<void> {
+      // Answer the peer's close frame. Without web_socket_auto_reply_to_close
+      // the runtime does not, and the browser socket stays CLOSING forever.
+      answerClose(ws, code, reason);
+
       // Studio connections — just clean up, no lifecycle
       if (this.isStudioWs(ws)) {
         this.studioConnections.delete(ws);
