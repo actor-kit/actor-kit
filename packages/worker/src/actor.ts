@@ -421,8 +421,11 @@ export function actor(
       return false;
     }
 
-    /** Fire-and-forget: touch the registry to update last_active_at (debounced 10s). */
-    touchRegistry(): void {
+    /**
+     * Fire-and-forget: touch the registry to update last_active_at (debounced 10s).
+     * `previousActorId` tells the registry to re-key a row registered under an older ID.
+     */
+    touchRegistry(previousActorId?: string): void {
       if (this.registryStub === null) return;
       const now = Date.now();
       if (now - this.lastRegistryTouch < 10_000) return; // Debounce: 10 seconds
@@ -433,30 +436,27 @@ export function actor(
         const stub: Record<string, unknown> = this.registryStub;
         const touchFn = stub["touch"];
         if (typeof touchFn === "function") {
-          void (touchFn as (t: string, id: string, v: number) => Promise<void>)(
-            _actorName,
-            this.actorId ?? this.ctx.id.toString(),
-            this.version,
-          );
+          void touchFn(_actorName, this.actorId ?? this.ctx.id.toString(), this.version, previousActorId);
         }
       } catch {
         // Fire and forget
       }
     }
 
-    /** Fire-and-forget: update connection count in the registry. */
-    updateRegistryConnections(): void {
+    /**
+     * Fire-and-forget: update connection count in the registry.
+     * Counts hibernation-surviving sockets (ctx.getWebSockets()), not the in-memory map, which
+     * is empty after a wake. `closing` is the socket being closed, excluded from the count.
+     */
+    updateRegistryConnections(closing?: WebSocket): void {
       if (this.registryStub === null) return;
 
       try {
+        const count = this.ctx.getWebSockets().filter((ws) => ws !== closing && !this.isStudioWs(ws)).length;
         const stub: Record<string, unknown> = this.registryStub;
         const updateFn = stub["updateConnections"];
         if (typeof updateFn === "function") {
-          void (updateFn as (t: string, id: string, c: number) => Promise<void>)(
-            _actorName,
-            this.actorId ?? this.ctx.id.toString(),
-            this.connections.size,
-          );
+          void updateFn(_actorName, this.actorId ?? this.ctx.id.toString(), count);
         }
       } catch {
         // Fire and forget
@@ -1058,11 +1058,12 @@ export function actor(
         // Already initialized (auto-spawn or prior spawn call).
         // Update actorId if a human-readable name was provided and we only have the hex ID.
         if (input.actorId && this.actorId !== input.actorId) {
+          const previousActorId = this.actorId ?? this.ctx.id.toString();
           this.actorId = input.actorId;
           this.ctx.storage.sql.exec("UPDATE snapshots SET actor_id = ? WHERE id = 1", this.actorId);
-          // Force registry touch with the correct name (bypass debounce)
+          // Force registry touch with the correct name (bypass debounce), replacing the old row
           this.lastRegistryTouch = 0;
-          this.touchRegistry();
+          this.touchRegistry(previousActorId);
         }
         return;
       }
@@ -1671,7 +1672,7 @@ export function actor(
       }
 
       // Update registry connection count
-      this.updateRegistryConnections();
+      this.updateRegistryConnections(ws);
 
       // Run lifecycle.disconnect if defined
       if (def.lifecycle?.disconnect) {

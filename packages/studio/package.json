@@ -15,7 +15,8 @@
   },
   "dependencies": {
     "@actor-kit/core": "workspace:*",
-    "workers-qb": "^1.15.0"
+    "workers-qb": "^1.15.0",
+    "zod": "^4.6.5"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^5.20260927.1",

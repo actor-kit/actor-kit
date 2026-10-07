@@ -4,10 +4,25 @@
  * Auto-discovered by the actor runtime via ctx.exports.
  * Stores actor type, ID, last activity, and connection counts.
  * Provides list/search/filter for the studio dashboard.
+ *
+ * Every RPC argument is parsed with Zod: these methods are called across a DO boundary.
+ * Fire-and-forget writes (`touch`, `updateConnections`) drop invalid input instead of
+ * throwing, so a bad call never surfaces as an unhandled rejection inside the calling actor.
  */
 
 import { DurableObject } from "cloudflare:workers";
 import { DOQB } from "workers-qb";
+import {
+  type ActorEntry,
+  ActorRow,
+  ActorTypeRow,
+  buildListQuery,
+  ConnectionArgs,
+  type ListOptions,
+  TouchArgs,
+} from "./registry-query";
+
+export type { ActorEntry, ListOptions };
 
 const REGISTRY_MIGRATIONS = [
   {
@@ -27,21 +42,6 @@ const REGISTRY_MIGRATIONS = [
   },
 ];
 
-interface ActorEntry {
-  actorType: string;
-  actorId: string;
-  lastActiveAt: number;
-  version: number | null;
-  connectionCount: number;
-}
-
-interface ListOptions {
-  type?: string;
-  search?: string;
-  limit?: number;
-  offset?: number;
-}
-
 export class StudioRegistry extends DurableObject {
   migrated = false;
 
@@ -54,79 +54,81 @@ export class StudioRegistry extends DurableObject {
     this.migrated = true;
   }
 
-  /** Called by actors (fire-and-forget) to register/update activity. */
-  touch(actorType: string, actorId: string, version: number): void {
+  /**
+   * Called by actors (fire-and-forget) to register/update activity.
+   * `previousActorId` re-keys an actor that was registered under another ID (e.g. its hex
+   * DO ID before spawn() named it): the old row is removed and its connection count kept.
+   */
+  touch(actorType: string, actorId: string, version: number, previousActorId?: string): void {
+    const parsed = TouchArgs.safeParse({ actorType, actorId, version, previousActorId });
+    if (!parsed.success) return;
+    const args = parsed.data;
+    this.ensureMigrated();
+    const sql = this.ctx.storage.sql;
+
+    this.ctx.storage.transactionSync(() => {
+      let carriedConnections = 0;
+      if (args.previousActorId !== undefined && args.previousActorId !== args.actorId) {
+        const previous = sql
+          .exec(
+            "DELETE FROM actors WHERE actor_type = ? AND actor_id = ? RETURNING connection_count",
+            args.actorType,
+            args.previousActorId,
+          )
+          .toArray();
+        const count = previous[0]?.["connection_count"];
+        if (typeof count === "number") carriedConnections = count;
+      }
+
+      sql.exec(
+        `INSERT INTO actors (actor_type, actor_id, last_active_at, version, connection_count)
+         VALUES (?, ?, ?, ?, ?)
+         ON CONFLICT(actor_type, actor_id) DO UPDATE SET
+           last_active_at = excluded.last_active_at,
+           version = excluded.version`,
+        args.actorType,
+        args.actorId,
+        Date.now(),
+        args.version,
+        carriedConnections,
+      );
+    });
+  }
+
+  /**
+   * Called by actors to update connection count. A connection is real activity, so an
+   * actor not yet registered (e.g. persisted before Studio was enabled) is registered here.
+   */
+  updateConnections(actorType: string, actorId: string, count: number): void {
+    const parsed = ConnectionArgs.safeParse({ actorType, actorId, count });
+    if (!parsed.success) return;
+    const args = parsed.data;
     this.ensureMigrated();
     this.ctx.storage.sql.exec(
       `INSERT INTO actors (actor_type, actor_id, last_active_at, version, connection_count)
-       VALUES (?, ?, ?, ?, 0)
+       VALUES (?, ?, ?, NULL, ?)
        ON CONFLICT(actor_type, actor_id) DO UPDATE SET
-         last_active_at = excluded.last_active_at,
-         version = excluded.version`,
-      actorType,
-      actorId,
+         connection_count = excluded.connection_count,
+         last_active_at = excluded.last_active_at`,
+      args.actorType,
+      args.actorId,
       Date.now(),
-      version,
+      args.count,
     );
   }
 
-  /** Called by actors to update connection count. */
-  updateConnections(actorType: string, actorId: string, count: number): void {
-    this.ensureMigrated();
-    this.ctx.storage.sql.exec(
-      `UPDATE actors SET connection_count = ?, last_active_at = ? WHERE actor_type = ? AND actor_id = ?`,
-      count,
-      Date.now(),
-      actorType,
-      actorId,
-    );
-  }
-
-  /** Called by studio middleware to list actors. */
+  /** Called by studio middleware to list actors, newest first. */
   async listActors(opts: ListOptions): Promise<ActorEntry[]> {
+    const query = buildListQuery(opts);
     this.ensureMigrated();
-    const limit = opts.limit ?? 50;
-    const offset = opts.offset ?? 0;
-
-    let query: string;
-    const params: unknown[] = [];
-
-    if (opts.type !== undefined && opts.search !== undefined) {
-      query = `SELECT actor_type, actor_id, last_active_at, version, connection_count
-               FROM actors WHERE actor_type = ? AND actor_id LIKE ?
-               ORDER BY last_active_at DESC LIMIT ? OFFSET ?`;
-      params.push(opts.type, `%${opts.search}%`, limit, offset);
-    } else if (opts.type !== undefined) {
-      query = `SELECT actor_type, actor_id, last_active_at, version, connection_count
-               FROM actors WHERE actor_type = ?
-               ORDER BY last_active_at DESC LIMIT ? OFFSET ?`;
-      params.push(opts.type, limit, offset);
-    } else if (opts.search !== undefined) {
-      query = `SELECT actor_type, actor_id, last_active_at, version, connection_count
-               FROM actors WHERE actor_id LIKE ?
-               ORDER BY last_active_at DESC LIMIT ? OFFSET ?`;
-      params.push(`%${opts.search}%`, limit, offset);
-    } else {
-      query = `SELECT actor_type, actor_id, last_active_at, version, connection_count
-               FROM actors ORDER BY last_active_at DESC LIMIT ? OFFSET ?`;
-      params.push(limit, offset);
-    }
-
-    const rows = this.ctx.storage.sql.exec(query, ...params).toArray();
-
-    return rows.map((row) => ({
-      actorType: row["actor_type"] as string,
-      actorId: row["actor_id"] as string,
-      lastActiveAt: row["last_active_at"] as number,
-      version: row["version"] as number | null,
-      connectionCount: row["connection_count"] as number,
-    }));
+    const rows = this.ctx.storage.sql.exec(query.sql, ...query.params).toArray();
+    return rows.map((row) => ActorRow.parse(row));
   }
 
   /** Get distinct actor types. */
   async getActorTypes(): Promise<string[]> {
     this.ensureMigrated();
     const rows = this.ctx.storage.sql.exec("SELECT DISTINCT actor_type FROM actors ORDER BY actor_type").toArray();
-    return rows.map((row) => row["actor_type"] as string);
+    return rows.map((row) => ActorTypeRow.parse(row).actor_type);
   }
 }
