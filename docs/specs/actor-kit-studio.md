@@ -103,7 +103,8 @@ The `actor()` runtime detects `StudioRegistry` in `ctx.exports` on initializatio
 
 - **On `init()`**: INSERT into registry with `last_active_at = now`.
 - **On state change**: touch `last_active_at` via fire-and-forget RPC, **debounced at 10 seconds** per actor instance. A timestamp that's 10s stale is acceptable for a dashboard sorted by recency.
-- **On connect/disconnect**: update `connection_count`.
+- **On connect/disconnect**: update `connection_count`. The count is the number of app sockets the DO holds (`ctx.getWebSockets()` minus Studio sockets), so it stays exact across hibernation, and is re-synced on every cold start (a restart drops sockets without `webSocketClose`).
+- **On `spawn({ actorId })` after an auto-spawn**: `rename(type, hexId, name)` moves the row, so an actor first touched by Studio (or any RPC) under its hex DO ID is listed once, under its name.
 
 If the registry is not in `ctx.exports`, no registration occurs. Zero overhead for users who haven't set up the studio.
 
@@ -114,6 +115,7 @@ class StudioRegistry extends DurableObject {
   // Called by actors (fire-and-forget)
   touch(actorType: string, actorId: string, version: number): void;
   updateConnections(actorType: string, actorId: string, count: number): void;
+  rename(actorType: string, fromId: string, toId: string, version: number): void;
 
   // Called by studio middleware
   listActors(opts: {
@@ -202,6 +204,12 @@ The middleware resolves the DO namespace via `ctx.exports`, stamps `withCallerId
 The actor runtime detects `callerId === "__studio"` (reserved) and **bypasses role evaluation entirely**. Studio connections do not appear in the actor's `connections` map, do not trigger `lifecycle.connect/disconnect`, and do not receive view projections.
 
 Studio connections are tracked in a separate `studioConnections` set.
+
+### Connections and timeline identity
+
+- Every app socket gets a `connectionId` (UUID) and `connectedAt` in its WebSocket attachment (`serializeAttachment`). `ConnectionInfo` is `{ connectionId, caller, callerType, connectedAt, role }`, read from the sockets the DO holds, so two tabs of one caller are two connections, hibernation keeps them, and a restart clears them. `studio.connection` disconnect events carry the `connectionId`.
+- Live `studio.timeline` entries carry the row `id`, the same id `__getTimeline()` and the snapshot use. A Studio that reconnects replaces its timeline with the snapshot and merges live entries by `id`, so nothing is duplicated.
+- The Studio UI reconnects its WebSocket with backoff (restart, network drop, or an actor that does not exist yet) and takes the fresh snapshot as the truth.
 
 ### Messages from DO → Studio
 

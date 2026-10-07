@@ -47,7 +47,11 @@ Called by actors (fire-and-forget) to register or update their `last_active_at`.
 
 ### `updateConnections(actorType, actorId, count)`
 
-Called by actors when WebSocket connections change.
+Called by actors when WebSocket connections change, and on every cold start. The count is the number of app sockets the actor holds, so it stays exact across hibernation and restarts.
+
+### `rename(actorType, fromId, toId, version)`
+
+Called by an actor auto-spawned under its hex DO ID when `spawn({ actorId })` gives it a name. Moves the row so the actor is listed once.
 
 ### `listActors(opts)`
 
@@ -170,6 +174,7 @@ The studio WebSocket bypasses role evaluation. It uses the reserved caller ID `_
 {
   type: "studio.timeline";
   entry: {
+    id: number;          // same id as the snapshot and __getTimeline()
     causeType: string;
     causeData: string;
     stateSnapshot: string;
@@ -185,9 +190,13 @@ The studio WebSocket bypasses role evaluation. It uses the reserved caller ID `_
 {
   type: "studio.connection";
   action: "connect" | "disconnect";
-  connection: { caller: string; callerType: "user" | "service" };
+  // connect: { connectionId, caller, callerType, connectedAt, role }
+  // disconnect: { connectionId, caller, callerType }
+  connection: { connectionId: string; caller: string; callerType: "user" | "service" };
 }
 ```
+
+`connectionId` is unique per socket: two tabs of one caller are two connections.
 
 ### Messages from client
 

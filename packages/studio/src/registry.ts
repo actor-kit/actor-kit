@@ -70,6 +70,33 @@ export class StudioRegistry extends DurableObject {
     );
   }
 
+  /**
+   * Called by actors when they learn their name: an actor auto-spawned under
+   * its hex DO ID and later spawned by name moves its row instead of leaving
+   * a second one behind.
+   */
+  rename(actorType: string, fromId: string, toId: string, version: number): void {
+    this.ensureMigrated();
+    this.ctx.storage.transactionSync(() => {
+      this.ctx.storage.sql.exec(
+        `INSERT INTO actors (actor_type, actor_id, last_active_at, version, connection_count)
+         VALUES (?, ?, ?, ?, COALESCE((SELECT connection_count FROM actors WHERE actor_type = ? AND actor_id = ?), 0))
+         ON CONFLICT(actor_type, actor_id) DO UPDATE SET
+           last_active_at = excluded.last_active_at,
+           version = excluded.version`,
+        actorType,
+        toId,
+        Date.now(),
+        version,
+        actorType,
+        fromId,
+      );
+      if (fromId !== toId) {
+        this.ctx.storage.sql.exec("DELETE FROM actors WHERE actor_type = ? AND actor_id = ?", actorType, fromId);
+      }
+    });
+  }
+
   /** Called by actors to update connection count. */
   updateConnections(actorType: string, actorId: string, count: number): void {
     this.ensureMigrated();
