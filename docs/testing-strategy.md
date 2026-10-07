@@ -110,7 +110,7 @@ describe("TodoList actor", () => {
 **What**: Full DO lifecycle — WebSocket connection, binary frames, persistence, reconnection, outbox drain.
 **How**: `@cloudflare/vitest-pool-workers`. Real Durable Objects, real SQLite, real WebSocket.
 
-The repo is on Vitest 4.1, not 5: `@cloudflare/vitest-pool-workers` supports `vitest ^4.1` only, and on Vitest 5 Stryker's vitest-runner silently reports every call-time mutant as survived (verified: a mutant that fails all tests when activated by hand was reported "Survived"). Re-check both before moving to Vitest 5. `tests/integration` is its own workspace package (`@actor-kit/integration-tests`). One config (`cloudflareTest()` plugin) runs every file, WebSocket tests included — the old isolated/WebSocket split is gone. Run with `pnpm test:integration`.
+The repo is on Vitest 4.1, not 5: `@cloudflare/vitest-pool-workers` supports `vitest ^4.1` only, and on Vitest 5 Stryker's vitest-runner silently reports every call-time mutant as survived (verified: a mutant that fails all tests when activated by hand was reported "Survived"). Re-check both before moving to Vitest 5. `tests/integration` is its own workspace package (`@actor-kit/integration-tests`). One config (`cloudflareTest()` plugin) runs every file, WebSocket tests included — the old isolated/WebSocket split is gone. Run with `pnpm test:integration`. The config caps parallelism at `maxWorkers: "25%"`: each worker is a whole workerd runtime, and Vitest's default (cores - 1) oversubscribes the CPU, making CPU-bound tests (the 510-message timeline ring-buffer test) about 7x slower and the whole suite slower too.
 **Speed**: ~50-200ms per test.
 **Location**: `tests/integration/`
 
