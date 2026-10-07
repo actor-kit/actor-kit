@@ -199,6 +199,27 @@ describe("list query parsing", () => {
     },
   );
 
+  // Regression for the verifier finding: with the Zod-validating registry, these reached
+  // listActors, which threw ZodError and surfaced as 500 {"error":"ZodError"}.
+  it.each([
+    ["limit=-1", "limit"],
+    ["limit=abc", "limit"],
+    ["limit=NaN", "limit"],
+    ["offset=-5", "offset"],
+    ["offset=NaN", "offset"],
+  ])("%s is a 400 naming the parameter, even when the registry would throw", async (q, param) => {
+    const { ns, calls } = fakeNamespace({
+      listActors: () => {
+        throw new Error("ZodError");
+      },
+    });
+    const res = await handle(`/__studio/api/actors?${q}`, {}, { STUDIO_REGISTRY: ns });
+    expect(res.status).toBe(400);
+    const body: unknown = await res.json();
+    expect(body).toEqual({ error: expect.stringContaining(`Invalid query parameter ${param}:`) });
+    expect(calls).toEqual([]);
+  });
+
   it("a registry RPC failure is a JSON 500 without a stack trace", async () => {
     const { ns } = fakeNamespace({
       listActors: () => {
