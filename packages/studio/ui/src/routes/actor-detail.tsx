@@ -1,9 +1,11 @@
 import { Link, useParams } from "@tanstack/react-router";
 import { useState } from "react";
-import type { TimelineEntry } from "../api";
-import { useStudioWs } from "../hooks/use-studio-ws";
+import { formatCauseSummary } from "../cause-summary";
 import { JsonDiff } from "../components/json-diff";
 import { JsonTree } from "../components/json-tree";
+import { useStudioWs } from "../hooks/use-studio-ws";
+import type { TimelineItem } from "../protocol";
+import type { StudioStatus } from "../studio-state";
 
 const CAUSE_LABELS: Record<string, { label: string; color: string }> = {
   init: { label: "init", color: "bg-zinc-600" },
@@ -18,28 +20,6 @@ const CAUSE_LABELS: Record<string, { label: string; color: string }> = {
   "link.onUnlink": { label: "link unlink", color: "bg-zinc-500" },
 };
 
-function formatCauseSummary(entry: TimelineEntry): string {
-  const data = JSON.parse(entry.causeData) as Record<string, unknown>;
-  switch (entry.causeType) {
-    case "message":
-      return `${data["caller"]} sent ${data["messageType"]}`;
-    case "lifecycle.connect":
-      return `${data["caller"]} connected (${data["role"]})`;
-    case "lifecycle.disconnect":
-      return `${data["caller"]} disconnected`;
-    case "service.onDone":
-      return `${data["service"]} completed`;
-    case "service.onError":
-      return `${data["service"]} failed: ${data["error"]}`;
-    case "link.onUpdate":
-      return `${data["sourceType"]}:${data["sourceId"]} updated`;
-    case "init":
-      return "Actor initialized";
-    default:
-      return entry.causeType;
-  }
-}
-
 function relativeTime(ts: number): string {
   const diff = Date.now() - ts;
   if (diff < 1000) return "just now";
@@ -50,16 +30,127 @@ function relativeTime(ts: number): string {
 
 type Tab = "state" | "timeline" | "connections" | "outbox" | "links";
 
+function StatusBadge({ status }: { status: StudioStatus }) {
+  switch (status) {
+    case "live":
+      return (
+        <span className="ml-2 inline-flex items-center gap-1 text-emerald-400" data-testid="status">
+          <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+          Live
+        </span>
+      );
+    case "reconnecting":
+      return (
+        <span className="ml-2 text-amber-400" data-testid="status">
+          Reconnecting...
+        </span>
+      );
+    case "polling":
+      return (
+        <span className="ml-2 text-amber-400" data-testid="status" title="Live updates unavailable; showing HTTP data">
+          Polling
+        </span>
+      );
+    case "not-found":
+      return (
+        <span className="ml-2 text-amber-400" data-testid="status">
+          Not found
+        </span>
+      );
+    case "error":
+      return (
+        <span className="ml-2 text-red-400" data-testid="status">
+          Disconnected
+        </span>
+      );
+    case "connecting":
+      return null;
+  }
+}
+
+function TimelineRow({
+  entry,
+  previous,
+  expanded,
+  onToggle,
+}: {
+  entry: TimelineItem;
+  previous: TimelineItem | undefined;
+  expanded: boolean;
+  onToggle: () => void;
+}) {
+  const cause = CAUSE_LABELS[entry.causeType] ?? { label: entry.causeType, color: "bg-zinc-700" };
+  return (
+    <div className="border border-zinc-800 rounded">
+      <button
+        type="button"
+        onClick={onToggle}
+        aria-expanded={expanded}
+        className="w-full flex items-center gap-2 px-3 py-2 text-sm text-left hover:bg-zinc-900/50 cursor-pointer"
+        data-testid={`timeline-entry-${entry.id}`}
+      >
+        <span className={`${cause.color} text-white text-xs px-1.5 py-0.5 rounded`}>{cause.label}</span>
+        <span className="flex-1 text-zinc-300 break-all">{formatCauseSummary(entry.causeType, entry.cause)}</span>
+        <span className="text-zinc-600 text-xs" title={new Date(entry.createdAt).toISOString()}>
+          {relativeTime(entry.createdAt)}
+        </span>
+      </button>
+      {expanded && (
+        <div className="px-3 pb-3 border-t border-zinc-800/50 space-y-2">
+          {previous !== undefined && (
+            <div>
+              <p className="text-xs text-zinc-500 mb-1">Changes:</p>
+              <div className="bg-zinc-950 rounded p-2 text-xs">
+                <JsonDiff before={previous.state} after={entry.state} />
+              </div>
+            </div>
+          )}
+          <div>
+            <p className="text-xs text-zinc-500 mb-1">Cause data:</p>
+            <div className="bg-zinc-950 rounded p-2 text-xs">
+              <JsonTree data={entry.cause} />
+            </div>
+          </div>
+          <div>
+            <p className="text-xs text-zinc-500 mb-1">State after:</p>
+            <div className="bg-zinc-950 rounded p-2 text-xs">
+              <JsonTree data={entry.state} />
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function ActorDetailPage() {
   const { actorType, actorId } = useParams({ from: "/actors/$actorType/$actorId" });
-  const { inspect, timeline, connected } = useStudioWs(actorType, actorId);
+  // Keyed so switching actors starts from a clean slate (tabs, expanded rows).
+  return <ActorDetail key={`${actorType}\u0000${actorId}`} actorType={actorType} actorId={actorId} />;
+}
+
+function ActorDetail({ actorType, actorId }: { actorType: string; actorId: string }) {
+  const { inspect, timeline, status, error } = useStudioWs(actorType, actorId);
   const [activeTab, setActiveTab] = useState<Tab>("state");
   const [expandedEntry, setExpandedEntry] = useState<number | null>(null);
+
+  const errorBanner =
+    error === null ? null : (
+      <p role="alert" className="mb-4 rounded border border-red-900 bg-red-950/40 px-3 py-2 text-sm text-red-300">
+        {error}
+      </p>
+    );
 
   if (!inspect) {
     return (
       <div className="max-w-4xl mx-auto">
-        <p className="text-zinc-500">{connected ? "Loading..." : "Connecting..."}</p>
+        {errorBanner}
+        {status === "not-found" && (
+          <p className="text-zinc-500" data-testid="not-found">
+            This actor doesn&apos;t exist yet. Waiting for it to be created...
+          </p>
+        )}
+        {(status === "connecting" || status === "reconnecting") && <p className="text-zinc-500">Connecting...</p>}
         <Link to="/" className="text-sky-400 hover:underline text-sm mt-2 inline-block">
           Back to dashboard
         </Link>
@@ -82,20 +173,17 @@ export function ActorDetailPage() {
         <Link to="/" className="text-zinc-500 hover:text-zinc-300 text-sm">
           &larr; Dashboard
         </Link>
-        <h1 className="text-xl font-bold mt-1" data-testid="actor-title">
+        <h1 className="text-xl font-bold mt-1 break-all" data-testid="actor-title">
           <span className="bg-zinc-800 text-zinc-300 px-2 py-0.5 rounded text-sm mr-2">{actorType}</span>
           {actorId}
         </h1>
         <p className="text-zinc-500 text-sm mt-1">
           Version {inspect.version}
-          {connected && (
-            <span className="ml-2 inline-flex items-center gap-1 text-emerald-400">
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-              Live
-            </span>
-          )}
+          <StatusBadge status={status} />
         </p>
       </div>
+
+      {errorBanner}
 
       {/* Tabs */}
       <div className="flex gap-1 border-b border-zinc-800 mb-4" data-testid="tab-bar">
@@ -120,7 +208,7 @@ export function ActorDetailPage() {
 
       {/* Tab content */}
       {activeTab === "state" && (
-        <div className="bg-zinc-900 border border-zinc-800 rounded p-4 text-sm" data-testid="state-panel">
+        <div className="bg-zinc-900 border border-zinc-800 rounded p-4 text-sm overflow-x-auto" data-testid="state-panel">
           <JsonTree data={inspect.state} />
         </div>
       )}
@@ -128,51 +216,16 @@ export function ActorDetailPage() {
       {activeTab === "timeline" && (
         <div className="space-y-1" data-testid="timeline-panel">
           {timeline.length === 0 && <p className="text-zinc-500">No timeline entries.</p>}
-          {timeline.map((entry, idx) => {
-            const cause = CAUSE_LABELS[entry.causeType] ?? { label: entry.causeType, color: "bg-zinc-700" };
-            const isExpanded = expandedEntry === entry.id;
-            // Previous state is the next entry in the array (timeline is newest-first)
-            const prevEntry = timeline[idx + 1];
-            const prevState = prevEntry ? JSON.parse(prevEntry.stateSnapshot) : null;
-            const currentState = JSON.parse(entry.stateSnapshot);
-            return (
-              <div key={entry.id} className="border border-zinc-800 rounded">
-                <button
-                  onClick={() => setExpandedEntry(isExpanded ? null : entry.id)}
-                  className="w-full flex items-center gap-2 px-3 py-2 text-sm text-left hover:bg-zinc-900/50 cursor-pointer"
-                  data-testid={`timeline-entry-${entry.id}`}
-                >
-                  <span className={`${cause.color} text-white text-xs px-1.5 py-0.5 rounded`}>{cause.label}</span>
-                  <span className="flex-1 text-zinc-300">{formatCauseSummary(entry)}</span>
-                  <span className="text-zinc-600 text-xs">{relativeTime(entry.createdAt)}</span>
-                </button>
-                {isExpanded && (
-                  <div className="px-3 pb-3 border-t border-zinc-800/50 space-y-2">
-                    {prevState && (
-                      <div>
-                        <p className="text-xs text-zinc-500 mb-1">Changes:</p>
-                        <div className="bg-zinc-950 rounded p-2 text-xs">
-                          <JsonDiff before={prevState} after={currentState} />
-                        </div>
-                      </div>
-                    )}
-                    <div>
-                      <p className="text-xs text-zinc-500 mb-1">Cause data:</p>
-                      <div className="bg-zinc-950 rounded p-2 text-xs">
-                        <JsonTree data={JSON.parse(entry.causeData)} />
-                      </div>
-                    </div>
-                    <div>
-                      <p className="text-xs text-zinc-500 mb-1">State after:</p>
-                      <div className="bg-zinc-950 rounded p-2 text-xs">
-                        <JsonTree data={currentState} />
-                      </div>
-                    </div>
-                  </div>
-                )}
-              </div>
-            );
-          })}
+          {timeline.map((entry, idx) => (
+            <TimelineRow
+              key={entry.id}
+              entry={entry}
+              // Timeline is newest-first, so the previous state is the next entry.
+              previous={timeline[idx + 1]}
+              expanded={expandedEntry === entry.id}
+              onToggle={() => setExpandedEntry(expandedEntry === entry.id ? null : entry.id)}
+            />
+          ))}
         </div>
       )}
 

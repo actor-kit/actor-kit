@@ -235,7 +235,8 @@ type StudioSnapshot = {
   version: number;
 };
 
-// Pushed on every state mutation
+// Pushed on every state mutation. `entry.id` is the persisted row id (the same
+// id __getTimeline() returns): the UI keys rows and de-duplicates by it.
 type StudioTimelineEntry = {
   type: "studio.timeline";
   entry: TimelineEntry;
@@ -348,6 +349,13 @@ class ActorInstance extends DurableObject {
 - Manual "Connect to actor" input (type + ID), always shown — the registry is debounced and may be unavailable
 
 #### Actor Detail (`/__studio/actors/:type/:id`)
+
+**Connection behavior** (`ui/src/hooks/use-studio-ws.ts`, `ui/src/studio-state.ts`)
+- Every frame and API response is parsed with Zod (`ui/src/protocol.ts`). A malformed frame shows an error banner; the last good data stays on screen.
+- A dropped socket reconnects with backoff (0.5s doubling, capped at 10s). The new snapshot replaces the timeline, and live entries are de-duplicated by id.
+- If the socket cannot open, the UI asks the HTTP API: 404 shows "not created yet" and keeps retrying (the page goes live once the actor exists); 401/403/400 show the error and stop; if the API answers, its data is shown ("Polling") while the socket keeps retrying.
+- Leaving the page closes the socket and cancels retries. The actor answers the close frame (`webSocketClose` calls `ws.close`), so the browser socket doesn't stay in CLOSING.
+- The UI keeps at most 500 timeline entries (the default ring size). Large arrays/objects render 100 children at a time; strings over 200 characters and diffs over 200 rows are truncated with a control to show more.
 
 **State panel**
 - Live-updating JSON tree view of current state

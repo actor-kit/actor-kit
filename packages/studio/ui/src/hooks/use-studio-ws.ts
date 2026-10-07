@@ -1,137 +1,133 @@
-import { useEffect, useRef, useState } from "react";
-import type { InspectResult, TimelineEntry } from "../api";
-
-export interface StudioConnection {
-  /** Unique per app socket: two tabs of one caller are two connections. */
-  connectionId: string;
-  caller: string;
-  callerType: "user" | "service";
-  connectedAt: number;
-  role: string | null;
-}
-
-interface StudioSnapshot {
-  type: "studio.snapshot";
-  state: unknown;
-  timeline: TimelineEntry[];
-  connections: StudioConnection[];
-  outbox: Array<{
-    id: string;
-    service: string;
-    payload: string;
-    status: string;
-    attempts: number;
-    createdAt: number;
-  }>;
-  activeLinks: Array<{ targetType: string; targetId: string; linkName: string; version: number }>;
-  linkSubscribers: Array<{ subscriberType: string; subscriberId: string }>;
-  actorType: string;
-  actorId: string;
-  version: number;
-}
-
-interface StudioTimelineMsg {
-  type: "studio.timeline";
-  entry: TimelineEntry;
-}
-
-interface StudioConnectionMsg {
-  type: "studio.connection";
-  action: "connect" | "disconnect";
-  connection: StudioConnection;
-}
-
-type StudioMessage = StudioSnapshot | StudioTimelineMsg | StudioConnectionMsg;
+import { useEffect, useReducer } from "react";
+import { StudioApiError, fetchInspect, fetchTimeline } from "../api";
+import type { InspectResult, TimelineItem } from "../protocol";
+import { parseStudioFrame } from "../protocol";
+import { type RequestFailure, type StudioStatus, initialStudioState, studioReducer } from "../studio-state";
 
 export interface StudioWsState {
   inspect: InspectResult | null;
-  timeline: TimelineEntry[];
+  timeline: TimelineItem[];
+  status: StudioStatus;
+  error: string | null;
+  /** True while the live WebSocket is open. */
   connected: boolean;
 }
 
+const BASE_RETRY_MS = 500;
+const MAX_RETRY_MS = 10_000;
+
+/** Exponential backoff: 0.5s, 1s, 2s, … capped at 10s. */
+export function reconnectDelay(attempt: number): number {
+  return Math.min(BASE_RETRY_MS * 2 ** attempt, MAX_RETRY_MS);
+}
+
+function classifyFailure(err: unknown): RequestFailure {
+  if (!(err instanceof StudioApiError)) return "transient";
+  if (err.permanent) return "permanent";
+  if (err.kind === "not-found") return "not-found";
+  return "transient";
+}
+
+function studioSocketUrl(actorType: string, actorId: string): string {
+  const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+  return `${protocol}//${window.location.host}/__studio/actors/${encodeURIComponent(actorType)}/${encodeURIComponent(actorId)}/ws`;
+}
+
 /**
- * Connect to an actor's studio WebSocket for live updates.
- * Falls back to HTTP polling if WebSocket fails.
+ * Live connection to one actor's studio WebSocket.
+ *
+ * - Every frame is parsed at the boundary; malformed frames surface as `error`.
+ * - A dropped socket reconnects with backoff; the fresh snapshot replaces the
+ *   timeline, so nothing is duplicated.
+ * - If the socket cannot open at all, the HTTP API is asked instead: its error
+ *   (401, 404, …) becomes the page's error state, or its data is shown
+ *   ("polling") while the socket keeps retrying.
+ * - Unmounting, or switching actors, closes the socket and cancels retries;
+ *   late events from an old socket are ignored.
  */
 export function useStudioWs(actorType: string, actorId: string): StudioWsState {
-  const [inspect, setInspect] = useState<InspectResult | null>(null);
-  const [timeline, setTimeline] = useState<TimelineEntry[]>([]);
-  const [connected, setConnected] = useState(false);
-  const wsRef = useRef<WebSocket | null>(null);
+  const [state, dispatch] = useReducer(studioReducer, initialStudioState);
 
   useEffect(() => {
-    const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-    const wsUrl = `${protocol}//${window.location.host}/__studio/actors/${actorType}/${encodeURIComponent(actorId)}/ws`;
+    let disposed = false;
+    let socket: WebSocket | null = null;
+    let retryTimer: ReturnType<typeof setTimeout> | null = null;
+    let attempt = 0;
+    const abort = new AbortController();
 
-    const ws = new WebSocket(wsUrl);
-    wsRef.current = ws;
+    dispatch({ type: "reset" });
 
-    ws.onopen = () => {
-      setConnected(true);
+    const scheduleReconnect = () => {
+      if (disposed) return;
+      const delay = reconnectDelay(attempt);
+      attempt++;
+      retryTimer = setTimeout(() => {
+        retryTimer = null;
+        connect();
+      }, delay);
     };
 
-    ws.onmessage = (event) => {
+    /** The socket never opened: ask the HTTP API why (or for the data). */
+    const probeHttp = async () => {
       try {
-        const msg = JSON.parse(event.data as string) as StudioMessage;
-
-        if (msg.type === "studio.snapshot") {
-          setInspect({
-            state: msg.state,
-            version: msg.version,
-            actorId: msg.actorId,
-            connections: msg.connections,
-            outbox: msg.outbox,
-            activeLinks: msg.activeLinks,
-            linkSubscribers: msg.linkSubscribers,
-          });
-          setTimeline(msg.timeline);
-        }
-
-        if (msg.type === "studio.timeline") {
-          setTimeline((prev) => [msg.entry, ...prev]);
-          // Update state from the latest timeline entry
-          if (msg.entry.stateSnapshot) {
-            setInspect((prev) => {
-              if (!prev) return prev;
-              return { ...prev, state: JSON.parse(msg.entry.stateSnapshot) };
-            });
-          }
-        }
-
-        if (msg.type === "studio.connection") {
-          setInspect((prev) => {
-            if (!prev) return prev;
-            if (msg.action === "connect") {
-              return {
-                ...prev,
-                connections: [...prev.connections, msg.connection],
-              };
-            }
-            return {
-              ...prev,
-              // Remove only the socket that closed, not every socket of that caller.
-              connections: prev.connections.filter((c) => c.connectionId !== msg.connection.connectionId),
-            };
-          });
-        }
-      } catch {
-        // Invalid message — ignore
+        const [inspect, page] = await Promise.all([
+          fetchInspect(actorType, actorId, abort.signal),
+          fetchTimeline(actorType, actorId, undefined, abort.signal),
+        ]);
+        if (disposed) return;
+        dispatch({ type: "http-loaded", inspect, timeline: page.entries });
+        scheduleReconnect();
+      } catch (err) {
+        if (disposed) return;
+        const failure = classifyFailure(err);
+        const message = err instanceof Error ? err.message : "Request failed";
+        dispatch({ type: "request-failed", error: message, failure });
+        if (failure !== "permanent") scheduleReconnect();
       }
     };
 
-    ws.onclose = () => {
-      setConnected(false);
+    const connect = () => {
+      if (disposed) return;
+      const ws = new WebSocket(studioSocketUrl(actorType, actorId));
+      socket = ws;
+      let opened = false;
+      const isCurrent = () => !disposed && socket === ws;
+
+      ws.onopen = () => {
+        if (!isCurrent()) return;
+        opened = true;
+        attempt = 0;
+        dispatch({ type: "socket-open" });
+      };
+
+      ws.onmessage = (event: MessageEvent) => {
+        if (!isCurrent()) return;
+        const parsed = parseStudioFrame(event.data);
+        if (parsed.kind === "frame") dispatch({ type: "frame", frame: parsed.frame });
+        else if (parsed.kind === "malformed") dispatch({ type: "malformed-frame", error: parsed.error });
+      };
+
+      ws.onclose = () => {
+        if (!isCurrent()) return;
+        socket = null;
+        dispatch({ type: "socket-closed" });
+        if (opened) scheduleReconnect();
+        else void probeHttp();
+      };
     };
 
-    ws.onerror = () => {
-      setConnected(false);
-    };
+    connect();
 
     return () => {
-      ws.close();
-      wsRef.current = null;
+      disposed = true;
+      abort.abort();
+      if (retryTimer !== null) clearTimeout(retryTimer);
+      if (socket !== null) {
+        socket.close(1000, "studio view closed");
+        socket = null;
+      }
     };
   }, [actorType, actorId]);
 
-  return { inspect, timeline, connected };
+  return { ...state, connected: state.status === "live" };
 }
