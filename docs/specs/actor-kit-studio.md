@@ -279,6 +279,15 @@ All routes prefixed with `/__studio/`.
 | `/__studio/api/actors/:type/:id/timeline` | GET | Get timeline entries via `__getTimeline()` RPC |
 | `/__studio/actors/:type/:id/ws` | GET | WebSocket upgrade to actor's studio connection |
 
+Request handling rules:
+
+- Only `/__studio` and `/__studio/*` are intercepted; `/__studiofoo` and similar pass through to the app.
+- Auth runs first. Then any method other than `GET`/`HEAD` is `405` (`Allow: GET, HEAD`).
+- Path segments and query params are parsed before anything is contacted: malformed percent-encoding, `limit` outside 1–1000, negative/non-integer `limit`/`offset`/`before`, empty `type`, or `search` over 256 chars are `400`.
+- An actor DO is only contacted once `StudioRegistry.hasActor(type, id)` confirms it exists (checked under the spawn name and its DO hex id), so looking up an unknown actor is `404` and never auto-spawns a phantom actor. Without a registry binding the check is skipped.
+- Unknown routes under `/__studio/api/` are a JSON `404`; every other unknown path serves the SPA shell (client-side routes, including actor ids containing dots); unknown `/__studio/assets/*` is `404`.
+- Every error body is JSON: `{ "error": string }` (message only, no stack).
+
 ### Actor RPC Methods
 
 Added to every actor DO by the `actor()` function:

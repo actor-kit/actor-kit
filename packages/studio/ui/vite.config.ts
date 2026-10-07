@@ -8,6 +8,7 @@ export default defineConfig({
   base: "/__studio/",
   build: {
     outDir: "../dist-ui",
-    emptyDirBeforeWrite: true,
+    // outDir is outside root, so Vite only clears it when asked explicitly.
+    emptyOutDir: true,
   },
 });

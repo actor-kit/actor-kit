@@ -125,6 +125,15 @@ export class StudioRegistry extends DurableObject {
     return rows.map((row) => ActorRow.parse(row));
   }
 
+  /** Exact lookup used by the studio middleware before it contacts an actor DO. */
+  async hasActor(actorType: string, actorId: string): Promise<boolean> {
+    this.ensureMigrated();
+    const rows = this.ctx.storage.sql
+      .exec("SELECT 1 FROM actors WHERE actor_type = ? AND actor_id = ? LIMIT 1", actorType, actorId)
+      .toArray();
+    return rows.length > 0;
+  }
+
   /** Get distinct actor types. */
   async getActorTypes(): Promise<string[]> {
     this.ensureMigrated();
