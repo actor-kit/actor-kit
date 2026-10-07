@@ -114,3 +114,95 @@ describe("createStudioClient", () => {
     expect(() => createStudioClient({ baseUrl: "file:///etc", auth: { kind: "none" } })).toThrow(/http/);
   });
 });
+
+describe("createStudioClient: errors and requests (mutation hardening)", () => {
+  const none = { kind: "none" as const };
+
+  it("wraps a network failure", async () => {
+    const client = createStudioClient({
+      baseUrl: "https://x.example.com",
+      auth: none,
+      fetch: async () => {
+        throw new Error("ECONNREFUSED");
+      },
+    });
+    await expect(client.types()).rejects.toThrow("Could not reach https://x.example.com: ECONNREFUSED");
+  });
+
+  it("reports a non-JSON-error failure body generically", async () => {
+    const { fetchFn } = fakeFetch(() => Response.json({ nope: 1 }, { status: 500 }));
+    const client = createStudioClient({ baseUrl: "https://x.example.com", auth: none, fetch: fetchFn });
+    await expect(client.types()).rejects.toThrow("500: request failed");
+  });
+
+  it("names the error class", () => {
+    expect(new StudioClientError("m", null).name).toBe("StudioClientError");
+  });
+
+  it("does not follow redirects (an Access login redirect must not be chased)", async () => {
+    let init: RequestInit | undefined;
+    const client = createStudioClient({
+      baseUrl: "https://x.example.com",
+      auth: none,
+      fetch: async (_u, i) => {
+        init = i;
+        return Response.json({ types: [] });
+      },
+    });
+    await client.types();
+    expect(init?.redirect).toBe("manual");
+  });
+
+  it("sends no auth headers in dev mode and no query string without params", async () => {
+    const { seen, fetchFn } = fakeFetch(() => Response.json({ actors: [] }));
+    await createStudioClient({ baseUrl: "http://localhost:8787", auth: none, fetch: fetchFn }).list();
+    expect(seen[0]?.url).toBe("http://localhost:8787/__studio/api/actors");
+    expect([...(seen[0]?.headers.keys() ?? [])]).toEqual([]);
+  });
+
+  it.each([
+    ["list", (c: ReturnType<typeof createStudioClient>) => c.list(), { actors: [{ actorType: 1 }] }],
+    ["inspect", (c: ReturnType<typeof createStudioClient>) => c.inspect("t", "i"), "nope"],
+    ["view", (c: ReturnType<typeof createStudioClient>) => c.view("t", "i", { role: "r" }), { type: "other" }],
+  ])("rejects a malformed %s response", async (_name, call, body) => {
+    const { fetchFn } = fakeFetch(() => Response.json(body));
+    await expect(
+      call(createStudioClient({ baseUrl: "https://x.example.com", auth: none, fetch: fetchFn })),
+    ).rejects.toThrow(/Malformed/);
+  });
+
+  it("parses both view reply forms", async () => {
+    const err = { type: "studio.view", role: "r", caller: null, error: "No view" };
+    const { fetchFn } = fakeFetch(() => Response.json(err));
+    expect(
+      await createStudioClient({ baseUrl: "https://x.example.com", auth: none, fetch: fetchFn }).view("t", "i", {
+        role: "r",
+      }),
+    ).toEqual(err);
+  });
+});
+
+describe("authFromEnv: edge cases (mutation hardening)", () => {
+  it("rejects a secret without an id", () => {
+    expect(() => authFromEnv({ CF_ACCESS_CLIENT_SECRET: "s" })).toThrow(/CF_ACCESS_CLIENT_ID/);
+  });
+
+  it("treats empty strings as unset", () => {
+    expect(authFromEnv({ CF_ACCESS_CLIENT_ID: "", CF_ACCESS_CLIENT_SECRET: "", CF_ACCESS_TOKEN: "" })).toEqual({
+      kind: "none",
+    });
+  });
+
+  it("accepts long credentials", () => {
+    expect(authFromEnv({ CF_ACCESS_CLIENT_ID: "id.access", CF_ACCESS_CLIENT_SECRET: "a".repeat(64) })).toMatchObject({
+      kind: "service-token",
+    });
+    expect(authFromEnv({ CF_ACCESS_TOKEN: "t".repeat(40) })).toEqual({ kind: "access-token", token: "t".repeat(40) });
+  });
+
+  it("prefers a service token over a person's token", () => {
+    expect(authFromEnv({ CF_ACCESS_CLIENT_ID: "i", CF_ACCESS_CLIENT_SECRET: "s", CF_ACCESS_TOKEN: "t" }).kind).toBe(
+      "service-token",
+    );
+  });
+});

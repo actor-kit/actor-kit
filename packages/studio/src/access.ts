@@ -30,9 +30,8 @@ export interface AccessDeps {
 
 const ACCESS_JWT_HEADER = "Cf-Access-Jwt-Assertion";
 
-const TeamDomain = z
-  .string()
-  .regex(/^[a-z0-9][a-z0-9-]*\.cloudflareaccess\.com$/i, "must be <team>.cloudflareaccess.com");
+/** `<team>.cloudflareaccess.com` (the error shown is the deny() message below). */
+const TeamDomain = z.string().regex(/^[a-z0-9][a-z0-9-]*\.cloudflareaccess\.com$/i);
 
 const AccessEnv = z.object({
   STUDIO_ACCESS_TEAM_DOMAIN: z.string().optional(),

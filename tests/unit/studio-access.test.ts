@@ -5,6 +5,7 @@ import {
   type AuthResult,
   authenticateStudio,
   hasScope,
+  remoteAccessKeys,
   type StudioPrincipal,
 } from "../../packages/studio/src/access";
 
@@ -172,5 +173,66 @@ describe("authenticateStudio: Access JWT", () => {
   it("does not leak verifier internals in the error", async () => {
     const d = denied(await auth("studio.example.com", ACCESS_ENV, await sign(userClaims, { aud: "other-app" })));
     expect(d.error).toBe("Invalid Cloudflare Access token");
+  });
+});
+
+describe("authenticateStudio: exact answers (mutation hardening)", () => {
+  it("answers a missing assertion with the sign-in message", async () => {
+    expect(denied(await auth("studio.example.com", ACCESS_ENV))).toEqual({
+      status: 401,
+      error: "Sign in through Cloudflare Access to use Studio",
+    });
+  });
+
+  it("treats an empty assertion like a missing one", async () => {
+    expect(denied(await auth("studio.example.com", ACCESS_ENV, ""))).toEqual({
+      status: 401,
+      error: "Sign in through Cloudflare Access to use Studio",
+    });
+  });
+
+  it("names both settings when only one is set", async () => {
+    expect(denied(await auth("localhost", { STUDIO_ACCESS_AUD: AUD })).error).toBe(
+      "Studio is misconfigured: set both STUDIO_ACCESS_TEAM_DOMAIN and STUDIO_ACCESS_AUD",
+    );
+  });
+
+  it("explains a malformed team domain", async () => {
+    const env = { STUDIO_ACCESS_TEAM_DOMAIN: "x.example.com", STUDIO_ACCESS_AUD: AUD };
+    expect(denied(await auth("example.com", env)).error).toBe(
+      "Studio is misconfigured: STUDIO_ACCESS_TEAM_DOMAIN must be <team>.cloudflareaccess.com",
+    );
+  });
+
+  it("fails closed when a setting is not a string", async () => {
+    expect(denied(await auth("localhost", { STUDIO_ACCESS_TEAM_DOMAIN: 42 }))).toEqual({
+      status: 403,
+      error: "Studio is misconfigured: STUDIO_ACCESS_* settings must be strings",
+    });
+  });
+
+  it("treats whitespace-only settings as unset (dev mode on localhost)", async () => {
+    const env = { STUDIO_ACCESS_TEAM_DOMAIN: "  ", STUDIO_ACCESS_AUD: " " };
+    expect(principal(await auth("localhost", env)).kind).toBe("dev");
+  });
+
+  it("trims surrounding whitespace from the settings", async () => {
+    const env = { STUDIO_ACCESS_TEAM_DOMAIN: ` ${TEAM} `, STUDIO_ACCESS_AUD: ` ${AUD} ` };
+    expect(principal(await auth("studio.example.com", env, await sign(userClaims))).kind).toBe("human");
+  });
+
+  it("rejects claims that fail the shape check with the generic message", async () => {
+    expect(denied(await auth("studio.example.com", ACCESS_ENV, await sign({ sub: "u" }))).error).toBe(
+      "Invalid Cloudflare Access token",
+    );
+  });
+});
+
+describe("remoteAccessKeys", () => {
+  it("caches one key set per team domain", () => {
+    const a = remoteAccessKeys.keysFor("a.cloudflareaccess.com");
+    expect(typeof a).toBe("function");
+    expect(remoteAccessKeys.keysFor("a.cloudflareaccess.com")).toBe(a);
+    expect(remoteAccessKeys.keysFor("b.cloudflareaccess.com")).not.toBe(a);
   });
 });

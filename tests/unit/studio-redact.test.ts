@@ -95,3 +95,54 @@ describe("compileRedaction", () => {
     expect(compileRedaction(["**"]).apply({ a: 1 })).toBe(REDACTED);
   });
 });
+
+describe("compileRedaction: containers and contract (mutation hardening)", () => {
+  it("the redaction marker is the wire string [redacted]", () => {
+    expect(REDACTED).toBe("[redacted]");
+  });
+
+  it("keeps Maps as Maps, redacting entries by key", () => {
+    const out = compileRedaction(["byId.*.name"]).apply({ byId: new Map([["p1", { name: "Juneau", n: 1 }]]) });
+    if (!(typeof out === "object" && out !== null && "byId" in out && out.byId instanceof Map)) {
+      throw new Error("byId is not a Map");
+    }
+    expect(out.byId.get("p1")).toEqual({ name: REDACTED, n: 1 });
+  });
+
+  it("keeps Sets as Sets, redacting members by index", () => {
+    const out = compileRedaction(["names.1"]).apply({ names: new Set(["a", "Juneau"]) });
+    if (!(typeof out === "object" && out !== null && "names" in out && out.names instanceof Set)) {
+      throw new Error("names is not a Set");
+    }
+    expect([...out.names]).toEqual(["a", REDACTED]);
+  });
+
+  it("keeps Dates as Dates", () => {
+    const at = new Date(0);
+    const out = compileRedaction(["**.name"]).apply({ at });
+    expect(out).toEqual({ at });
+    expect(typeof out === "object" && out !== null && "at" in out && out.at instanceof Date).toBe(true);
+  });
+
+  it("does not explode strings into characters on a partial match", () => {
+    expect(compileRedaction(["a.0"]).apply({ a: "str" })).toStrictEqual({ a: "str" });
+  });
+
+  it("matches literal segments exactly, not as wildcards", () => {
+    expect(compileRedaction(["a.b"]).apply({ a: { c: 1, b: 2 } })).toStrictEqual({ a: { c: 1, b: REDACTED } });
+  });
+
+  it("returns plain, writable objects", () => {
+    const out = compileRedaction(["x"]).apply({ a: { b: 1 } });
+    expect(Object.getOwnPropertyDescriptor(out, "a")).toMatchObject({ writable: true, enumerable: true });
+  });
+
+  it("names the problem in pattern errors", () => {
+    expect(() => compileRedaction([""])).toThrow("studio.redact patterns must not be empty");
+    expect(() => compileRedaction(["a..b"])).toThrow('studio.redact pattern "a..b" has an empty segment');
+  });
+});
+
+it("leaves null alone on a partial match", () => {
+  expect(compileRedaction(["a.b"]).apply({ a: null })).toStrictEqual({ a: null });
+});

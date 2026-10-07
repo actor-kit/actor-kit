@@ -97,3 +97,70 @@ describe("timelineShape", () => {
     expect(timelineShape([bad])).toEqual([{ id: 1, at: 1, causeType: "message", checksum: "c", changedPaths: [] }]);
   });
 });
+
+describe("timelineShape: exact output (mutation hardening)", () => {
+  it("omits absent optional fields entirely", () => {
+    expect(timelineShape([entry(1, "init", {}, {})])).toStrictEqual([
+      { id: 1, at: 10, causeType: "init", checksum: "c1", changedPaths: [] },
+    ]);
+  });
+
+  it("includes each optional field only when present", () => {
+    const e = entry(1, "service.onDone", { service: "S", input: { b: 1, a: 2 } }, {});
+    expect(timelineShape([e])).toStrictEqual([
+      {
+        id: 1,
+        at: 10,
+        causeType: "service.onDone",
+        service: "S",
+        inputKeys: ["a", "b"],
+        checksum: "c1",
+        changedPaths: [],
+      },
+    ]);
+  });
+
+  it("gives no changed paths when either neighbouring snapshot is unparsable", () => {
+    const older = { ...entry(1, "init", {}, {}), stateSnapshot: "nope" };
+    const newer = entry(2, "message", {}, { a: 1 });
+    expect(timelineShape([older, newer])[1]?.changedPaths).toEqual([]);
+    const brokenNewer = { ...entry(2, "message", {}, {}), stateSnapshot: "nope" };
+    expect(timelineShape([entry(1, "init", {}, { a: 1 }), brokenNewer])[1]?.changedPaths).toEqual([]);
+  });
+
+  it("does not treat arrays as records for payload keys", () => {
+    expect(timelineShape([entry(1, "message", { payload: [1, 2] }, {})])[0]).not.toHaveProperty("payloadKeys");
+  });
+
+  it("sorts changed paths", () => {
+    expect(changedPaths({ z: 1, a: 1, m: 1 }, { z: 2, a: 2, m: 2 })).toEqual(["a", "m", "z"]);
+  });
+
+  it("compares an array with a non-array as a whole", () => {
+    expect(changedPaths({ a: [1] }, { a: null })).toEqual(["a"]);
+  });
+});
+
+it("omits payload keys for a primitive payload", () => {
+  const e = {
+    id: 1,
+    causeType: "message",
+    causeData: JSON.stringify({ payload: 5 }),
+    stateSnapshot: "{}",
+    checksum: "c",
+    createdAt: 1,
+  };
+  expect(timelineShape([e])[0]).not.toHaveProperty("payloadKeys");
+});
+
+it("omits payload keys for a null payload", () => {
+  const e = {
+    id: 1,
+    causeType: "message",
+    causeData: JSON.stringify({ payload: null }),
+    stateSnapshot: "{}",
+    checksum: "c",
+    createdAt: 1,
+  };
+  expect(timelineShape([e])[0]).not.toHaveProperty("payloadKeys");
+});

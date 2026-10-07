@@ -56,7 +56,7 @@ function step(patterns: readonly Pattern[], cursors: readonly Cursor[], key: str
     const segment = patterns[p]?.[i];
     if (segment === undefined) continue;
     if (segment.kind === "any") next.push([p, i]);
-    else if (segment.kind === "one" || segment.key === key) next.push([p, i + 1]);
+    else if (segment.kind === "one" || (segment.kind === "literal" && segment.key === key)) next.push([p, i + 1]);
   }
   return closure(patterns, next);
 }
@@ -83,17 +83,10 @@ function walk(patterns: readonly Pattern[], value: unknown, cursors: readonly Cu
   }
   if (value instanceof Date) return value;
 
-  // defineProperty, not assignment, so a "__proto__" key stays an own data property.
-  const out: Record<string, unknown> = {};
-  for (const [key, item] of Object.entries(value)) {
-    Object.defineProperty(out, key, {
-      value: walk(patterns, item, step(patterns, cursors, key)),
-      enumerable: true,
-      writable: true,
-      configurable: true,
-    });
-  }
-  return out;
+  // fromEntries defines own data properties, so a "__proto__" key stays a plain key.
+  return Object.fromEntries(
+    Object.entries(value).map(([key, item]) => [key, walk(patterns, item, step(patterns, cursors, key))]),
+  );
 }
 
 /** Compile `studio.redact`. Throws on a malformed pattern, so actors fail at definition time. */

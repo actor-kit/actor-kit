@@ -128,3 +128,72 @@ describe("other projections", () => {
     expect(await projectView(errorReply, agent())).toEqual(errorReply);
   });
 });
+
+describe("projections: exact shapes (mutation hardening)", () => {
+  it("hashes with HMAC-SHA256 (known answer)", async () => {
+    const { createHmac } = await import("node:crypto");
+    const expected = `caller:${createHmac("sha256", KEY).update("Juneau").digest("hex").slice(0, 12)}`;
+    expect(await createCallerHasher(KEY)("Juneau")).toBe(expected);
+  });
+
+  it("redacts non-object cause data whole when redaction is active", async () => {
+    for (const causeData of ["[1,2]", "null", '"text"']) {
+      const out = await projectTimelineEntry({ ...entry("message", {}), causeData }, human());
+      expect(out.causeData).toBe(JSON.stringify(REDACTED));
+    }
+  });
+
+  it("passes non-object cause data through when nothing is projected", async () => {
+    const none = { redactor: compileRedaction([]), hashCaller: null };
+    expect((await projectTimelineEntry({ ...entry("message", {}), causeData: "[1]" }, none)).causeData).toBe("[1]");
+  });
+
+  it("returns JSON text untouched (byte for byte) without patterns", async () => {
+    const e = { ...entry("init", {}), stateSnapshot: '{ "a" : 1 }' };
+    const out = await projectTimelineEntry(e, { redactor: compileRedaction([]), hashCaller: createCallerHasher(KEY) });
+    expect(out.stateSnapshot).toBe('{ "a" : 1 }');
+  });
+
+  it("only hashes string callers", async () => {
+    const out = await projectTimelineEntry(entry("message", { caller: 7 }), agent());
+    expect(JSON.parse(out.causeData)).toStrictEqual({ caller: 7 });
+  });
+
+  it("does not add value fields a cause did not have", async () => {
+    const out = await projectTimelineEntry(entry("message", { messageType: "X" }), human());
+    expect(out.causeData).toBe(JSON.stringify({ messageType: "X" }));
+  });
+
+  it("does not add data to an error view reply", async () => {
+    const errorReply = { type: "studio.view" as const, role: "p", caller: "u", error: "No view" };
+    expect(await projectView(errorReply, human())).toStrictEqual(errorReply);
+  });
+
+  it("redacts an unparsable outbox payload whole", () => {
+    const row = { id: "1", service: "s", payload: "nope", status: "pending", attempts: 0, createdAt: 1 };
+    expect(projectOutboxRow(row, human()).payload).toBe(JSON.stringify(REDACTED));
+  });
+});
+
+describe("projections: hashing without patterns (mutation hardening)", () => {
+  it("matches HMAC-SHA256 for many callers (zero-padded hex)", async () => {
+    const { createHmac } = await import("node:crypto");
+    const hash = createCallerHasher(KEY);
+    for (let i = 0; i < 64; i++) {
+      const caller = `user-${i}`;
+      expect(await hash(caller)).toBe(`caller:${createHmac("sha256", KEY).update(caller).digest("hex").slice(0, 12)}`);
+    }
+  });
+
+  it("hashes callers for agents even when the actor declares no patterns", async () => {
+    const projection = { redactor: compileRedaction([]), hashCaller: createCallerHasher(KEY) };
+    const out = await projectTimelineEntry(entry("message", { caller: "Juneau" }), projection);
+    expect(out.causeData).not.toContain("Juneau");
+  });
+
+  it("returns cause text untouched when nothing is projected", async () => {
+    const none = { redactor: compileRedaction([]), hashCaller: null };
+    const e = { ...entry("message", {}), causeData: '{ "caller" : "u" }' };
+    expect((await projectTimelineEntry(e, none)).causeData).toBe('{ "caller" : "u" }');
+  });
+});
