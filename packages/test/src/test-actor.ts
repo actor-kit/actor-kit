@@ -16,7 +16,7 @@ import type {
   SchemaDefinition,
   TimelineEntry,
 } from "@actor-kit/core";
-import type { LinkCall, RolePredicate, UnlinkCall } from "@actor-kit/worker/testing";
+import type { LifecycleEvent, LinkCall, RolePredicate, UnlinkCall } from "@actor-kit/worker/testing";
 import { resolveRole, routeMessage } from "@actor-kit/worker/testing";
 import type { z } from "zod";
 
@@ -44,8 +44,8 @@ interface TestableActorDef<TState, TInput> {
     }
   >;
   lifecycle?: {
-    connect?(state: TState, event: { caller: string; callerType: "user" | "service" }, ctx: unknown): TState;
-    disconnect?(state: TState, event: { caller: string; callerType: "user" | "service" }, ctx: unknown): TState;
+    connect?(state: TState, event: LifecycleEvent, ctx: unknown): TState;
+    disconnect?(state: TState, event: LifecycleEvent, ctx: unknown): TState;
   };
   observe?: {
     onTransition?(
@@ -159,8 +159,8 @@ interface ContractShape {
     messages: Record<string, unknown>;
     views: Record<string, { readonly fn: (state: unknown, caller: string) => unknown }>;
     lifecycle?: {
-      connect?(state: unknown, event: { caller: string; callerType: "user" | "service" }, ctx: unknown): unknown;
-      disconnect?(state: unknown, event: { caller: string; callerType: "user" | "service" }, ctx: unknown): unknown;
+      connect?(state: unknown, event: LifecycleEvent, ctx: unknown): unknown;
+      disconnect?(state: unknown, event: LifecycleEvent, ctx: unknown): unknown;
     };
     observe?: {
       onTransition?(

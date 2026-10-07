@@ -3,7 +3,7 @@
 
 import { z } from "zod";
 import { array, schema, string, uint32, view } from "@actor-kit/core";
-import { defineActor, message } from "@actor-kit/worker/testing";
+import { defineActor, type LifecycleEvent, message } from "@actor-kit/worker/testing";
 
 type ChatMessage = { id: string; author: string; text: string; timestamp: number };
 type ChatState = {
@@ -51,21 +51,17 @@ export const ChatRoomContract = defineActor("chat-room", {
 
   studio: { enabled: true },
 
+  // Lifecycle fires per socket, so a user with two tabs connects twice.
+  // They stay online until their last tab closes (callerConnections === 0).
   lifecycle: {
-    connect: (
-      state: ChatState,
-      { caller }: { caller: string; callerType: "user" | "service" },
-    ) => {
+    connect: (state: ChatState, { caller }: LifecycleEvent) => {
       if (state.onlineUsers.includes(caller)) return state;
       return { ...state, onlineUsers: [...state.onlineUsers, caller] };
     },
-    disconnect: (
-      state: ChatState,
-      { caller }: { caller: string; callerType: "user" | "service" },
-    ) => ({
-      ...state,
-      onlineUsers: state.onlineUsers.filter((u) => u !== caller),
-    }),
+    disconnect: (state: ChatState, { caller, callerConnections }: LifecycleEvent) => {
+      if (callerConnections > 0) return state;
+      return { ...state, onlineUsers: state.onlineUsers.filter((u) => u !== caller) };
+    },
   },
 });
 

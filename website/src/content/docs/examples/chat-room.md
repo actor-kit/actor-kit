@@ -51,10 +51,10 @@ export const ChatRoomContract = defineActor("chat-room", {
       if (state.onlineUsers.includes(caller)) return state;
       return { ...state, onlineUsers: [...state.onlineUsers, caller] };
     },
-    disconnect: (state, { caller }) => ({
-      ...state,
-      onlineUsers: state.onlineUsers.filter((u) => u !== caller),
-    }),
+    disconnect: (state, { caller, callerConnections }) => {
+      if (callerConnections > 0) return state; // another tab is still open
+      return { ...state, onlineUsers: state.onlineUsers.filter((u) => u !== caller) };
+    },
   },
 });
 export type ChatRoomContract = typeof ChatRoomContract;
@@ -71,7 +71,7 @@ import { ChatRoomContract } from "./chat.contract";
 export const ChatRoom = createActorClass(ChatRoomContract);
 ```
 
-When a WebSocket connects, the framework calls `lifecycle.connect` with `{ caller, callerType }`. When it disconnects, `lifecycle.disconnect` fires. Both are transitions — they persist state and broadcast views.
+When a WebSocket connects, the framework calls `lifecycle.connect` with `{ caller, callerType, callerConnections }`. When it disconnects, `lifecycle.disconnect` fires. Each socket (tab) is its own connection, so both fire once per tab; `callerConnections` is how many sockets that caller still has open after the event, so a user stays online until their last tab closes. Both are transitions — they persist state and broadcast views.
 
 ## Message Handling
 
@@ -176,7 +176,7 @@ function ChatRoom() {
 }
 ```
 
-The `lifecycle.connect` and `lifecycle.disconnect` handlers on the actor handle online tracking — the client doesn't need to do anything special. Opening a tab increments the count; closing it decrements.
+The `lifecycle.connect` and `lifecycle.disconnect` handlers on the actor handle online tracking — the client doesn't need to do anything special. A user's first tab adds them to the count; closing their last tab removes them. Extra tabs of the same user do not change it.
 
 ## Try it
 

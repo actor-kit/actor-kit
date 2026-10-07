@@ -22,6 +22,7 @@ import type {
 import { createDeltaFrame, createSnapshotFrame, encode, encodeDelta } from "@actor-kit/core";
 import { DOQB } from "workers-qb";
 import type { z } from "zod";
+import type { LifecycleEvent } from "./define";
 import { BINARY_SUPPORT_HEADER, CALLER_ID_HEADER, CALLER_TYPE_HEADER } from "./identity";
 import {
   isStudioSocket,
@@ -111,8 +112,8 @@ interface ActorDef {
     }
   >;
   lifecycle?: {
-    connect?(state: unknown, event: { caller: string; callerType: "user" | "service" }, ctx: unknown): unknown;
-    disconnect?(state: unknown, event: { caller: string; callerType: "user" | "service" }, ctx: unknown): unknown;
+    connect?(state: unknown, event: LifecycleEvent, ctx: unknown): unknown;
+    disconnect?(state: unknown, event: LifecycleEvent, ctx: unknown): unknown;
   };
   observe?: {
     onTransition?(
@@ -556,6 +557,11 @@ export function actor(
         .filter((ws) => ws !== exclude)
         .map((ws) => ({ tags: this.ctx.getTags(ws), attachment: ws.deserializeAttachment() }));
       return toLiveConnections(sockets, def.roles, this.state);
+    }
+
+    /** Open app sockets held by one caller (same caller + callerType); `exclude` is left out. */
+    callerConnectionCount(caller: string, callerType: "user" | "service", exclude?: WebSocket): number {
+      return this.liveConnections(exclude).filter((c) => c.caller === caller && c.callerType === callerType).length;
     }
 
     /**
@@ -1618,7 +1624,11 @@ export function actor(
         };
         const nextState = def.lifecycle.connect(
           this.state,
-          { caller: callerInfo.caller, callerType: callerInfo.callerType },
+          {
+            caller: callerInfo.caller,
+            callerType: callerInfo.callerType,
+            callerConnections: this.callerConnectionCount(callerInfo.caller, callerInfo.callerType),
+          },
           connectCtx,
         );
         if (nextState instanceof Promise) {
@@ -1795,7 +1805,15 @@ export function actor(
           forward: (linkName: string, targetId: string, message: { type: string; [key: string]: unknown }) =>
             disconnectOutbox.forward(linkName, targetId, message),
         };
-        const nextState = def.lifecycle.disconnect(this.state, { caller, callerType: info.callerType }, disconnectCtx);
+        const nextState = def.lifecycle.disconnect(
+          this.state,
+          {
+            caller,
+            callerType: info.callerType,
+            callerConnections: this.callerConnectionCount(caller, info.callerType, ws),
+          },
+          disconnectCtx,
+        );
         if (nextState instanceof Promise) {
           throw new Error("lifecycle.disconnect returned a Promise. Handlers must be synchronous.");
         }

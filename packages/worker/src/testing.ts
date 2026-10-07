@@ -2,7 +2,7 @@
 // Used by @actor-kit/test and unit tests that run outside CF runtime
 
 // Contract builder
-export type { ActorContract } from "./define";
+export type { ActorContract, LifecycleEvent } from "./define";
 export { defineActor } from "./define";
 // Identity (Worker-trust model)
 export { CALLER_ID_HEADER, CALLER_TYPE_HEADER, withCallerIdentity } from "./identity";

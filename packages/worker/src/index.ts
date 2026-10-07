@@ -4,7 +4,7 @@ export type { TypedActorClass } from "./actor";
 // Core actor builder + typed DO class
 export { actor, createActorClass } from "./actor";
 // Contract builder
-export type { ActorContract } from "./define";
+export type { ActorContract, LifecycleEvent } from "./define";
 export { defineActor } from "./define";
 // Identity (Worker-trust model)
 export { CALLER_ID_HEADER, CALLER_TYPE_HEADER, withCallerIdentity } from "./identity";

@@ -16,6 +16,10 @@ name = "NULLABLE_COUNTER"
 class_name = "NullableCounter"
 
 [[durable_objects.bindings]]
+name = "CHAT_ROOM"
+class_name = "ChatRoom"
+
+[[durable_objects.bindings]]
 name = "STUDIO_REGISTRY"
 class_name = "StudioRegistry"
 
@@ -42,3 +46,7 @@ new_sqlite_classes = ["StudioRegistry"]
 [[migrations]]
 tag = "v4"
 new_sqlite_classes = ["StudioProbe", "StudioOff"]
+
+[[migrations]]
+tag = "v5"
+new_sqlite_classes = ["ChatRoom"]

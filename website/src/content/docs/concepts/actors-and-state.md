@@ -121,16 +121,18 @@ The `lifecycle` block handles WebSocket connection events:
 
 ```typescript
 lifecycle: {
-  connect: (state, { caller, callerType }) => {
+  connect: (state, { caller, callerConnections }) => {
+    if (callerConnections > 1) return state; // already online in another tab
     return { ...state, onlineUsers: [...state.onlineUsers, caller] };
   },
-  disconnect: (state, { caller, callerType }) => {
+  disconnect: (state, { caller, callerConnections }) => {
+    if (callerConnections > 0) return state; // another tab is still open
     return { ...state, onlineUsers: state.onlineUsers.filter(u => u !== caller) };
   },
 },
 ```
 
-`connect` and `disconnect` fire when WebSocket connections open and close. Both are full transitions — they persist state and broadcast views. Lifecycle handlers are synchronous — they return new state, not a Promise.
+`connect` and `disconnect` fire when WebSocket connections open and close — once per socket, so a user with two tabs connects twice. The event is `{ caller, callerType, callerConnections }`, where `callerConnections` is how many sockets that caller has open after the event (the first connect sees 1, the last disconnect sees 0). Both are full transitions — they persist state and broadcast views. Lifecycle handlers are synchronous — they return new state, not a Promise.
 
 ## Observability
 

@@ -272,6 +272,7 @@ WebSocket lifecycle:
 - On connect: extract caller identity from headers (Worker-trust) or JWT (fallback), resolve role (reject 403 if no match), add to connections map, send full snapshot, run `lifecycle.connect`.
 - On message: decode JSON, route to `send()`.
 - On close: run `lifecycle.disconnect`, remove from connections map.
+- Both hooks fire once per socket and receive `{ caller, callerType, callerConnections }`; `callerConnections` is the number of sockets that caller holds open after the event (connect includes the new socket, disconnect excludes the closing one). Per-user presence keys off it: online on the first connect, offline when a disconnect sees 0.
 - On error: remove from connections map.
 
 Broadcasting:

@@ -3,6 +3,8 @@ import { StudioRegistry } from "@actor-kit/studio";
 import { createActorClass, defineActor, message } from "@actor-kit/worker";
 import { z } from "zod";
 
+import { ChatRoomContract } from "../../../examples/chat-room/src/chat";
+
 export { StudioOff, StudioProbe } from "./studio-probe";
 export { StudioRegistry };
 
@@ -137,6 +139,10 @@ const NullableCounterContract = defineActor("nullable-counter", {
 });
 
 export const NullableCounter = createActorClass(NullableCounterContract);
+
+// --- ChatRoom actor: the examples/chat-room contract, unchanged (presence per socket) ---
+
+export const ChatRoom = createActorClass(ChatRoomContract);
 
 // --- Worker entrypoint ---
 

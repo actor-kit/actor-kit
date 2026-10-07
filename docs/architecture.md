@@ -192,12 +192,14 @@ Connect:
   2. Resolve role (reject with 403 if no match)
   3. Register WebSocket in connections map (keyed by caller)
   4. Send SNAPSHOT frame (full binary state for this caller's view)
-  5. Run lifecycle.connect(state, { caller }, ctx) if defined
+  5. Run lifecycle.connect(state, { caller, callerType, callerConnections }, ctx) if defined
+     (callerConnections = this caller's open sockets, including this one)
   6. Persist state if connect handler changed it
   7. Broadcast view updates to ALL connected callers
 
 Disconnect:
-  1. Run lifecycle.disconnect(state, { caller }, ctx) if defined
+  1. Run lifecycle.disconnect(state, { caller, callerType, callerConnections }, ctx) if defined
+     (callerConnections = this caller's open sockets, excluding the closing one; 0 = last tab closed)
   2. Persist state if disconnect handler changed it
   3. Remove WebSocket from connections map
   4. Broadcast view updates to remaining callers

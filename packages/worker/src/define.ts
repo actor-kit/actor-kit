@@ -44,3 +44,16 @@ export function defineActor<
 >(name: TName, def: TDef): ActorContract<TName, TDef> {
   return { name, def };
 }
+
+/**
+ * What lifecycle.connect / lifecycle.disconnect receive. Each socket is its own
+ * connection, so these fire once per socket (tab). `callerConnections` is how many
+ * sockets this caller (same caller + callerType) holds open after the event: it
+ * includes the socket that just connected and excludes the one that just closed.
+ * A caller's first connect sees 1; their last disconnect sees 0.
+ */
+export interface LifecycleEvent {
+  caller: string;
+  callerType: "user" | "service";
+  callerConnections: number;
+}

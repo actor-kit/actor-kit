@@ -215,7 +215,7 @@ Studio connections are tracked in a separate `studioConnections` set.
 
 ### Connections and timeline identity
 
-- Every app socket gets a `connectionId` (UUID) and `connectedAt` in its WebSocket attachment (`serializeAttachment`). `ConnectionInfo` is `{ connectionId, caller, callerType, connectedAt, role }`, read from the sockets the DO holds, so two tabs of one caller are two connections, hibernation keeps them, and a restart clears them. `studio.connection` disconnect events carry the `connectionId`.
+- Every app socket gets a `connectionId` (UUID) and `connectedAt` in its WebSocket attachment (`serializeAttachment`). `ConnectionInfo` is `{ connectionId, caller, callerType, connectedAt, role }`, read from the sockets the DO holds, so two tabs of one caller are two connections, hibernation keeps them, and a restart clears them. `studio.connection` disconnect events carry the `connectionId`. Because lifecycle hooks also fire per socket, the lifecycle event carries `callerConnections` (that caller's open sockets after the event) so per-user state such as presence only changes on a caller's first connect and last disconnect.
 - Live `studio.timeline` entries carry the row `id`, the same id `__getTimeline()` and the snapshot use. A Studio that reconnects replaces its timeline with the snapshot and merges live entries by `id`, so nothing is duplicated.
 - The Studio UI reconnects its WebSocket with backoff (restart, network drop, or an actor that does not exist yet) and takes the fresh snapshot as the truth.
 
