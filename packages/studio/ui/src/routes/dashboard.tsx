@@ -1,6 +1,9 @@
-import { Link } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
-import { type ActorEntry, fetchActorTypes, fetchActors } from "../api";
+import { Link, useNavigate } from "@tanstack/react-router";
+import { type FormEvent, useEffect, useState } from "react";
+import { type ActorEntry, StudioApiError, fetchActorTypes, fetchActors, saveStudioKey } from "../api";
+
+/** Rows per dashboard page. One extra row is requested to know whether a next page exists. */
+export const PAGE_SIZE = 50;
 
 function relativeTime(ts: number): string {
   const diff = Date.now() - ts;
@@ -11,42 +14,65 @@ function relativeTime(ts: number): string {
   return `${Math.floor(diff / 86_400_000)}d ago`;
 }
 
+function isAbort(err: unknown): boolean {
+  return err instanceof DOMException && err.name === "AbortError";
+}
+
+type ListState =
+  | { kind: "loading" }
+  | { kind: "loaded"; actors: ActorEntry[]; hasMore: boolean }
+  | { kind: "failed"; message: string; unauthorized: boolean };
+
 export function DashboardPage() {
-  const [actors, setActors] = useState<ActorEntry[]>([]);
+  const [list, setList] = useState<ListState>({ kind: "loading" });
   const [types, setTypes] = useState<string[]>([]);
   const [typeFilter, setTypeFilter] = useState("");
   const [search, setSearch] = useState("");
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
-  // Manual connect mode (when registry is unavailable)
-  const [manualType, setManualType] = useState("");
-  const [manualId, setManualId] = useState("");
+  const [offset, setOffset] = useState(0);
+  // Bumped after the studio key changes, to refetch everything with it.
+  const [authEpoch, setAuthEpoch] = useState(0);
 
   useEffect(() => {
-    fetchActorTypes()
+    const abort = new AbortController();
+    fetchActorTypes(abort.signal)
       .then(setTypes)
       .catch(() => {
-        /* registry may not be available */
+        // The type list is optional: the actor list reports registry errors.
       });
-  }, []);
+    return () => abort.abort();
+  }, [authEpoch]);
 
   useEffect(() => {
-    setLoading(true);
-    setError(null);
-    fetchActors({
-      type: typeFilter || undefined,
-      search: search || undefined,
-    })
-      .then((result) => {
-        setActors(result);
-        setLoading(false);
+    // Each request owns an AbortController; a newer filter/search/page aborts
+    // the older request, so a slow stale response can never overwrite it.
+    const abort = new AbortController();
+    setList({ kind: "loading" });
+    fetchActors(
+      {
+        type: typeFilter || undefined,
+        search: search || undefined,
+        limit: PAGE_SIZE + 1,
+        offset,
+      },
+      abort.signal,
+    )
+      .then((rows) => {
+        if (abort.signal.aborted) return;
+        setList({ kind: "loaded", actors: rows.slice(0, PAGE_SIZE), hasMore: rows.length > PAGE_SIZE });
       })
-      .catch((err) => {
-        setError(err instanceof Error ? err.message : "Failed to fetch actors");
-        setLoading(false);
+      .catch((err: unknown) => {
+        if (abort.signal.aborted || isAbort(err)) return;
+        setList({
+          kind: "failed",
+          message: err instanceof Error ? err.message : "Failed to fetch actors",
+          unauthorized: err instanceof StudioApiError && (err.kind === "unauthorized" || err.kind === "forbidden"),
+        });
       });
-  }, [typeFilter, search]);
+    return () => abort.abort();
+  }, [typeFilter, search, offset, authEpoch]);
+
+  const actors = list.kind === "loaded" ? list.actors : [];
+  const showPager = list.kind === "loaded" && (offset > 0 || list.hasMore);
 
   return (
     <div className="max-w-4xl mx-auto">
@@ -56,7 +82,10 @@ export function DashboardPage() {
       <div className="flex gap-3 mb-4">
         <select
           value={typeFilter}
-          onChange={(e) => setTypeFilter(e.target.value)}
+          onChange={(e) => {
+            setTypeFilter(e.target.value);
+            setOffset(0);
+          }}
           className="bg-zinc-900 border border-zinc-700 rounded px-3 py-1.5 text-sm"
           data-testid="type-filter"
         >
@@ -71,51 +100,30 @@ export function DashboardPage() {
           type="text"
           placeholder="Search actor ID..."
           value={search}
-          onChange={(e) => setSearch(e.target.value)}
+          onChange={(e) => {
+            setSearch(e.target.value);
+            setOffset(0);
+          }}
           className="bg-zinc-900 border border-zinc-700 rounded px-3 py-1.5 text-sm flex-1"
           data-testid="search-input"
         />
       </div>
 
-      {/* Actor list */}
-      {loading && <p className="text-zinc-500">Loading...</p>}
-      {error && <p className="text-red-400">{error}</p>}
-
-      {/* Manual connect — always available: the registry is debounced and may
-          not list an actor yet, or may be unavailable entirely. */}
-      {!loading && (
-        <div className="mb-6 max-w-md">
-          <p className="text-zinc-400 text-sm mb-2">Connect manually:</p>
-          <div className="flex gap-2">
-            <input
-              type="text"
-              placeholder="Actor type"
-              value={manualType}
-              onChange={(e) => setManualType(e.target.value)}
-              className="bg-zinc-900 border border-zinc-700 rounded px-2 py-1 text-sm flex-1"
-              data-testid="manual-type"
-            />
-            <input
-              type="text"
-              placeholder="Actor ID"
-              value={manualId}
-              onChange={(e) => setManualId(e.target.value)}
-              className="bg-zinc-900 border border-zinc-700 rounded px-2 py-1 text-sm flex-1"
-              data-testid="manual-id"
-            />
-            <Link
-              to="/actors/$actorType/$actorId"
-              params={{ actorType: manualType, actorId: manualId }}
-              className="bg-zinc-700 hover:bg-zinc-600 px-3 py-1 rounded text-sm"
-              data-testid="manual-connect"
-            >
-              Connect
-            </Link>
-          </div>
+      {list.kind === "loading" && <p className="text-zinc-500">Loading...</p>}
+      {list.kind === "failed" && (
+        <div className="mb-4">
+          <p role="alert" className="text-red-400">
+            {list.message}
+          </p>
+          {list.unauthorized && <StudioKeyForm onSaved={() => setAuthEpoch((n) => n + 1)} />}
         </div>
       )}
 
-      {!loading && actors.length === 0 && (
+      {/* Manual connect — always available: the registry is debounced and may
+          not list an actor yet, or may be unavailable entirely. */}
+      <ManualConnect />
+
+      {list.kind === "loaded" && actors.length === 0 && (
         <div className="text-zinc-500 border border-zinc-800 rounded p-6 text-center mb-6">
           <p>No actors found.</p>
         </div>
@@ -139,11 +147,9 @@ export function DashboardPage() {
                   className="border-b border-zinc-800/50 hover:bg-zinc-900/50"
                 >
                   <td className="px-4 py-2">
-                    <span className="bg-zinc-800 text-zinc-300 px-2 py-0.5 rounded text-xs">
-                      {actor.actorType}
-                    </span>
+                    <span className="bg-zinc-800 text-zinc-300 px-2 py-0.5 rounded text-xs">{actor.actorType}</span>
                   </td>
-                  <td className="px-4 py-2">
+                  <td className="px-4 py-2 break-all">
                     <Link
                       to="/actors/$actorType/$actorId"
                       params={{ actorType: actor.actorType, actorId: actor.actorId }}
@@ -153,7 +159,9 @@ export function DashboardPage() {
                       {actor.actorId}
                     </Link>
                   </td>
-                  <td className="px-4 py-2 text-zinc-500">{relativeTime(actor.lastActiveAt)}</td>
+                  <td className="px-4 py-2 text-zinc-500" title={new Date(actor.lastActiveAt).toISOString()}>
+                    {relativeTime(actor.lastActiveAt)}
+                  </td>
                   <td className="px-4 py-2 text-right text-zinc-400">{actor.connectionCount}</td>
                 </tr>
               ))}
@@ -161,6 +169,112 @@ export function DashboardPage() {
           </table>
         </div>
       )}
+
+      {showPager && list.kind === "loaded" && (
+        <div className="flex items-center gap-3 mt-3 text-sm text-zinc-400">
+          <button
+            type="button"
+            disabled={offset === 0}
+            onClick={() => setOffset((o) => Math.max(0, o - PAGE_SIZE))}
+            className="px-2 py-1 rounded bg-zinc-800 disabled:opacity-40 cursor-pointer disabled:cursor-default"
+            data-testid="page-prev"
+          >
+            Previous
+          </button>
+          <span data-testid="page-info">
+            {offset + 1}–{offset + actors.length}
+          </span>
+          <button
+            type="button"
+            disabled={!list.hasMore}
+            onClick={() => setOffset((o) => o + PAGE_SIZE)}
+            className="px-2 py-1 rounded bg-zinc-800 disabled:opacity-40 cursor-pointer disabled:cursor-default"
+            data-testid="page-next"
+          >
+            Next
+          </button>
+        </div>
+      )}
     </div>
+  );
+}
+
+function ManualConnect() {
+  const navigate = useNavigate();
+  const [manualType, setManualType] = useState("");
+  const [manualId, setManualId] = useState("");
+  const actorType = manualType.trim();
+  const actorId = manualId.trim();
+  const ready = actorType !== "" && actorId !== "";
+
+  const onSubmit = (e: FormEvent) => {
+    e.preventDefault();
+    if (!ready) return;
+    void navigate({ to: "/actors/$actorType/$actorId", params: { actorType, actorId } });
+  };
+
+  return (
+    <form className="mb-6 max-w-md" onSubmit={onSubmit}>
+      <p className="text-zinc-400 text-sm mb-2">Connect manually:</p>
+      <div className="flex gap-2">
+        <input
+          type="text"
+          placeholder="Actor type"
+          aria-label="Actor type"
+          value={manualType}
+          onChange={(e) => setManualType(e.target.value)}
+          className="bg-zinc-900 border border-zinc-700 rounded px-2 py-1 text-sm flex-1"
+          data-testid="manual-type"
+        />
+        <input
+          type="text"
+          placeholder="Actor ID"
+          aria-label="Actor ID"
+          value={manualId}
+          onChange={(e) => setManualId(e.target.value)}
+          className="bg-zinc-900 border border-zinc-700 rounded px-2 py-1 text-sm flex-1"
+          data-testid="manual-id"
+        />
+        <button
+          type="submit"
+          disabled={!ready}
+          className="bg-zinc-700 hover:bg-zinc-600 px-3 py-1 rounded text-sm cursor-pointer disabled:opacity-40 disabled:cursor-default"
+          data-testid="manual-connect"
+        >
+          Connect
+        </button>
+      </div>
+    </form>
+  );
+}
+
+/** Spec: in production the UI prompts for the studio key and keeps it in localStorage. */
+function StudioKeyForm({ onSaved }: { onSaved: () => void }) {
+  const [key, setKey] = useState("");
+  const onSubmit = (e: FormEvent) => {
+    e.preventDefault();
+    saveStudioKey(key.trim());
+    onSaved();
+  };
+  return (
+    <form className="mt-2 flex gap-2 max-w-md" onSubmit={onSubmit}>
+      <input
+        type="password"
+        placeholder="Studio key"
+        aria-label="Studio key"
+        autoComplete="off"
+        value={key}
+        onChange={(e) => setKey(e.target.value)}
+        className="bg-zinc-900 border border-zinc-700 rounded px-2 py-1 text-sm flex-1"
+        data-testid="studio-key-input"
+      />
+      <button
+        type="submit"
+        className="bg-zinc-700 hover:bg-zinc-600 px-3 py-1 rounded text-sm cursor-pointer"
+        data-testid="studio-key-save"
+      >
+        Save key
+      </button>
+    </form>
   );
 }

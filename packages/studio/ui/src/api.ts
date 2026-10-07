@@ -1,113 +1,165 @@
-/** Studio API client — fetches from /__studio/api/* endpoints. */
+/** Studio API client — fetches from /__studio/api/* endpoints and parses every response. */
+
+import type { z } from "zod";
+import {
+  ActorTypesResponseSchema,
+  ActorsResponseSchema,
+  type ActorEntry,
+  ErrorBodySchema,
+  type InspectResult,
+  InspectSchema,
+  TimelineResponseSchema,
+  type TimelineItem,
+  formatIssues,
+} from "./protocol";
+
+export type { ActorEntry, InspectResult, StudioConnectionInfo, TimelineItem } from "./protocol";
 
 const BASE = "/__studio/api";
+export const STUDIO_KEY_STORAGE = "actor-kit-studio-key";
+
+export type StudioApiErrorKind =
+  | "bad-request"
+  | "unauthorized"
+  | "forbidden"
+  | "not-found"
+  | "unavailable"
+  | "server"
+  | "network"
+  | "malformed";
+
+/** A failed Studio API call, classified so the UI can pick the right error state. */
+export class StudioApiError extends Error {
+  readonly kind: StudioApiErrorKind;
+  readonly status: number | null;
+
+  constructor(kind: StudioApiErrorKind, message: string, status: number | null) {
+    super(message);
+    this.name = "StudioApiError";
+    this.kind = kind;
+    this.status = status;
+  }
+
+  /** Retrying will not help: the request is not allowed or is itself invalid. */
+  get permanent(): boolean {
+    return this.kind === "unauthorized" || this.kind === "forbidden" || this.kind === "bad-request";
+  }
+}
+
+function readStoredKey(): string | null {
+  try {
+    return localStorage.getItem(STUDIO_KEY_STORAGE);
+  } catch {
+    return null;
+  }
+}
+
+/** Store (or clear, with an empty string) the studio key sent with every API call. */
+export function saveStudioKey(key: string): void {
+  try {
+    if (key === "") localStorage.removeItem(STUDIO_KEY_STORAGE);
+    else localStorage.setItem(STUDIO_KEY_STORAGE, key);
+  } catch {
+    // Storage unavailable (private mode); the key just isn't remembered.
+  }
+}
 
 function getHeaders(): HeadersInit {
-  const key = localStorage.getItem("actor-kit-studio-key");
+  const key = readStoredKey();
   if (key) return { "X-Actor-Kit-Studio-Key": key };
   return {};
 }
 
-export interface ActorEntry {
-  actorType: string;
-  actorId: string;
-  lastActiveAt: number;
-  version: number | null;
-  connectionCount: number;
+function kindForStatus(status: number): StudioApiErrorKind {
+  if (status === 400) return "bad-request";
+  if (status === 401) return "unauthorized";
+  if (status === 403) return "forbidden";
+  if (status === 404) return "not-found";
+  if (status === 503) return "unavailable";
+  return "server";
 }
 
-export interface StudioConnectionInfo {
-  caller: string;
-  callerType: "user" | "service";
-  connectedAt: number;
-  role: string | null;
+/** Pull a readable message out of an error response body (JSON `{error}` or plain text). */
+function errorMessage(status: number, text: string): string {
+  let message = text.trim();
+  try {
+    const body = ErrorBodySchema.safeParse(JSON.parse(text));
+    if (body.success) message = body.data.error;
+  } catch {
+    // Plain-text body
+  }
+  if (message === "") message = `HTTP ${status}`;
+  if (status === 401 && !/unauthori[sz]ed/i.test(message)) return `Unauthorized: ${message}`;
+  return message;
 }
 
-export interface InspectResult {
-  state: unknown;
-  version: number;
-  actorId: string | null;
-  connections: StudioConnectionInfo[];
-  outbox: Array<{
-    id: string;
-    service: string;
-    payload: string;
-    status: string;
-    attempts: number;
-    createdAt: number;
-  }>;
-  activeLinks: Array<{
-    targetType: string;
-    targetId: string;
-    linkName: string;
-    version: number;
-  }>;
-  linkSubscribers: Array<{
-    subscriberType: string;
-    subscriberId: string;
-  }>;
-}
+async function request<S extends z.ZodType>(url: string, schema: S, signal?: AbortSignal): Promise<z.output<S>> {
+  let res: Response;
+  try {
+    res = await fetch(url, signal === undefined ? { headers: getHeaders() } : { headers: getHeaders(), signal });
+  } catch (err) {
+    if (err instanceof DOMException && err.name === "AbortError") throw err;
+    throw new StudioApiError("network", "Network error: could not reach the Studio API", null);
+  }
 
-export interface TimelineEntry {
-  id: number;
-  causeType: string;
-  causeData: string;
-  stateSnapshot: string;
-  checksum: string;
-  createdAt: number;
-}
-
-/** Parse a JSON response, throwing on non-OK status or server-side errors. */
-async function parseJson<T>(res: Response): Promise<T> {
+  const text = await res.text().catch(() => "");
   if (!res.ok) {
-    const text = await res.text().catch(() => `HTTP ${res.status}`);
-    throw new Error(text);
+    throw new StudioApiError(kindForStatus(res.status), errorMessage(res.status, text), res.status);
   }
-  const data = (await res.json()) as T & { error?: string };
-  if (data.error) {
-    throw new Error(data.error);
+
+  let json: unknown;
+  try {
+    json = JSON.parse(text);
+  } catch {
+    throw new StudioApiError("malformed", "Malformed response: body is not JSON", res.status);
   }
-  return data;
+  const errorBody = ErrorBodySchema.safeParse(json);
+  if (errorBody.success) {
+    throw new StudioApiError("server", errorBody.data.error, res.status);
+  }
+  const parsed = schema.safeParse(json);
+  if (!parsed.success) {
+    throw new StudioApiError("malformed", `Malformed response: ${formatIssues(parsed.error)}`, res.status);
+  }
+  return parsed.data;
 }
 
-export async function fetchActors(opts?: {
-  type?: string;
-  search?: string;
-}): Promise<ActorEntry[]> {
+function actorPath(actorType: string, actorId: string): string {
+  return `${BASE}/actors/${encodeURIComponent(actorType)}/${encodeURIComponent(actorId)}`;
+}
+
+export async function fetchActors(
+  opts?: { type?: string; search?: string; limit?: number; offset?: number },
+  signal?: AbortSignal,
+): Promise<ActorEntry[]> {
   const params = new URLSearchParams();
   if (opts?.type) params.set("type", opts.type);
   if (opts?.search) params.set("search", opts.search);
-  const url = `${BASE}/actors${params.toString() ? `?${params}` : ""}`;
-  const res = await fetch(url, { headers: getHeaders() });
-  const data = await parseJson<{ actors: ActorEntry[] }>(res);
+  if (opts?.limit !== undefined) params.set("limit", String(opts.limit));
+  if (opts?.offset) params.set("offset", String(opts.offset));
+  const query = params.toString();
+  const data = await request(`${BASE}/actors${query ? `?${query}` : ""}`, ActorsResponseSchema, signal);
   return data.actors;
 }
 
-export async function fetchActorTypes(): Promise<string[]> {
-  const res = await fetch(`${BASE}/actors/types`, { headers: getHeaders() });
-  const data = await parseJson<{ types: string[] }>(res);
+export async function fetchActorTypes(signal?: AbortSignal): Promise<string[]> {
+  const data = await request(`${BASE}/actors/types`, ActorTypesResponseSchema, signal);
   return data.types;
 }
 
-export async function fetchInspect(
-  actorType: string,
-  actorId: string,
-): Promise<InspectResult> {
-  const res = await fetch(`${BASE}/actors/${actorType}/${encodeURIComponent(actorId)}`, {
-    headers: getHeaders(),
-  });
-  return parseJson<InspectResult>(res);
+export function fetchInspect(actorType: string, actorId: string, signal?: AbortSignal): Promise<InspectResult> {
+  return request(actorPath(actorType, actorId), InspectSchema, signal);
 }
 
-export async function fetchTimeline(
+export function fetchTimeline(
   actorType: string,
   actorId: string,
   opts?: { limit?: number; before?: number },
-): Promise<{ entries: TimelineEntry[]; hasMore: boolean }> {
+  signal?: AbortSignal,
+): Promise<{ entries: TimelineItem[]; hasMore: boolean }> {
   const params = new URLSearchParams();
   if (opts?.limit) params.set("limit", String(opts.limit));
   if (opts?.before) params.set("before", String(opts.before));
-  const url = `${BASE}/actors/${actorType}/${encodeURIComponent(actorId)}/timeline${params.toString() ? `?${params}` : ""}`;
-  const res = await fetch(url, { headers: getHeaders() });
-  return parseJson<{ entries: TimelineEntry[]; hasMore: boolean }>(res);
+  const query = params.toString();
+  return request(`${actorPath(actorType, actorId)}/timeline${query ? `?${query}` : ""}`, TimelineResponseSchema, signal);
 }
