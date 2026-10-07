@@ -7,7 +7,7 @@ Actors on the edge. Each actor is a Cloudflare Durable Object with a mailbox, pr
 - **Language**: TypeScript (strict mode, no `any`, no `as` casts)
 - **Runtime**: Cloudflare Workers + Durable Objects (SQLite storage)
 - **Validation**: Zod (messages + input), custom `schema()` builder (views + binary encoding)
-- **State mutations**: Immer `produce()`
+- **State mutations**: plain reducers — handlers return the next state (spreads, or bring your own Immer); the runtime never mutates state
 - **Auth**: JWT via `jose` library
 - **Build**: tsdown (esbuild-based)
 - **Test**: Vitest + `@cloudflare/vitest-pool-workers` for integration tests
@@ -123,6 +123,8 @@ Do NOT load all docs upfront. Load only when relevant to the current task.
 - Version-based migration: bump `version`, provide `migrate(persisted, fromVersion)`.
 - Sequential migration: v1 → v3 runs migrate(v1→v2) then migrate(v2→v3).
 - Custom `serialize`/`restore` for non-JSON-safe state (Maps, Sets, Dates).
+- Every persisted transition also appends one row to the `events` journal in the same `transactionSync` (ADR-013). Journal is on by default and keeps everything; `journal: false` opts out, `journal: { keep }` opts into pruning.
+- Handlers read time and randomness only through `ctx.now()`, `ctx.id()`, `ctx.random()` — never `Date.now()`, `Math.random()` or `crypto.randomUUID()`. These are recorded as facts so `replayJournal()` (`@actor-kit/test`) reproduces state exactly.
 
 ### Schema and binary encoding
 
@@ -156,6 +158,7 @@ Do NOT load all docs upfront. Load only when relevant to the current task.
 | DO runtime (`src/runtime/`) | [docs/architecture.md](docs/architecture.md) § Runtime |
 | Test infrastructure | [docs/testing-strategy.md](docs/testing-strategy.md) |
 | Studio instrumentation | [docs/specs/actor-kit-studio.md](docs/specs/actor-kit-studio.md) |
+| Journal tables, causes or facts | [docs/adrs/013-actor-journal.md](docs/adrs/013-actor-journal.md) |
 | Any architectural decision | Create new ADR in [docs/adrs/](docs/adrs/) |
 
 ## Off-limits
