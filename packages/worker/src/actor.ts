@@ -27,7 +27,9 @@ import { BINARY_SUPPORT_HEADER, CALLER_ID_HEADER, CALLER_TYPE_HEADER } from "./i
 import {
   isStudioSocket,
   type LiveConnection,
+  nextConnectionSeq,
   readConnectionAttachment,
+  type SocketRecord,
   toLiveConnections,
 } from "./runtime/live-connections";
 import { routeMessage } from "./runtime/message-router";
@@ -558,11 +560,14 @@ export function actor(
 
     /** App connections from the sockets this DO holds right now (survives hibernation, empty after restart). */
     liveConnections(exclude?: WebSocket): LiveConnection[] {
-      const sockets = this.ctx
+      return toLiveConnections(this.socketRecords(exclude), def.roles, this.state);
+    }
+
+    private socketRecords(exclude?: WebSocket): SocketRecord[] {
+      return this.ctx
         .getWebSockets()
         .filter((ws) => ws !== exclude)
         .map((ws) => ({ tags: this.ctx.getTags(ws), attachment: ws.deserializeAttachment() }));
-      return toLiveConnections(sockets, def.roles, this.state);
     }
 
     /** Open app sockets held by one caller (same caller + callerType); `exclude` is left out. */
@@ -1584,6 +1589,7 @@ export function actor(
       // Tags: ["caller:{id}", "callerType:{type}"]
       const tags = [`caller:${callerInfo.caller}`, `callerType:${callerInfo.callerType}`];
       if (clientSupportsBinary) tags.push("binary");
+      const seq = nextConnectionSeq(this.socketRecords());
       this.ctx.acceptWebSocket(server, tags);
       this.connections.set(server, { caller: callerInfo.caller, callerType: callerInfo.callerType });
 
@@ -1591,7 +1597,7 @@ export function actor(
       // disappears with it on restart, and tells two tabs of one caller apart.
       const connectedAt = Date.now();
       const connectionId = crypto.randomUUID();
-      server.serializeAttachment({ connectionId, connectedAt });
+      server.serializeAttachment({ connectionId, connectedAt, seq });
 
       // Notify studio of new connection (covers hibernated sockets too)
       if (this.hasStudioWs()) {

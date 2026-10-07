@@ -1,4 +1,9 @@
-import { isStudioSocket, readConnectionAttachment, toLiveConnections } from "@actor-kit/worker/testing";
+import {
+  isStudioSocket,
+  nextConnectionSeq,
+  readConnectionAttachment,
+  toLiveConnections,
+} from "@actor-kit/worker/testing";
 import { describe, expect, it } from "vitest";
 
 type State = { ownerId: string };
@@ -25,6 +30,24 @@ describe("toLiveConnections", () => {
       { connectionId: "c2", caller: "alice", callerType: "user", connectedAt: 20, role: "owner" },
       { connectionId: "c3", caller: "bob", callerType: "service", connectedAt: 30, role: "viewer" },
     ]);
+  });
+
+  it("orders connections that share a connectedAt millisecond by connect sequence, whatever order the sockets arrive in", () => {
+    const sockets = [
+      socket("ivan", "user", { connectionId: "second", connectedAt: 10, seq: 2 }),
+      socket("hank", "user", { connectionId: "first", connectedAt: 10, seq: 1 }),
+    ];
+    expect(toLiveConnections(sockets, roles, state).map((c) => c.connectionId)).toEqual(["first", "second"]);
+  });
+
+  it("numbers the next connection after the highest live sequence", () => {
+    const sockets = [
+      socket("a", "user", { connectionId: "x", connectedAt: 1, seq: 4 }),
+      socket("b", "user", { connectionId: "y", connectedAt: 1, seq: 7 }),
+      { tags: ["caller:__studio", "callerType:service"], attachment: null },
+    ];
+    expect(nextConnectionSeq(sockets)).toBe(8);
+    expect(nextConnectionSeq([])).toBe(1);
   });
 
   it("leaves out the Studio socket", () => {

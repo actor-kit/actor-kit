@@ -16,6 +16,8 @@ const STUDIO_CALLER = "__studio";
 const ConnectionAttachmentSchema = z.object({
   connectionId: z.string().min(1),
   connectedAt: z.number(),
+  /** Per-actor connect order; breaks `connectedAt` ties and survives hibernation with the socket. */
+  seq: z.number().int().nonnegative().optional(),
 });
 export type ConnectionAttachment = z.infer<typeof ConnectionAttachmentSchema>;
 
@@ -52,7 +54,7 @@ export function readConnectionAttachment(attachment: unknown): ConnectionAttachm
 }
 
 /**
- * Lists app connections from socket records, oldest first, with each caller's
+ * Lists app connections from socket records, oldest first (by `connectedAt`, then connect sequence), with each caller's
  * current role. Studio sockets, and sockets without a valid identity or
  * attachment, are rejected rather than coerced.
  */
@@ -61,7 +63,7 @@ export function toLiveConnections<TState>(
   roles: Record<string, RolePredicate<TState>>,
   state: TState,
 ): LiveConnection[] {
-  const connections: LiveConnection[] = [];
+  const connections: Array<{ connection: LiveConnection; seq: number }> = [];
   for (const socket of sockets) {
     if (isStudioSocket(socket.tags)) continue;
     const caller = tagValue(socket.tags, "caller:");
@@ -69,12 +71,31 @@ export function toLiveConnections<TState>(
     const attachment = readConnectionAttachment(socket.attachment);
     if (caller === undefined || !callerType.success || attachment === null) continue;
     connections.push({
-      connectionId: attachment.connectionId,
-      caller,
-      callerType: callerType.data,
-      connectedAt: attachment.connectedAt,
-      role: resolveRole(roles, state, caller, { callerType: callerType.data }),
+      seq: attachment.seq ?? 0,
+      connection: {
+        connectionId: attachment.connectionId,
+        caller,
+        callerType: callerType.data,
+        connectedAt: attachment.connectedAt,
+        role: resolveRole(roles, state, caller, { callerType: callerType.data }),
+      },
     });
   }
-  return connections.sort((a, b) => a.connectedAt - b.connectedAt);
+  return connections
+    .sort((a, b) => a.connection.connectedAt - b.connection.connectedAt || a.seq - b.seq)
+    .map((entry) => entry.connection);
+}
+
+/**
+ * The sequence number for the next connection: one past the highest among the
+ * sockets held now. Derived from the attachments, so it keeps increasing across
+ * hibernation without any extra storage.
+ */
+export function nextConnectionSeq(sockets: ReadonlyArray<SocketRecord>): number {
+  let highest = 0;
+  for (const socket of sockets) {
+    const attachment = readConnectionAttachment(socket.attachment);
+    if (attachment?.seq !== undefined && attachment.seq > highest) highest = attachment.seq;
+  }
+  return highest + 1;
 }

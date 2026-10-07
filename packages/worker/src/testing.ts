@@ -20,7 +20,12 @@ export { createChangeEntry } from "./runtime/cdc";
 export { getTokenFromRequest } from "./runtime/get-token";
 // Live app connections from held sockets (pure)
 export type { ConnectionAttachment, LiveConnection, SocketRecord } from "./runtime/live-connections";
-export { isStudioSocket, readConnectionAttachment, toLiveConnections } from "./runtime/live-connections";
+export {
+  isStudioSocket,
+  nextConnectionSeq,
+  readConnectionAttachment,
+  toLiveConnections,
+} from "./runtime/live-connections";
 // Message router
 export type { RouteResult } from "./runtime/message-router";
 export { routeMessage } from "./runtime/message-router";
