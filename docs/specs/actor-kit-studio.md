@@ -62,21 +62,22 @@ export default {
 
 | Variable | Required | Description |
 |---|---|---|
-| `ACTOR_KIT_STUDIO_SECRET` | Prod only | Secret key for API auth. Set via `wrangler secret put`. |
+| `STUDIO_ACCESS_TEAM_DOMAIN` | Prod | `<team>.cloudflareaccess.com` |
+| `STUDIO_ACCESS_AUD` | Prod | AUD tag of the Studio Access application |
+| `STUDIO_ADMIN_EMAILS` | Optional (secret) | Emails granted `mutate` |
+| `STUDIO_CALLER_HASH_KEY` | For agents (secret) | HMAC key for agent caller hashing |
 
 ## Authentication
 
+Superseded by [ADR-014](../adrs/014-studio-production-access.md): Cloudflare Access in front of `/__studio`, JWT verified in the middleware, read-only agents, server-side redaction (`studio.redact`) and one `studio.request` audit event per request. The shared `X-Actor-Kit-Studio-Key` header was removed.
+
 ### Local development (`wrangler dev`)
 
-No auth required. If `ACTOR_KIT_STUDIO_SECRET` is not set and the request is from localhost, all studio routes are open.
+No auth required when no `STUDIO_ACCESS_*` setting is present and the URL hostname is exactly `localhost` or `127.0.0.1`.
 
 ### Production
 
-Every `/__studio/*` request must include `X-Actor-Kit-Studio-Key` header matching `ACTOR_KIT_STUDIO_SECRET`. The studio UI prompts for this key on first visit and stores it in localStorage.
-
-If the secret is not configured in prod, the middleware returns `403` with an error message explaining setup.
-
-Cloudflare WAF / Access can be layered on top for defense-in-depth (documented, not required).
+Every `/__studio/*` request must carry a valid `Cf-Access-Jwt-Assertion` (Access adds it after SSO or a service token). The UI relies on the Access cookie; on 401/403 it offers "Sign in through Cloudflare Access".
 
 ## Actor Registry
 

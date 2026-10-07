@@ -166,3 +166,55 @@ single point of contention.
   the setup commands.
 - Agents never need raw values to fix a bug. Shape, changed paths, cause types and checksums are
   enough to write a regression test.
+
+## Known limits (found while building)
+
+- **Object keys are structure, not values.** Redaction replaces values. State keyed by a
+  person's name (`scores.Juneau`) leaks the name through the keys in inspect output and through
+  `changedPaths` in the timeline shape. Key records by id.
+- **Error strings are not redacted.** `service.onError` / `link.onError` causes keep their
+  `error` message. Don't interpolate state into thrown messages. The CLI's `--shape` drops
+  error messages anyway.
+- **Actor ids are not redacted.** A room named after a child shows in Studio, the registry and
+  the audit line. The sre-agent proposal hashes the id before it goes into an issue.
+- **The viewer argument defaults to human.** `__inspect()` without arguments (people, dev) shows
+  raw callers. The DO's RPC is reachable only from the Worker, and the middleware always passes
+  `{ viewer: "agent" }` for service tokens. The WebSocket viewer header is stamped by the
+  middleware, and any inbound copy is removed.
+
+## Rollout (Jon runs these; nothing here was created by an agent)
+
+The Cloudflare API token needs **Access: Apps and Policies Edit** and **Access: Service Tokens Edit**.
+
+```bash
+ACCOUNT=<account id>; HOST=<game host, e.g. game.example.com>; EMAIL=<your SSO email>
+CF="https://api.cloudflare.com/client/v4/accounts/$ACCOUNT/access"
+AUTH=(-H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -H "Content-Type: application/json")
+
+# 1. Team domain -> STUDIO_ACCESS_TEAM_DOMAIN
+curl -s "${AUTH[@]}" "$CF/organizations" | jq -r .result.auth_domain
+
+# 2. Access application on the Studio path -> STUDIO_ACCESS_AUD (= .result.aud)
+curl -s "${AUTH[@]}" -X POST "$CF/apps" --data "{\"name\":\"Actor Kit Studio ($HOST)\",\"domain\":\"$HOST/__studio\",\"type\":\"self_hosted\",\"session_duration\":\"12h\"}" | jq '.result | {id, aud}'
+APP=<id from step 2>
+
+# 3. People: allow your email
+curl -s "${AUTH[@]}" -X POST "$CF/apps/$APP/policies" --data "{\"name\":\"Studio people\",\"decision\":\"allow\",\"include\":[{\"email\":{\"email\":\"$EMAIL\"}}],\"precedence\":1}"
+
+# 4. One service token per agent (client_secret is shown ONCE; put it straight into the agent's secret store)
+curl -s "${AUTH[@]}" -X POST "$CF/service_tokens" --data '{"name":"studio-sre-agent-<repo>","duration":"8760h"}' | jq '.result | {id, client_id}'
+#    then allow it (Service Auth = decision non_identity)
+curl -s "${AUTH[@]}" -X POST "$CF/apps/$APP/policies" --data '{"name":"Studio agents","decision":"non_identity","include":[{"service_token":{"token_id":"<token id>"}}],"precedence":2}'
+
+# 5. Worker settings
+#    wrangler.jsonc vars: STUDIO_ACCESS_TEAM_DOMAIN, STUDIO_ACCESS_AUD
+openssl rand -hex 32 | wrangler secret put STUDIO_CALLER_HASH_KEY
+wrangler secret put STUDIO_ADMIN_EMAILS
+```
+
+Verify after deploying (unverified until then):
+- `https://$HOST/__studio/` redirects to the Access login, then the UI loads, and the live
+  WebSocket connects. This confirms Access forwards `Cf-Access-Jwt-Assertion` on the upgrade.
+- `CF_ACCESS_CLIENT_ID=… CF_ACCESS_CLIENT_SECRET=… actor-kit studio types --url https://$HOST`
+  returns JSON. The Worker log shows `"principal":"agent"`.
+- `curl https://<worker>.workers.dev/__studio/api/actors` returns 401.

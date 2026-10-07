@@ -52,24 +52,61 @@ tag = "v2"  # increment your migration tag
 new_sqlite_classes = ["StudioRegistry"]
 ```
 
-### 4. Set the secret (production only)
+### 4. Production: put `/__studio` behind Cloudflare Access
 
-In production, studio routes require a secret key:
+In local development (`wrangler dev` on `localhost` / `127.0.0.1`) with no Access settings, Studio is open. In production, Studio requires [Cloudflare Access](https://developers.cloudflare.com/cloudflare-one/): people sign in with SSO, and each agent gets its own service token. The middleware verifies the `Cf-Access-Jwt-Assertion` JWT itself (RS256, issuer, audience, expiry), so a route Access doesn't cover (e.g. `*.workers.dev`) is still refused. See ADR-014.
+
+Set these on the Worker:
+
+| Setting | How | Purpose |
+|---|---|---|
+| `STUDIO_ACCESS_TEAM_DOMAIN` | var | `<team>.cloudflareaccess.com` |
+| `STUDIO_ACCESS_AUD` | var | AUD tag of the Studio Access application |
+| `STUDIO_ADMIN_EMAILS` | `wrangler secret put` | comma-separated emails allowed to **mutate** (e.g. future journal restore) |
+| `STUDIO_CALLER_HASH_KEY` | `wrangler secret put` | HMAC key that hashes callers for agents |
 
 ```bash
-wrangler secret put ACTOR_KIT_STUDIO_SECRET
+openssl rand -hex 32 | wrangler secret put STUDIO_CALLER_HASH_KEY
+wrangler secret put STUDIO_ADMIN_EMAILS
 ```
 
-In local development (`wrangler dev`), no secret is needed — localhost is trusted.
+## Authentication and permissions
 
-## Authentication
+| Who | How | Can |
+|---|---|---|
+| Localhost, no Access settings | nothing | read + mutate (dev) |
+| Person | Access SSO cookie (browser) or `cloudflared access token` (CLI) | read; mutate if in `STUDIO_ADMIN_EMAILS` |
+| Agent | Access service token (`CF-Access-Client-Id` / `-Secret`) | read only, never mutate; callers are hashed |
+| Anything else | | 401 (no or invalid token) / 403 (Studio not configured) |
 
-| Environment | Auth |
-|-------------|------|
-| `localhost` / `127.0.0.1` | No auth required |
-| Production | `X-Actor-Kit-Studio-Key` header must match `ACTOR_KIT_STUDIO_SECRET` |
+Every Studio request logs one `studio.request` JSON line (principal, subject, route, actor, status, duration), never bodies or tokens.
 
-For additional security in production, you can layer Cloudflare WAF rules or Cloudflare Access on top of the `/__studio/*` path.
+## Redaction
+
+Values an actor declares in `studio.redact` are replaced with `"[redacted]"` **inside the Durable Object**, before anything is returned to Studio, for everyone, people included:
+
+```typescript
+const Game = defineActor("game", {
+  // ...
+  studio: { redact: ["players.*.name", "**.email"] },
+});
+```
+
+`*` matches one key or array index, `**` any depth. The same patterns apply to state, timeline snapshots, message payloads, service input/output, link views, outbox payloads and role views, each relative to its own root. Object **keys** are not redacted, so key records by id, not by a person's name.
+
+## CLI and MCP (`@actor-kit/studio-cli`)
+
+```bash
+export ACTOR_KIT_STUDIO_URL=https://game.example.com
+export CF_ACCESS_CLIENT_ID=... CF_ACCESS_CLIENT_SECRET=...   # agent service token
+# or, for a person: export CF_ACCESS_TOKEN=$(cloudflared access token -app=$ACTOR_KIT_STUDIO_URL/__studio)
+actor-kit studio list --type game
+actor-kit studio inspect game room-7
+actor-kit studio timeline game room-7 --limit 20 --shape   # no values: safe for a public issue
+actor-kit studio view game room-7 --role player --caller <id>
+```
+
+`actor-kit-studio-mcp` serves the same tools over stdio: `studio_list_actors`, `studio_actor_types`, `studio_inspect`, `studio_timeline` (shape by default) and `studio_view`.
 
 ## Enable timeline without StudioRegistry
 
@@ -109,13 +146,14 @@ Once configured, the following routes are available:
 | `/__studio/api/actors/types` | GET | List distinct actor types |
 | `/__studio/api/actors/:type/:id` | GET | Inspect actor (state, connections, outbox, links) |
 | `/__studio/api/actors/:type/:id/timeline` | GET | Timeline entries (query: `limit`, `before`) |
+| `/__studio/api/actors/:type/:id/view` | GET | A role's view (query: `role`, `caller`) |
 | `/__studio/actors/:type/:id/ws` | WS | Live studio WebSocket connection |
 
 ## RPC methods
 
-Every actor DO exposes two RPC methods for programmatic access:
+Every actor DO exposes three RPC methods for programmatic access. All are redacted; pass `{ viewer: "agent" }` to also hash callers.
 
-### `__inspect()`
+### `__inspect(opts?)`
 
 Returns current state, metadata, connections, outbox, and links.
 
@@ -135,4 +173,11 @@ const result = await stub.__getTimeline({ limit: 20 });
 
 // Paginate with cursor:
 const page2 = await stub.__getTimeline({ limit: 20, before: lastEntryId });
+```
+
+### `__getView(opts)`
+
+```typescript
+const reply = await stub.__getView({ role: "player", caller: "user-1" });
+// { type: "studio.view", role, caller, callerRole, data } or { ..., error }
 ```

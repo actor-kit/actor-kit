@@ -21,14 +21,20 @@ export default {
 };
 ```
 
-### Auth behavior
+### Auth behavior (ADR-014)
 
 | Condition | Result |
 |-----------|--------|
-| Localhost, no secret configured | Allowed |
-| Remote, no secret configured | 403 |
-| Remote, wrong `X-Actor-Kit-Studio-Key` | 401 |
-| Remote, correct `X-Actor-Kit-Studio-Key` | Allowed |
+| Localhost, no `STUDIO_ACCESS_*` configured | Allowed (dev: read + mutate) |
+| Remote, no `STUDIO_ACCESS_*` configured | 403 |
+| Only one of `STUDIO_ACCESS_TEAM_DOMAIN` / `STUDIO_ACCESS_AUD` set | 403 (fails closed) |
+| Access configured, missing or invalid `Cf-Access-Jwt-Assertion` | 401 |
+| Valid Access user JWT | Allowed (read; mutate if in `STUDIO_ADMIN_EMAILS`) |
+| Valid Access service-token JWT | Allowed (read only; 503 if `STUDIO_CALLER_HASH_KEY` is unset) |
+
+### `createActorKitStudio(options)`
+
+Builds the middleware with injected dependencies: `access.keysFor(teamDomain)` (JWKS; default: the team's published certs) and `log(event)` (audit sink; default: one `studio.request` JSON line on `console.log`). `actorKitStudio` is `createActorKitStudio()`.
 
 ## `StudioRegistry`
 
