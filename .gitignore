@@ -15,3 +15,10 @@ test-results/
 reports/
 workers-qb/
 .DS_Store
+
+# Studio walkthrough recordings (pnpm record:studio)
+recordings/*.webm
+recordings/*.mp4
+recordings/*.log
+recordings/.state/
+recordings/shots/
