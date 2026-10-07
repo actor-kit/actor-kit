@@ -2,7 +2,10 @@
  * Scripted Actor Kit Studio walkthrough, recorded as a screen video.
  *
  * Runs against examples/chat-room (Studio wired in via src/worker.ts and
- * `studio: { enabled: true }` in src/chat.ts). Everything on screen is real:
+ * `studio: { enabled: true }` in src/chat.ts). chat-room has no services or
+ * links, so step 5 also starts the Studio e2e worker (tests/e2e-studio: an
+ * auction-room with a NOTIFY_WINNER service that links to a lobby) on the
+ * next port and shows its Outbox and Links changing live. Everything on screen is real:
  * chat users are separate browser contexts that join rooms and send messages
  * through the example's own UI; nothing is mocked and no frames are injected.
  * The only thing added to the recorded page is a caption bar at the bottom.
@@ -15,6 +18,7 @@
  *   recordings/shots/NN-*.png                  — one screenshot per step
  *   recordings/shots/findings.json             — anything that did not behave as expected
  *   recordings/chat-room-dev.log               — wrangler dev output
+ *   recordings/effects-dev.log                 — wrangler dev output for the Studio e2e worker
  *
  * Anything that does not behave as expected is captioned "BUG:" on camera and
  * listed in findings.json; the walkthrough carries on so the rest is recorded.
@@ -36,6 +40,10 @@ const LOG_FILE = join(OUT_DIR, "chat-room-dev.log");
 const WEBM = join(OUT_DIR, "studio-walkthrough.webm");
 const MP4 = join(OUT_DIR, "studio-walkthrough.mp4");
 const WRANGLER = join(CHAT_DIR, "node_modules/.bin/wrangler");
+const EFFECTS_DIR = join(ROOT, "tests/e2e-studio");
+const EFFECTS_STATE_DIR = join(OUT_DIR, ".state/effects");
+const EFFECTS_LOG_FILE = join(OUT_DIR, "effects-dev.log");
+const EFFECTS_WRANGLER = join(EFFECTS_DIR, "node_modules/.bin/wrangler");
 
 const PORT = Number(process.env["STUDIO_RECORD_PORT"] ?? "8860");
 const BASE = `http://localhost:${PORT}`;
@@ -43,6 +51,8 @@ const STUDIO = `${BASE}/__studio/`;
 const SIZE = { width: 1440, height: 900 };
 const ACTOR_TYPE = "chat-room";
 const GHOST_ID = "ghost-room-404";
+const EFFECTS_PORT = PORT + 1;
+const EFFECTS_BASE = `http://localhost:${EFFECTS_PORT}`;
 
 // ---------------------------------------------------------------------------
 // Server lifecycle (only the process group this script started is touched)
@@ -121,6 +131,56 @@ async function stopServer(): Promise<void> {
     signalGroup(child, "SIGKILL");
     await sleep(300);
   }
+}
+
+// The Studio e2e worker (real services + links) for step 5, in its own process group.
+let effectsServer: ChildProcess | null = null;
+
+async function startEffectsServer(): Promise<void> {
+  const log = openSync(EFFECTS_LOG_FILE, "a");
+  effectsServer = spawn(
+    EFFECTS_WRANGLER,
+    ["dev", "--persist-to", EFFECTS_STATE_DIR, "--port", String(EFFECTS_PORT), "--inspector-port", "0"],
+    {
+      cwd: EFFECTS_DIR,
+      detached: true,
+      stdio: ["ignore", log, log],
+      env: { ...process.env, WRANGLER_SEND_METRICS: "false" },
+    },
+  );
+  closeSync(log);
+  const deadline = Date.now() + 90_000;
+  while (Date.now() < deadline) {
+    if (await answers(`${EFFECTS_BASE}/__studio/api/actors/types`)) return;
+    if (effectsServer.exitCode !== null) throw new Error(`effects wrangler exited early; see ${EFFECTS_LOG_FILE}`);
+    await sleep(500);
+  }
+  throw new Error(`effects server on ${EFFECTS_BASE} did not answer; see ${EFFECTS_LOG_FILE}`);
+}
+
+async function stopEffectsServer(): Promise<void> {
+  const child = effectsServer;
+  effectsServer = null;
+  if (child === null) return;
+  if (child.exitCode === null && child.signalCode === null) {
+    const exited = new Promise<void>((done) => child.once("exit", () => done()));
+    signalGroup(child, "SIGTERM");
+    const timedOut = await Promise.race([exited.then(() => false), sleep(8000).then(() => true)]);
+    if (timedOut) signalGroup(child, "SIGKILL");
+  }
+  const deadline = Date.now() + 10_000;
+  while (Date.now() < deadline && (await answers(`${EFFECTS_BASE}/__studio/api/actors/types`))) {
+    signalGroup(child, "SIGKILL");
+    await sleep(300);
+  }
+}
+
+type EffectsType = "lobby" | "auction-room";
+
+/** Drive the e2e worker's actors (tests/e2e-studio/worker.ts /effects/* endpoints). */
+async function effects(path: "spawn" | "send", body: { type: EffectsType; actorId: string } & Record<string, unknown>) {
+  const res = await fetch(`${EFFECTS_BASE}/effects/${path}`, { method: "POST", body: JSON.stringify(body) });
+  if (!res.ok) throw new Error(`effects ${path} ${body.actorId}: ${res.status} ${await res.text()}`);
 }
 
 // ---------------------------------------------------------------------------
@@ -608,7 +668,7 @@ async function walkthrough(browser: Browser, studio: Page): Promise<void> {
 
   // --- 5. Outbox and links ---------------------------------------------------------
   // chat.ts declares no `services` and no `links`, so both panels are empty for real.
-  await caption(studio, "5. Outbox: empty — chat-room declares no services (no ctx.execute)");
+  await caption(studio, "5. Outbox and Links: empty here — chat-room has no services or links");
   await studio.getByTestId("tab-outbox").click();
   await expectOnCamera(
     studio,
@@ -616,10 +676,8 @@ async function walkthrough(browser: Browser, studio: Page): Promise<void> {
     () => studio.getByTestId("outbox-panel").getByText("No executions.").waitFor({ timeout: 3000 }),
     textOf(studio.getByTestId("outbox-panel")),
   );
-  await pause(3000);
+  await pause(1500);
   await shot(studio, "outbox-empty");
-
-  await caption(studio, "5. Links: empty — chat-room declares no links and has no subscribers");
   await studio.getByTestId("tab-links").click();
   await expectOnCamera(
     studio,
@@ -630,8 +688,160 @@ async function walkthrough(browser: Browser, studio: Page): Promise<void> {
     },
     textOf(studio.getByTestId("links-panel")),
   );
-  await pause(3000);
+  await pause(1500);
   await shot(studio, "links-empty");
+
+  // Real side effects: the Studio e2e worker's auction-room (NOTIFY_WINNER service) and lobby (link target).
+  await caption(studio, `5. Outbox: switching to a worker with services and links (port ${EFFECTS_PORT})`);
+  await startEffectsServer();
+  const roomId = "spring-auction";
+  const lobbyId = "main-hall";
+  await effects("spawn", { type: "lobby", actorId: lobbyId, input: { name: "Main Hall" } });
+  await effects("spawn", { type: "auction-room", actorId: roomId, input: { item: "brass lamp" } });
+
+  const effectsStatus = studio.getByTestId("status");
+  const openEffects = async (type: EffectsType, id: string, tab: "outbox" | "links") => {
+    await studio.goto(`${EFFECTS_BASE}/__studio/actors/${type}/${id}`);
+    await effectsStatus.filter({ hasText: "Live" }).waitFor({ timeout: 10_000 });
+    await studio.getByTestId(`tab-${tab}`).click();
+  };
+  const outboxRows = studio.getByTestId("outbox-row");
+  const outboxRow = (status: string) => studio.locator(`[data-testid='outbox-row'][data-status='${status}']`);
+
+  await openEffects("auction-room", roomId, "outbox");
+  await caption(studio, "5. Outbox: auction-room/spring-auction closes for alice: NOTIFY_WINNER is pending");
+  await effects("send", {
+    type: "auction-room",
+    actorId: roomId,
+    message: { type: "CLOSE", winner: "alice", delayMs: 5000, fail: false },
+  });
+  await expectOnCamera(
+    studio,
+    "a pending NOTIFY_WINNER row, live",
+    () => outboxRow("pending").filter({ hasText: "NOTIFY_WINNER" }).waitFor({ timeout: 4000 }),
+    textOf(studio.getByTestId("outbox-panel")),
+  );
+  await pause(1500);
+  await shot(studio, "outbox-pending");
+  await caption(studio, "5. Outbox: the service finishes: pending turns done (onDone sets the notice)");
+  await expectOnCamera(
+    studio,
+    "the row turns 'done'",
+    () => outboxRow("done").waitFor({ timeout: 10_000 }),
+    textOf(studio.getByTestId("outbox-panel")),
+  );
+  await pause(2500);
+  await shot(studio, "outbox-done");
+
+  await caption(studio, "5. Outbox: a second close whose mail bounces: pending, then failed (onError)");
+  await effects("send", {
+    type: "auction-room",
+    actorId: roomId,
+    message: { type: "CLOSE", winner: "bob", delayMs: 4000, fail: true },
+  });
+  await expectOnCamera(
+    studio,
+    "a second, pending row on top",
+    async () => {
+      await outboxRow("pending").waitFor({ timeout: 4000 });
+      if ((await outboxRows.count()) !== 2) throw new Error(String(await outboxRows.count()));
+    },
+    textOf(studio.getByTestId("outbox-panel")),
+  );
+  await pause(1500);
+  await shot(studio, "outbox-second-pending");
+  await expectOnCamera(
+    studio,
+    "the second row turns 'failed', the first stays 'done'",
+    async () => {
+      await outboxRow("failed").waitFor({ timeout: 10_000 });
+      await outboxRow("done").waitFor({ timeout: 1000 });
+    },
+    textOf(studio.getByTestId("outbox-panel")),
+  );
+  await pause(2500);
+  await shot(studio, "outbox-done-and-failed");
+  await caption(studio, "5. Outbox: onError wrote the failure into state");
+  await studio.getByTestId("tab-state").click();
+  await expectOnCamera(
+    studio,
+    "'notify failed: mailbox full for bob' in state",
+    () => studio.getByTestId("state-panel").getByText("notify failed: mailbox full for bob").waitFor({ timeout: 3000 }),
+    textOf(studio.getByTestId("state-panel")),
+  );
+  await pause(2500);
+  await shot(studio, "outbox-onerror-state");
+
+  const activeLinkRows = studio.getByTestId("active-link-row");
+  const subscriberRows = studio.getByTestId("link-subscriber-row");
+  await studio.getByTestId("tab-links").click();
+  await caption(studio, "5. Links: the auction room links to lobby/main-hall; the link appears live");
+  await pause(1500);
+  await effects("send", { type: "auction-room", actorId: roomId, message: { type: "LINK_LOBBY", lobbyId } });
+  await expectOnCamera(
+    studio,
+    "an active link 'lobby → LOBBY:main-hall'",
+    () => activeLinkRows.filter({ hasText: `LOBBY:${lobbyId}` }).waitFor({ timeout: 5000 }),
+    textOf(studio.getByTestId("links-panel")),
+  );
+  await pause(2500);
+  await shot(studio, "links-active");
+
+  const linkVersion = studio.getByTestId("active-link-version");
+  const versionBefore = Number(await linkVersion.innerText().catch(() => "0"));
+  await caption(studio, "5. Links: the lobby is renamed 'Grand Hall': the update flows over the link");
+  await effects("send", { type: "lobby", actorId: lobbyId, message: { type: "RENAME", name: "Grand Hall" } });
+  await expectOnCamera(
+    studio,
+    "the link version goes up",
+    async () => {
+      const deadline = Date.now() + 5000;
+      while (Number(await linkVersion.innerText()) <= versionBefore) {
+        if (Date.now() > deadline) throw new Error("version unchanged");
+        await sleep(100);
+      }
+    },
+    textOf(studio.getByTestId("links-panel")),
+  );
+  await pause(2000);
+  await shot(studio, "links-version-bump");
+  await studio.getByTestId("tab-state").click();
+  await expectOnCamera(
+    studio,
+    "lobbyName 'Grand Hall' in the room's state",
+    () => studio.getByTestId("state-panel").getByText("Grand Hall").waitFor({ timeout: 3000 }),
+    textOf(studio.getByTestId("state-panel")),
+  );
+  await pause(2500);
+  await shot(studio, "links-state-updated");
+
+  await openEffects("lobby", lobbyId, "links");
+  await caption(studio, "5. Links: on lobby/main-hall, the auction room is listed as a subscriber");
+  await expectOnCamera(
+    studio,
+    `a subscriber row 'AUCTION_ROOM ${roomId}'`,
+    () => subscriberRows.filter({ hasText: roomId }).waitFor({ timeout: 5000 }),
+    textOf(studio.getByTestId("links-panel")),
+  );
+  await pause(2500);
+  await shot(studio, "links-subscriber");
+
+  await caption(studio, "5. Links: the auction room unlinks; the subscriber disappears live");
+  await effects("send", { type: "auction-room", actorId: roomId, message: { type: "UNLINK_LOBBY", lobbyId } });
+  await expectOnCamera(
+    studio,
+    "'No subscribers.'",
+    () => studio.getByTestId("links-panel").getByText("No subscribers.").waitFor({ timeout: 5000 }),
+    textOf(studio.getByTestId("links-panel")),
+  );
+  await pause(2500);
+  await shot(studio, "links-unsubscribed");
+  await stopEffectsServer();
+
+  // Back to chat-room/lobby for the resilience steps.
+  await studio.goto(`${STUDIO}actors/${ACTOR_TYPE}/lobby`);
+  await status.filter({ hasText: "Live" }).waitFor({ timeout: 10_000 });
+  await caption(studio, "Back to chat-room/lobby");
 
   // --- 6a. Resilience: dev server restart ------------------------------------------------
   await studio.getByTestId("tab-timeline").click();
@@ -761,10 +971,11 @@ async function main(): Promise<void> {
   rmSync(join(OUT_DIR, ".state"), { recursive: true, force: true });
   rmSync(SHOTS_DIR, { recursive: true, force: true });
   rmSync(LOG_FILE, { force: true });
-  for (const dir of [STATE_DIR, SHOTS_DIR, VIDEO_TMP]) mkdirSync(dir, { recursive: true });
+  rmSync(EFFECTS_LOG_FILE, { force: true });
+  for (const dir of [STATE_DIR, EFFECTS_STATE_DIR, SHOTS_DIR, VIDEO_TMP]) mkdirSync(dir, { recursive: true });
 
   const onSignal = () => {
-    void stopServer().finally(() => process.exit(130));
+    void Promise.all([stopServer(), stopEffectsServer()]).finally(() => process.exit(130));
   };
   process.once("SIGINT", onSignal);
   process.once("SIGTERM", onSignal);
@@ -801,6 +1012,7 @@ async function main(): Promise<void> {
   } finally {
     await browser?.close();
     await stopServer();
+    await stopEffectsServer();
   }
 
   for (const f of readdirSync(VIDEO_TMP)) rmSync(join(VIDEO_TMP, f), { force: true });
