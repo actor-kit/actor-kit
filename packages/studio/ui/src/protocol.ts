@@ -31,6 +31,8 @@ export const ActorEntrySchema = z.object({
 export type ActorEntry = z.infer<typeof ActorEntrySchema>;
 
 export const ConnectionSchema = z.object({
+  /** Unique per app socket: two tabs of one caller are two connections. */
+  connectionId: z.string().min(1),
   caller: z.string(),
   callerType: z.enum(["user", "service"]),
   connectedAt: z.number(),
@@ -121,7 +123,7 @@ const ConnectionFrameSchema = z.discriminatedUnion("action", [
   z.object({
     type: z.literal("studio.connection"),
     action: z.literal("disconnect"),
-    connection: ConnectionSchema.pick({ caller: true, callerType: true }),
+    connection: ConnectionSchema.pick({ connectionId: true, caller: true, callerType: true }),
   }),
 ]);
 

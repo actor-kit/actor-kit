@@ -109,8 +109,9 @@ function applyFrame(state: StudioViewState, frame: StudioFrame): StudioViewState
 
     case "studio.connection": {
       if (state.inspect === null) return state;
-      const { caller, callerType } = frame.connection;
-      const others = state.inspect.connections.filter((c) => c.caller !== caller || c.callerType !== callerType);
+      // One row per app socket: only the socket that connected or closed changes.
+      const { connectionId } = frame.connection;
+      const others = state.inspect.connections.filter((c) => c.connectionId !== connectionId);
       const connections = frame.action === "connect" ? [...others, frame.connection] : others;
       return { ...state, inspect: { ...state.inspect, connections } };
     }

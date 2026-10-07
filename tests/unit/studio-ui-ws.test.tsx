@@ -187,9 +187,9 @@ describe("useStudioWs", () => {
     expect(result.current.error).toBeNull();
   });
 
-  it("upserts connections by caller and removes them on disconnect", () => {
+  it("upserts connections by connectionId and removes them on disconnect", () => {
     const { result } = renderHook(() => useStudioWs("counter", "a1"));
-    const conn = { caller: "u1", callerType: "user", connectedAt: 5, role: "user" };
+    const conn = { connectionId: "c1", caller: "u1", callerType: "user", connectedAt: 5, role: "user" };
     act(() => {
       FakeWebSocket.latest().serverOpen();
       FakeWebSocket.latest().serverSend(snapshot(1));
@@ -205,10 +205,47 @@ describe("useStudioWs", () => {
       FakeWebSocket.latest().serverSend({
         type: "studio.connection",
         action: "disconnect",
-        connection: { caller: "u1", callerType: "user" },
+        connection: { connectionId: "c1", caller: "u1", callerType: "user" },
       });
     });
     expect(result.current.inspect?.connections).toEqual([]);
+  });
+
+  it("lists every socket as its own connection: two tabs of one caller are two rows, one tab closing removes one", () => {
+    const { result } = renderHook(() => useStudioWs("counter", "a1"));
+    const tab1 = { connectionId: "c1", caller: "u1", callerType: "user", connectedAt: 5, role: "user" };
+    const tab2 = { ...tab1, connectionId: "c2", connectedAt: 6 };
+    act(() => {
+      FakeWebSocket.latest().serverOpen();
+      FakeWebSocket.latest().serverSend(snapshot(1));
+      FakeWebSocket.latest().serverSend({ type: "studio.connection", action: "connect", connection: tab1 });
+      FakeWebSocket.latest().serverSend({ type: "studio.connection", action: "connect", connection: tab2 });
+    });
+    expect(result.current.inspect?.connections).toEqual([tab1, tab2]);
+    act(() => {
+      FakeWebSocket.latest().serverSend({
+        type: "studio.connection",
+        action: "disconnect",
+        connection: { connectionId: "c1", caller: "u1", callerType: "user" },
+      });
+    });
+    expect(result.current.inspect?.connections).toEqual([tab2]);
+    expect(result.current.error).toBeNull();
+  });
+
+  it("treats a connection frame without a connectionId as malformed", () => {
+    const { result } = renderHook(() => useStudioWs("counter", "a1"));
+    act(() => {
+      FakeWebSocket.latest().serverOpen();
+      FakeWebSocket.latest().serverSend(snapshot(1));
+      FakeWebSocket.latest().serverSend({
+        type: "studio.connection",
+        action: "connect",
+        connection: { caller: "u1", callerType: "user", connectedAt: 5, role: "user" },
+      });
+    });
+    expect(result.current.inspect?.connections).toEqual([]);
+    expect(result.current.error).not.toBeNull();
   });
 
   it("reconnects after the socket drops and replaces the timeline from the new snapshot", () => {

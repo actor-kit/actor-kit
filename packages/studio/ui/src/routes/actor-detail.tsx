@@ -244,8 +244,8 @@ function ActorDetail({ actorType, actorId }: { actorType: string; actorId: strin
                 </tr>
               </thead>
               <tbody>
-                {inspect.connections.map((conn, i) => (
-                  <tr key={`${conn.caller}:${conn.callerType}:${i}`} className="border-b border-zinc-800/50">
+                {inspect.connections.map((conn) => (
+                  <tr key={conn.connectionId} className="border-b border-zinc-800/50">
                     <td className="px-4 py-2 font-mono">{conn.caller}</td>
                     <td className="px-4 py-2 text-zinc-400">{conn.callerType}</td>
                     <td className="px-4 py-2">
