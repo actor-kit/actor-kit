@@ -1,5 +1,13 @@
 @import "tailwindcss";
 
+/* Diff colours (docs/specs/actor-kit-studio.md: added=green, removed=red, changed=yellow).
+   Used as text-diff-added / text-diff-removed / text-diff-changed. */
+@theme {
+  --color-diff-added: var(--color-emerald-400);
+  --color-diff-removed: var(--color-red-400);
+  --color-diff-changed: var(--color-amber-300);
+}
+
 body {
   font-family:
     ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono",
