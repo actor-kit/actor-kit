@@ -290,7 +290,12 @@ function ActorDetail({ actorType, actorId }: { actorType: string; actorId: strin
                           ? "text-amber-400"
                           : "text-zinc-400";
                   return (
-                    <tr key={exec.id} className="border-b border-zinc-800/50">
+                    <tr
+                      key={exec.id}
+                      className="border-b border-zinc-800/50"
+                      data-testid="outbox-row"
+                      data-status={exec.status}
+                    >
                       <td className="px-4 py-2">{exec.service}</td>
                       <td className={`px-4 py-2 ${statusColor}`}>{exec.status}</td>
                       <td className="px-4 py-2 text-right text-zinc-400">{exec.attempts}</td>
@@ -320,12 +325,14 @@ function ActorDetail({ actorType, actorId }: { actorType: string; actorId: strin
                 </thead>
                 <tbody>
                   {inspect.activeLinks.map((link, i) => (
-                    <tr key={i} className="border-b border-zinc-800/50">
+                    <tr key={i} className="border-b border-zinc-800/50" data-testid="active-link-row">
                       <td className="px-4 py-2">{link.linkName}</td>
                       <td className="px-4 py-2">
                         {link.targetType}:{link.targetId}
                       </td>
-                      <td className="px-4 py-2 text-right text-zinc-400">{link.version}</td>
+                      <td className="px-4 py-2 text-right text-zinc-400" data-testid="active-link-version">
+                        {link.version}
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -346,7 +353,7 @@ function ActorDetail({ actorType, actorId }: { actorType: string; actorId: strin
                 </thead>
                 <tbody>
                   {inspect.linkSubscribers.map((sub, i) => (
-                    <tr key={i} className="border-b border-zinc-800/50">
+                    <tr key={i} className="border-b border-zinc-800/50" data-testid="link-subscriber-row">
                       <td className="px-4 py-2">{sub.subscriberType}</td>
                       <td className="px-4 py-2">{sub.subscriberId}</td>
                     </tr>

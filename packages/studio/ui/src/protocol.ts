@@ -127,11 +127,36 @@ const ConnectionFrameSchema = z.discriminatedUnion("action", [
   }),
 ]);
 
-const FrameSchema = z.union([SnapshotFrameSchema, TimelineFrameSchema, ConnectionFrameSchema]);
+/** The whole outbox, pushed whenever an execution is added or settles. */
+const OutboxFrameSchema = z.object({
+  type: z.literal("studio.outbox"),
+  outbox: z.array(OutboxEntrySchema),
+});
+
+/** Active links and subscribers, pushed whenever either changes. */
+const LinksFrameSchema = z.object({
+  type: z.literal("studio.links"),
+  activeLinks: z.array(ActiveLinkSchema),
+  linkSubscribers: z.array(LinkSubscriberSchema),
+});
+
+const FrameSchema = z.union([
+  SnapshotFrameSchema,
+  TimelineFrameSchema,
+  ConnectionFrameSchema,
+  OutboxFrameSchema,
+  LinksFrameSchema,
+]);
 export type StudioFrame = z.infer<typeof FrameSchema>;
 
 /** Frame types the UI understands. Anything else (e.g. `studio.view`) is ignored. */
-const KNOWN_FRAME_TYPES = new Set(["studio.snapshot", "studio.timeline", "studio.connection"]);
+const KNOWN_FRAME_TYPES = new Set([
+  "studio.snapshot",
+  "studio.timeline",
+  "studio.connection",
+  "studio.outbox",
+  "studio.links",
+]);
 
 const FrameEnvelopeSchema = z.object({ type: z.string() });
 

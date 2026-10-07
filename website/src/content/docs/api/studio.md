@@ -194,6 +194,25 @@ The studio WebSocket bypasses role evaluation. It uses the reserved caller ID `_
 
 `connectionId` is unique per socket: two tabs of one caller are two connections.
 
+**`studio.outbox`** — pushed when an execution is added or settles, with the whole outbox (newest first):
+
+```typescript
+{
+  type: "studio.outbox";
+  outbox: Array<{ id: string; service: string; payload: string; status: string; attempts: number; createdAt: number }>;
+}
+```
+
+**`studio.links`** — pushed when this actor links or unlinks, a subscriber registers or leaves, or a link delivery bumps a version:
+
+```typescript
+{
+  type: "studio.links";
+  activeLinks: Array<{ targetType: string; targetId: string; linkName: string; version: number }>;
+  linkSubscribers: Array<{ subscriberType: string; subscriberId: string }>;
+}
+```
+
 ### Messages from client
 
 **`studio.requestView`** — request a computed view for a specific role:

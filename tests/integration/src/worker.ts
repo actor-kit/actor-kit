@@ -5,6 +5,7 @@ import { z } from "zod";
 
 import { ChatRoomContract } from "../../../examples/chat-room/src/chat";
 
+export { Bulletin, Desk } from "./studio-effects";
 export { StudioOff, StudioProbe } from "./studio-probe";
 export { StudioRegistry };
 

@@ -249,10 +249,20 @@ type StudioConnectionChange = {
   connection: ConnectionInfo;
 };
 
-// Pushed on outbox status change
+// Pushed when an execution is added (pending) or settles (done / failed).
+// Carries the whole outbox, newest first; the UI replaces its list.
 type StudioOutboxChange = {
   type: "studio.outbox";
-  entry: OutboxEntry;
+  outbox: OutboxEntry[];
+};
+
+// Pushed when active_links or link_subscribers change: link, unlink, a
+// subscriber registering or leaving, and a link version bump on delivery.
+// Carries both lists in full; the UI replaces them.
+type StudioLinksChange = {
+  type: "studio.links";
+  activeLinks: ActiveLink[];        // { targetType, targetId, linkName, version }
+  linkSubscribers: LinkSubscriber[]; // { subscriberType, subscriberId }
 };
 ```
 
@@ -384,6 +394,8 @@ class ActorInstance extends DurableObject {
 **Links panel**
 - Two sections: "Linked to" (active_links) and "Subscribers" (link_subscribers)
 - Each link shows: actor type, actor ID, link name, version
+- A subscriber is listed by its actor ID (the name the target resolves with `idFromName()`), not its hex Durable Object ID
+- Both panels update live from `studio.outbox` / `studio.links`
 
 **Views panel**
 - Dropdown to select role

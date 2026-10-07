@@ -13,3 +13,15 @@ class_name = "StudioRegistry"
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["Counter", "StudioRegistry"]
+
+[[durable_objects.bindings]]
+name = "LOBBY"
+class_name = "Lobby"
+
+[[durable_objects.bindings]]
+name = "AUCTION_ROOM"
+class_name = "AuctionRoom"
+
+[[migrations]]
+tag = "v2"
+new_sqlite_classes = ["Lobby", "AuctionRoom"]

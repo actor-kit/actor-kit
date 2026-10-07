@@ -115,6 +115,17 @@ function applyFrame(state: StudioViewState, frame: StudioFrame): StudioViewState
       const connections = frame.action === "connect" ? [...others, frame.connection] : others;
       return { ...state, inspect: { ...state.inspect, connections } };
     }
+
+    case "studio.outbox":
+      if (state.inspect === null) return state;
+      return { ...state, inspect: { ...state.inspect, outbox: frame.outbox } };
+
+    case "studio.links":
+      if (state.inspect === null) return state;
+      return {
+        ...state,
+        inspect: { ...state.inspect, activeLinks: frame.activeLinks, linkSubscribers: frame.linkSubscribers },
+      };
   }
 }
 

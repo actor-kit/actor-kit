@@ -50,3 +50,15 @@ new_sqlite_classes = ["StudioProbe", "StudioOff"]
 [[migrations]]
 tag = "v5"
 new_sqlite_classes = ["ChatRoom"]
+
+[[durable_objects.bindings]]
+name = "BULLETIN"
+class_name = "Bulletin"
+
+[[durable_objects.bindings]]
+name = "DESK"
+class_name = "Desk"
+
+[[migrations]]
+tag = "v6"
+new_sqlite_classes = ["Bulletin", "Desk"]
