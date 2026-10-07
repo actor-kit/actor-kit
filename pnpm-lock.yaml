@@ -528,6 +528,9 @@ importers:
       '@actor-kit/studio':
         specifier: workspace:*
         version: link:../../packages/studio
+      '@actor-kit/test':
+        specifier: workspace:*
+        version: link:../../packages/test
       '@actor-kit/worker':
         specifier: workspace:*
         version: link:../../packages/worker

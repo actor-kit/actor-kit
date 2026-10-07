@@ -62,3 +62,23 @@ class_name = "NotAnActor"
 [[migrations]]
 tag = "v5"
 new_sqlite_classes = ["JournalProbe", "JournalOff", "JournalKeep", "NotAnActor"]
+
+[[durable_objects.bindings]]
+name = "EXAMPLE_AUCTION"
+class_name = "ExampleAuction"
+
+[[durable_objects.bindings]]
+name = "EXAMPLE_CHAT_ROOM"
+class_name = "ExampleChatRoom"
+
+[[durable_objects.bindings]]
+name = "EXAMPLE_COUNTER"
+class_name = "ExampleCounter"
+
+[[durable_objects.bindings]]
+name = "EXAMPLE_TODO_LIST"
+class_name = "ExampleTodoList"
+
+[[migrations]]
+tag = "v6"
+new_sqlite_classes = ["ExampleAuction", "ExampleChatRoom", "ExampleCounter", "ExampleTodoList"]

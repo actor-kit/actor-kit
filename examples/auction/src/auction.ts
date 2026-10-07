@@ -44,13 +44,13 @@ export const AuctionContract = defineActor("auction", {
   messages: {
     BID: message(z.object({ amount: z.number().int().positive() }), {
       guard: (state: AuctionState) => !state.closed,
-      handler: (state: AuctionState, { amount }, { caller }) => {
+      handler: (state: AuctionState, { amount }, { caller, now }) => {
         const highestBid =
           state.bids.length > 0 ? Math.max(...state.bids.map((b) => b.amount)) : 0;
         if (amount <= highestBid) return state; // Reject lower bids silently
         return {
           ...state,
-          bids: [...state.bids, { bidder: caller, amount, timestamp: Date.now() }],
+          bids: [...state.bids, { bidder: caller, amount, timestamp: now() }],
         };
       },
     }),

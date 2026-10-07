@@ -161,6 +161,17 @@ describe("TodoList DO lifecycle", () => {
 });
 ```
 
+### Journal replay (ADR-013)
+
+Every persisted transition is journaled. `replayJournal(contract, journal)` from `@actor-kit/test` folds a journal through the contract's current handlers and throws `JournalDivergenceError` at the first event whose after-state checksum differs (or `JournalNondeterminismError` if a handler reads a fact that wasn't recorded). Read a real DO's journal with `readJournal(state.storage.sql)` inside `runInDurableObject`:
+
+```typescript
+const journal = await runInDurableObject(stub, (_i, state) => readJournal(state.storage.sql));
+await replayJournal(ChatRoomContract, journal); // throws if any handler used Date.now()/Math.random()
+```
+
+`tests/integration/examples-replay.test.ts` runs every example actor this way. Add new example actors there.
+
 ## TDD workflow
 
 Red-green-refactor for every feature:

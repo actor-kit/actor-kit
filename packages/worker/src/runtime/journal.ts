@@ -500,3 +500,63 @@ export async function applyJournalEvent(
       throw new Error("Journal replay: restore events are not supported yet (ADR-013 step 3)");
   }
 }
+
+/** Thrown when a replayed state's checksum differs from the one recorded when the event was written. */
+export class JournalDivergenceError extends Error {
+  override name = "JournalDivergenceError";
+  constructor(
+    readonly seq: number,
+    readonly causeType: string,
+    /** Message, service or link name of the event (null for init, lifecycle, migrate). */
+    readonly causeName: string | null,
+    readonly expected: string,
+    readonly actual: string,
+  ) {
+    super(
+      `Journal replay diverged at seq ${seq} (${causeType}${causeName === null ? "" : ` ${causeName}`}): expected checksum ${expected}, got ${actual}`,
+    );
+  }
+}
+
+/**
+ * Replay a journal from init (or, for a pruned journal, from the checkpoint just before its
+ * first event), verifying every event's after-state checksum. Throws on the first divergence.
+ */
+export async function foldJournal(
+  def: ReplayableDef,
+  journal: Journal,
+  options: { env?: unknown } = {},
+): Promise<{ state: unknown; replayed: number }> {
+  const events = [...journal.events].sort((a, b) => a.seq - b.seq);
+  const first = events[0];
+  if (first === undefined) return { state: undefined, replayed: 0 };
+
+  let state: unknown;
+  if (first.causeType !== "init") {
+    const baseSeq = first.seq - 1;
+    const checkpoint = journal.checkpoints.find((c) => c.seq === baseSeq);
+    if (checkpoint === undefined) {
+      throw new Error(`Journal replay: no checkpoint at seq ${baseSeq} to start from`);
+    }
+    const actual = xxh64(checkpoint.state);
+    if (actual !== checkpoint.checksum) {
+      throw new JournalDivergenceError(checkpoint.seq, "checkpoint", null, checkpoint.checksum, actual);
+    }
+    const parsed: unknown = JSON.parse(checkpoint.state);
+    state = def.restore ? def.restore(parsed) : parsed;
+  }
+
+  let expectedSeq = first.seq;
+  for (const event of events) {
+    if (event.seq !== expectedSeq) {
+      throw new Error(`Journal replay: expected seq ${expectedSeq}, found ${event.seq}`);
+    }
+    state = await applyJournalEvent(def, state, event, options);
+    const actual = checksumState(def, state);
+    if (actual !== event.stateChecksum) {
+      throw new JournalDivergenceError(event.seq, event.causeType, event.name, event.stateChecksum, actual);
+    }
+    expectedSeq += 1;
+  }
+  return { state, replayed: events.length };
+}

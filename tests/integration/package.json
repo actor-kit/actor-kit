@@ -8,6 +8,7 @@
   "dependencies": {
     "@actor-kit/core": "workspace:*",
     "@actor-kit/studio": "workspace:*",
+    "@actor-kit/test": "workspace:*",
     "@actor-kit/worker": "workspace:*",
     "zod": "^4.6.5"
   },

@@ -39,6 +39,8 @@ export {
   checksumState,
   createLiveFacts,
   createReplayFacts,
+  foldJournal,
+  JournalDivergenceError,
   JournalNondeterminismError,
   readJournal,
   resolveJournalConfig,
