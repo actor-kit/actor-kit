@@ -19,6 +19,14 @@ class_name = "NullableCounter"
 name = "STUDIO_REGISTRY"
 class_name = "StudioRegistry"
 
+[[durable_objects.bindings]]
+name = "STUDIO_PROBE"
+class_name = "StudioProbe"
+
+[[durable_objects.bindings]]
+name = "STUDIO_OFF"
+class_name = "StudioOff"
+
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["Counter"]
@@ -30,3 +38,7 @@ new_sqlite_classes = ["NullableCounter"]
 [[migrations]]
 tag = "v3"
 new_sqlite_classes = ["StudioRegistry"]
+
+[[migrations]]
+tag = "v4"
+new_sqlite_classes = ["StudioProbe", "StudioOff"]
