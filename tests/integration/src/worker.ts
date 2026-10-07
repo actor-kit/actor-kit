@@ -4,6 +4,7 @@ import { createActorClass, defineActor, message } from "@actor-kit/worker";
 import { z } from "zod";
 
 export { StudioOff, StudioProbe } from "./studio-probe";
+export { StudioRedacted } from "./studio-redacted";
 export { StudioRegistry };
 
 // --- Counter actor (v3: defineActor + flat messages + guards) ---

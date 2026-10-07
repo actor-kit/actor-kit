@@ -23,6 +23,42 @@ export function resolveTimelineSize(size: number | undefined): number {
   return size;
 }
 
+// --- Viewer (ADR-014) ---
+
+/** Who is looking. Agents get hashed callers. Omitted = human (the middleware only sets "agent"). */
+export type StudioViewer = "human" | "agent";
+
+const ViewerSchema = z.enum(["human", "agent"]).optional();
+
+/** Header the studio middleware stamps on studio WebSocket upgrades. */
+export const STUDIO_VIEWER_HEADER = "X-Actor-Kit-Studio-Viewer";
+const STUDIO_VIEWER_TAG = "studioViewer:agent";
+
+/** Viewer from the stamped header. Anything but "agent" (including absent) is a human. */
+export function viewerFromHeader(value: string | null): StudioViewer {
+  return value === "agent" ? "agent" : "human";
+}
+
+/** Socket tags recording the viewer, so it survives hibernation. */
+export function viewerTags(viewer: StudioViewer): string[] {
+  return viewer === "agent" ? [STUDIO_VIEWER_TAG] : [];
+}
+
+export function viewerFromTags(tags: readonly string[]): StudioViewer {
+  return tags.includes(STUDIO_VIEWER_TAG) ? "agent" : "human";
+}
+
+const InspectOptionsSchema = z.object({ viewer: ViewerSchema }).strict().optional();
+
+/** Parse `__inspect` options. Throws `Invalid inspect options: …` on bad input. */
+export function parseInspectOptions(opts: unknown): { viewer: StudioViewer } {
+  const parsed = InspectOptionsSchema.safeParse(opts);
+  if (!parsed.success) {
+    throw new Error(`Invalid inspect options: ${parsed.error.message}`);
+  }
+  return { viewer: parsed.data?.viewer ?? "human" };
+}
+
 // --- Timeline ---
 
 export const DEFAULT_TIMELINE_LIMIT = 50;
@@ -31,12 +67,15 @@ const TimelineOptionsSchema = z
   .object({
     limit: z.number().int().positive().optional(),
     before: z.number().int().positive().optional(),
+    viewer: ViewerSchema,
   })
   .optional();
 
 export interface TimelineQuery {
   limit: number;
   before: number | undefined;
+  /** Absent = human. */
+  viewer: StudioViewer | undefined;
 }
 
 /** Parse `__getTimeline` options. Throws `Invalid timeline options: …` on bad input. */
@@ -45,7 +84,11 @@ export function parseTimelineOptions(opts: unknown): TimelineQuery {
   if (!parsed.success) {
     throw new Error(`Invalid timeline options: ${parsed.error.message}`);
   }
-  return { limit: parsed.data?.limit ?? DEFAULT_TIMELINE_LIMIT, before: parsed.data?.before };
+  return {
+    limit: parsed.data?.limit ?? DEFAULT_TIMELINE_LIMIT,
+    before: parsed.data?.before,
+    viewer: parsed.data?.viewer,
+  };
 }
 
 const TimelineRowSchema = z.object({
@@ -96,6 +139,26 @@ export interface StudioViewSource<TState> {
   state: TState;
 }
 
+const ViewOptionsSchema = z.object({
+  role: z.string().min(1),
+  caller: z.string().min(1).optional(),
+  callerType: z.enum(["user", "service"]).optional(),
+  viewer: ViewerSchema,
+});
+
+export type ViewOptions = z.infer<typeof ViewOptionsSchema>;
+
+/** Parse `__getView` options. Throws `Invalid view options: …` on bad input. */
+export function parseViewOptions(opts: unknown): ViewOptions & { viewer: StudioViewer } {
+  const parsed = ViewOptionsSchema.safeParse(opts);
+  if (!parsed.success) {
+    throw new Error(`Invalid view options: ${parsed.error.message}`);
+  }
+  return { ...parsed.data, viewer: parsed.data.viewer ?? "human" };
+}
+
+export type StudioViewReply = Extract<StudioReply, { type: "studio.view" }>;
+
 export type StudioReply =
   | { type: "studio.error"; error: string }
   | { type: "studio.view"; role: string; caller: string | null; error: string }
@@ -129,13 +192,14 @@ export function handleStudioFrame<TState>(data: string, source: StudioViewSource
   if (!request.success) {
     return { type: "studio.error", error: `Invalid studio.requestView: ${request.error.message}` };
   }
-  return requestView(request.data, source);
+  return studioView(request.data, source);
 }
 
-function requestView<TState>(
-  request: z.infer<typeof RequestViewSchema>,
+/** Project one role's view for Studio (shared by the WS studio.requestView frame and __getView). */
+export function studioView<TState>(
+  request: { role: string; caller?: string | undefined; callerType?: "user" | "service" | undefined },
   { views, roles, state }: StudioViewSource<TState>,
-): StudioReply {
+): StudioViewReply {
   const { role } = request;
   const caller = request.caller ?? null;
 

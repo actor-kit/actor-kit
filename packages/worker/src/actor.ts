@@ -34,12 +34,34 @@ import { createOutbox } from "./runtime/outbox";
 import { resolveNamespace } from "./runtime/resolve-namespace";
 import { resolveRole } from "./runtime/roles";
 import {
+  type CallerHasher,
+  createCallerHasher,
+  projectCaller,
+  projectConnections,
+  projectOutboxRow,
+  projectState,
+  projectTimelineEntry,
+  projectView,
+  type StudioOutboxRow,
+  type StudioProjection,
+} from "./runtime/studio-project";
+import {
   handleStudioFrame,
+  parseInspectOptions,
   parseTimelineOptions,
+  parseViewOptions,
   resolveTimelineSize,
+  STUDIO_VIEWER_HEADER,
   type StudioTimelineEntry,
+  type StudioViewer,
+  type StudioViewReply,
+  studioView,
   toTimelineEntry,
+  viewerFromHeader,
+  viewerFromTags,
+  viewerTags,
 } from "./runtime/studio-protocol";
+import { compileRedaction } from "./runtime/studio-redact";
 
 /** Reserved caller ID for studio WebSocket connections (stamped by the studio middleware). */
 const STUDIO_CALLER_ID = "__studio";
@@ -151,6 +173,12 @@ interface ActorDef {
     enabled?: boolean;
     /** Timeline ring-buffer size (positive integer, default 500). */
     timelineSize?: number;
+    /**
+     * Path globs redacted from everything Studio returns (ADR-014): state, cause data, outbox
+     * payloads and views, each relative to its own root. `*` = one segment, `**` = any depth.
+     * Example: ["players.*.name", "**.email"].
+     */
+    redact?: readonly string[];
   };
 }
 
@@ -338,6 +366,7 @@ export function actor(
 ): { new (ctx: DurableObjectState, env: Record<string, unknown>): DurableObject } {
   // Validate studio config at definition time, not on the first mutation.
   const configuredTimelineSize = resolveTimelineSize(def.studio?.timelineSize);
+  const studioRedactor = compileRedaction(def.studio?.redact);
 
   const DOClass = class ActorInstance extends DurableObject {
     state: unknown = undefined;
@@ -366,6 +395,9 @@ export function actor(
     persistedLoaded = false; // loadPersisted() has run against existing storage
     studioDetected = false; // detectStudioConfig() has run
     autoSpawning: Promise<void> | null = null; // in-flight auto-spawn (prevents double init)
+    callerHasher: CallerHasher | null = null; // Agent caller hashing (ADR-014), created on first use
+    // Studio frames are projected asynchronously (caller hashing); one chain keeps them in order.
+    studioSendChain: Promise<void> = Promise.resolve();
 
     constructor(ctx: DurableObjectState, env: Record<string, unknown>) {
       super(ctx, env);
@@ -620,7 +652,10 @@ export function actor(
 
         // Push to studio connections (covers hibernated sockets too)
         if (this.hasStudioWs()) {
-          this.broadcastToStudio({ type: "studio.timeline", entry });
+          this.broadcastToStudio(async (projection) => ({
+            type: "studio.timeline",
+            entry: await projectTimelineEntry(entry, projection),
+          }));
         }
       }
     }
@@ -1561,17 +1596,17 @@ export function actor(
 
       // Notify studio of new connection (covers hibernated sockets too)
       if (this.hasStudioWs()) {
-        this.broadcastToStudio({
+        this.broadcastToStudio(async (projection) => ({
           type: "studio.connection",
           action: "connect",
           connection: {
             connectionId,
-            caller: callerInfo.caller,
+            caller: await projectCaller(callerInfo.caller, projection),
             callerType: callerInfo.callerType,
             connectedAt,
             role,
           },
-        });
+        }));
       }
 
       // An app client connecting is real activity: register/touch the actor (debounced) so actors
@@ -1774,11 +1809,12 @@ export function actor(
       // Notify studio of disconnection (covers hibernated sockets too)
       const attachment = readConnectionAttachment(ws.deserializeAttachment());
       if (attachment !== null && this.hasStudioWs()) {
-        this.broadcastToStudio({
+        const { connectionId } = attachment;
+        this.broadcastToStudio(async (projection) => ({
           type: "studio.connection",
           action: "disconnect",
-          connection: { connectionId: attachment.connectionId, caller, callerType: info.callerType },
-        });
+          connection: { connectionId, caller: await projectCaller(caller, projection), callerType: info.callerType },
+        }));
       }
 
       // Update registry connection count (the closing socket may still be listed)
@@ -1837,13 +1873,15 @@ export function actor(
       const pair = new WebSocketPair();
       const [client, server] = [pair[0], pair[1]];
 
-      const tags = [`caller:${STUDIO_CALLER_ID}`, "callerType:service"];
+      // The viewer (stamped by the studio middleware) is kept as a tag so it survives hibernation.
+      const viewer = viewerFromHeader(request.headers.get(STUDIO_VIEWER_HEADER));
+      const tags = [`caller:${STUDIO_CALLER_ID}`, "callerType:service", ...viewerTags(viewer)];
       this.ctx.acceptWebSocket(server, tags);
       this.studioConnections.add(server);
 
-      // Send initial snapshot
-      const snapshot = this.buildStudioSnapshot();
-      server.send(JSON.stringify(snapshot));
+      // Initial snapshot: read now, projected and sent in order with any later pushes.
+      const snapshot = this.readStudioSnapshot();
+      this.enqueueStudioSend(server, async () => await this.projectStudioSnapshot(snapshot, viewer));
 
       const reqProtocolHeader = request.headers.get("Sec-WebSocket-Protocol");
       const requestedProtocols = reqProtocolHeader?.split(",").map((p) => p.trim()) ?? [];
@@ -1860,73 +1898,124 @@ export function actor(
       });
     }
 
-    /** Build the initial studio snapshot payload. */
-    buildStudioSnapshot(): Record<string, unknown> {
-      // Connections — the app sockets held right now (survives hibernation)
-      const connections = this.liveConnections();
+    /** What Studio may see, for this viewer (ADR-014). Agents need STUDIO_CALLER_HASH_KEY. */
+    studioProjection(viewer: StudioViewer): StudioProjection {
+      if (viewer === "human") return { redactor: studioRedactor, hashCaller: null };
+      if (this.callerHasher === null) {
+        const key = this.envBindings["STUDIO_CALLER_HASH_KEY"];
+        if (typeof key !== "string" || key === "") {
+          throw new Error("STUDIO_CALLER_HASH_KEY is not set: agents cannot use Studio");
+        }
+        this.callerHasher = createCallerHasher(key);
+      }
+      return { redactor: studioRedactor, hashCaller: this.callerHasher };
+    }
 
-      // Timeline entries
-      const timelineRows = this.ctx.storage.sql
+    /** Raw outbox rows (payloads unredacted — project before returning them to Studio). */
+    readOutbox(): StudioOutboxRow[] {
+      return this.ctx.storage.sql
+        .exec("SELECT id, service, payload, status, attempts, created_at FROM executions ORDER BY id DESC")
+        .toArray()
+        .map((row) => ({
+          id: String(row["id"]),
+          service: String(row["service"]),
+          payload: String(row["payload"]),
+          status: String(row["status"]),
+          attempts: Number(row["attempts"]),
+          createdAt: Number(row["created_at"]),
+        }));
+    }
+
+    readActiveLinks(): Array<{ targetType: string; targetId: string; linkName: string; version: number }> {
+      return this.ctx.storage.sql
+        .exec("SELECT target_type, target_id, link_name, version FROM active_links")
+        .toArray()
+        .map((row) => ({
+          targetType: String(row["target_type"]),
+          targetId: String(row["target_id"]),
+          linkName: String(row["link_name"]),
+          version: Number(row["version"]),
+        }));
+    }
+
+    readLinkSubscribers(): Array<{ subscriberType: string; subscriberId: string }> {
+      return this.ctx.storage.sql
+        .exec("SELECT subscriber_type, subscriber_id FROM link_subscribers")
+        .toArray()
+        .map((row) => ({
+          subscriberType: String(row["subscriber_type"]),
+          subscriberId: String(row["subscriber_id"]),
+        }));
+    }
+
+    /** Read the raw studio snapshot synchronously (state as of now). */
+    readStudioSnapshot() {
+      const timeline = this.ctx.storage.sql
         .exec(
           "SELECT id, cause_type, cause_data, state_snapshot, checksum, created_at FROM timeline ORDER BY id DESC LIMIT 50",
         )
-        .toArray();
-      const timeline = timelineRows.map(toTimelineEntry);
-
-      // Outbox
-      const execRows = this.ctx.storage.sql
-        .exec("SELECT id, service, payload, status, attempts, created_at FROM executions ORDER BY id DESC")
-        .toArray();
-      const outbox = execRows.map((row) => ({
-        id: row["id"] as string,
-        service: row["service"] as string,
-        payload: row["payload"] as string,
-        status: row["status"] as string,
-        attempts: row["attempts"] as number,
-        createdAt: row["created_at"] as number,
-      }));
-
-      // Links
-      const linkRows = this.ctx.storage.sql
-        .exec("SELECT target_type, target_id, link_name, version FROM active_links")
-        .toArray();
-      const activeLinks = linkRows.map((row) => ({
-        targetType: row["target_type"] as string,
-        targetId: row["target_id"] as string,
-        linkName: row["link_name"] as string,
-        version: row["version"] as number,
-      }));
-
-      const subRows = this.ctx.storage.sql
-        .exec("SELECT subscriber_type, subscriber_id FROM link_subscribers")
-        .toArray();
-      const linkSubscribers = subRows.map((row) => ({
-        subscriberType: row["subscriber_type"] as string,
-        subscriberId: row["subscriber_id"] as string,
-      }));
-
+        .toArray()
+        .map(toTimelineEntry);
       return {
-        type: "studio.snapshot",
         state: this.state,
         timeline,
-        connections,
-        outbox,
-        activeLinks,
-        linkSubscribers,
-        actorType: _actorName,
+        connections: this.liveConnections(),
+        outbox: this.readOutbox(),
+        activeLinks: this.readActiveLinks(),
+        linkSubscribers: this.readLinkSubscribers(),
         actorId: this.actorId ?? this.ctx.id.toString(),
         version: this.version,
+      };
+    }
+
+    /** Project a raw snapshot for one viewer: the initial studio.snapshot frame. */
+    async projectStudioSnapshot(
+      snapshot: ReturnType<ActorInstance["readStudioSnapshot"]>,
+      viewer: StudioViewer,
+    ): Promise<Record<string, unknown>> {
+      const projection = this.studioProjection(viewer);
+      return {
+        type: "studio.snapshot",
+        state: projectState(snapshot.state, projection),
+        timeline: await Promise.all(snapshot.timeline.map((e) => projectTimelineEntry(e, projection))),
+        connections: await projectConnections(snapshot.connections, projection),
+        outbox: snapshot.outbox.map((row) => projectOutboxRow(row, projection)),
+        activeLinks: snapshot.activeLinks,
+        linkSubscribers: snapshot.linkSubscribers,
+        actorType: _actorName,
+        actorId: snapshot.actorId,
+        version: snapshot.version,
       };
     }
 
     /** Handle a frame from a studio WebSocket: view requests only; app messages are refused. */
     handleStudioMessage(ws: WebSocket, data: string): void {
       const reply = handleStudioFrame(data, { views: def.views, roles: def.roles, state: this.state });
-      try {
-        ws.send(JSON.stringify(reply));
-      } catch {
-        // Socket closed while handling
-      }
+      const viewer = viewerFromTags(this.ctx.getTags(ws));
+      this.enqueueStudioSend(ws, async () =>
+        reply.type === "studio.view" ? await projectView(reply, this.studioProjection(viewer)) : reply,
+      );
+    }
+
+    /**
+     * Send one studio frame, built asynchronously, after every frame queued before it.
+     * A frame that cannot be projected (e.g. an agent socket without STUDIO_CALLER_HASH_KEY)
+     * is never sent raw: the socket gets a studio.error instead.
+     */
+    enqueueStudioSend(ws: WebSocket, build: () => Promise<Record<string, unknown>>): void {
+      this.studioSendChain = this.studioSendChain.then(async () => {
+        let frame: Record<string, unknown>;
+        try {
+          frame = await build();
+        } catch (error) {
+          frame = { type: "studio.error", error: error instanceof Error ? error.message : String(error) };
+        }
+        try {
+          ws.send(JSON.stringify(frame));
+        } catch {
+          this.studioConnections.delete(ws);
+        }
+      });
     }
 
     /** Throws when studio instrumentation is off — every studio RPC entry point calls this. */
@@ -1936,39 +2025,38 @@ export function actor(
       }
     }
 
-    /** Send a message to all connected studio WebSockets.
+    /** Send a frame to all connected studio WebSockets, projected per viewer (built once per viewer kind).
      * Iterates ctx.getWebSockets() so it survives DO hibernation —
      * the in-memory studioConnections set is repopulated lazily by isStudioWs(). */
-    broadcastToStudio(message: Record<string, unknown>): void {
-      const json = JSON.stringify(message);
+    broadcastToStudio(build: (projection: StudioProjection) => Promise<Record<string, unknown>>): void {
+      const built = new Map<StudioViewer, Promise<Record<string, unknown>>>();
+      const frameFor = (viewer: StudioViewer) => {
+        let frame = built.get(viewer);
+        if (frame === undefined) {
+          frame = Promise.resolve().then(() => build(this.studioProjection(viewer)));
+          built.set(viewer, frame);
+        }
+        return frame;
+      };
       for (const ws of this.ctx.getWebSockets()) {
         if (!this.isStudioWs(ws)) continue;
-        try {
-          ws.send(json);
-        } catch {
-          this.studioConnections.delete(ws);
-        }
+        const viewer = viewerFromTags(this.ctx.getTags(ws));
+        this.enqueueStudioSend(ws, () => frameFor(viewer));
       }
     }
 
     // --- Studio RPC methods ---
 
-    /** Studio RPC: returns current state + metadata for inspection. */
-    __inspect(): {
+    /** Studio RPC: returns current state + metadata for inspection, redacted (ADR-014).
+     * `viewer: "agent"` also hashes callers. */
+    __inspect(opts?: { viewer?: StudioViewer }): Promise<{
       /** false when no actor has ever been persisted under this ID (studio lookups never create one). */
       initialized: boolean;
       state: unknown;
       version: number;
       actorId: string | null;
       connections: LiveConnection[];
-      outbox: Array<{
-        id: string;
-        service: string;
-        payload: string;
-        status: string;
-        attempts: number;
-        createdAt: number;
-      }>;
+      outbox: StudioOutboxRow[];
       activeLinks: Array<{
         targetType: string;
         targetId: string;
@@ -1979,14 +2067,16 @@ export function actor(
         subscriberType: string;
         subscriberId: string;
       }>;
-    } {
+    }> {
       // Studio lookups are read-only: never auto-spawn, persist or register an actor.
       this.loadPersisted({ create: false });
       this.assertStudioEnabled();
+      // Validation and projection setup throw synchronously, as before (RPC rejects either way).
+      const projection = this.studioProjection(parseInspectOptions(opts).viewer);
 
       if (!this.persistedLoaded) {
         // No actor has ever been persisted under this ID.
-        return {
+        return Promise.resolve({
           initialized: false,
           state: null,
           version: this.version,
@@ -1995,69 +2085,34 @@ export function actor(
           outbox: [],
           activeLinks: [],
           linkSubscribers: [],
-        };
+        });
       }
 
-      // Current connections — the app sockets held right now (survives hibernation)
-      const connList = this.liveConnections();
-
-      // Outbox / executions
-      const execRows = this.ctx.storage.sql
-        .exec("SELECT id, service, payload, status, attempts, created_at FROM executions ORDER BY id DESC")
-        .toArray();
-      const outbox = execRows.map((row) => ({
-        id: row["id"] as string,
-        service: row["service"] as string,
-        payload: row["payload"] as string,
-        status: row["status"] as string,
-        attempts: row["attempts"] as number,
-        createdAt: row["created_at"] as number,
-      }));
-
-      // Active links
-      const linkRows = this.ctx.storage.sql
-        .exec("SELECT target_type, target_id, link_name, version FROM active_links")
-        .toArray();
-      const activeLinks = linkRows.map((row) => ({
-        targetType: row["target_type"] as string,
-        targetId: row["target_id"] as string,
-        linkName: row["link_name"] as string,
-        version: row["version"] as number,
-      }));
-
-      // Subscribers
-      const subRows = this.ctx.storage.sql
-        .exec("SELECT subscriber_type, subscriber_id FROM link_subscribers")
-        .toArray();
-      const linkSubscribers = subRows.map((row) => ({
-        subscriberType: row["subscriber_type"] as string,
-        subscriberId: row["subscriber_id"] as string,
-      }));
-
-      return {
+      const base = {
         initialized: this.initialized,
-        state: this.state,
+        state: projectState(this.state, projection),
         version: this.version,
         actorId: this.actorId ?? null,
-        connections: connList,
-        outbox,
-        activeLinks,
-        linkSubscribers,
+        outbox: this.readOutbox().map((row) => projectOutboxRow(row, projection)),
+        activeLinks: this.readActiveLinks(),
+        linkSubscribers: this.readLinkSubscribers(),
       };
+      return projectConnections(this.liveConnections(), projection).then((connections) => ({ ...base, connections }));
     }
 
-    /** Studio RPC: returns paginated timeline entries, newest first.
+    /** Studio RPC: returns paginated timeline entries, newest first, redacted (ADR-014).
      * `before` is an exclusive entry-ID cursor; IDs are unique, so equal timestamps
      * never cause gaps or duplicates at page boundaries. Invalid options are rejected. */
-    __getTimeline(opts?: { limit?: number; before?: number }): {
+    __getTimeline(opts?: { limit?: number; before?: number; viewer?: StudioViewer }): Promise<{
       entries: StudioTimelineEntry[];
       hasMore: boolean;
-    } {
+    }> {
       // Studio lookups are read-only: never auto-spawn, persist or register an actor.
       this.loadPersisted({ create: false });
       this.assertStudioEnabled();
-      const { limit, before } = parseTimelineOptions(opts);
-      if (!this.persistedLoaded) return { entries: [], hasMore: false };
+      const { limit, before, viewer } = parseTimelineOptions(opts);
+      const projection = this.studioProjection(viewer ?? "human");
+      if (!this.persistedLoaded) return Promise.resolve({ entries: [], hasMore: false });
 
       const rows =
         before !== undefined
@@ -2076,9 +2131,34 @@ export function actor(
               .toArray();
 
       const hasMore = rows.length > limit;
-      const entries = rows.slice(0, limit).map(toTimelineEntry);
+      const raw = rows.slice(0, limit).map(toTimelineEntry);
+      return Promise.all(raw.map((entry) => projectTimelineEntry(entry, projection))).then((entries) => ({
+        entries,
+        hasMore,
+      }));
+    }
 
-      return { entries, hasMore };
+    /** Studio RPC: one role's view, as `studio.requestView` would return it, redacted (ADR-014). */
+    __getView(opts: {
+      role: string;
+      caller?: string;
+      callerType?: "user" | "service";
+      viewer?: StudioViewer;
+    }): Promise<StudioViewReply> {
+      // Studio lookups are read-only: never auto-spawn, persist or register an actor.
+      this.loadPersisted({ create: false });
+      this.assertStudioEnabled();
+      const { viewer, ...request } = parseViewOptions(opts);
+      const projection = this.studioProjection(viewer);
+      if (!this.persistedLoaded) {
+        return Promise.resolve({
+          type: "studio.view",
+          role: request.role,
+          caller: request.caller ?? null,
+          error: "Actor not found",
+        });
+      }
+      return projectView(studioView(request, { views: def.views, roles: def.roles, state: this.state }), projection);
     }
   };
 
@@ -2178,7 +2258,7 @@ export interface TypedActorClass<TContract> {
       callerType: "user" | "service",
     ): Promise<{ checksum: string; snapshot: unknown; role: string }>;
     fetch(request: Request): Promise<Response>;
-    __inspect(): Promise<{
+    __inspect(opts?: { viewer?: "human" | "agent" }): Promise<{
       /** false when no actor has ever been persisted under this ID (studio lookups never create one). */
       initialized: boolean;
       state: unknown;
@@ -2204,7 +2284,7 @@ export interface TypedActorClass<TContract> {
         subscriberId: string;
       }>;
     }>;
-    __getTimeline(opts?: { limit?: number; before?: number }): Promise<{
+    __getTimeline(opts?: { limit?: number; before?: number; viewer?: "human" | "agent" }): Promise<{
       entries: Array<{
         id: number;
         causeType: string;
@@ -2215,6 +2295,15 @@ export interface TypedActorClass<TContract> {
       }>;
       hasMore: boolean;
     }>;
+    __getView(opts: {
+      role: string;
+      caller?: string;
+      callerType?: "user" | "service";
+      viewer?: "human" | "agent";
+    }): Promise<
+      | { type: "studio.view"; role: string; caller: string | null; error: string }
+      | { type: "studio.view"; role: string; caller: string | null; callerRole: string | null; data: unknown }
+    >;
   };
 }
 

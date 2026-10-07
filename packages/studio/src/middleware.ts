@@ -309,6 +309,12 @@ function route(
     return jsonError(405, `Method ${request.method} not allowed`, { Allow: ALLOWED_METHODS });
   }
 
+  // Agents only ever see hashed callers; without the key the DO could not hash, so refuse up front.
+  const hashKey = env["STUDIO_CALLER_HASH_KEY"];
+  if (principal.kind === "agent" && (typeof hashKey !== "string" || hashKey === "")) {
+    return jsonError(503, "Studio is not configured for agents: set STUDIO_CALLER_HASH_KEY");
+  }
+
   if (path === "/api" || path.startsWith("/api/")) {
     return routeApi(path, url, env, principal);
   }

@@ -8,7 +8,8 @@ import { createActorKitStudio, type StudioAuditEvent } from "../../packages/stud
 
 const TEAM = "mumm.cloudflareaccess.com";
 const AUD = "studio-aud";
-const ACCESS_ENV = { STUDIO_ACCESS_TEAM_DOMAIN: TEAM, STUDIO_ACCESS_AUD: AUD };
+// Test-only caller-hash key, not a real secret.
+const ACCESS_ENV = { STUDIO_ACCESS_TEAM_DOMAIN: TEAM, STUDIO_ACCESS_AUD: AUD, STUDIO_CALLER_HASH_KEY: "k" };
 const ctx = { waitUntil: (_p: Promise<unknown>): void => {}, passThroughOnException: (): void => {} };
 
 let privateKey: CryptoKey;
@@ -116,6 +117,21 @@ describe("Access-authenticated requests", () => {
     const { call, counter } = setup();
     await call("/__studio/actors/counter/a/ws", { Upgrade: "websocket", "Cf-Access-Jwt-Assertion": await userJwt() });
     expect(counter.fetched[0]?.headers.get("X-Actor-Kit-Studio-Viewer")).toBe("human");
+  });
+
+  it("refuses agents with 503 when STUDIO_CALLER_HASH_KEY is unset, before contacting any DO", async () => {
+    const { call, counter, events } = setup({ STUDIO_ACCESS_TEAM_DOMAIN: TEAM, STUDIO_ACCESS_AUD: AUD });
+    const res = await call("/__studio/api/actors/counter/a", { "Cf-Access-Jwt-Assertion": await agentJwt() });
+    expect(res.status).toBe(503);
+    expect(await res.json()).toEqual({ error: expect.stringContaining("STUDIO_CALLER_HASH_KEY") });
+    expect(counter.calls).toEqual([]);
+    expect(events[0]).toMatchObject({ principal: "agent", status: 503, outcome: "error" });
+  });
+
+  it("people do not need STUDIO_CALLER_HASH_KEY", async () => {
+    const { call } = setup({ STUDIO_ACCESS_TEAM_DOMAIN: TEAM, STUDIO_ACCESS_AUD: AUD });
+    const res = await call("/__studio/api/actors/counter/a", { "Cf-Access-Jwt-Assertion": await userJwt() });
+    expect(res.status).toBe(200);
   });
 
   it("rejects without contacting any DO when the token is invalid", async () => {
