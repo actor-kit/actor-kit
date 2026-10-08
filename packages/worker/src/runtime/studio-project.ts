@@ -74,13 +74,20 @@ async function projectCause(text: string, projection: StudioProjection): Promise
   if (!parsed.ok || !isRecord(parsed.value)) {
     return projection.redactor.active ? JSON.stringify(REDACTED) : text;
   }
-  const cause: Record<string, unknown> = { ...parsed.value };
+  return JSON.stringify(await projectCauseFields(parsed.value, projection));
+}
+
+async function projectCauseFields(
+  value: Record<string, unknown>,
+  projection: StudioProjection,
+): Promise<Record<string, unknown>> {
+  const cause: Record<string, unknown> = { ...value };
   for (const field of VALUE_FIELDS) {
     if (Object.hasOwn(cause, field)) cause[field] = projection.redactor.apply(cause[field]);
   }
   const caller = cause["caller"];
   if (typeof caller === "string") cause["caller"] = await projectCaller(caller, projection);
-  return JSON.stringify(cause);
+  return cause;
 }
 
 export async function projectTimelineEntry(

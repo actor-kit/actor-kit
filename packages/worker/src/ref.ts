@@ -110,56 +110,57 @@ export function createRef(
 ): ActorRef {
   // Dispatch: contract-based vs legacy
   if (isActorContract(contractOrEnv)) {
-    const contract = contractOrEnv;
-
-    if (typeof exportsOrEnvOrActorType === "object" && typeof envOrActorId === "object") {
-      // createRef(contract, exports, env, actorId, locationHint?)
-      const exports = exportsOrEnvOrActorType;
-      const env = envOrActorId;
-      const actorId = actorIdOrLocationHint;
-      if (typeof actorId !== "string") {
-        throw new Error("createRef(contract, exports, env, actorId): actorId must be a string");
-      }
-      const locationHint = maybeLocationHint;
-      const namespaceValue: unknown = resolveNamespace(contract.name, exports, env);
-      if (!isDONamespace(namespaceValue)) {
-        throw new Error(`Resolved namespace for "${contract.name}" is not a valid DO namespace`);
-      }
-      const id = namespaceValue.idFromName(actorId);
-      const stub = namespaceValue.get(id, locationHint ? { locationHint } : undefined);
-      return buildRef(contract.name, actorId, stub);
-    }
-
-    if (typeof exportsOrEnvOrActorType === "object" && typeof envOrActorId === "string") {
-      // createRef(contract, env, actorId, locationHint?)
-      const env = exportsOrEnvOrActorType;
-      const actorId = envOrActorId;
-      const locationHint = actorIdOrLocationHint;
-      const actorType = contract.name.toUpperCase().replace(/-/g, "_");
-      const namespaceValue: unknown = env[actorType];
-      if (!isDONamespace(namespaceValue)) {
-        throw new Error(`DO namespace "${actorType}" not found in env`);
-      }
-      const id = namespaceValue.idFromName(actorId);
-      const stub = namespaceValue.get(id, locationHint ? { locationHint } : undefined);
-      return buildRef(actorType, actorId, stub);
-    }
-
-    throw new Error("createRef(contract, ...): second argument must be an env or exports object");
+    return contractRef(contractOrEnv, exportsOrEnvOrActorType, envOrActorId, actorIdOrLocationHint, maybeLocationHint);
   }
 
   // Legacy: createRef(env, actorType, actorId, locationHint?)
-  const env = contractOrEnv;
   const actorType = String(exportsOrEnvOrActorType);
   const actorId = String(envOrActorId);
-  const locationHint = actorIdOrLocationHint;
-  const namespaceValue: unknown = env[actorType];
-  if (!isDONamespace(namespaceValue)) {
-    throw new Error(`DO namespace "${actorType}" not found in env`);
-  }
-  const id = namespaceValue.idFromName(actorId);
-  const stub = namespaceValue.get(id, locationHint ? { locationHint } : undefined);
+  const stub = openStub(
+    contractOrEnv[actorType],
+    `DO namespace "${actorType}" not found in env`,
+    actorId,
+    actorIdOrLocationHint,
+  );
   return buildRef(actorType, actorId, stub);
+}
+
+function contractRef(
+  contract: ActorContract,
+  exportsOrEnv: Record<string, unknown> | string,
+  envOrActorId: Record<string, unknown> | string,
+  actorIdOrLocationHint: string | undefined,
+  maybeLocationHint: LocationHint | undefined,
+): ActorRef {
+  if (typeof exportsOrEnv === "object" && typeof envOrActorId === "object") {
+    // createRef(contract, exports, env, actorId, locationHint?)
+    const actorId = actorIdOrLocationHint;
+    if (typeof actorId !== "string") {
+      throw new Error("createRef(contract, exports, env, actorId): actorId must be a string");
+    }
+    const namespaceValue: unknown = resolveNamespace(contract.name, exportsOrEnv, envOrActorId);
+    const error = `Resolved namespace for "${contract.name}" is not a valid DO namespace`;
+    return buildRef(contract.name, actorId, openStub(namespaceValue, error, actorId, maybeLocationHint));
+  }
+
+  if (typeof exportsOrEnv === "object" && typeof envOrActorId === "string") {
+    // createRef(contract, env, actorId, locationHint?)
+    const actorType = contract.name.toUpperCase().replace(/-/g, "_");
+    const error = `DO namespace "${actorType}" not found in env`;
+    return buildRef(
+      actorType,
+      envOrActorId,
+      openStub(exportsOrEnv[actorType], error, envOrActorId, actorIdOrLocationHint),
+    );
+  }
+
+  throw new Error("createRef(contract, ...): second argument must be an env or exports object");
+}
+
+/** A stub for one actor in a namespace (throws `error` when the value is not a DO namespace). */
+function openStub(namespace: unknown, error: string, actorId: string, locationHint: string | undefined): DOStub {
+  if (!isDONamespace(namespace)) throw new Error(error);
+  return namespace.get(namespace.idFromName(actorId), locationHint ? { locationHint } : undefined);
 }
 
 function buildRef(actorType: string, actorId: string, stub: DOStub): ActorRef {

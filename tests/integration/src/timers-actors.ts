@@ -7,6 +7,7 @@
  * - LOOP schedules `again`, whose handler schedules itself with in: 0 (must not spin within one alarm).
  * - PING_LATER schedules `ping`, whose handler executes a service (timers can run effects).
  * QuizNoJournal is the same actor with `journal: false`; QuizNoStudio has Studio disabled.
+ * QuizLifecycle schedules a timer on connect and cancels it on disconnect, leaving the state alone.
  */
 
 import { schema, uint32, view } from "@actor-kit/core";
@@ -109,3 +110,20 @@ export const QuizNoStudio = createActorClass(
   defineActor("quiz-no-studio", { ...QuizContract.def, studio: { enabled: false } }),
 );
 export { QuizContract };
+
+/** Lifecycle handlers that only schedule / cancel: their transitions must still be committed. */
+export const QuizLifecycle = createActorClass(
+  defineActor("quiz-lifecycle", {
+    ...QuizContract.def,
+    lifecycle: {
+      connect: (s: QuizState, { caller }: { caller: string }, ctx: Ctx) => {
+        ctx.schedule("tick", { in: 60_000, key: `hello-${caller}` });
+        return s;
+      },
+      disconnect: (s: QuizState, { caller }: { caller: string }, ctx: Ctx) => {
+        ctx.cancel(`hello-${caller}`);
+        return s;
+      },
+    },
+  }),
+);

@@ -8,17 +8,8 @@ export function resolveNamespace(
   env: Record<string, unknown>,
 ): unknown {
   // Try ctx.exports first
-  if (exports) {
-    for (const [_key, value] of Object.entries(exports)) {
-      if (typeof value === "object" && value !== null && "__actorKitContractName" in value) {
-        // After `in` check, TS knows __actorKitContractName exists on value
-        const marker: unknown = value.__actorKitContractName;
-        if (marker === contractName) {
-          return value;
-        }
-      }
-    }
-  }
+  const exported = exportedNamespace(contractName, exports);
+  if (exported !== undefined) return exported;
 
   // Fall back to env binding
   const bindingName = contractName.toUpperCase().replace(/-/g, "_");
@@ -26,4 +17,15 @@ export function resolveNamespace(
   if (binding) return binding;
 
   throw new Error(`Actor "${contractName}" not found in ctx.exports or env.${bindingName}`);
+}
+
+/** The ctx.exports entry marked with this contract name. */
+function exportedNamespace(contractName: string, exports: Record<string, unknown> | undefined): unknown {
+  return Object.values(exports ?? {}).find(
+    (value) =>
+      typeof value === "object" &&
+      value !== null &&
+      "__actorKitContractName" in value &&
+      value.__actorKitContractName === contractName,
+  );
 }

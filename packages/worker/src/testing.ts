@@ -14,9 +14,13 @@ export { message } from "./message";
 // Actor references
 export type { ActorRef, LocationHint } from "./ref";
 export { createRef } from "./ref";
+export { hasActorDefShape } from "./runtime/actor-def";
 // CDC
 export type { ChangeEntry } from "./runtime/cdc";
 export { createChangeEntry } from "./runtime/cdc";
+export { closeCodeToSend } from "./runtime/close-code";
+export type { ConnectRequest } from "./runtime/connect-request";
+export { ACTOR_KIT_PROTOCOL, parseConnectRequest } from "./runtime/connect-request";
 export { parseDuration } from "./runtime/duration";
 // Effect ids, retries, outbox store (ADR-015 D1)
 export type { EffectIdParts } from "./runtime/effect-id";

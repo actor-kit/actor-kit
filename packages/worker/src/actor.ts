@@ -23,7 +23,9 @@ import { createDeltaFrame, createSnapshotFrame, encode, encodeDelta, xxh64 } fro
 import { DOQB } from "workers-qb";
 import { z } from "zod";
 import type { LifecycleEvent } from "./define";
-import { BINARY_SUPPORT_HEADER, CALLER_ID_HEADER, CALLER_TYPE_HEADER } from "./identity";
+import { hasActorDefShape } from "./runtime/actor-def";
+import { closeCodeToSend } from "./runtime/close-code";
+import { type ConnectRequest, parseConnectRequest } from "./runtime/connect-request";
 import {
   appendJournalEvent,
   clockedSources,
@@ -107,7 +109,6 @@ import {
   timerByKey,
   timerFailedEvent,
 } from "./runtime/timers-store";
-import { isWebSocketUpgrade } from "./runtime/upgrade";
 import { toRuntimeDef } from "./runtime/versions";
 
 /** Reserved caller ID for studio WebSocket connections (stamped by the studio middleware). */
@@ -315,13 +316,8 @@ function rpcMethod(stub: Record<string, unknown> | undefined, name: string): Rpc
  * back, so they are answered with 1000. Already-closed sockets are ignored.
  */
 function answerClose(ws: WebSocket, code: number | undefined, reason: string | undefined): void {
-  const sendable =
-    code !== undefined &&
-    (code === 1000 ||
-      (code >= 1001 && code <= 1014 && code !== 1005 && code !== 1006) ||
-      (code >= 3000 && code <= 4999));
   try {
-    ws.close(sendable ? code : 1000, reason ?? "");
+    ws.close(closeCodeToSend(code), reason ?? "");
   } catch {
     // Socket already closed
   }
@@ -329,6 +325,29 @@ function answerClose(ws: WebSocket, code: number | undefined, reason: string | u
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
+}
+
+/** A transition declared effects to persist: executions, forwards, or timer schedules / cancels. */
+function declaresEffects(result: StepResult): boolean {
+  const { effects } = result;
+  return effects.getExecutions().length > 0 || effects.getForwards().length > 0 || effects.toTimerOps().length > 0;
+}
+
+/** send()'s answer for a message admission refused. */
+function rejected(admission: { error: string; detail?: string | undefined }): {
+  ok: false;
+  error: string;
+  detail?: string;
+} {
+  return admission.detail === undefined
+    ? { ok: false, error: admission.error }
+    : { ok: false, error: admission.error, detail: admission.detail };
+}
+
+/** The __error frame a socket gets for a message the actor refused. */
+function rejectionFrame(message: string, result: { error?: string | undefined; detail?: string | undefined }) {
+  const frame = { type: "__error", message, error: result.error };
+  return result.detail === undefined ? frame : { ...frame, detail: result.detail };
 }
 
 /** ctx.exports itself (not a copy: its bindings may not all be enumerable). */
@@ -1508,13 +1527,7 @@ export function actor(
 
       // Admit (validate payload, run guard), then run the transition through the step core.
       const admission = admitMessage(def.messages, role, this.state, event, { caller, callerType, env: this.env });
-      if (!admission.ok) {
-        const base: { ok: false; error: string; detail?: string } = { ok: false, error: admission.error };
-        if (admission.detail !== undefined) {
-          base.detail = admission.detail;
-        }
-        return base;
-      }
+      if (!admission.ok) return rejected(admission);
       const result = this.runStep({
         type: "message",
         name: event.type,
@@ -1535,44 +1548,26 @@ export function actor(
         payload: msgPayload,
       };
 
-      // Fire onTransition if defined (it sees the handler's state, before onUnlink)
-      if (def.observe?.onTransition) {
-        try {
-          def.observe.onTransition(this.state, result.handlerState, event, { caller, role });
-        } catch {
-          // Observability hooks must not break the transition
-        }
-      }
+      // onTransition sees the handler's state, before onUnlink
+      this.observeTransition(result.handlerState, event, caller, role);
 
       // Persist state + executions + link intents + forwards + journal event atomically.
-      const executionCount = result.effects.getExecutions().length;
-      const linkCalls = result.effects.getLinks();
-      const unlinkCalls = result.effects.getUnlinks();
-      const forwardCount = result.effects.getForwards().length;
       this.commit(result.state, result.event, (seq) => this.writeEffects(result, seq, caller, callerType));
 
-      // Broadcast views to connected clients and DO subscribers
-      this.broadcastViews();
-
-      // Studio: new executions are pending, links may have changed
-      if (executionCount > 0) {
-        this.pushStudioOutbox();
-      }
-      if (linkCalls.length > 0 || unlinkCalls.length > 0) {
+      // Studio: links may have changed. Then views, executions and forwards.
+      if (result.effects.getLinks().length > 0 || result.effects.getUnlinks().length > 0) {
         this.pushStudioLinks();
       }
-
-      // Drain executions asynchronously
-      if (executionCount > 0) {
-        this.drainExecutions();
-      }
-
-      // Drain forwards asynchronously
-      if (forwardCount > 0) {
-        this.drainForwards();
-      }
-
+      this.afterEffects(result);
       return { ok: true };
+    }
+
+    observeTransition(handlerState: unknown, event: { type: string }, caller: string, role: string): void {
+      try {
+        def.observe?.onTransition?.(this.state, handlerState, event, { caller, role });
+      } catch {
+        // Observability hooks must not break the transition
+      }
     }
 
     async getSnapshot(
@@ -1642,69 +1637,13 @@ export function actor(
 
     broadcastViews(): void {
       // Use getWebSockets() to get all connected sockets (survives hibernation)
-      const allSockets = this.ctx.getWebSockets();
-      const roleNames = Object.keys(def.roles);
-
-      for (const ws of allSockets) {
+      for (const ws of this.ctx.getWebSockets()) {
         // Skip studio connections — they don't receive view projections
         if (this.isStudioWs(ws)) continue;
-
         const info = this.getCallerFromWs(ws);
         if (!info) continue;
-        const { caller, callerType: ct } = info;
         try {
-          const role = resolveRole(def.roles, this.state, caller, { callerType: ct });
-          if (role === null) continue;
-
-          const viewDef = def.views[role];
-          if (viewDef === undefined) continue;
-
-          const viewData = viewDef.fn(this.state, caller);
-          // Include role in dedupe key — role change with identical data still triggers update
-          const dedupeKey = `${role}:${JSON.stringify(viewData)}`;
-
-          const prevKey = this.previousViews.get(ws);
-          if (dedupeKey === prevKey) continue;
-
-          // Detect role change: if the role portion of the previous dedupe key differs,
-          // the client has an old schema's snapshot — delta would corrupt the view.
-          const prevRole = prevKey?.split(":")[0];
-          const roleChanged = prevRole !== undefined && prevRole !== role;
-
-          const prevViewData = roleChanged ? undefined : this.previousViewData.get(ws);
-          if (roleChanged) {
-            // Clear stale view data so next broadcast starts fresh
-            this.previousViewData.delete(ws);
-          }
-          this.previousViews.set(ws, dedupeKey);
-          this.previousViewData.set(ws, viewData as Record<string, unknown>);
-          this.connectionChecksums.set(ws, this.computeChecksum(JSON.stringify(viewData)));
-
-          // Use binary encoding when the view has a schema AND connection supports binary
-          const viewSchema = viewDef.schema;
-          const connSupportsBinary = this.supportsBinary.get(ws) ?? false;
-          if (viewSchema?.fields && connSupportsBinary) {
-            const schemaDef = viewSchema as SchemaDefinition<Record<string, FieldDescriptor>>;
-
-            // Try delta encoding if we have previous view data (skip if role changed)
-            if (prevViewData) {
-              const deltaPayload = encodeDelta(schemaDef, prevViewData, viewData as Record<string, unknown>);
-              if (deltaPayload) {
-                const frame = createDeltaFrame(this.version, deltaPayload);
-                ws.send(frame);
-                continue; // Delta sent successfully
-              }
-            }
-
-            // Full snapshot (first connect, role changed, or delta returned null)
-            const payload = encode(schemaDef, viewData as Record<string, unknown>);
-            const roleIndex = roleNames.indexOf(role);
-            const frame = createSnapshotFrame(this.version, roleIndex, payload);
-            ws.send(frame);
-          } else {
-            // JSON fallback (no schema or connection doesn't support binary)
-            ws.send(JSON.stringify({ type: "snapshot", role, data: viewData }));
-          }
+          this.pushView(ws, info.caller, info.callerType);
         } catch {
           // Connection may have closed
         }
@@ -1714,30 +1653,30 @@ export function actor(
       this.pushToSubscribers();
     }
 
-    async fetch(request: Request): Promise<Response> {
-      // WebSocket upgrade
-      if (!isWebSocketUpgrade(request)) {
-        return new Response("Expected WebSocket", { status: 426 });
-      }
+    /** Send one socket its view if it changed (role included: a role change with identical data still sends). */
+    pushView(ws: WebSocket, caller: string, callerType: "user" | "service"): void {
+      const role = resolveRole(def.roles, this.state, caller, { callerType });
+      if (role === null) return;
+      const viewDef = def.views[role];
+      if (viewDef === undefined) return;
 
+      const viewData = viewDef.fn(this.state, caller);
+      const previousKey = this.previousViews.get(ws);
+      if (`${role}:${JSON.stringify(viewData)}` === previousKey) return;
+
+      const previous = this.rememberView(ws, role, previousKey, viewData);
+      ws.send(this.viewFrame(ws, viewDef, role, viewData, previous));
+    }
+
+    async fetch(request: Request): Promise<Response> {
       // --- Caller identity resolution (Worker-trust model) ---
       // The Worker authenticates the caller and stamps identity via withCallerIdentity().
       // SECURITY: withCallerIdentity scrubs inbound headers before setting verified ones.
       // Workers MUST call withCallerIdentity() before forwarding to the DO — forwarding
       // raw client requests (stub.fetch(request)) allows header spoofing.
       // CORS/Origin validation is handled at the Worker level (e.g., Hono cors() middleware).
-      const headerCallerId = request.headers.get(CALLER_ID_HEADER);
-      const headerCallerType = request.headers.get(CALLER_TYPE_HEADER);
-
-      if (!headerCallerId || !headerCallerType) {
-        return new Response("Missing caller identity", { status: 401 });
-      }
-      if (headerCallerType !== "user" && headerCallerType !== "service") {
-        return new Response("Invalid caller type", { status: 401 });
-      }
-      // TypeScript can't narrow string → "user"|"service" via !== guards alone; use positively-matched union.
-      const callerType: "user" | "service" = headerCallerType === "user" ? "user" : "service";
-      const callerInfo = { caller: headerCallerId, callerType };
+      const connect = parseConnectRequest(request);
+      if (!connect.ok) return new Response(connect.message, { status: connect.status });
 
       await this.loadState();
       if (!this.initialized) {
@@ -1745,43 +1684,46 @@ export function actor(
       }
 
       // Studio WebSocket — bypass role evaluation entirely.
-      // The reserved ID is only honoured for service callers (the studio middleware stamps "service").
-      if (headerCallerId === STUDIO_CALLER_ID) {
-        if (callerType !== "service") {
-          return new Response(`Caller ID "${STUDIO_CALLER_ID}" is reserved`, { status: 403 });
-        }
-        if (!this.studioEnabled) {
-          return new Response("Studio is not enabled for this actor", { status: 404 });
-        }
-        return this.handleStudioWebSocket(request);
-      }
+      if (connect.caller === STUDIO_CALLER_ID) return this.connectStudio(request, connect.callerType);
 
-      const role = resolveRole(def.roles, this.state, callerInfo.caller, { callerType: callerInfo.callerType });
+      const role = resolveRole(def.roles, this.state, connect.caller, { callerType: connect.callerType });
       if (role === null) {
         return new Response("Forbidden", { status: 403 });
       }
 
-      const clientSupportsBinary = request.headers.get(BINARY_SUPPORT_HEADER) === "1";
+      const client = this.acceptAppSocket(connect, role);
+      this.runConnectLifecycle(connect.caller, connect.callerType, role);
 
-      // Read requested WebSocket subprotocols so we can echo one back.
-      // The browser rejects the upgrade unless the server acknowledges one of
-      // the protocols the client requested. The Actor Kit client SDK always
-      // includes "actor-kit.v1" alongside optional "auth.<token>".
-      const reqProtocolHeader = request.headers.get("Sec-WebSocket-Protocol");
-      const requestedProtocols = reqProtocolHeader?.split(",").map((p) => p.trim()) ?? [];
-      const responseProtocol = requestedProtocols.includes("actor-kit.v1") ? "actor-kit.v1" : null;
+      // The browser rejects the upgrade unless the server acknowledges one of the protocols the
+      // client requested (the Actor Kit client always offers "actor-kit.v1").
+      const headers: Record<string, string> =
+        connect.protocol === null ? {} : { "Sec-WebSocket-Protocol": connect.protocol };
+      return new Response(null, { status: 101, webSocket: client, headers });
+    }
 
-      // Create WebSocket pair
+    /** The reserved Studio caller ID is only honoured for service callers (the studio middleware stamps "service"). */
+    connectStudio(request: Request, callerType: "user" | "service"): Response {
+      if (callerType !== "service") {
+        return new Response(`Caller ID "${STUDIO_CALLER_ID}" is reserved`, { status: 403 });
+      }
+      if (!this.studioEnabled) {
+        return new Response("Studio is not enabled for this actor", { status: 404 });
+      }
+      return this.handleStudioWebSocket(request);
+    }
+
+    /** Accept an app socket for `role`: tags, attachment, Studio and registry notices, first snapshot. */
+    acceptAppSocket(connect: Extract<ConnectRequest, { ok: true }>, role: string): WebSocket {
       const pair = new WebSocketPair();
       const [client, server] = [pair[0], pair[1]];
 
       // Store caller metadata as WebSocket tags so they survive DO hibernation.
-      // Tags: ["caller:{id}", "callerType:{type}"]
-      const tags = [`caller:${callerInfo.caller}`, `callerType:${callerInfo.callerType}`];
-      if (clientSupportsBinary) tags.push("binary");
+      // Tags: ["caller:{id}", "callerType:{type}", "binary"?]
+      const identityTags = [`caller:${connect.caller}`, `callerType:${connect.callerType}`];
+      const tags = connect.binary ? [...identityTags, "binary"] : identityTags;
       const seq = nextConnectionSeq(this.socketRecords());
       this.ctx.acceptWebSocket(server, tags);
-      this.connections.set(server, { caller: callerInfo.caller, callerType: callerInfo.callerType });
+      this.connections.set(server, { caller: connect.caller, callerType: connect.callerType });
 
       // Per-socket identity for Studio: survives hibernation with the socket and
       // disappears with it on restart, and tells two tabs of one caller apart.
@@ -1796,8 +1738,8 @@ export function actor(
           action: "connect",
           connection: {
             connectionId,
-            caller: await projectCaller(callerInfo.caller, projection),
-            callerType: callerInfo.callerType,
+            caller: await projectCaller(connect.caller, projection),
+            callerType: connect.callerType,
             connectedAt,
             role,
           },
@@ -1809,73 +1751,84 @@ export function actor(
       // (Studio sockets never reach this path, so a studio lookup never registers an actor.)
       this.touchRegistry();
       this.updateRegistryConnections();
-      this.supportsBinary.set(server, clientSupportsBinary);
+      this.supportsBinary.set(server, connect.binary);
 
-      // Send initial snapshot — binary if schema available, JSON fallback
+      this.sendFirstView(server, role, connect.caller);
+      return client;
+    }
+
+    /** The first snapshot on a new socket: binary when the view has a schema and the client decodes it. */
+    sendFirstView(ws: WebSocket, role: string, caller: string): void {
       const viewDef = def.views[role];
-      if (viewDef) {
-        const viewData = viewDef.fn(this.state, callerInfo.caller);
-        const json = JSON.stringify(viewData);
-        const dedupeKey = `${role}:${json}`;
-        const checksum = this.computeChecksum(json);
-        this.previousViews.set(server, dedupeKey);
-        this.previousViewData.set(server, viewData as Record<string, unknown>);
-        this.connectionChecksums.set(server, checksum);
+      if (!viewDef) return;
+      const viewData = viewDef.fn(this.state, caller);
+      this.rememberView(ws, role, undefined, viewData);
+      ws.send(this.viewFrame(ws, viewDef, role, viewData, undefined));
+    }
 
-        const viewSchema = viewDef.schema;
-        if (viewSchema?.fields && clientSupportsBinary) {
-          const schemaDef = viewSchema as SchemaDefinition<Record<string, FieldDescriptor>>;
-          const payload = encode(schemaDef, viewData as Record<string, unknown>);
-          const roleNames = Object.keys(def.roles);
-          const roleIndex = roleNames.indexOf(role);
-          const frame = createSnapshotFrame(this.version, roleIndex, payload);
-          server.send(frame);
-        } else {
-          server.send(JSON.stringify({ type: "snapshot", role, data: viewData }));
-        }
-      }
-
-      // Run lifecycle.connect if defined
-      if (def.lifecycle?.connect) {
-        const result = this.runStep({
-          type: "lifecycle.connect",
-          caller: callerInfo.caller,
-          callerType: callerInfo.callerType,
-          callerConnections: this.callerConnectionCount(callerInfo.caller, callerInfo.callerType),
-          role,
-        });
-        const connectExecutions = result.effects.getExecutions().length;
-        const connectForwards = result.effects.getForwards().length;
-        if (result.state !== this.state || connectExecutions > 0 || connectForwards > 0) {
-          this.pendingCause = {
-            type: "lifecycle.connect",
-            caller: callerInfo.caller,
-            callerType: callerInfo.callerType,
-            role,
-          };
-          this.commit(result.state, result.event, (seq) =>
-            this.writeEffects(result, seq, callerInfo.caller, callerInfo.callerType),
-          );
-          this.broadcastViews();
-          if (connectExecutions > 0) {
-            this.drainExecutions();
-          }
-          if (connectForwards > 0) {
-            this.drainForwards();
-          }
-        }
-      }
-
-      const responseHeaders: Record<string, string> = {};
-      if (responseProtocol !== null) {
-        responseHeaders["Sec-WebSocket-Protocol"] = responseProtocol;
-      }
-
-      return new Response(null, {
-        status: 101,
-        webSocket: client,
-        headers: responseHeaders,
+    runConnectLifecycle(caller: string, callerType: "user" | "service", role: string): void {
+      if (!def.lifecycle?.connect) return;
+      const result = this.runStep({
+        type: "lifecycle.connect",
+        caller,
+        callerType,
+        callerConnections: this.callerConnectionCount(caller, callerType),
+        role,
       });
+      this.commitLifecycle(result, { type: "lifecycle.connect", caller, callerType, role }, caller, callerType);
+    }
+
+    /**
+     * Commit a lifecycle transition when it did something: changed the state or declared effects
+     * (executions, forwards, timer schedules or cancels).
+     */
+    commitLifecycle(result: StepResult, cause: MutationCause, caller: string, callerType: "user" | "service"): void {
+      if (result.state === this.state && !declaresEffects(result)) return;
+      this.pendingCause = cause;
+      this.commit(result.state, result.event, (seq) => this.writeEffects(result, seq, caller, callerType));
+      this.afterEffects(result);
+    }
+
+    /**
+     * Record what a socket was last sent: the dedupe key (role + JSON), the data deltas are computed
+     * against, and the checksum a reconnect compares. Returns the data to delta against, or
+     * undefined when there is none or the role changed (the client holds another schema's snapshot).
+     */
+    rememberView(
+      ws: WebSocket,
+      role: string,
+      previousKey: string | undefined,
+      viewData: unknown,
+    ): Record<string, unknown> | undefined {
+      const previousRole = previousKey?.split(":")[0];
+      const roleChanged = previousRole !== undefined && previousRole !== role;
+      const previous = roleChanged ? undefined : this.previousViewData.get(ws);
+      const json = JSON.stringify(viewData);
+      this.previousViews.set(ws, `${role}:${json}`);
+      this.previousViewData.set(ws, viewData as Record<string, unknown>);
+      this.connectionChecksums.set(ws, this.computeChecksum(json));
+      return previous;
+    }
+
+    /** A view as a frame for one socket: a delta against `previous` when possible, else a snapshot. */
+    viewFrame(
+      ws: WebSocket,
+      viewDef: ActorDef["views"][string],
+      role: string,
+      viewData: unknown,
+      previous: Record<string, unknown> | undefined,
+    ): string | Uint8Array {
+      const viewSchema = viewDef.schema;
+      if (!viewSchema?.fields || !(this.supportsBinary.get(ws) ?? false)) {
+        // JSON fallback (no schema or connection doesn't support binary)
+        return JSON.stringify({ type: "snapshot", role, data: viewData });
+      }
+      const schemaDef = viewSchema as SchemaDefinition<Record<string, FieldDescriptor>>;
+      const deltaPayload = previous ? encodeDelta(schemaDef, previous, viewData as Record<string, unknown>) : null;
+      if (deltaPayload) return createDeltaFrame(this.version, deltaPayload);
+      // Full snapshot (first connect, role changed, or no delta)
+      const payload = encode(schemaDef, viewData as Record<string, unknown>);
+      return createSnapshotFrame(this.version, Object.keys(def.roles).indexOf(role), payload);
     }
 
     async webSocketMessage(ws: WebSocket, data: string | ArrayBuffer): Promise<void> {
@@ -1889,35 +1842,33 @@ export function actor(
 
       const info = this.getCallerFromWs(ws);
       if (!info) return;
-      const { caller, callerType } = info;
 
       try {
-        // Parse at the boundary: validate the message has at minimum a type field
-        const parsed = MessageEnvelopeSchema.safeParse(JSON.parse(data));
-        if (!parsed.success) {
-          ws.send(JSON.stringify({ type: "__error", detail: "Message must have a string 'type' field" }));
-          return;
-        }
-        const event = parsed.data;
-
-        // Handle reconnect handshake
-        if (event.type === "__reconnect" && typeof event["lastChecksum"] === "string") {
-          await this.handleReconnect(ws, caller, callerType, event["lastChecksum"]);
-          return;
-        }
-
-        const result = await this.send(caller, callerType, event);
-        // Send error frame back to client if message was rejected
-        if (!result.ok) {
-          const errorPayload: Record<string, unknown> = { type: "__error", message: event.type, error: result.error };
-          if (result.detail !== undefined) {
-            errorPayload["detail"] = result.detail;
-          }
-          ws.send(JSON.stringify(errorPayload));
-        }
+        await this.handleAppMessage(ws, info.caller, info.callerType, data);
       } catch {
         ws.send(JSON.stringify({ type: "__error", detail: "Invalid message" }));
       }
+    }
+
+    async handleAppMessage(ws: WebSocket, caller: string, callerType: "user" | "service", data: string): Promise<void> {
+      // Parse at the boundary: validate the message has at minimum a type field
+      const parsed = MessageEnvelopeSchema.safeParse(JSON.parse(data));
+      if (!parsed.success) {
+        ws.send(JSON.stringify({ type: "__error", detail: "Message must have a string 'type' field" }));
+        return;
+      }
+      const event = parsed.data;
+
+      // Handle reconnect handshake
+      const lastChecksum = event["lastChecksum"];
+      if (event.type === "__reconnect" && typeof lastChecksum === "string") {
+        await this.handleReconnect(ws, caller, callerType, lastChecksum);
+        return;
+      }
+
+      const result = await this.send(caller, callerType, event);
+      // Send error frame back to client if message was rejected
+      if (!result.ok) ws.send(JSON.stringify(rejectionFrame(event.type, result)));
     }
 
     async handleReconnect(
@@ -1933,29 +1884,17 @@ export function actor(
       if (!viewDef) return;
 
       const viewData = viewDef.fn(this.state, caller);
-      const json = JSON.stringify(viewData);
-      const currentChecksum = this.computeChecksum(json);
+      const currentChecksum = this.computeChecksum(JSON.stringify(viewData));
 
       if (currentChecksum === lastChecksum) {
         // State hasn't changed — send ack, no data needed
         ws.send(JSON.stringify({ type: "__reconnect_ack", checksum: currentChecksum }));
-      } else {
-        // State changed — send full snapshot (we don't have the client's previous view)
-        this.previousViewData.set(ws, viewData as Record<string, unknown>);
-        this.connectionChecksums.set(ws, currentChecksum);
-
-        const viewSchema = viewDef.schema;
-        const connSupportsBinary = this.supportsBinary.get(ws) ?? false;
-        if (viewSchema?.fields && connSupportsBinary) {
-          const schemaDef = viewSchema as SchemaDefinition<Record<string, FieldDescriptor>>;
-          const payload = encode(schemaDef, viewData as Record<string, unknown>);
-          const roleNames = Object.keys(def.roles);
-          const roleIndex = roleNames.indexOf(role);
-          ws.send(createSnapshotFrame(this.version, roleIndex, payload));
-        } else {
-          ws.send(JSON.stringify({ type: "snapshot", role, data: viewData }));
-        }
+        return;
       }
+      // State changed — send full snapshot (we don't have the client's previous view)
+      this.previousViewData.set(ws, viewData as Record<string, unknown>);
+      this.connectionChecksums.set(ws, currentChecksum);
+      ws.send(this.viewFrame(ws, viewDef, role, viewData, undefined));
     }
 
     async webSocketClose(ws: WebSocket, code?: number, reason?: string): Promise<void> {
@@ -1971,56 +1910,45 @@ export function actor(
 
       const info = this.getCallerFromWs(ws);
       if (!info) return;
-      const { caller } = info;
 
+      this.forgetSocket(ws);
+      this.announceDisconnect(ws, info.caller, info.callerType);
+      // Update registry connection count (the closing socket may still be listed)
+      this.updateRegistryConnections(ws);
+      this.runDisconnectLifecycle(ws, info.caller, info.callerType);
+    }
+
+    forgetSocket(ws: WebSocket): void {
       this.connections.delete(ws);
       this.previousViews.delete(ws);
       this.previousViewData.delete(ws);
       this.connectionChecksums.delete(ws);
       this.supportsBinary.delete(ws);
+    }
 
-      // Notify studio of disconnection (covers hibernated sockets too)
+    /** Notify studio of a disconnection (covers hibernated sockets too). */
+    announceDisconnect(ws: WebSocket, caller: string, callerType: "user" | "service"): void {
       const attachment = readConnectionAttachment(ws.deserializeAttachment());
-      if (attachment !== null && this.hasStudioWs()) {
-        const { connectionId } = attachment;
-        this.broadcastToStudio(async (projection) => ({
-          type: "studio.connection",
-          action: "disconnect",
-          connection: { connectionId, caller: await projectCaller(caller, projection), callerType: info.callerType },
-        }));
-      }
+      if (attachment === null || !this.hasStudioWs()) return;
+      const { connectionId } = attachment;
+      this.broadcastToStudio(async (projection) => ({
+        type: "studio.connection",
+        action: "disconnect",
+        connection: { connectionId, caller: await projectCaller(caller, projection), callerType },
+      }));
+    }
 
-      // Update registry connection count (the closing socket may still be listed)
-      this.updateRegistryConnections(ws);
-
-      // Run lifecycle.disconnect if defined
-      if (def.lifecycle?.disconnect) {
-        const result = this.runStep({
-          type: "lifecycle.disconnect",
-          caller,
-          callerType: info.callerType,
-          callerConnections: this.callerConnectionCount(caller, info.callerType, ws),
-          role: null,
-        });
-        const disconnectExecutions = result.effects.getExecutions().length;
-        const disconnectForwards = result.effects.getForwards().length;
-        if (result.state !== this.state || disconnectExecutions > 0 || disconnectForwards > 0) {
-          this.pendingCause = {
-            type: "lifecycle.disconnect",
-            caller,
-            callerType: info.callerType,
-            role: result.event.role ?? "unknown",
-          };
-          this.commit(result.state, result.event, (seq) => this.writeEffects(result, seq, caller, info.callerType));
-          this.broadcastViews();
-          if (disconnectForwards > 0) {
-            this.drainForwards();
-          }
-          if (disconnectExecutions > 0) {
-            this.drainExecutions();
-          }
-        }
-      }
+    runDisconnectLifecycle(ws: WebSocket, caller: string, callerType: "user" | "service"): void {
+      if (!def.lifecycle?.disconnect) return;
+      const result = this.runStep({
+        type: "lifecycle.disconnect",
+        caller,
+        callerType,
+        callerConnections: this.callerConnectionCount(caller, callerType, ws),
+        role: null,
+      });
+      const role = result.event.role ?? "unknown";
+      this.commitLifecycle(result, { type: "lifecycle.disconnect", caller, callerType, role }, caller, callerType);
     }
 
     // --- Studio WebSocket handling ---
@@ -2476,21 +2404,7 @@ export function actor(
  * and the runtime interface (which uses bivariant unknown-typed signatures).
  */
 function isActorDef(def: unknown): def is ActorDef {
-  if (typeof def !== "object" || def === null) return false;
-  if (!("input" in def) || typeof def.input !== "object" || def.input === null) return false;
-  if (!("init" in def) || typeof def.init !== "function") return false;
-  if (!("roles" in def) || typeof def.roles !== "object" || def.roles === null) return false;
-  if (!("views" in def) || typeof def.views !== "object" || def.views === null) return false;
-  // Optional links: if present, must be an object with link definitions
-  if ("links" in def && def.links !== undefined) {
-    if (typeof def.links !== "object" || def.links === null) return false;
-    const linksObj = def.links as Record<string, unknown>;
-    for (const val of Object.values(linksObj)) {
-      if (typeof val !== "object" || val === null) return false;
-      if (!("contract" in val) || !("onUpdate" in val)) return false;
-    }
-  }
-  return true;
+  return hasActorDefShape(def);
 }
 
 /**

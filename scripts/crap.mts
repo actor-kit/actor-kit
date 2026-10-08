@@ -14,7 +14,10 @@
  *
  * Usage (from the repo root):
  *   pnpm exec vitest run --coverage --coverage.reporter=json --silent
- *   node scripts/crap.mts [--coverage coverage/coverage-final.json] [--threshold 8] [--top 20] <dir>...
+ *   node scripts/crap.mts [--coverage coverage/coverage-final.json]... [--threshold 8] [--top 20] <dir>...
+ *
+ * --coverage may be given more than once (e.g. unit + integration coverage): each function takes
+ * its best coverage across the files.
  *
  * Prints one row per function above the threshold (or the top N), and a
  * per-directory summary (functions, max CRAP, count over threshold).
@@ -177,20 +180,26 @@ function sourceFiles(dir: string): string[] {
   return out;
 }
 
+const FLAGS = new Set(["--coverage", "--threshold", "--top"]);
+
+/** Every value given for a flag, in order. */
+function args(name: string): string[] {
+  return process.argv
+    .slice(2)
+    .flatMap((a, i, all) => (a === `--${name}` && all[i + 1] !== undefined ? [all[i + 1] ?? ""] : []));
+}
+
 function arg(name: string, fallback: string): string {
-  const i = process.argv.indexOf(`--${name}`);
-  return i >= 0 ? (process.argv[i + 1] ?? fallback) : fallback;
+  return args(name).at(-1) ?? fallback;
 }
 
 const threshold = Number(arg("threshold", "8"));
 const top = Number(arg("top", "0"));
-const coverage = Coverage.parse(
-  JSON.parse(readFileSync(resolve(arg("coverage", "coverage/coverage-final.json")), "utf8")),
+const coverageFiles = args("coverage");
+const coverages = (coverageFiles.length > 0 ? coverageFiles : ["coverage/coverage-final.json"]).map((file) =>
+  Coverage.parse(JSON.parse(readFileSync(resolve(file), "utf8"))),
 );
-const flagValues = new Set(
-  ["--coverage", "--threshold", "--top"].map((f) => process.argv[process.argv.indexOf(f) + 1]),
-);
-const dirs = process.argv.slice(2).filter((a) => !a.startsWith("--") && !flagValues.has(a));
+const dirs = process.argv.slice(2).filter((a, i, all) => !a.startsWith("--") && !FLAGS.has(all[i - 1] ?? ""));
 
 const rows: Row[] = [];
 for (const dir of dirs) {
@@ -199,7 +208,7 @@ for (const dir of dirs) {
     const program = AstNode.parse(parseSync(path, source).program);
     const starts = lineStarts(source);
     for (const fn of collectFunctions(program)) {
-      const cov = coverageFor(fn, coverage[path], starts);
+      const cov = Math.max(...coverages.map((coverage) => coverageFor(fn, coverage[path], starts)));
       const crap = fn.cc ** 2 * (1 - cov) ** 3 + fn.cc;
       const line = starts.filter((s) => s <= fn.start).length;
       rows.push({ file: relative(process.cwd(), path), name: fn.name, line, cc: fn.cc, cov, crap });

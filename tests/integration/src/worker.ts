@@ -12,7 +12,7 @@ export { Ledger, LedgerNoJournal, LedgerNoStudio } from "./restore-actors";
 export { Bulletin, Desk } from "./studio-effects";
 export { StudioOff, StudioProbe } from "./studio-probe";
 export { StudioRedacted } from "./studio-redacted";
-export { Quiz, QuizNoJournal, QuizNoStudio } from "./timers-actors";
+export { Quiz, QuizLifecycle, QuizNoJournal, QuizNoStudio } from "./timers-actors";
 export { RosterActor } from "./versions-actors";
 export { StudioRegistry };
 

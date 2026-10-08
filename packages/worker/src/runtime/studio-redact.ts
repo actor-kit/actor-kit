@@ -69,7 +69,10 @@ function walk(patterns: readonly Pattern[], value: unknown, cursors: readonly Cu
   if (cursors.length === 0) return value;
   if (isComplete(patterns, cursors)) return REDACTED;
   if (typeof value !== "object" || value === null) return value;
+  return walkObject(patterns, value, cursors);
+}
 
+function walkObject(patterns: readonly Pattern[], value: object, cursors: readonly Cursor[]): unknown {
   if (Array.isArray(value)) {
     return value.map((item, index) => walk(patterns, item, step(patterns, cursors, String(index))));
   }

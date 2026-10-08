@@ -15,7 +15,7 @@ import { Quiz, QuizContract } from "./src/timers-actors";
 let n = 0;
 const unique = (prefix: string) => `${prefix}-${Date.now()}-${++n}`;
 
-type Namespace = "QUIZ" | "QUIZ_NO_JOURNAL" | "QUIZ_NO_STUDIO";
+type Namespace = "QUIZ" | "QUIZ_NO_JOURNAL" | "QUIZ_NO_STUDIO" | "QUIZ_LIFECYCLE";
 
 async function spawn(prefix: string, ns: Namespace = "QUIZ") {
   const name = unique(prefix);
@@ -303,5 +303,22 @@ describe("Studio", () => {
   it("__fireTimer is refused when Studio is disabled", async () => {
     const stub = await spawn("fire-off", "QUIZ_NO_STUDIO");
     expect(await rpcError(() => stub.__fireTimer({ key: "round-1" }))).toMatch(/Studio is not enabled/);
+  });
+});
+
+describe("lifecycle handlers", () => {
+  it("a connect that only schedules, and a disconnect that only cancels, are committed", async () => {
+    const stub = await spawn("lifecycle", "QUIZ_LIFECYCLE");
+    const response = await stub.fetch("http://localhost/", {
+      headers: { Upgrade: "websocket", "X-Actor-Kit-Caller-Id": "u1", "X-Actor-Kit-Caller-Type": "user" },
+    });
+    const ws = response.webSocket;
+    if (ws === null) throw new Error("expected a WebSocket");
+    ws.accept();
+    expect((await look(stub)).timers.map((t) => t.key)).toEqual(["hello-u1"]);
+    expect((await look(stub)).alarm).not.toBeNull();
+
+    ws.close(1000, "bye");
+    await expect.poll(async () => (await look(stub)).timers).toEqual([]);
   });
 });

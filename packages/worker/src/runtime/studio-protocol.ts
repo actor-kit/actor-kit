@@ -272,29 +272,37 @@ export function studioView<TState>(
 ): StudioViewReply {
   const { role } = request;
   const caller = request.caller ?? null;
-
-  // Own properties only: "__proto__", "constructor" etc. are not roles.
-  const viewDef = Object.hasOwn(views, role) ? views[role] : undefined;
-  if (viewDef === undefined) {
-    return { type: "studio.view", role, caller, error: `No view for role "${role}"` };
-  }
-
-  // Legacy views without `kind` are treated as perCaller (matches the runtime).
-  if (viewDef.kind !== "shared" && caller === null) {
-    return { type: "studio.view", role, caller, error: `View for role "${role}" is perCaller: caller is required` };
-  }
-
-  let data: unknown;
-  try {
-    data = viewDef.fn(state, caller ?? "__studio");
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    return { type: "studio.view", role, caller, error: `View projection threw: ${message}` };
-  }
+  const projected = projectView(views, state, role, caller);
+  if (!projected.ok) return { type: "studio.view", role, caller, error: projected.error };
 
   // Report the caller's actual role so the UI can flag a projection the caller would never receive.
   const callerRole =
     caller === null ? null : resolveRole(roles, state, caller, { callerType: request.callerType ?? "user" });
 
-  return { type: "studio.view", role, caller, callerRole, data };
+  return { type: "studio.view", role, caller, callerRole, data: projected.data };
+}
+
+type Projected = { ok: true; data: unknown } | { ok: false; error: string };
+
+function projectView<TState>(
+  views: StudioViewSource<TState>["views"],
+  state: TState,
+  role: string,
+  caller: string | null,
+): Projected {
+  // Own properties only: "__proto__", "constructor" etc. are not roles.
+  const viewDef = Object.hasOwn(views, role) ? views[role] : undefined;
+  if (viewDef === undefined) return { ok: false, error: `No view for role "${role}"` };
+
+  // Legacy views without `kind` are treated as perCaller (matches the runtime).
+  if (viewDef.kind !== "shared" && caller === null) {
+    return { ok: false, error: `View for role "${role}" is perCaller: caller is required` };
+  }
+
+  try {
+    return { ok: true, data: viewDef.fn(state, caller ?? "__studio") };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return { ok: false, error: `View projection threw: ${message}` };
+  }
 }

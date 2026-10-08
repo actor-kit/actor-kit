@@ -164,3 +164,11 @@ class_name = "RosterActor"
 [[migrations]]
 tag = "v13"
 new_sqlite_classes = ["RosterActor"]
+
+[[durable_objects.bindings]]
+name = "QUIZ_LIFECYCLE"
+class_name = "QuizLifecycle"
+
+[[migrations]]
+tag = "v14"
+new_sqlite_classes = ["QuizLifecycle"]
