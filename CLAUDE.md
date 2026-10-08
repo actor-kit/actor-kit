@@ -16,7 +16,7 @@ Actors on the edge. Each actor is a Cloudflare Durable Object with a mailbox, pr
 
 ## Repo structure
 
-Six scoped packages under `@actor-kit/*`:
+Eight scoped packages under `@actor-kit/*`:
 
 ```
 actor-kit-2/
@@ -25,9 +25,10 @@ actor-kit-2/
 │   ├── worker/            → @actor-kit/worker: defineActor(), createActorClass(), message(), withCallerIdentity()
 │   ├── client/            → @actor-kit/client: actorClient(), WebSocket connection, binary decoding
 │   ├── react/             → @actor-kit/react: actorContext(), useView(), useSend(), useRole()
-│   ├── test/              → @actor-kit/test: testActor(), emission capture, view assertions
+│   ├── test/              → @actor-kit/test: testActor(), simulate() (many actors, virtual clock), replayJournal()
 │   ├── storybook/         → @actor-kit/storybook: withActorKit(), createMockClient()
-│   └── studio/            → @actor-kit/studio: actorKitStudio(), StudioRegistry, introspection
+│   ├── studio/            → @actor-kit/studio: actorKitStudio(), StudioRegistry, introspection
+│   └── studio-cli/        → @actor-kit/studio-cli: `actor-kit studio` CLI + read-only MCP server
 ├── tests/
 │   ├── unit/              → Pure logic tests (no CF runtime)
 │   └── integration/       → vitest-pool-workers (full DO lifecycle)
@@ -54,7 +55,13 @@ Run before committing:
 1. `pnpm typecheck` — strict TypeScript, zero errors
 2. `pnpm test:unit` — Vitest unit tests
 3. `pnpm test:integration` — vitest-pool-workers (DO lifecycle, WebSocket, persistence)
-4. `pnpm lint` — Biome: no-explicit-any, formatting, import ordering
+4. `pnpm lint` — Biome: no-explicit-any, formatting, import ordering (0 errors, 0 warnings)
+
+After a batch of changes (quality gates, see [docs/quality.md](docs/quality.md)):
+
+5. `pnpm exec stryker run --mutate <changed files>` — mutation score ≥ 90%; every survivor killed or justified in docs/quality.md. Delete `.stryker-tmp` before `pnpm test:e2e`.
+6. `pnpm crap <dirs>` and `pnpm crap:worker` — CRAP < 8 for every function (worker coverage includes integration tests run inside workerd)
+7. `pnpm test:e2e` — Playwright: Studio + every example
 
 ## Knowledge base
 
@@ -67,6 +74,7 @@ Do NOT load all docs upfront. Load only when relevant to the current task.
 | Testing strategy | [docs/testing-strategy.md](docs/testing-strategy.md) | Writing tests, choosing test level |
 | Feature specs | [docs/specs/](docs/specs/) | Implementing a specific feature |
 | Architecture decisions | [docs/adrs/](docs/adrs/) | Questioning a design choice, making a new one |
+| Quality scores | [docs/quality.md](docs/quality.md) | Mutation scores, CRAP, justified surviving mutants |
 
 ## Core principles
 
