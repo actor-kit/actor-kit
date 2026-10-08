@@ -91,9 +91,8 @@ function registryStub(env: Record<string, unknown>): DurableObjectStub | null {
 
 /** Path below the studio prefix, or null when the request is not a studio request. */
 function studioSubpath(pathname: string): string | null {
-  if (pathname === STUDIO_PREFIX) return "";
-  if (pathname.startsWith(`${STUDIO_PREFIX}/`)) return pathname.slice(STUDIO_PREFIX.length);
-  return null;
+  const isStudio = pathname === STUDIO_PREFIX || pathname.startsWith(`${STUDIO_PREFIX}/`);
+  return isStudio ? pathname.slice(STUDIO_PREFIX.length) : null;
 }
 
 function decodeSegment(segment: string): string | null {
@@ -143,8 +142,9 @@ function queryParams(url: URL, names: readonly string[]): Record<string, string>
   return out;
 }
 
+/** Every schema here is a flat object, so each issue names its field. */
 function describeIssues(error: z.ZodError): string {
-  return error.issues.map((issue) => `${issue.path.join(".") || "value"}: ${issue.message}`).join("; ");
+  return error.issues.map((issue) => `${issue.path.join(".")}: ${issue.message}`).join("; ");
 }
 
 type Parsed<T> = { ok: true; value: T } | { ok: false; response: Response };
@@ -205,29 +205,56 @@ interface RouteInfo {
   actorId?: string;
 }
 
-function classify(path: string): RouteInfo {
-  if (path === "/api/actors" || path === "/api/actors/") return { route: "list" };
-  if (path === "/api/actors/types") return { route: "types" };
-  const patterns: Array<[RegExp, StudioRoute]> = [
-    [/^\/api\/actors\/([^/]+)\/([^/]+)\/timeline$/, "timeline"],
-    [/^\/api\/actors\/([^/]+)\/([^/]+)\/view$/, "view"],
-    [/^\/api\/actors\/([^/]+)\/([^/]+)$/, "inspect"],
-    [/^\/actors\/([^/]+)\/([^/]+)\/ws$/, "ws"],
-  ];
-  for (const [pattern, route] of patterns) {
-    const match = path.match(pattern);
-    if (match?.[1] !== undefined && match[2] !== undefined) {
-      const actorType = decodeSegment(match[1]);
-      const actorId = decodeSegment(match[2]);
-      return {
-        route,
-        ...(actorType === null ? {} : { actorType: actorType.slice(0, MAX_TYPE_LENGTH) }),
-        ...(actorId === null ? {} : { actorId: actorId.slice(0, MAX_ID_LENGTH) }),
-      };
-    }
+type ActorRoute = "inspect" | "timeline" | "view" | "ws";
+
+/** A request below the studio prefix, matched once and shared by routing and the audit event. */
+type RouteMatch = { route: Exclude<StudioRoute, ActorRoute> } | { route: ActorRoute; rawType: string; rawId: string };
+
+/** Routes addressing one actor; the first matching pattern wins. */
+const ACTOR_ROUTES: ReadonlyArray<readonly [RegExp, ActorRoute]> = [
+  [/^\/api\/actors\/([^/]+)\/([^/]+)\/timeline$/, "timeline"],
+  [/^\/api\/actors\/([^/]+)\/([^/]+)\/view$/, "view"],
+  [/^\/api\/actors\/([^/]+)\/([^/]+)$/, "inspect"],
+  [/^\/actors\/([^/]+)\/([^/]+)\/ws$/, "ws"],
+];
+
+function isApiPath(path: string): boolean {
+  return path === "/api" || path.startsWith("/api/");
+}
+
+/** Routes with a fixed path. */
+const FIXED_ROUTES: ReadonlyMap<string, "list" | "types"> = new Map([
+  ["/api/actors", "list"],
+  ["/api/actors/", "list"],
+  ["/api/actors/types", "types"],
+]);
+
+function matchActorRoute(path: string): RouteMatch | null {
+  for (const [pattern, route] of ACTOR_ROUTES) {
+    const found = pattern.exec(path);
+    const rawType = found?.[1];
+    const rawId = found?.[2];
+    if (rawType !== undefined && rawId !== undefined) return { route, rawType, rawId };
   }
-  if (path === "/api" || path.startsWith("/api/")) return { route: "unknown" };
-  return { route: "ui" };
+  return null;
+}
+
+function matchRoute(path: string): RouteMatch {
+  const fixed = FIXED_ROUTES.get(path);
+  if (fixed !== undefined) return { route: fixed };
+  return matchActorRoute(path) ?? { route: isApiPath(path) ? "unknown" : "ui" };
+}
+
+/** Audit fields for a match: decoded (when decodable) and truncated actor coordinates. */
+function routeInfo(match: RouteMatch): RouteInfo {
+  if (!("rawType" in match)) return { route: match.route };
+  const actorType = decodeSegment(match.rawType);
+  const actorId = decodeSegment(match.rawId);
+  return {
+    route: match.route,
+    ...(actorType === null ? {} : { actorType: actorType.slice(0, MAX_TYPE_LENGTH) }),
+    ...(actorId === null ? {} : { actorId: actorId.slice(0, MAX_ID_LENGTH) }),
+  };
 }
 
 /** Apply `f` without introducing a Promise when `value` is already available. */
@@ -268,7 +295,8 @@ export function createActorKitStudio(options: StudioOptions = {}): StudioHandler
     if (path === null) return null;
 
     const startedAt = Date.now();
-    const info = classify(path);
+    const match = matchRoute(path);
+    const info = routeInfo(match);
     let principal: StudioPrincipal | null = null;
 
     const finish = (response: Response): Response => {
@@ -289,7 +317,7 @@ export function createActorKitStudio(options: StudioOptions = {}): StudioHandler
     const handled = andThen(authenticateStudio(request, url, env, access), (auth) => {
       if (!auth.ok) return jsonError(auth.status, auth.error);
       principal = auth.principal;
-      return route(request, path, url, env, auth.principal);
+      return route({ request, path, url, env, principal: auth.principal }, match);
     });
     return andThen(handled, finish);
   };
@@ -298,34 +326,45 @@ export function createActorKitStudio(options: StudioOptions = {}): StudioHandler
 /** Studio middleware with the default options (Access certs, console audit). */
 export const actorKitStudio: StudioHandler = createActorKitStudio();
 
-function route(
-  request: Request,
-  path: string,
-  url: URL,
-  env: Record<string, unknown>,
-  principal: StudioPrincipal,
-): Response | Promise<Response> {
-  if (request.method !== "GET" && request.method !== "HEAD") {
-    return jsonError(405, `Method ${request.method} not allowed`, { Allow: ALLOWED_METHODS });
+/** Everything a route handler may need about the request. */
+interface StudioRequest {
+  request: Request;
+  path: string;
+  url: URL;
+  env: Record<string, unknown>;
+  principal: StudioPrincipal;
+}
+
+type ActorHandler = (req: StudioRequest, rawType: string, rawId: string) => Response | Promise<Response>;
+
+const ACTOR_HANDLERS: Record<ActorRoute, ActorHandler> = {
+  inspect: handleInspect,
+  timeline: handleTimeline,
+  view: handleView,
+  ws: handleStudioWebSocket,
+};
+
+const OTHER_HANDLERS: Record<Exclude<StudioRoute, ActorRoute>, (req: StudioRequest) => Response | Promise<Response>> = {
+  list: (req) => handleListActors(req.url, req.env),
+  types: (req) => handleActorTypes(req.env),
+  unknown: (req) => jsonError(404, `Unknown studio API route: ${req.path}`),
+  ui: (req) => serveUi(req.path),
+};
+
+function route(req: StudioRequest, match: RouteMatch): Response | Promise<Response> {
+  const method = req.request.method;
+  if (method !== "GET" && method !== "HEAD") {
+    return jsonError(405, `Method ${method} not allowed`, { Allow: ALLOWED_METHODS });
   }
 
   // Agents only ever see hashed callers; without the key the DO could not hash, so refuse up front.
-  const hashKey = env["STUDIO_CALLER_HASH_KEY"];
-  if (principal.kind === "agent" && (typeof hashKey !== "string" || hashKey === "")) {
+  const hashKey = req.env["STUDIO_CALLER_HASH_KEY"];
+  if (req.principal.kind === "agent" && (typeof hashKey !== "string" || hashKey === "")) {
     return jsonError(503, "Studio is not configured for agents: set STUDIO_CALLER_HASH_KEY");
   }
 
-  if (path === "/api" || path.startsWith("/api/")) {
-    return routeApi(path, url, env, principal);
-  }
-
-  // Match /actors/:type/:id/ws — WebSocket upgrade
-  const wsMatch = path.match(/^\/actors\/([^/]+)\/([^/]+)\/ws$/);
-  if (wsMatch?.[1] !== undefined && wsMatch[2] !== undefined) {
-    return handleStudioWebSocket(request, wsMatch[1], wsMatch[2], env, principal);
-  }
-
-  return serveUi(path);
+  if ("rawType" in match) return ACTOR_HANDLERS[match.route](req, match.rawType, match.rawId);
+  return OTHER_HANDLERS[match.route](req);
 }
 
 /** Agents get hashed callers; people (and dev) use the DO's default human view. */
@@ -333,46 +372,10 @@ function viewerArg(principal: StudioPrincipal): { viewer: "agent" } | Record<str
   return principal.kind === "agent" ? { viewer: "agent" } : {};
 }
 
-function routeApi(
-  path: string,
-  url: URL,
-  env: Record<string, unknown>,
-  principal: StudioPrincipal,
-): Response | Promise<Response> {
-  if (path === "/api/actors" || path === "/api/actors/") {
-    return handleListActors(url, env);
-  }
-
-  if (path === "/api/actors/types") {
-    return handleActorTypes(env);
-  }
-
-  // Match /api/actors/:type/:id/timeline
-  const timelineMatch = path.match(/^\/api\/actors\/([^/]+)\/([^/]+)\/timeline$/);
-  if (timelineMatch?.[1] !== undefined && timelineMatch[2] !== undefined) {
-    return handleTimeline(timelineMatch[1], timelineMatch[2], url, env, principal);
-  }
-
-  // Match /api/actors/:type/:id/view
-  const viewMatch = path.match(/^\/api\/actors\/([^/]+)\/([^/]+)\/view$/);
-  if (viewMatch?.[1] !== undefined && viewMatch[2] !== undefined) {
-    return handleView(viewMatch[1], viewMatch[2], url, env, principal);
-  }
-
-  // Match /api/actors/:type/:id
-  const actorMatch = path.match(/^\/api\/actors\/([^/]+)\/([^/]+)$/);
-  if (actorMatch?.[1] !== undefined && actorMatch[2] !== undefined) {
-    return handleInspect(actorMatch[1], actorMatch[2], env, principal);
-  }
-
-  return jsonError(404, `Unknown studio API route: ${path}`);
-}
-
 /** Serve an embedded asset; any non-asset path falls back to the SPA shell (client-side routes). */
 function serveUi(path: string): Response {
-  const isAssetPath = path.startsWith("/assets/");
-  const asset =
-    getAsset(path === "" || path === "/" ? "/index.html" : path) ?? (isAssetPath ? null : getAsset("/index.html"));
+  // "", "/" and client-side routes are not assets, so they get the shell; unknown /assets/* do not.
+  const asset = getAsset(path) ?? (path.startsWith("/assets/") ? null : getAsset("/index.html"));
   if (asset === null) {
     return jsonError(404, "Not found");
   }
@@ -456,10 +459,9 @@ function handleActorTypes(env: Record<string, unknown>): Response | Promise<Resp
 }
 
 function handleInspect(
+  { env, principal }: StudioRequest,
   rawType: string,
   rawId: string,
-  env: Record<string, unknown>,
-  principal: StudioPrincipal,
 ): Response | Promise<Response> {
   const params = parseActorParams(rawType, rawId);
   if (!params.ok) return params.response;
@@ -473,11 +475,9 @@ function handleInspect(
 }
 
 function handleTimeline(
+  { url, env, principal }: StudioRequest,
   rawType: string,
   rawId: string,
-  url: URL,
-  env: Record<string, unknown>,
-  principal: StudioPrincipal,
 ): Response | Promise<Response> {
   const params = parseActorParams(rawType, rawId);
   if (!params.ok) return params.response;
@@ -494,11 +494,9 @@ function handleTimeline(
 }
 
 function handleView(
+  { url, env, principal }: StudioRequest,
   rawType: string,
   rawId: string,
-  url: URL,
-  env: Record<string, unknown>,
-  principal: StudioPrincipal,
 ): Response | Promise<Response> {
   const params = parseActorParams(rawType, rawId);
   if (!params.ok) return params.response;
@@ -515,13 +513,12 @@ function handleView(
 }
 
 function handleStudioWebSocket(
-  request: Request,
+  { request, env, principal }: StudioRequest,
   rawType: string,
   rawId: string,
-  env: Record<string, unknown>,
-  principal: StudioPrincipal,
 ): Response | Promise<Response> {
-  if (request.headers.get("Upgrade") !== "websocket") {
+  // RFC 6455 §4.2.1: the Upgrade value is a case-insensitive token.
+  if (request.headers.get("Upgrade")?.toLowerCase() !== "websocket") {
     return jsonError(426, "Expected WebSocket", { Upgrade: "websocket" });
   }
 
@@ -532,10 +529,8 @@ function handleStudioWebSocket(
   if (actor instanceof Response) return actor;
 
   return withExistingActor(env, actor, params.value, () => {
-    // Stamp __studio identity headers (scrubbing any inbound ones) and forward to DO
+    // Stamp __studio identity headers (set() replaces any inbound ones) and forward to DO
     const stampedRequest = new Request(request);
-    stampedRequest.headers.delete(CALLER_ID_HEADER);
-    stampedRequest.headers.delete(CALLER_TYPE_HEADER);
     stampedRequest.headers.set(CALLER_ID_HEADER, "__studio");
     stampedRequest.headers.set(CALLER_TYPE_HEADER, "service");
     stampedRequest.headers.set(STUDIO_VIEWER_HEADER, principal.kind === "agent" ? "agent" : "human");
