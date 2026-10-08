@@ -52,6 +52,10 @@ const OutboxEntrySchema = z.object({
   /** When a `retrying` row tries next. Absent from actors older than ADR-015. */
   nextAttemptAt: z.number().nullable().optional(),
   lastError: z.string().nullable().optional(),
+  /** Forwards only (`service` is then the link); rows without it are executions. */
+  kind: z.literal("forward").optional(),
+  /** Forwards only: the target actor's id. */
+  target: z.string().optional(),
 });
 export type OutboxEntry = z.infer<typeof OutboxEntrySchema>;
 

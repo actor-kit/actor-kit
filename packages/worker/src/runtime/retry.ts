@@ -39,9 +39,14 @@ export type RetryOption = z.input<typeof RetryOptionSchema>;
 
 /** Validate a service's `retry` option at definition time and fill in the defaults. */
 export function resolveRetryPolicy(option: unknown): RetryPolicy {
+  return policyFor(option, "service");
+}
+
+/** `owner` names what the option belongs to in the error (`service`, `link "room"`). */
+function policyFor(option: unknown, owner: string): RetryPolicy {
   const parsed = RetryOptionSchema.safeParse(option);
   if (!parsed.success) {
-    throw new Error(`Invalid service retry option: ${parsed.error.message}`);
+    throw new Error(`Invalid ${owner} retry option: ${parsed.error.message}`);
   }
   const backoff = parsed.data?.backoff;
   return {
@@ -76,4 +81,11 @@ export function settleAttempt(
   if (outcome.ok) return { status: "done" };
   if (attempt >= policy.attempts) return { status: "failed" };
   return { status: "retrying", nextAttemptAt: now + retryDelay(attempt, policy, random) };
+}
+
+/** The forward retry policy of every declared link (forwards through undeclared links get the default). */
+export function linkRetryPolicies(links: Readonly<Record<string, { readonly retry?: unknown }>> | undefined) {
+  return new Map<string, RetryPolicy>(
+    Object.entries(links ?? {}).map(([name, linkDef]) => [name, policyFor(linkDef.retry, `link "${name}"`)]),
+  );
 }

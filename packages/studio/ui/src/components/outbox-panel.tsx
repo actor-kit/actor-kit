@@ -17,9 +17,16 @@ function dueIn(at: number): string {
   return new Date(at).toLocaleTimeString();
 }
 
+/** A service name, or for a forward the link it goes through and its target. */
+function EffectName({ entry }: { entry: OutboxEntry }) {
+  if (entry.kind !== "forward") return <>{entry.service}</>;
+  return <span data-testid="outbox-forward">{`forward → ${entry.service} / ${entry.target}`}</span>;
+}
+
 /**
- * Executions, newest effect first (ADR-015 D1): effect id, status, tries, when a `retrying` row
- * tries next and its last error. Failed rows are dead letters; an admin can redrive them.
+ * Executions and forwards, newest effect first (ADR-015 D1): effect id, status, tries, when a
+ * `retrying` row tries next and its last error. Failed rows are dead letters; an admin can redrive
+ * them. A forward shows the link it goes through and its target.
  */
 export function OutboxPanel({
   actorType,
@@ -71,7 +78,9 @@ export function OutboxPanel({
                 data-status={exec.status}
               >
                 <td className="px-4 py-2 font-mono text-zinc-500">{exec.id}</td>
-                <td className="px-4 py-2">{exec.service}</td>
+                <td className="px-4 py-2">
+                  <EffectName entry={exec} />
+                </td>
                 <td className={`px-4 py-2 ${STATUS_COLORS[exec.status] ?? "text-zinc-400"}`}>
                   {exec.status}
                   {exec.status === "retrying" && typeof exec.nextAttemptAt === "number" && (

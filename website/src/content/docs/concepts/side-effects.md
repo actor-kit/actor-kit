@@ -95,6 +95,8 @@ ITEM_ADDED: message(z.object({ itemId: z.string() }), (state, { itemId }, { exec
 
 Outbox rows move through `pending` → `running` → `done`, `retrying` (and back to `running`) or `failed`. A `failed` row is a dead letter: it stays until an admin redrives it from Studio's Outbox panel, which moves it back to `pending` under the same effect id.
 
+Messages sent with `ctx.forward(link, targetId, message)` go through the outbox too, with the same effect ids, statuses, alarm and redrive. Their retry policy belongs to the link: `link(Contract, { onUpdate, retry: { attempts, backoff } })`, same shape and defaults as a service. A send that throws (the target is unreachable) is retried; a target that cannot be resolved is a dead letter straight away. A target that answers, even with a refusal, counts as delivered.
+
 Handlers never `await`. State is never stale. Crashes never lose intent.
 
 ## Guarantees

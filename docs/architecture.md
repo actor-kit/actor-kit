@@ -329,8 +329,15 @@ redrive: __redrive({ effectId }) / Studio action — failed → pending, attempt
 ```
 
 Retry policy per service: `retry: { attempts, backoff: { baseMs, factor, maxMs, jitter } }`, default 3 tries,
-1s then 5s apart, ±20% jitter. `failed` is final: failed rows are the dead letters. Forwards keep a single try
-(their attempts are counted; retrying them is not built yet).
+1s then 5s apart, ±20% jitter. `failed` is final: failed rows are the dead letters.
+
+Forwards (`ctx.forward`) follow the same lifecycle in the `forwards` table: `drainForwards()` sends due rows
+(`dueForwards`), counts tries with the same `startAttempt`/`finishAttempt` (table `forwards`) and settles them with the
+link's policy (`link(Contract, { retry })`, same shape and defaults; undeclared links get the default). A send that
+throws is retried on the shared alarm (`nextRetryAt` is the earliest across both tables); a target that cannot be
+resolved or a stored message that is not a message is a dead letter at once. A target that answers, even with a
+refusal, is `done`. Redrive takes either kind by effect id, and Studio's Outbox lists both (forwards carry
+`kind: "forward"`, the link as `service` and their `target`).
 
 ### Restore and replay on wake (ADR-015 D3)
 

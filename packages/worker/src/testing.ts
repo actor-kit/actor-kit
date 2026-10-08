@@ -88,12 +88,22 @@ export type {
   UnlinkCall,
 } from "./runtime/outbox";
 export { createOutbox } from "./runtime/outbox";
-export type { DueExecution, NewExecution, OutboxFailedEvent, OutboxRow } from "./runtime/outbox-store";
+export type {
+  DueExecution,
+  DueForward,
+  EffectTable,
+  NewExecution,
+  NewForward,
+  OutboxFailedEvent,
+  OutboxRow,
+} from "./runtime/outbox-store";
 export {
   cancelUndoneEffects,
   dueExecutions,
+  dueForwards,
   finishAttempt,
   insertExecutions,
+  insertForwards,
   isRunning,
   nextRetryAt,
   outboxFailedEvent,
@@ -107,7 +117,13 @@ export { resolveNamespace } from "./runtime/resolve-namespace";
 export type { RestorePlan } from "./runtime/restore";
 export { planRestore } from "./runtime/restore";
 export type { AttemptSettlement, RetryOption, RetryPolicy } from "./runtime/retry";
-export { DEFAULT_RETRY_POLICY, resolveRetryPolicy, retryDelay, settleAttempt } from "./runtime/retry";
+export {
+  DEFAULT_RETRY_POLICY,
+  linkRetryPolicies,
+  resolveRetryPolicy,
+  retryDelay,
+  settleAttempt,
+} from "./runtime/retry";
 // Role resolution
 export type { RolePredicate } from "./runtime/roles";
 export { resolveRole } from "./runtime/roles";

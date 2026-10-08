@@ -32,6 +32,7 @@ describe("ACTOR_KIT_MIGRATIONS", () => {
       "0010_effect_ids_and_retries",
       "0011_timers",
       "0012_restore",
+      "0013_forward_retries",
     ]);
   });
 
@@ -39,6 +40,7 @@ describe("ACTOR_KIT_MIGRATIONS", () => {
     expect(schemaAfterMigrations()).toEqual([
       "index:idx_executions_due",
       "index:idx_executions_status",
+      "index:idx_forwards_due",
       "index:idx_forwards_status_created",
       "index:idx_outbox_status_created",
       "index:idx_timeline_created",

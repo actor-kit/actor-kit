@@ -51,9 +51,12 @@ import {
 import { ACTOR_KIT_MIGRATIONS } from "./runtime/migrations";
 import {
   cancelUndoneEffects,
+  type DueForward,
   dueExecutions,
+  dueForwards,
   finishAttempt,
   insertExecutions,
+  insertForwards,
   isRunning,
   nextRetryAt,
   outboxFailedEvent,
@@ -64,7 +67,13 @@ import {
 } from "./runtime/outbox-store";
 import { resolveNamespace } from "./runtime/resolve-namespace";
 import { planRestore } from "./runtime/restore";
-import { type RetryPolicy, resolveRetryPolicy, settleAttempt } from "./runtime/retry";
+import {
+  DEFAULT_RETRY_POLICY,
+  linkRetryPolicies,
+  type RetryPolicy,
+  resolveRetryPolicy,
+  settleAttempt,
+} from "./runtime/retry";
 import { resolveRole } from "./runtime/roles";
 import { admitMessage, liveStepFacts, type StepCause, type StepResult, step, stepInit } from "./runtime/step";
 import {
@@ -214,6 +223,8 @@ interface ActorDef {
           ) => unknown)
         | undefined;
       onUnlink?: ((state: unknown, id: string | undefined, ctx: DeterministicContext) => unknown) | undefined;
+      /** Tries and backoff for forwards through this link (ADR-015 D1). */
+      retry?: unknown;
     }
   >;
   /** Compiled from `versions` by createActorClass (ADR-015 D5); never written by hand. */
@@ -270,14 +281,6 @@ const TargetIdRowSchema = z.object({ target_id: z.string() });
 const ActiveLinkRowSchema = z.object({ target_id: z.string(), link_name: z.string() });
 const LinkVersionRowSchema = z.object({ link_name: z.string(), version: z.number() });
 const SubscriberRowSchema = z.object({ subscriber_type: z.string(), subscriber_id: z.string() });
-const ForwardRowSchema = z.object({
-  id: z.string(),
-  link_name: z.string(),
-  target_id: z.string(),
-  message: z.string(),
-  caller: z.string(),
-  caller_type: z.string(),
-});
 /** A message: an object with a string `type` (forwarded rows, WebSocket frames). */
 const MessageEnvelopeSchema = z.looseObject({ type: z.string() });
 const ViewFieldsSchema = z.record(z.string(), z.unknown());
@@ -330,6 +333,22 @@ async function tryService(
 ): Promise<ServiceOutcome> {
   try {
     return { ok: true, result: await serviceDef.fn(entry.input, env, { effectId: entry.id, attempt }) };
+  } catch (error) {
+    return { ok: false, message: error instanceof Error ? error.message : String(error) };
+  }
+}
+
+type MessageEnvelope = z.infer<typeof MessageEnvelopeSchema>;
+
+/** One try of a forward: the target's answer, or the message the send failed with. */
+async function trySend(
+  send: RpcFunction,
+  caller: string,
+  callerType: "user" | "service",
+  message: MessageEnvelope,
+): Promise<ServiceOutcome> {
+  try {
+    return { ok: true, result: await send(caller, callerType, message) };
   } catch (error) {
     return { ok: false, message: error instanceof Error ? error.message : String(error) };
   }
@@ -402,6 +421,7 @@ export function actor(
   const retryPolicies = new Map<string, RetryPolicy>(
     Object.entries(def.services ?? {}).map(([name, service]) => [name, resolveRetryPolicy(service.retry)]),
   );
+  const forwardPolicies = linkRetryPolicies(def.links);
 
   const DOClass = class ActorInstance extends DurableObject {
     state: unknown = undefined;
@@ -785,6 +805,7 @@ export function actor(
       if (!this.initialized) return;
       this.fireDueTimers(Date.now());
       await this.drainExecutions();
+      await this.drainForwards();
       this.syncAlarm();
     }
 
@@ -898,20 +919,7 @@ export function actor(
       outcome: ServiceOutcome,
       settle: () => void,
     ): void {
-      if (!outcome.ok) {
-        console.error(
-          JSON.stringify(
-            outboxFailedEvent({
-              actorType: _actorName,
-              actorId: this.actorId ?? this.ctx.id.toString(),
-              effectId: entry.id,
-              service: entry.service,
-              attempts: attempt,
-              error: outcome.message,
-            }),
-          ),
-        );
-      }
+      if (!outcome.ok) this.logDeadLetter("execution", entry.id, entry.service, attempt, outcome.message);
       try {
         this.settleExecution(entry.service, entry.id, entry.input, outcome, settle);
       } catch (error) {
@@ -1040,22 +1048,7 @@ export function actor(
       caller: string,
       callerType: "user" | "service",
     ): void {
-      for (const entry of entries) {
-        this.ctx.storage.sql.exec(
-          "INSERT INTO forwards (id, seq, idx, link_name, target_id, message, caller, caller_type, status, attempts, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-          entry.id,
-          entry.seq,
-          entry.index,
-          entry.linkName,
-          entry.targetId,
-          JSON.stringify(entry.message),
-          caller,
-          callerType,
-          entry.status,
-          entry.attempts,
-          entry.createdAt,
-        );
-      }
+      insertForwards(this.ctx.storage.sql, entries, caller, callerType);
     }
 
     async drainForwards(): Promise<void> {
@@ -1068,46 +1061,75 @@ export function actor(
       }
     }
 
+    /** Send due forwards, oldest effect first, until none are due (rows added meanwhile are picked up). */
     async drainForwardsInner(): Promise<void> {
-      const rows = this.ctx.storage.sql
-        .exec(
-          "SELECT id, link_name, target_id, message, caller, caller_type FROM forwards WHERE status = 'pending' ORDER BY seq, idx",
-        )
-        .toArray();
-
-      for (const row of rows) {
-        await this.deliverForward(ForwardRowSchema.parse(row));
+      for (;;) {
+        const due = dueForwards(this.ctx.storage.sql, Date.now());
+        if (due.length === 0) return;
+        for (const entry of due) {
+          await this.deliverForward(entry);
+        }
       }
     }
 
-    /** Send one pending forward to its target; the row ends done or failed (forwards are not retried). */
-    async deliverForward(entry: z.infer<typeof ForwardRowSchema>): Promise<void> {
+    /**
+     * One try of one forward. A target that cannot be resolved, or a stored message that is not a
+     * message, is a dead letter at once (retrying cannot help); a send that throws is retried by the
+     * link's policy. A target that answers (even with a refusal) is done.
+     */
+    async deliverForward(entry: DueForward): Promise<void> {
       const sql = this.ctx.storage.sql;
-      const fail = () => sql.exec("UPDATE forwards SET status = 'failed' WHERE id = ?", entry.id);
+      const target = this.forwardTarget(entry);
+      if (!target.ok) {
+        finishAttempt(sql, entry.id, { status: "failed" }, target.error, "forwards");
+        this.logDeadLetter("forward", entry.id, entry.linkName, 0, target.error);
+        this.pushStudioOutbox();
+        return;
+      }
 
+      const attempt = startAttempt(sql, entry.id, "forwards");
+      this.pushStudioOutbox();
+      const callerType: "user" | "service" = entry.callerType === "service" ? "service" : "user";
+      const outcome = await trySend(target.send, entry.caller, callerType, target.message);
+
+      // A restore may have cancelled this try while it ran: its transition is undone, settle nothing.
+      if (isRunning(sql, entry.id, "forwards")) this.settleForward(entry, attempt, outcome);
+      this.pushStudioOutbox();
+    }
+
+    /** Record how a forward's try ended: done, retrying (re-arm the alarm) or a dead letter. */
+    settleForward(entry: DueForward, attempt: number, outcome: ServiceOutcome): void {
+      const policy = forwardPolicies.get(entry.linkName) ?? DEFAULT_RETRY_POLICY;
+      const settlement = settleAttempt(outcome, attempt, policy, Date.now(), Math.random);
+      const error = outcome.ok ? null : outcome.message;
+      finishAttempt(this.ctx.storage.sql, entry.id, settlement, error, "forwards");
+      if (settlement.status === "retrying") this.syncAlarm();
+      if (error !== null && settlement.status === "failed") {
+        this.logDeadLetter("forward", entry.id, entry.linkName, attempt, error);
+      }
+    }
+
+    /** The target's send() and the parsed message, or why the forward can never be delivered. */
+    forwardTarget(
+      entry: DueForward,
+    ): { ok: true; send: RpcFunction; message: MessageEnvelope } | { ok: false; error: string } {
       // Resolve contract name: prefer declared link def, else lowercase the link name.
-      const linkDef = def.links?.[entry.link_name];
-      const contractName = linkDef ? linkDef.contract.name : entry.link_name.toLowerCase().replace(/_/g, "-");
-
-      const send = rpcMethod(resolveStub(contractName, entry.target_id, this.ctx, this.env), "send");
+      const linkDef = def.links?.[entry.linkName];
+      const contractName = linkDef ? linkDef.contract.name : entry.linkName.toLowerCase().replace(/_/g, "-");
+      const send = rpcMethod(resolveStub(contractName, entry.targetId, this.ctx, this.env), "send");
       if (send === null) {
-        fail();
-        return;
+        return { ok: false, error: `Forward target "${contractName}" ${entry.targetId} cannot be resolved` };
       }
-      const parsedMessage = MessageEnvelopeSchema.safeParse(JSON.parse(entry.message));
-      if (!parsedMessage.success) {
-        fail();
-        return;
-      }
+      const parsed = MessageEnvelopeSchema.safeParse(JSON.parse(entry.message));
+      if (!parsed.success) return { ok: false, error: `Forward message is invalid: ${parsed.error.message}` };
+      return { ok: true, send, message: parsed.data };
+    }
 
-      const callerType: "user" | "service" = entry.caller_type === "service" ? "service" : "user";
-      sql.exec("UPDATE forwards SET attempts = attempts + 1 WHERE id = ?", entry.id);
-      try {
-        await send(entry.caller, callerType, parsedMessage.data);
-        sql.exec("UPDATE forwards SET status = 'done' WHERE id = ?", entry.id);
-      } catch {
-        fail();
-      }
+    /** The wide event for an effect that became a dead letter (never its input). */
+    logDeadLetter(kind: "execution" | "forward", effectId: string, service: string, attempts: number, error: string) {
+      const actorId = this.actorId ?? this.ctx.id.toString();
+      const event = outboxFailedEvent({ kind, actorType: _actorName, actorId, effectId, service, attempts, error });
+      console.error(JSON.stringify(event));
     }
 
     // --- Link processing (subscriber side) ---
@@ -2269,11 +2291,13 @@ export function actor(
       this.assertStudioEnabled();
       const { effectId } = RedriveOptionsSchema.parse(opts);
       if (!this.persistedLoaded) return Promise.resolve({ ok: false, error: "Actor not found" });
-      if (!redriveExecution(this.ctx.storage.sql, effectId)) {
+      const sql = this.ctx.storage.sql;
+      if (!redriveExecution(sql, effectId) && !redriveExecution(sql, effectId, "forwards")) {
         return Promise.resolve({ ok: false, error: `Effect ${effectId} is not a failed execution` });
       }
       this.pushStudioOutbox();
       void this.drainExecutions();
+      void this.drainForwards();
       return Promise.resolve({ ok: true });
     }
 

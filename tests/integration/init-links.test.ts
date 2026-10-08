@@ -70,6 +70,17 @@ describe("ctx.link in init", () => {
       input: { bulletinId: target.id, via: "bulletin" },
     });
 
+    // The subscription is registered after spawn returns (fire-and-forget): wait for it.
+    await expect
+      .poll(() =>
+        runInDurableObject(target.stub, (_i, state) =>
+          state.storage.sql
+            .exec("SELECT subscriber_id FROM link_subscribers")
+            .toArray()
+            .map((r) => r["subscriber_id"]),
+        ),
+      )
+      .toEqual([id]);
     await target.stub.send("svc", "service", { type: "EDIT", headline: "Evening edition" });
     await expect.poll(async () => (await look(stub)).state.headline).toBe("Evening edition");
   });

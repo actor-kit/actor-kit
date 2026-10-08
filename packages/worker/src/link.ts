@@ -16,6 +16,7 @@
  */
 
 import type { DeterministicContext } from "@actor-kit/core";
+import type { RetryOption } from "./runtime/retry";
 
 /** Link declaration — returned by link(contract, handlers). */
 export interface LinkDef<TContract, TView, TState = unknown> {
@@ -30,6 +31,8 @@ export interface LinkDef<TContract, TView, TState = unknown> {
       ) => TState)
     | undefined;
   readonly onUnlink: ((state: TState, id: string | undefined, ctx: DeterministicContext) => TState) | undefined;
+  /** Tries and backoff for messages forwarded through this link (same shape and defaults as services). */
+  readonly retry: RetryOption;
 }
 
 /** Link error codes. */
@@ -51,6 +54,8 @@ export function link<
       ctx: DeterministicContext,
     ) => TState;
     onUnlink?: (state: TState, id: string | undefined, ctx: DeterministicContext) => TState;
+    /** Tries and backoff for ctx.forward() through this link. Default: 3 tries, 1s then 5s apart. */
+    retry?: RetryOption;
   },
 ): LinkDef<TContract, TView, TState> {
   return {
@@ -58,5 +63,6 @@ export function link<
     onUpdate: handlers.onUpdate,
     onError: handlers.onError,
     onUnlink: handlers.onUnlink,
+    retry: handlers.retry,
   };
 }

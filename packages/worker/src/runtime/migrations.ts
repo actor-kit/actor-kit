@@ -169,4 +169,14 @@ export const ACTOR_KIT_MIGRATIONS: ReadonlyArray<{ readonly name: string; readon
       ALTER TABLE timeline ADD COLUMN seq INTEGER;
     `,
   },
+  {
+    // Forwards retry like executions: `retrying` rows wait until next_attempt_at; the last error is
+    // kept for Studio and dead letters.
+    name: "0013_forward_retries",
+    sql: `
+      ALTER TABLE forwards ADD COLUMN next_attempt_at INTEGER;
+      ALTER TABLE forwards ADD COLUMN last_error TEXT;
+      CREATE INDEX IF NOT EXISTS idx_forwards_due ON forwards(status, next_attempt_at);
+    `,
+  },
 ];
