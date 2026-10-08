@@ -316,6 +316,10 @@ function stepMessage(
   };
 }
 
+function lifecyclePayload(cause: { readonly callerConnections?: number }): { callerConnections?: number } {
+  return cause.callerConnections === undefined ? {} : { callerConnections: cause.callerConnections };
+}
+
 function stepLifecycle(
   def: StepDef,
   state: unknown,
@@ -348,7 +352,8 @@ function stepLifecycle(
     state: next,
     handlerState: next,
     effects,
-    event: draft({ causeType: cause.type, name: null, payload: {} }, { ...who, role }, facts),
+    // callerConnections is journaled (it is what the handler read), so replay hands it back.
+    event: draft({ causeType: cause.type, name: null, payload: lifecyclePayload(cause) }, { ...who, role }, facts),
   };
 }
 

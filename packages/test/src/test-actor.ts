@@ -154,6 +154,22 @@ function wrapFlatMessages(
   return result;
 }
 
+/** The error testActor().send throws for a message the runtime would reject. */
+function rejectionError(
+  result: { error: "message_not_found" | "validation_failed" | "guard_failed"; detail?: string },
+  type: string,
+  role: string,
+): Error {
+  switch (result.error) {
+    case "message_not_found":
+      return new Error(`Message "${type}" not found for role "${role}"`);
+    case "validation_failed":
+      return new Error(`Validation failed for "${type}": ${result.detail ?? "unknown"}`);
+    case "guard_failed":
+      return new Error(`Guard rejected "${type}"`);
+  }
+}
+
 // --- Contract detection ---
 
 interface ContractShape {
@@ -266,16 +282,7 @@ export function testActor(
 
     const result = routeMessage(def.messages, role, state, event, ctx);
 
-    if (!result.ok) {
-      switch (result.error) {
-        case "message_not_found":
-          throw new Error(`Message "${event.type}" not found for role "${role}"`);
-        case "validation_failed":
-          throw new Error(`Validation failed for "${event.type}": ${result.detail ?? "unknown"}`);
-        case "guard_failed":
-          throw new Error(`Guard rejected "${event.type}"`);
-      }
-    }
+    if (!result.ok) throw rejectionError(result, event.type, role);
 
     if (def.observe?.onTransition) {
       def.observe.onTransition(state, result.state, event, { caller, role });

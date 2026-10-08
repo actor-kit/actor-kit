@@ -397,6 +397,8 @@ const LinkErrorPayload = z.object({
   targetId: z.string(),
   error: z.object({ message: z.string(), code: z.string() }),
 });
+/** Lifecycle events journal callerConnections (events written before it was recorded have `{}`). */
+const LifecyclePayload = z.object({ callerConnections: z.number().optional() });
 const MigratePayload = z.object({ fromVersion: z.number(), toVersion: z.number() });
 const TimerPayload = z.object({
   id: z.string(),
@@ -429,6 +431,12 @@ function roleOf(event: JournalEvent): string {
   return event.role;
 }
 
+function lifecycleCause(type: "lifecycle.connect" | "lifecycle.disconnect", event: JournalEvent): StepCause {
+  const cause = { type, role: event.role, ...callerOf(event) };
+  const { callerConnections } = LifecyclePayload.parse(event.payload);
+  return callerConnections === undefined ? cause : { ...cause, callerConnections };
+}
+
 type ReplayCause = (def: ReplayableDef, state: unknown, event: JournalEvent) => StepCause;
 
 /** How each journaled cause becomes a step cause again. Handlers that are gone fail loudly. */
@@ -441,11 +449,11 @@ const REPLAY_CAUSES: Record<Exclude<JournalCauseType, "init" | "restore">, Repla
   },
   "lifecycle.connect": (def, _state, event) => {
     required(def.lifecycle?.connect, "lifecycle.connect");
-    return { type: "lifecycle.connect", role: event.role, ...callerOf(event) };
+    return lifecycleCause("lifecycle.connect", event);
   },
   "lifecycle.disconnect": (def, _state, event) => {
     required(def.lifecycle?.disconnect, "lifecycle.disconnect");
-    return { type: "lifecycle.disconnect", role: event.role, ...callerOf(event) };
+    return lifecycleCause("lifecycle.disconnect", event);
   },
   "service.onDone": (def, _state, event) => {
     const service = nameOf(event);

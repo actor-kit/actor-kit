@@ -637,3 +637,13 @@ describe("step: services and links that are missing by name", () => {
     expect(step(declared, state, cause, facts(), {}).state).toBe(state);
   });
 });
+
+describe("step: lifecycle payload", () => {
+  it("journals callerConnections when the cause has it, nothing otherwise", () => {
+    const cause = { type: "lifecycle.connect", caller: "b", callerType: "user", role: "user" } as const;
+    expect(step(def, { log: [] }, { ...cause, callerConnections: 3 }, facts(), {}).event.payload).toEqual({
+      callerConnections: 3,
+    });
+    expect(step(def, { log: [] }, cause, facts(), {}).event.payload).toEqual({});
+  });
+});

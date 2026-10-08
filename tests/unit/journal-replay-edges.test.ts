@@ -267,3 +267,40 @@ describe("foldJournal", () => {
     );
   });
 });
+
+describe("lifecycle events carry callerConnections", () => {
+  type P = { log: string[] };
+  const presence = {
+    lifecycle: {
+      disconnect: (s: P, e: { caller: string; callerConnections?: number }) => ({
+        log: [...s.log, `${e.caller}:${e.callerConnections}`],
+      }),
+    },
+  };
+  const disconnect = (payload: unknown) =>
+    ev({ causeType: "lifecycle.disconnect", caller: "bob", callerType: "user", payload });
+
+  it("replays the recorded count", async () => {
+    expect(await applyJournalEvent(presence, { log: [] }, disconnect({ callerConnections: 1 }))).toEqual({
+      log: ["bob:1"],
+    });
+  });
+
+  it("replays events written before it was recorded without one", async () => {
+    const seen: unknown[] = [];
+    const def = {
+      lifecycle: {
+        disconnect: (s: P, e: unknown) => {
+          seen.push(e);
+          return s;
+        },
+      },
+    };
+    await applyJournalEvent(def, { log: [] }, disconnect({}));
+    expect(seen).toStrictEqual([{ caller: "bob", callerType: "user" }]);
+  });
+
+  it("refuses a malformed count", async () => {
+    await expect(applyJournalEvent(presence, { log: [] }, disconnect({ callerConnections: "two" }))).rejects.toThrow();
+  });
+});

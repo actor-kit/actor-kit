@@ -33,7 +33,7 @@ Throws if input is invalid.
 
 ### `t.send(state, caller, message, opts?)`
 
-Resolves the caller's role, validates the message, runs the handler. Returns `{ state, executions, links, unlinks, forwards }`.
+Resolves the caller's role, validates the message, runs the handler. Returns `{ state, executions, links, unlinks, forwards, schedules, cancels, timeline }` (`schedules` and `cancels` record `ctx.schedule` / `ctx.cancel` calls; timers do not run, use `simulate()`).
 
 ```typescript
 let state = t.init({});
@@ -92,3 +92,42 @@ const def = {
   },
 };
 ```
+
+## `simulate(options?)`
+
+Many actors on a virtual clock, with effects as data (ADR-015 D4). Every transition runs through the same step core
+as the Durable Object, so a simulation behaves like the runtime without the Workers runtime, a browser or real time.
+
+```typescript
+import { replayJournal, simulate } from "@actor-kit/test";
+
+const sim = simulate({ contracts: [AuctionContract, LobbyContract], seed: 42, now: Date.UTC(2026, 0, 1) });
+const room = await sim.spawn(AuctionContract, "lamp-sale", { item: "lamp" });
+
+room.send("alice", { type: "BID", amount: 10 });             // { ok: true } or { ok: false, error, detail? }
+room.send("ops", { type: "CLOSE" }, { callerType: "service" });
+room.view("alice");                                           // the caller's role view
+room.state;                                                   // typed from the contract
+
+const [charge] = sim.pendingEffects();                        // services never run on their own
+sim.resolve(charge, { receipt: "r1" });                       // runs onDone (sim.reject → onError)
+
+sim.advance("30s");                                           // fires due timers in (fireAt, id) order
+
+const other = sim.branch();                                   // an independent copy to explore another ending
+await replayJournal(AuctionContract, room.journal);           // every simulated journal replays exactly
+```
+
+- **Options**: `contracts` (reachable by name for forwards and init links; spawned contracts are added), `seed`
+  (for `ctx.id()` and `ctx.random()`, default 1), `now` (start of the virtual clock, default 0), `env`.
+- **`spawn(contract, id, input, { caller, callerType }?)`**: parses the input and runs `init` (async). Init links
+  read the linked actor's view as a service caller.
+- **`actor(contract, id)`**: a handle with `state`, `journal`, `timers`, `links`, `send`, `role`, `view` and
+  `connect(caller)`, which runs `lifecycle.connect` and returns `{ disconnect() }`. `callerConnections` counts the
+  caller's open simulated connections, as the runtime counts sockets.
+- **`pendingEffects()`**: service executions as `{ actor, effectId, service, input }`. `resolve` / `reject` take
+  the effect, or its effect id when that is unique across actors.
+- **`advance(duration)`**: moves the clock; each due timer fires on its own deadline (`ctx.lateBy` is 0).
+- **Forwards** are delivered at once with the original caller; `failedForwards()` lists those whose target was
+  never spawned.
+- Not simulated: link view pushes between actors (`link()` and `unlink()` are recorded on the actor).

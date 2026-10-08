@@ -77,13 +77,14 @@ A checkpoint is written every `checkpointEvery` events (default 100). Checkpoint
 |---|---|---|---|
 | `init` | — | parsed input | `def.init(payload, ctx)` |
 | `message` | message type | parsed payload | `handler(state, payload, ctx)` + `onUnlink` for recorded unlinks. **No guard**: only accepted messages are journaled, and replay never asks again. |
-| `lifecycle.connect` / `lifecycle.disconnect` | — | `{}` | `lifecycle.connect/disconnect(state, { caller, callerType }, ctx)` |
+| `lifecycle.connect` / `lifecycle.disconnect` | — | `{ callerConnections }` (`{}` in events written before ADR-015) | `lifecycle.connect/disconnect(state, { caller, callerType, callerConnections }, ctx)` |
 | `service.onDone` | service | `{ input, result }` | `onDone(state, result, input, ctx)` |
 | `service.onError` | service | `{ input, error: { message } }` | `onError(state, error, input, ctx)` |
 | `link.onUpdate` | link | `{ sourceId, view }` | `onUpdate(state, view, sourceId, ctx)` |
 | `link.onError` | link | `{ targetId, error: { message, code } }` | `onError(state, error, targetId, ctx)` |
 | `migrate` | — | `{ fromVersion, toVersion }` | `restore(migrate(serialize(state), fromVersion))` |
 | `restore` | — | `{ toSeq }` | Reserved for step 3. |
+| `timer` | timer name | `{ id, key, payload, fireAt, lateBy }` | `timers[name].handler(state, payload, { key, lateBy, ...ctx })` (ADR-015 D2) |
 
 Every transition that persists state appends exactly one event. A rejected message (no role, validation, guard) appends nothing.
 
