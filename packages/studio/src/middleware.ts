@@ -586,9 +586,7 @@ const ACTIONS_ROUTE = /^\/api\/actors\/([^/]+)\/([^/]+)\/actions$/;
 const MAX_ACTION_BODY = 4096;
 
 /** Every Studio action, by name: the actor RPC it calls and its arguments. */
-const ActionBody = z.discriminatedUnion("action", [
-  z.object({ action: z.literal("redrive"), effectId: z.string().min(1).max(64) }).strict(),
-]);
+const ActionBody = z.union([z.object({ action: z.literal("redrive"), effectId: z.string().min(1).max(64) }).strict()]);
 type ActionBody = z.infer<typeof ActionBody>;
 
 const ActionReply = z.union([z.object({ ok: z.literal(true) }), z.object({ ok: z.literal(false), error: z.string() })]);

@@ -405,13 +405,24 @@ function callerOf(event: JournalEvent): { caller: string; callerType: "user" | "
   return { caller: event.caller, callerType: event.callerType };
 }
 
+/** The message, service or link name an event was journaled under. */
+function nameOf(event: JournalEvent): string {
+  if (event.name === null) throw new Error(`Journal replay: event ${event.seq} (${event.causeType}) has no name`);
+  return event.name;
+}
+
+function roleOf(event: JournalEvent): string {
+  if (event.role === null) throw new Error(`Journal replay: event ${event.seq} (${event.causeType}) has no role`);
+  return event.role;
+}
+
 type ReplayCause = (def: ReplayableDef, state: unknown, event: JournalEvent) => StepCause;
 
 /** How each journaled cause becomes a step cause again. Handlers that are gone fail loudly. */
 const REPLAY_CAUSES: Record<Exclude<JournalCauseType, "init" | "restore">, ReplayCause> = {
   message: (def, _state, event) => {
-    const name = event.name ?? "";
-    const role = event.role ?? "";
+    const name = nameOf(event);
+    const role = roleOf(event);
     required(def.messages?.[role]?.[name], `message "${name}" for role "${role}"`);
     return { type: "message", name, payload: event.payload, role, ...callerOf(event) };
   },
@@ -424,20 +435,24 @@ const REPLAY_CAUSES: Record<Exclude<JournalCauseType, "init" | "restore">, Repla
     return { type: "lifecycle.disconnect", role: event.role, ...callerOf(event) };
   },
   "service.onDone": (def, _state, event) => {
-    required(def.services?.[event.name ?? ""]?.onDone, `service "${event.name}" onDone`);
-    return { type: "service.onDone", service: event.name ?? "", ...ServicePayload.parse(event.payload) };
+    const service = nameOf(event);
+    required(def.services?.[service]?.onDone, `service "${service}" onDone`);
+    return { type: "service.onDone", service, ...ServicePayload.parse(event.payload) };
   },
   "service.onError": (def, _state, event) => {
-    required(def.services?.[event.name ?? ""]?.onError, `service "${event.name}" onError`);
-    return { type: "service.onError", service: event.name ?? "", ...ServiceErrorPayload.parse(event.payload) };
+    const service = nameOf(event);
+    required(def.services?.[service]?.onError, `service "${service}" onError`);
+    return { type: "service.onError", service, ...ServiceErrorPayload.parse(event.payload) };
   },
   "link.onUpdate": (def, _state, event) => {
-    required(def.links?.[event.name ?? ""], `link "${event.name}"`);
-    return { type: "link.onUpdate", link: event.name ?? "", ...LinkUpdatePayload.parse(event.payload) };
+    const link = nameOf(event);
+    required(def.links?.[link], `link "${link}"`);
+    return { type: "link.onUpdate", link, ...LinkUpdatePayload.parse(event.payload) };
   },
   "link.onError": (def, _state, event) => {
-    required(def.links?.[event.name ?? ""]?.onError, `link "${event.name}" onError`);
-    return { type: "link.onError", link: event.name ?? "", ...LinkErrorPayload.parse(event.payload) };
+    const link = nameOf(event);
+    required(def.links?.[link]?.onError, `link "${link}" onError`);
+    return { type: "link.onError", link, ...LinkErrorPayload.parse(event.payload) };
   },
   migrate: (def, state, event) => {
     required(def.migrate, "migrate");

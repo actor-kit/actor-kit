@@ -100,7 +100,7 @@ export type {
   StepMessageSlot,
   StepResult,
 } from "./runtime/step";
-export { admitMessage, liveUnlinkTargets, step, stepInit } from "./runtime/step";
+export { admitMessage, liveStepFacts, liveUnlinkTargets, replayStepFacts, step, stepInit } from "./runtime/step";
 // Studio protocol (pure): timeline options, timeline rows, studio WebSocket frames
 export type {
   StudioActiveLink,

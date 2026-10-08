@@ -204,3 +204,31 @@ describe("postAction errors", () => {
     expect(await screen.findByText("HTTP 502")).toBeTruthy();
   });
 });
+
+describe("Outbox panel and postAction: boundaries", () => {
+  it("an hour away is shown as a clock time, not minutes", async () => {
+    await openOutbox([row("1:0", "retrying", { nextAttemptAt: Date.now() + 3_600_000 })]);
+    expect(screen.getByTestId("outbox-next-try").textContent).not.toContain("m)");
+  });
+
+  it("a retrying row without a next time shows no next try", async () => {
+    await openOutbox([row("1:0", "retrying", { nextAttemptAt: null })]);
+    expect(screen.queryByTestId("outbox-next-try")).toBeNull();
+  });
+
+  it("postAction resolves on success and rejects with a classified StudioApiError otherwise", async () => {
+    const { postAction, StudioApiError } = await import("../../packages/studio/ui/src/api");
+    await expect(postAction("counter", "a1", { action: "redrive", effectId: "1:0" })).resolves.toBeUndefined();
+    actionResponse = () => Response.json({ error: "nope" }, { status: 403 });
+    await expect(postAction("counter", "a1", { action: "redrive", effectId: "1:0" })).rejects.toMatchObject({
+      kind: "forbidden",
+      status: 403,
+    });
+    actionResponse = () => {
+      throw new TypeError("offline");
+    };
+    const error = await postAction("counter", "a1", { action: "redrive", effectId: "1:0" }).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(StudioApiError);
+    expect(error).toMatchObject({ kind: "network", status: null });
+  });
+});

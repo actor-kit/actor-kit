@@ -6,7 +6,9 @@
 import {
   admitMessage,
   createLiveFacts,
+  liveStepFacts,
   liveUnlinkTargets,
+  replayStepFacts,
   type StepFacts,
   step,
   stepInit,
@@ -248,7 +250,7 @@ describe("step: lifecycle", () => {
       facts(),
       {},
     );
-    expect(seen).toEqual([{ caller: "b", callerType: "user" }]);
+    expect(seen).toStrictEqual([{ caller: "b", callerType: "user" }]);
   });
 });
 
@@ -477,5 +479,150 @@ describe("liveUnlinkTargets", () => {
       "r1",
       "r2",
     ]);
+  });
+});
+
+describe("step: edges", () => {
+  it("tells unlinkTargets what this transition linked under the name and which unlinks ran before", () => {
+    const calls: unknown[] = [];
+    const spy: StepFacts = {
+      ...facts(),
+      unlinkTargets: (name, pending) => {
+        calls.push({ name, pending });
+        return [];
+      },
+    };
+    const twice = {
+      links: { room: { onUpdate: (s: S) => s, onUnlink: (s: S) => s }, team: { onUpdate: (s: S) => s } },
+      messages: {
+        user: {
+          GO: {
+            handler: (
+              s: S,
+              _p: unknown,
+              ctx: { link(n: string, id: string): void; unlink(n: string, id?: string): void },
+            ) => {
+              ctx.link("room", "r1");
+              ctx.link("team", "t1");
+              ctx.link("room", "r2");
+              ctx.unlink("team", "t1");
+              ctx.unlink("room");
+              return s;
+            },
+          },
+        },
+      },
+    };
+    step(twice, { log: [] }, msg("GO"), spy, {});
+    expect(calls).toEqual([{ name: "room", pending: { linked: ["r1", "r2"], earlier: [{ name: "team", id: "t1" }] } }]);
+  });
+
+  it("an actor without links ignores unlink calls", () => {
+    const state = { log: [] };
+    const bare = {
+      messages: {
+        user: {
+          GO: {
+            handler: (s: S, _p: unknown, ctx: { unlink(n: string): void }) => {
+              ctx.unlink("room");
+              return s;
+            },
+          },
+        },
+      },
+    };
+    expect(step(bare, state, msg("GO"), facts(), {}).state).toBe(state);
+  });
+
+  it("an actor without messages says which message is missing", () => {
+    expect(() => step({}, { log: [] }, msg("ADD"), facts(), {})).toThrow(
+      'Message "ADD" is not defined for role "user"',
+    );
+  });
+
+  it("says which lifecycle handler returned a Promise", () => {
+    const asyncConnect = { lifecycle: { disconnect: async (s: S) => s } };
+    expect(() =>
+      step(
+        asyncConnect,
+        { log: [] },
+        { type: "lifecycle.disconnect", caller: "a", callerType: "user", role: null },
+        facts(),
+        {},
+      ),
+    ).toThrow("lifecycle.disconnect returned a Promise. Handlers must be synchronous.");
+  });
+
+  it("connect is journaled under the role the caller connected with, even if the handler changes it", () => {
+    const result = step(
+      { ...def, lifecycle: { connect: (s: S) => ({ log: [...s.log, "promoted"] }) } },
+      { log: [] },
+      { type: "lifecycle.connect", caller: "a", callerType: "user", role: "user" },
+      facts(),
+      {},
+    );
+    expect(result.event.role).toBe("user");
+  });
+
+  it("disconnect resolves the role with the caller's type", () => {
+    const byType = {
+      roles: {
+        svc: (_s: S, _c: string, claims: { callerType: string }) => claims.callerType === "service",
+        user: () => true,
+      },
+      lifecycle: { disconnect: (s: S) => s },
+    };
+    const as = (callerType: "user" | "service") =>
+      step(byType, { log: [] }, { type: "lifecycle.disconnect", caller: "a", callerType, role: null }, facts(), {})
+        .event.role;
+    expect(as("service")).toBe("svc");
+    expect(as("user")).toBe("user");
+  });
+
+  it("disconnect without roles is journaled with no role", () => {
+    const result = step(
+      { lifecycle: { disconnect: (s: S) => s } },
+      { log: [] },
+      { type: "lifecycle.disconnect", caller: "a", callerType: "user", role: null },
+      facts(),
+      {},
+    );
+    expect(result.event.role).toBeNull();
+  });
+
+  it.each([
+    { type: "service.onDone", service: "S", input: 1, result: 2 },
+    { type: "service.onError", service: "S", input: 1, error: { message: "x" } },
+    { type: "link.onUpdate", link: "L", sourceId: "s", view: {} },
+    { type: "link.onError", link: "L", targetId: "t", error: { message: "m", code: "c" } },
+  ] as const)("a def without services or links leaves the state alone ($type)", (cause) => {
+    const state = { log: [] };
+    expect(step({}, state, cause, facts(), {}).state).toBe(state);
+    expect(
+      step({ services: { S: {} }, links: { L: { onUpdate: (s: S) => s } } }, state, cause, facts(), {}).state,
+    ).toBe(state);
+  });
+});
+
+describe("live and replay step facts", () => {
+  it("live: reads stored targets, merges this transition's links, records what it returned", () => {
+    const live = createLiveFacts({ now: () => 5, id: () => "i", random: () => 0 });
+    const f = liveStepFacts(live, (name) => (name === "room" ? ["r1"] : []));
+    expect(f.unlinkTargets("room", { linked: ["r2"], earlier: [] })).toEqual(["r1", "r2"]);
+    expect(f.ctx.now()).toBe(5);
+    expect(f.recorded()).toEqual({ now: 5, unlinked: [{ name: "room", ids: ["r1", "r2"] }] });
+  });
+
+  it("replay: hands back recorded targets and link views, and the recorded facts", () => {
+    const recorded = {
+      now: 9,
+      unlinked: [{ name: "room", ids: ["x"] }],
+      linkViews: [{ name: "room", id: "r1", view: { v: 1 } }],
+    };
+    const f = replayStepFacts(recorded);
+    expect(f.unlinkTargets("room", { linked: ["ignored"], earlier: [] })).toEqual(["x"]);
+    expect(f.takeLinkView("room", "r1")).toEqual({ v: 1 });
+    expect(f.ctx.now()).toBe(9);
+    expect(f.recorded()).toBe(recorded);
   });
 });
