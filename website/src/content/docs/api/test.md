@@ -130,4 +130,4 @@ await replayJournal(AuctionContract, room.journal);           // every simulated
 - **`advance(duration)`**: moves the clock; each due timer fires on its own deadline (`ctx.lateBy` is 0).
 - **Forwards** are delivered at once with the original caller; `failedForwards()` lists those whose target was
   never spawned.
-- Not simulated: link view pushes between actors (`link()` and `unlink()` are recorded on the actor).
+- Link views are pushed as the runtime pushes them: after every committed transition a source sends each actor linked to it its view (projected for the caller `<source type>:<subscriber id>`, a service), only when it changed; the subscriber runs `link.onUpdate` with the role added. A new link, also one made in `init`, gets the current view at once.

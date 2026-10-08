@@ -105,6 +105,14 @@ Surviving mutants that no test can kill, because the mutated program behaves ide
 | worker | studio-redact.ts:57 | `if (segment === undefined) continue` → `false` | `walk` returns REDACTED before `step` whenever a cursor is complete, so `step` never sees a past-the-end segment; the check is for the type checker. |
 | worker | studio-redact.ts:59 | `segment.kind === "literal" && …` → `true && …` | Kinds are any / one / literal; with any and one excluded only literal is left. |
 | worker | versions.ts:118 (×2) | `first?.state` / `first?.rebuild` → `first.…` | The chain schema has `.min(1)`, so `first` is always defined; `?.` is for unchecked index access. |
+| test | simulate.ts:175, 538 | `value !== null` → `true` (view spread) | Spreading `null` adds no keys, so `{ role, ...null }` equals `{ role }`. |
+| test | simulate.ts:207 (×2, one NoCoverage) | unknown-contract guard in `defOf` → removed / message `""` | Unreachable: an actor exists only after `spawn` registered its contract, and every lookup is for an existing actor's type. The guard is for the type checker. |
+| test | simulate.ts:253 | undeclared or present link `return false` → `true` | Subscribing such a link pushes nothing: an undeclared link has no source, and a present one's view is already pushed (dedupe). |
+| test | simulate.ts:261 | unlink(name) unsubscribes `[]` → `["Stryker was here"]` | A string has no `name`, so it points at no source and nothing is forgotten. |
+| test | simulate.ts:272 (×2) | `def.links?.[name]?.contract` → without `?.` | Only declared links are ever recorded on an actor, so the link definition always exists. |
+| test | simulate.ts:301 | `if (role === null) return` → `if (false)` | `def.views[null]` is `views["null"]`, undefined, so the next check returns. |
+| test | simulate.ts:353 | `if (from !== null)` before delivering forwards → `true` | `from` is null only for callbacks (onDone, onError, onUpdate), whose step has an empty outbox: there are no forwards to deliver. |
+| test | simulate.ts:555 (×2, one NoCoverage) | init's unlink targets `() => []` → `undefined` / `["…"]` | `init` gets no `unlink`, so the fact is never read. |
 
 ## Bugs found while hardening (2026-10-07)
 

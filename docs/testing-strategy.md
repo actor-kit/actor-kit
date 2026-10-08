@@ -175,10 +175,11 @@ await replayJournal(ChatRoomContract, journal); // throws if any handler used Da
 ### Multi-actor simulations (ADR-015 D4)
 
 `simulate()` (`@actor-kit/test`) runs many actors through the runtime's own step core on a virtual clock: services
-wait in `pendingEffects()` until the test resolves or rejects them, forwards are delivered, `advance()` fires timers
-like `alarm()`, ids and randoms are seeded, and `branch()` copies the whole simulation. Every simulated journal
-verifies with `replayJournal()`. Use it for multi-actor and time-dependent logic before reaching for the Workers
-pool (`tests/unit/simulate-examples.test.ts` ports the auction and chat-room scenarios).
+wait in `pendingEffects()` until the test resolves or rejects them, forwards are delivered, link views are pushed to
+subscribers through `link.onUpdate`, `advance()` fires timers like `alarm()`, ids and randoms are seeded, and
+`branch()` copies the whole simulation. Every simulated journal verifies with `replayJournal()`. Use it for
+multi-actor and time-dependent logic before reaching for the Workers pool (`tests/unit/simulate-examples.test.ts`
+ports the auction and chat-room scenarios; `simulate-link-pushes.test.ts` the Studio lobby link scenario).
 
 ### SQL on real SQLite in unit tests
 

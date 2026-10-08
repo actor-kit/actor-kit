@@ -13,9 +13,11 @@
  * - `ctx.now()` reads the virtual clock; `ctx.id()` and `ctx.random()` come from a seeded PRNG.
  * - Each actor writes a journal (events + checkpoints, with checksums), verifiable by
  *   `replayJournal(contract, actor.journal)`.
+ * - Link views are pushed as the runtime pushes them: after every committed transition a source
+ *   sends each actor linked to it its view (projected for caller `${source}:${subscriberId}`, a
+ *   service), only when it changed for that subscriber; the subscriber runs link.onUpdate with the
+ *   role added. A new link (also from init) gets the current view at once.
  * - `branch()` copies the whole simulation, so alternative futures can be explored.
- *
- * Not simulated: link view pushes between actors (link() and unlink() are recorded on the actor).
  */
 
 import type { ContractMessages, Duration } from "@actor-kit/core";
@@ -151,6 +153,8 @@ interface ActorData {
   timers: Array<SimTimer & { seq: number; index: number }>;
   links: Array<{ name: string; id: string }>;
   connections: Record<string, number>;
+  /** Last view pushed to each subscriber (`type/id` → role + JSON), so unchanged views are not pushed. */
+  pushed: Record<string, string>;
 }
 
 interface SimData {
@@ -166,6 +170,10 @@ const MAX_TIMER_FIRINGS = 10_000;
 type Caller = { readonly caller: string; readonly callerType: "user" | "service" };
 
 const keyOf = (address: ActorAddress): string => `${address.type}/${address.id}`;
+
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
 
 function errorOf(error: string | { message: string }): { message: string } {
   return typeof error === "string" ? { message: error } : { message: error.message };
@@ -237,17 +245,80 @@ function createSimulation(
     }
   }
 
-  function applyLinks(actor: ActorData, def: SimDef, result: StepResult): void {
-    for (const link of result.effects.getLinks()) {
+  /** Record links and unlinks; returns the links this transition added (they get the current view). */
+  function applyLinks(actor: ActorData, def: SimDef, result: StepResult): Array<{ name: string; id: string }> {
+    const added = result.effects.getLinks().filter((link) => {
       const declared = def.links?.[link.name] !== undefined;
       const present = actor.links.some((l) => l.name === link.name && l.id === link.id);
-      if (declared && !present) actor.links.push(link);
-    }
+      if (!declared || present) return false;
+      actor.links.push(link);
+      return true;
+    });
     for (const unlink of result.effects.getUnlinks()) {
-      actor.links = actor.links.filter(
-        (l) => l.name !== unlink.name || (unlink.id !== undefined && l.id !== unlink.id),
-      );
+      const kept = actor.links.filter((l) => l.name !== unlink.name || (unlink.id !== undefined && l.id !== unlink.id));
+      // unlink(name, id) unsubscribes from that target; unlink(name) cannot (as in the runtime, the
+      // ids are gone), so its targets keep the subscription and their dedupe.
+      const unsubscribed = unlink.id === undefined ? [] : actor.links.filter((l) => !kept.includes(l));
+      for (const link of unsubscribed) forgetPush(def, link, actor);
+      actor.links = kept;
     }
+    return added;
+  }
+
+  // --- Link pushes: the simulated counterpart of pushToSubscribers() / __receiveLinkUpdate() ---
+
+  /** Whether a subscriber's (declared) link points at `source`. */
+  const pointsAt = (def: SimDef, link: { name: string; id: string }, source: ActorData): boolean =>
+    link.id === source.id && def.links?.[link.name]?.contract.name === source.type;
+
+  /** The actor a link points at, if it has been spawned. */
+  const linkedSource = (def: SimDef, link: { name: string; id: string }): ActorData | undefined =>
+    Object.values(data.actors).find((source) => pointsAt(def, link, source));
+
+  function forgetPush(def: SimDef, link: { name: string; id: string }, subscriber: ActorData): void {
+    const source = linkedSource(def, link);
+    if (source !== undefined) delete source.pushed[keyOf(subscriber)];
+  }
+
+  /** Actors with a link to `source`, and the names of those links. */
+  function subscribersOf(source: ActorData): Array<{ subscriber: ActorData; names: string[] }> {
+    return Object.values(data.actors).flatMap((subscriber) => {
+      const def = defOf(subscriber.type);
+      const names = subscriber.links.filter((l) => pointsAt(def, l, source)).map((l) => l.name);
+      return names.length === 0 ? [] : [{ subscriber, names }];
+    });
+  }
+
+  function pushViews(source: ActorData): void {
+    for (const { subscriber, names } of subscribersOf(source)) push(source, subscriber, names);
+  }
+
+  /** Push `source`'s view to one subscriber, if it changed for it. */
+  function push(source: ActorData, subscriber: ActorData, names: readonly string[]): void {
+    const def = defOf(source.type);
+    const caller = `${source.type}:${subscriber.id}`;
+    const role = resolveRole(def.roles, source.state, caller, { callerType: "service" });
+    if (role === null) return;
+    const viewDef = def.views[role];
+    if (viewDef === undefined) return;
+    const view = viewDef.fn(source.state, caller);
+    const dedupeKey = `${role}:${JSON.stringify(view)}`;
+    if (source.pushed[keyOf(subscriber)] === dedupeKey) return;
+    source.pushed[keyOf(subscriber)] = dedupeKey;
+    const viewWithRole = { ...(isPlainRecord(view) ? view : {}), role };
+    for (const name of names) receive(subscriber, name, source.id, viewWithRole);
+  }
+
+  function receive(subscriber: ActorData, link: string, sourceId: string, view: Record<string, unknown>): void {
+    const cause: StepCause = { type: "link.onUpdate", link, sourceId, view };
+    const result = step(defOf(subscriber.type), subscriber.state, cause, factsFor(subscriber), env);
+    if (result.state !== subscriber.state) commit(subscriber, result, null);
+  }
+
+  /** A new link gets the target's current view at once (if the target exists yet). */
+  function subscribe(subscriber: ActorData, def: SimDef, link: { name: string; id: string }): void {
+    const source = linkedSource(def, link);
+    if (source !== undefined) push(source, subscriber, [link.name]);
   }
 
   function applyTimers(actor: ActorData, result: StepResult): void {
@@ -258,7 +329,8 @@ function createSimulation(
         actor.timers.push({ id, seq, index, name, key, payload, fireAt });
       }
     }
-    actor.timers.sort((a, b) => a.fireAt - b.fireAt || a.seq - b.seq || a.index - b.index);
+    // Timers are appended in (seq, index) order and the sort is stable, so equal deadlines keep it.
+    actor.timers.sort((a, b) => a.fireAt - b.fireAt);
   }
 
   /** `from`: who forwarded messages are sent as (null for transitions that cannot forward). */
@@ -274,12 +346,14 @@ function createSimulation(
         input: execution.input,
       });
     }
-    applyLinks(actor, def, result);
+    const added = applyLinks(actor, def, result);
     applyTimers(actor, result);
     appendJournal(actor, def, result.event);
     for (const forward of result.effects.toForwardEntries(actor.seq)) {
       if (from !== null) deliver(actor, def, forward.linkName, forward.targetId, forward.message, from);
     }
+    pushViews(actor);
+    for (const link of added) subscribe(actor, def, link);
   }
 
   function deliver(
@@ -499,9 +573,11 @@ function createSimulation(
         timers: [],
         links,
         connections: {},
+        pushed: {},
       };
       data.actors[keyOf(address)] = actor;
       appendJournal(actor, def, init.event);
+      for (const link of links) subscribe(actor, def, link);
       return handle(address);
     })();
   }
