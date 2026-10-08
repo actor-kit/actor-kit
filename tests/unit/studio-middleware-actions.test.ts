@@ -175,3 +175,126 @@ describe("studio actions: redrive", () => {
     expect(res?.headers.get("Allow")).toBe("POST");
   });
 });
+
+describe("studio actions: edge cases", () => {
+  it("refuses with a reason naming the mutate scope", async () => {
+    const { post } = setup();
+    const res = await post(
+      PATH,
+      { action: "redrive", effectId: "4:0" },
+      { "Cf-Access-Jwt-Assertion": await userJwt() },
+    );
+    expect(await res.json()).toEqual({ error: expect.stringContaining("mutate scope") });
+  });
+
+  it("says why a body is refused", async () => {
+    const { post } = setup();
+    const token = { "Cf-Access-Jwt-Assertion": await adminJwt() };
+    expect(await (await post(PATH, "{nope", token)).json()).toEqual({ error: "Action body must be JSON" });
+    expect(await (await post(PATH, { action: "explode" }, token)).json()).toEqual({
+      error: expect.stringMatching(/^Invalid action: .+/),
+    });
+  });
+
+  it("accepts a body of exactly 4096 characters and refuses a longer one with 413", async () => {
+    const { post, actorCalls } = setup();
+    const token = { "Cf-Access-Jwt-Assertion": await adminJwt() };
+    const json = JSON.stringify({ action: "redrive", effectId: "4:0" });
+    const exact = json + " ".repeat(4096 - json.length);
+    expect((await post(PATH, exact, token)).status).toBe(200);
+    const res = await post(PATH, `${exact} `, token);
+    expect(res.status).toBe(413);
+    expect(await res.json()).toEqual({ error: "Action body too large" });
+    expect(actorCalls()).toHaveLength(1);
+  });
+
+  it("refuses an invalid actor path with 400 and an unknown actor type with 404", async () => {
+    const { post, actorCalls } = setup();
+    const token = { "Cf-Access-Jwt-Assertion": await adminJwt() };
+    const body = { action: "redrive", effectId: "4:0" };
+    expect((await post("/__studio/api/actors/%ZZ/abc/actions", body, token)).status).toBe(400);
+    const res = await post("/__studio/api/actors/nope/abc/actions", body, token);
+    expect(res.status).toBe(404);
+    expect(await res.json()).toEqual({ error: expect.stringContaining("not found in env bindings") });
+    expect(actorCalls()).toEqual([]);
+  });
+
+  it("is a 500 with the message when the actor RPC throws", async () => {
+    const { post } = setup({
+      redrive: () => {
+        throw new Error("Studio is not enabled for this actor");
+      },
+    });
+    const res = await post(
+      PATH,
+      { action: "redrive", effectId: "4:0" },
+      { "Cf-Access-Jwt-Assertion": await adminJwt() },
+    );
+    expect(res.status).toBe(500);
+    expect(await res.json()).toEqual({ error: "Studio is not enabled for this actor" });
+  });
+
+  it("is a 500 when the actor's reply has the wrong shape", async () => {
+    const { post } = setup({ redrive: () => ({ done: true }) });
+    const res = await post(
+      PATH,
+      { action: "redrive", effectId: "4:0" },
+      { "Cf-Access-Jwt-Assertion": await adminJwt() },
+    );
+    expect(res.status).toBe(500);
+  });
+
+  it("works with multi-character actor types and ids", async () => {
+    const { post, actorCalls } = setup();
+    const res = await post(
+      "/__studio/api/actors/counter/room-42/actions",
+      { action: "redrive", effectId: "12:3" },
+      { "Cf-Access-Jwt-Assertion": await adminJwt() },
+    );
+    expect(res.status).toBe(200);
+    expect(actorCalls()).toEqual([{ method: "__redrive", args: [{ effectId: "12:3" }] }]);
+  });
+
+  it("only the exact actions path is an action: anything after it is not", async () => {
+    const studio = createActorKitStudio({ access: { keysFor: () => jwks }, log: () => {} });
+    const res = await studio(
+      new Request("http://localhost/__studio/api/actors/counter/abc/actions/extra", { method: "POST", body: "{}" }),
+      {},
+      ctx,
+    );
+    expect(res?.status).toBe(405);
+    expect(res?.headers.get("Allow")).toBe("GET, HEAD");
+  });
+
+  it("GET on the actions route says which method was refused", async () => {
+    const studio = createActorKitStudio({ access: { keysFor: () => jwks }, log: () => {} });
+    const res = await studio(new Request(`http://localhost${PATH}`), {}, ctx);
+    expect(await res?.json()).toEqual({ error: "Method GET not allowed" });
+  });
+});
+
+describe("agents and the caller-hash key", () => {
+  it("an empty STUDIO_CALLER_HASH_KEY refuses agents like a missing one (503 before any actor)", async () => {
+    const calls: string[] = [];
+    const ns = {
+      idFromName: (name: string) => ({ toString: () => name }),
+      idFromString: (hex: string) => ({ toString: () => hex }),
+      get: () => ({
+        __inspect: async () => {
+          calls.push("__inspect");
+          return {};
+        },
+      }),
+    };
+    const studio = createActorKitStudio({ access: { keysFor: () => jwks }, log: () => {} });
+    const res = await studio(
+      new Request("https://studio.example.com/__studio/api/actors/counter/a", {
+        headers: { "Cf-Access-Jwt-Assertion": await agentJwt() },
+      }),
+      { ...ACCESS_ENV, STUDIO_CALLER_HASH_KEY: "", COUNTER: ns },
+      ctx,
+    );
+    expect(res?.status).toBe(503);
+    expect(calls).toEqual([]);
+  });
+});

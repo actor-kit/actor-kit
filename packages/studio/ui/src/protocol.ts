@@ -106,9 +106,6 @@ export const TimelineResponseSchema = z.object({
 });
 export const ErrorBodySchema = z.object({ error: z.string() });
 
-/** A Studio action the actor accepted (refusals arrive as an error body). */
-export const ActionOkSchema = z.object({ ok: z.literal(true) });
-
 /** Actions an admin can take from Studio (POST .../actions, mutate scope). */
 export type StudioAction = { action: "redrive"; effectId: string };
 

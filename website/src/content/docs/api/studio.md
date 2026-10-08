@@ -95,13 +95,15 @@ Returns:
     caller: string;
     callerType: "user" | "service";
   }>;
-  outbox: Array<{              // Service executions
-    id: string;
+  outbox: Array<{              // Service executions, newest effect first
+    id: string;                // effect id, "seq:index" (ADR-015)
     service: string;
     payload: string;
-    status: string;            // "pending" | "done" | "failed"
-    attempts: number;
+    status: string;            // "pending" | "running" | "retrying" | "done" | "failed"
+    attempts: number;          // tries so far
     createdAt: number;
+    nextAttemptAt: number | null; // when a "retrying" row tries next
+    lastError: string | null;
   }>;
   activeLinks: Array<{         // Actor-to-actor links (subscriber side)
     targetType: string;
@@ -139,6 +141,18 @@ Returns:
   }>;
   hasMore: boolean;
 }
+```
+
+### `__redrive({ effectId })`
+
+Moves a dead letter (a `failed` execution) back to `pending` under the same effect id and runs it. Returns `{ ok: true }`, or `{ ok: false, error }` for any other row or an unknown id. Throws when Studio is disabled for the actor.
+
+Over HTTP it is a Studio action, which needs the `mutate` scope (an admin in `STUDIO_ADMIN_EMAILS`, or dev on localhost); everyone else gets 403 before the actor is contacted:
+
+```
+POST /__studio/api/actors/:type/:id/actions
+{ "action": "redrive", "effectId": "12:0" }
+→ 200 { "ok": true } | 409 { "error": "Effect 12:0 is not a failed execution" }
 ```
 
 ## Studio WebSocket protocol
@@ -205,7 +219,10 @@ The studio WebSocket bypasses role evaluation. It uses the reserved caller ID `_
 ```typescript
 {
   type: "studio.outbox";
-  outbox: Array<{ id: string; service: string; payload: string; status: string; attempts: number; createdAt: number }>;
+  outbox: Array<{
+    id: string; service: string; payload: string; status: string; attempts: number; createdAt: number;
+    nextAttemptAt: number | null; lastError: string | null;
+  }>;
 }
 ```
 

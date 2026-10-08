@@ -42,3 +42,26 @@ describe("outbox effect ids (ADR-015 D1)", () => {
     });
   });
 });
+
+describe("outbox collector getters", () => {
+  it("returns links, unlinks and forwards as declared, without the effect index", () => {
+    const outbox = createOutbox();
+    outbox.link("room", "r1");
+    outbox.unlink("room", "r1");
+    outbox.unlink("room");
+    outbox.forward("COUNTER", "c-1", { type: "PING" });
+    expect(outbox.getLinks()).toEqual([{ name: "room", id: "r1" }]);
+    expect(outbox.getUnlinks()).toEqual([
+      { name: "room", id: "r1" },
+      { name: "room", id: undefined },
+    ]);
+    expect(outbox.getForwards()).toEqual([{ linkName: "COUNTER", targetId: "c-1", message: { type: "PING" } }]);
+  });
+
+  it("starts empty", () => {
+    const outbox = createOutbox();
+    expect(outbox.getLinks()).toEqual([]);
+    expect(outbox.getUnlinks()).toEqual([]);
+    expect(outbox.getForwards()).toEqual([]);
+  });
+});

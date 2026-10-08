@@ -22,3 +22,4 @@ recordings/*.mp4
 recordings/*.log
 recordings/.state/
 recordings/shots/
+coverage/

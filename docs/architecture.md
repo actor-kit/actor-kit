@@ -278,28 +278,39 @@ CREATE TABLE journal_checkpoints (seq INTEGER PRIMARY KEY, version INTEGER, stat
 - `journal: false` turns it off; `journal: { keep }` prunes events at or below the newest checkpoint `<= lastSeq - keep`.
 - `readJournal(sql)` and `applyJournalEvent()` (`@actor-kit/worker/testing`) and `replayJournal()` (`@actor-kit/test`) read and fold it. Replay never runs guards or side effects.
 
-### Transactional outbox
+### Transactional outbox and retries (ADR-003, ADR-015 D1)
+
+Every effect a transition declares (`execute`, `forward`) gets an **effect id** `seq:index`: `seq` is the
+transition's number, read inside the commit by `nextTransitionSeq()` (one past the larger of
+`snapshots.last_seq` and the journal's high-water mark, so it also works with `journal: false`), and `index` counts
+the transition's effects in declaration order. Rows in `executions` and `forwards` are keyed by it and sort by
+`(seq, idx)` as integers. Modules: `runtime/effect-id.ts`, `runtime/outbox.ts` (collector),
+`runtime/outbox-store.ts` (SQL), `runtime/retry.ts` (policy), `runtime/migrations.ts` (schema).
 
 ```
-Transition completes → state + emissions collected
-  → BEGIN TRANSACTION
-      INSERT INTO snapshots (state)
-      INSERT INTO outbox (id, type, payload) for each emit()
-    COMMIT
-  → Schedule outbox drain (non-blocking)
+Transition → commit(): BEGIN
+    seq = nextTransitionSeq()
+    INSERT executions/forwards (id = seq:index, status pending)
+    INSERT OR REPLACE snapshots (…, last_seq = seq) + INSERT events (seq, …)
+  COMMIT → syncAlarm() → drainExecutions() (async)
 
-Outbox drain:
-  → SELECT * FROM outbox WHERE status = 'pending' ORDER BY created_at
-  → For each:
-      Execute side effect (queue.send, fetch, rpc.call)
-      If success: UPDATE status = 'sent'
-      If failure: INCREMENT attempts
-        If attempts >= 3: move to emission_failures, deliver EMISSION_FAILED event
-        Else: exponential backoff (1s, 5s, 25s)
+drainExecutions(): until no row is due
+  due = pending, or retrying with next_attempt_at <= now (ORDER BY seq, idx)
+  for each: startAttempt (status running, attempts + 1)
+            fn(input, env, { effectId, attempt })
+            settleAttempt(outcome, attempt, policy):
+              ok          → done   (+ onDone transition, same transaction as the row update)
+              failed, more tries left → retrying, next_attempt_at = now + backoff; syncAlarm()
+              failed, last try        → failed (+ onError transition); log actor_kit.outbox.failed
 
-DO restart:
-  → Drain outbox immediately (pending items from before crash)
+alarm(): drain due rows, then syncAlarm() (one alarm: the earliest next_attempt_at, or none)
+wake:    rows left running by a crash go back to pending (at-least-once), then drain
+redrive: __redrive({ effectId }) / Studio action — failed → pending, attempts 0, same effect id
 ```
+
+Retry policy per service: `retry: { attempts, backoff: { baseMs, factor, maxMs, jitter } }`, default 3 tries,
+1s then 5s apart, ±20% jitter. `failed` is final: failed rows are the dead letters. Forwards keep a single try
+(their attempts are counted; retrying them is not built yet).
 
 ### Actor-to-actor communication (DO RPC)
 

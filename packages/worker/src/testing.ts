@@ -19,7 +19,7 @@ export type { ChangeEntry } from "./runtime/cdc";
 export { createChangeEntry } from "./runtime/cdc";
 // Effect ids, retries, outbox store (ADR-015 D1)
 export type { EffectIdParts } from "./runtime/effect-id";
-export { compareEffectIds, formatEffectId, parseEffectId } from "./runtime/effect-id";
+export { formatEffectId, parseEffectId } from "./runtime/effect-id";
 export { getTokenFromRequest } from "./runtime/get-token";
 // Actor journal (ADR-013): facts, events, replay
 export type {
@@ -38,6 +38,7 @@ export type {
   ReplayFacts,
 } from "./runtime/journal";
 export {
+  appendJournalEvent,
   applyJournalEvent,
   checksumState,
   createLiveFacts,

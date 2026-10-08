@@ -24,15 +24,3 @@ export function parseEffectId(id: string): EffectIdParts | null {
   if (match === null) return null;
   return { seq: Number(match[1]), index: Number(match[2]) };
 }
-
-/** Order by (seq, index) as integers; malformed ids sort after every valid one, by string. */
-export function compareEffectIds(a: string, b: string): number {
-  const pa = parseEffectId(a);
-  const pb = parseEffectId(b);
-  if (pa === null || pb === null) {
-    if (pa !== null) return -1;
-    if (pb !== null) return 1;
-    return a < b ? -1 : a > b ? 1 : 0;
-  }
-  return pa.seq - pb.seq || pa.index - pb.index;
-}

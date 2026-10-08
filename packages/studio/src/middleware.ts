@@ -206,30 +206,44 @@ interface RouteInfo {
   actorId?: string;
 }
 
+const ACTOR_ROUTES: ReadonlyArray<readonly [RegExp, StudioRoute]> = [
+  [/^\/api\/actors\/([^/]+)\/([^/]+)\/timeline$/, "timeline"],
+  [/^\/api\/actors\/([^/]+)\/([^/]+)\/view$/, "view"],
+  [/^\/api\/actors\/([^/]+)\/([^/]+)\/actions$/, "action"],
+  [/^\/api\/actors\/([^/]+)\/([^/]+)$/, "inspect"],
+  [/^\/actors\/([^/]+)\/([^/]+)\/ws$/, "ws"],
+];
+
+/** The raw (still encoded) actor type and id of an actor route, or null when `path` doesn't match. */
+function actorRouteParams(path: string, pattern: RegExp): readonly [string, string] | null {
+  const match = path.match(pattern);
+  const actorType = match?.[1];
+  const actorId = match?.[2];
+  return actorType === undefined || actorId === undefined ? null : [actorType, actorId];
+}
+
+function isApiPath(path: string): boolean {
+  return path === "/api" || path.startsWith("/api/");
+}
+
+function actorRouteInfo(route: StudioRoute, [rawType, rawId]: readonly [string, string]): RouteInfo {
+  const actorType = decodeSegment(rawType);
+  const actorId = decodeSegment(rawId);
+  return {
+    route,
+    ...(actorType === null ? {} : { actorType: actorType.slice(0, MAX_TYPE_LENGTH) }),
+    ...(actorId === null ? {} : { actorId: actorId.slice(0, MAX_ID_LENGTH) }),
+  };
+}
+
 function classify(path: string): RouteInfo {
   if (path === "/api/actors" || path === "/api/actors/") return { route: "list" };
   if (path === "/api/actors/types") return { route: "types" };
-  const patterns: Array<[RegExp, StudioRoute]> = [
-    [/^\/api\/actors\/([^/]+)\/([^/]+)\/timeline$/, "timeline"],
-    [/^\/api\/actors\/([^/]+)\/([^/]+)\/view$/, "view"],
-    [/^\/api\/actors\/([^/]+)\/([^/]+)\/actions$/, "action"],
-    [/^\/api\/actors\/([^/]+)\/([^/]+)$/, "inspect"],
-    [/^\/actors\/([^/]+)\/([^/]+)\/ws$/, "ws"],
-  ];
-  for (const [pattern, route] of patterns) {
-    const match = path.match(pattern);
-    if (match?.[1] !== undefined && match[2] !== undefined) {
-      const actorType = decodeSegment(match[1]);
-      const actorId = decodeSegment(match[2]);
-      return {
-        route,
-        ...(actorType === null ? {} : { actorType: actorType.slice(0, MAX_TYPE_LENGTH) }),
-        ...(actorId === null ? {} : { actorId: actorId.slice(0, MAX_ID_LENGTH) }),
-      };
-    }
+  for (const [pattern, route] of ACTOR_ROUTES) {
+    const params = actorRouteParams(path, pattern);
+    if (params !== null) return actorRouteInfo(route, params);
   }
-  if (path === "/api" || path.startsWith("/api/")) return { route: "unknown" };
-  return { route: "ui" };
+  return { route: isApiPath(path) ? "unknown" : "ui" };
 }
 
 /** Apply `f` without introducing a Promise when `value` is already available. */
@@ -308,35 +322,46 @@ function route(
   principal: StudioPrincipal,
 ): Response | Promise<Response> {
   // Actions are the only POST route, and the only route that changes an actor.
-  const actionMatch = path.match(ACTIONS_ROUTE);
-  if (actionMatch?.[1] !== undefined && actionMatch[2] !== undefined) {
-    if (request.method !== "POST") {
-      return jsonError(405, `Method ${request.method} not allowed`, { Allow: "POST" });
-    }
-    return handleAction(request, actionMatch[1], actionMatch[2], env, principal);
-  }
+  const action = actorRouteParams(path, ACTIONS_ROUTE);
+  if (action !== null) return routeAction(request, action, env, principal);
 
   if (request.method !== "GET" && request.method !== "HEAD") {
     return jsonError(405, `Method ${request.method} not allowed`, { Allow: ALLOWED_METHODS });
   }
 
-  // Agents only ever see hashed callers; without the key the DO could not hash, so refuse up front.
+  const refusal = agentRefusal(env, principal);
+  if (refusal !== null) return refusal;
+
+  if (isApiPath(path)) return routeApi(path, url, env, principal);
+
+  // /actors/:type/:id/ws — WebSocket upgrade
+  const ws = actorRouteParams(path, WS_ROUTE);
+  if (ws !== null) return handleStudioWebSocket(request, ws[0], ws[1], env, principal);
+
+  return serveUi(path);
+}
+
+const WS_ROUTE = /^\/actors\/([^/]+)\/([^/]+)\/ws$/;
+
+function routeAction(
+  request: Request,
+  [rawType, rawId]: readonly [string, string],
+  env: Record<string, unknown>,
+  principal: StudioPrincipal,
+): Response | Promise<Response> {
+  if (request.method !== "POST") {
+    return jsonError(405, `Method ${request.method} not allowed`, { Allow: "POST" });
+  }
+  return handleAction(request, rawType, rawId, env, principal);
+}
+
+/** Agents only ever see hashed callers; without the key the DO could not hash, so refuse up front. */
+function agentRefusal(env: Record<string, unknown>, principal: StudioPrincipal): Response | null {
   const hashKey = env["STUDIO_CALLER_HASH_KEY"];
   if (principal.kind === "agent" && (typeof hashKey !== "string" || hashKey === "")) {
     return jsonError(503, "Studio is not configured for agents: set STUDIO_CALLER_HASH_KEY");
   }
-
-  if (path === "/api" || path.startsWith("/api/")) {
-    return routeApi(path, url, env, principal);
-  }
-
-  // Match /actors/:type/:id/ws — WebSocket upgrade
-  const wsMatch = path.match(/^\/actors\/([^/]+)\/([^/]+)\/ws$/);
-  if (wsMatch?.[1] !== undefined && wsMatch[2] !== undefined) {
-    return handleStudioWebSocket(request, wsMatch[1], wsMatch[2], env, principal);
-  }
-
-  return serveUi(path);
+  return null;
 }
 
 /** Agents get hashed callers; people (and dev) use the DO's default human view. */

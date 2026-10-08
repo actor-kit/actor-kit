@@ -16,7 +16,7 @@ import {
   timelineEntry,
 } from "./studio-ui-pages.helpers";
 
-let actionResponse: () => Response = () => Response.json({ ok: true });
+let actionResponse: () => Response | Promise<Response> = () => Response.json({ ok: true });
 
 beforeEach(() => {
   actionResponse = () => Response.json({ ok: true });
@@ -89,5 +89,118 @@ describe("Outbox panel: retries and dead letters", () => {
     await openOutbox([row("3:0", "failed")]);
     fireEvent.click(screen.getByRole("button", { name: /redrive 3:0/i }));
     expect(await screen.findByText(/need the mutate scope/)).toBeTruthy();
+  });
+});
+
+describe("Outbox panel: formatting", () => {
+  const nextTry = (offsetMs: number) => {
+    cleanup();
+    return openOutbox([row("1:0", "retrying", { nextAttemptAt: Date.now() + offsetMs })]).then(
+      () => screen.getByTestId("outbox-next-try").textContent,
+    );
+  };
+
+  it("shows seconds under a minute, minutes under an hour, then a clock time", async () => {
+    expect(await nextTry(5_000)).toBe("(in 5s)");
+    expect(await nextTry(59_000)).toBe("(in 59s)");
+    expect(await nextTry(60_000)).toBe("(in 1m)");
+    expect(await nextTry(150_000)).toBe("(in 3m)");
+    expect(await nextTry(3_599_000)).toBe("(in 60m)");
+    expect(await nextTry(7_200_000)).toMatch(/^\(\d{1,2}:\d{2}/);
+  });
+
+  it("an overdue retry is due in 0s, never a negative time", async () => {
+    expect(await nextTry(-30_000)).toBe("(in 0s)");
+  });
+
+  it("shows no next try for a non-retrying row, even with a time", async () => {
+    await openOutbox([row("1:0", "pending", { nextAttemptAt: Date.now() + 5000 })]);
+    expect(screen.queryByTestId("outbox-next-try")).toBeNull();
+  });
+
+  it("colours each status, with grey for any other", async () => {
+    await openOutbox([
+      row("6:0", "done"),
+      row("5:0", "failed"),
+      row("4:0", "pending"),
+      row("3:0", "running"),
+      row("2:0", "retrying"),
+      row("1:0", "parked"),
+    ]);
+    const statusCells = screen.getAllByTestId("outbox-row").map((r) => r.children[2]?.className ?? "");
+    expect(statusCells).toEqual([
+      "px-4 py-2 text-emerald-400",
+      "px-4 py-2 text-red-400",
+      "px-4 py-2 text-amber-400",
+      "px-4 py-2 text-sky-400",
+      "px-4 py-2 text-amber-300",
+      "px-4 py-2 text-zinc-400",
+    ]);
+  });
+
+  it("leaves the last error cell empty when there is none", async () => {
+    await openOutbox([row("1:0", "done", { lastError: null })]);
+    expect(screen.getByTestId("outbox-row").children[4]?.textContent).toBe("");
+  });
+
+  it("shows no error banner until an action fails", async () => {
+    await openOutbox([row("3:0", "failed")]);
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+});
+
+describe("Outbox panel: redrive in flight", () => {
+  it("disables the button while the redrive is in flight, then enables it again", async () => {
+    let release: (r: Response) => void = () => {};
+    actionResponse = () =>
+      new Promise<Response>((resolve) => {
+        release = resolve;
+      });
+    await openOutbox([row("3:0", "failed")]);
+    const button = screen.getByRole("button", { name: /redrive 3:0/i });
+    fireEvent.click(button);
+    await waitFor(() => expect(button.hasAttribute("disabled")).toBe(true));
+    await act(async () => release(Response.json({ ok: true })));
+    await waitFor(() => expect(button.hasAttribute("disabled")).toBe(false));
+  });
+
+  it("clears an earlier error when the next redrive succeeds", async () => {
+    actionResponse = () => Response.json({ error: "nope" }, { status: 409 });
+    await openOutbox([row("3:0", "failed")]);
+    fireEvent.click(screen.getByRole("button", { name: /redrive 3:0/i }));
+    expect(await screen.findByText("nope")).toBeTruthy();
+    actionResponse = () => Response.json({ ok: true });
+    fireEvent.click(screen.getByRole("button", { name: /redrive 3:0/i }));
+    await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
+  });
+});
+
+describe("postAction errors", () => {
+  it("sends JSON", async () => {
+    await openOutbox([row("3:0", "failed")]);
+    fireEvent.click(screen.getByRole("button", { name: /redrive 3:0/i }));
+    await waitFor(() => expect(actionCalls()).toHaveLength(1));
+    expect(new Headers(actionCalls()[0]?.init?.headers).get("Content-Type")).toBe("application/json");
+  });
+
+  it("reports a network failure", async () => {
+    actionResponse = () => {
+      throw new TypeError("Failed to fetch");
+    };
+    await openOutbox([row("3:0", "failed")]);
+    fireEvent.click(screen.getByRole("button", { name: /redrive 3:0/i }));
+    expect(await screen.findByText("Network error: could not reach the Studio API")).toBeTruthy();
+  });
+
+  it("falls back to the status when the error body cannot be read", async () => {
+    class Unreadable extends Response {
+      override text(): Promise<string> {
+        return Promise.reject(new Error("stream broken"));
+      }
+    }
+    actionResponse = () => new Unreadable(null, { status: 502 });
+    await openOutbox([row("3:0", "failed")]);
+    fireEvent.click(screen.getByRole("button", { name: /redrive 3:0/i }));
+    expect(await screen.findByText("HTTP 502")).toBeTruthy();
   });
 });
