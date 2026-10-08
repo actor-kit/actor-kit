@@ -9,10 +9,11 @@
     "test:e2e": "pnpm build && pnpm exec playwright test",
     "test:e2e-agent": "pnpm build && pnpm --filter actor-kit-chat-example build && E2E_TELEMETRY_DISABLED=1 pnpm --filter @actor-kit/e2e-agent test:e2e",
     "record:studio": "pnpm build && pnpm --filter actor-kit-chat-example build && node scripts/record-studio-walkthrough.mts",
-    "lint": "biome check packages/core/src/ packages/worker/src/ packages/client/src/ packages/react/src/ packages/test/src/ packages/studio/src/ packages/studio-cli/src/ tests/ scripts/",
-    "lint:fix": "biome check --write packages/core/src/ packages/worker/src/ packages/client/src/ packages/react/src/ packages/test/src/ packages/studio/src/ packages/studio-cli/src/ tests/ scripts/",
+    "lint": "biome check packages/core/src/ packages/worker/src/ packages/client/src/ packages/react/src/ packages/test/src/ packages/studio/src/ packages/studio-cli/src/ packages/studio/ui/src/ packages/storybook/src/ tests/ scripts/",
+    "lint:fix": "biome check --write packages/core/src/ packages/worker/src/ packages/client/src/ packages/react/src/ packages/test/src/ packages/studio/src/ packages/studio-cli/src/ packages/studio/ui/src/ packages/storybook/src/ tests/ scripts/",
     "build": "pnpm -r run build",
-    "prepare": "husky"
+    "prepare": "husky",
+    "crap": "vitest run --coverage --coverage.reporter=json --coverage.include='packages/*/src/**' --coverage.include='packages/studio/ui/src/**' --silent > /dev/null && node scripts/crap.mts"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.5.14",
@@ -28,9 +29,11 @@
     "@types/node": "^26.6.4",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
+    "@vitest/coverage-v8": "~4.1.11",
     "husky": "^9.1.7",
     "jose": "^6.2.12",
     "jsdom": "^30.1.1",
+    "oxc-parser": "^0.152.0",
     "react": "^19.3.0",
     "react-dom": "^19.3.0",
     "tsdown": "^0.23.0",

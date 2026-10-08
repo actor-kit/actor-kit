@@ -110,9 +110,18 @@ async function execute(
 }
 
 /** Run the CLI. Returns the exit code. Never prints credentials. */
-export async function runCli(argv: readonly string[], env: Record<string, string | undefined>, io: CliIo): Promise<number> {
+export async function runCli(
+  argv: readonly string[],
+  env: Record<string, string | undefined>,
+  io: CliIo,
+): Promise<number> {
   try {
-    const { values, positionals } = parseArgs({ args: [...argv], options: OPTIONS, allowPositionals: true, strict: true });
+    const { values, positionals } = parseArgs({
+      args: [...argv],
+      options: OPTIONS,
+      allowPositionals: true,
+      strict: true,
+    });
     const [group, command, ...rest] = positionals;
     if (values.help === true && group === "studio") {
       io.stdout(USAGE);

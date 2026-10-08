@@ -1,6 +1,6 @@
 import { Link, useNavigate } from "@tanstack/react-router";
 import { type FormEvent, useEffect, useState } from "react";
-import { type ActorEntry, StudioApiError, fetchActorTypes, fetchActors } from "../api";
+import { type ActorEntry, fetchActors, fetchActorTypes, StudioApiError } from "../api";
 
 /** Rows per dashboard page. One extra row is requested to know whether a next page exists. */
 export const PAGE_SIZE = 50;

@@ -31,6 +31,9 @@
       "packages/react/src/**/*.ts",
       "packages/test/src/**/*.ts",
       "packages/studio/src/**/*.ts",
+      "packages/studio/ui/src/**/*.{ts,tsx}",
+      "packages/studio-cli/src/**/*.ts",
+      "packages/storybook/src/**/*.ts",
       "tests/**/*.ts",
       "scripts/**/*.mts",
       "!**/.wrangler"

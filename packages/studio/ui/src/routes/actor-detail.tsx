@@ -189,6 +189,7 @@ function ActorDetail({ actorType, actorId }: { actorType: string; actorId: strin
       <div className="flex gap-1 border-b border-zinc-800 mb-4" data-testid="tab-bar">
         {tabs.map((tab) => (
           <button
+            type="button"
             key={tab.key}
             onClick={() => setActiveTab(tab.key)}
             className={`px-3 py-2 text-sm cursor-pointer border-b-2 ${
@@ -208,7 +209,10 @@ function ActorDetail({ actorType, actorId }: { actorType: string; actorId: strin
 
       {/* Tab content */}
       {activeTab === "state" && (
-        <div className="bg-zinc-900 border border-zinc-800 rounded p-4 text-sm overflow-x-auto" data-testid="state-panel">
+        <div
+          className="bg-zinc-900 border border-zinc-800 rounded p-4 text-sm overflow-x-auto"
+          data-testid="state-panel"
+        >
           <JsonTree data={inspect.state} />
         </div>
       )}
@@ -324,8 +328,12 @@ function ActorDetail({ actorType, actorId }: { actorType: string; actorId: strin
                   </tr>
                 </thead>
                 <tbody>
-                  {inspect.activeLinks.map((link, i) => (
-                    <tr key={i} className="border-b border-zinc-800/50" data-testid="active-link-row">
+                  {inspect.activeLinks.map((link) => (
+                    <tr
+                      key={`${link.linkName}:${link.targetType}:${link.targetId}`}
+                      className="border-b border-zinc-800/50"
+                      data-testid="active-link-row"
+                    >
                       <td className="px-4 py-2">{link.linkName}</td>
                       <td className="px-4 py-2">
                         {link.targetType}:{link.targetId}
@@ -352,8 +360,12 @@ function ActorDetail({ actorType, actorId }: { actorType: string; actorId: strin
                   </tr>
                 </thead>
                 <tbody>
-                  {inspect.linkSubscribers.map((sub, i) => (
-                    <tr key={i} className="border-b border-zinc-800/50" data-testid="link-subscriber-row">
+                  {inspect.linkSubscribers.map((sub) => (
+                    <tr
+                      key={`${sub.subscriberType}:${sub.subscriberId}`}
+                      className="border-b border-zinc-800/50"
+                      data-testid="link-subscriber-row"
+                    >
                       <td className="px-4 py-2">{sub.subscriberType}</td>
                       <td className="px-4 py-2">{sub.subscriberId}</td>
                     </tr>

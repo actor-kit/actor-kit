@@ -18,10 +18,22 @@
     "packages/client/src/**/*.ts",
     "packages/react/src/**/*.ts",
     "packages/test/src/**/*.ts",
+    "packages/storybook/src/**/*.ts",
+    "packages/studio/src/**/*.ts",
+    "packages/studio/ui/src/**/*.{ts,tsx}",
+    "packages/studio-cli/src/**/*.ts",
     "!packages/*/src/index.ts",
-    "!packages/worker/src/actor.ts"
+    "!packages/worker/src/actor.ts",
+    "!packages/studio/src/ui-assets.ts",
+    "!packages/studio-cli/src/bin.ts",
+    "!packages/studio-cli/src/mcp-bin.ts",
+    "!packages/studio/ui/src/main.tsx",
+    "!packages/studio/ui/src/route-tree.tsx"
   ],
-  "reporters": ["clear-text", "html"],
+  "reporters": [
+    "clear-text",
+    "html"
+  ],
   "thresholds": {
     "high": 90,
     "low": 70,

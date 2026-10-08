@@ -1,8 +1,8 @@
 import { useEffect, useReducer } from "react";
-import { StudioApiError, fetchInspect, fetchTimeline } from "../api";
+import { fetchInspect, fetchTimeline, StudioApiError } from "../api";
 import type { InspectResult, TimelineItem } from "../protocol";
 import { parseStudioFrame } from "../protocol";
-import { type RequestFailure, type StudioStatus, initialStudioState, studioReducer } from "../studio-state";
+import { initialStudioState, type RequestFailure, type StudioStatus, studioReducer } from "../studio-state";
 
 export interface StudioWsState {
   inspect: InspectResult | null;

@@ -77,7 +77,13 @@ export function timelineShape(entries: readonly TimelineEntry[]): TimelineShapeE
   return ordered.map((entry, index) => {
     const cause = CauseSchema.safeParse(parseJson(entry.causeData));
     const previous = ordered[index - 1];
-    const shape: TimelineShapeEntry = { id: entry.id, at: entry.createdAt, causeType: entry.causeType, checksum: entry.checksum, changedPaths: [] };
+    const shape: TimelineShapeEntry = {
+      id: entry.id,
+      at: entry.createdAt,
+      causeType: entry.causeType,
+      checksum: entry.checksum,
+      changedPaths: [],
+    };
     if (cause.success) {
       const { messageType, service, role, callerType, payload, input } = cause.data;
       if (messageType !== undefined) shape.messageType = messageType;

@@ -13,7 +13,7 @@ import { timelineShape } from "./shape";
 
 const READ_ONLY = { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true } as const;
 
-const actorType = z.string().min(1).max(128).describe("Actor type, e.g. \"game\"");
+const actorType = z.string().min(1).max(128).describe('Actor type, e.g. "game"');
 const actorId = z.string().min(1).max(512).describe("Actor id (name or 64-hex DO id)");
 
 async function respond(run: () => Promise<unknown>): Promise<CallToolResult> {
@@ -60,7 +60,7 @@ export function createStudioMcpServer(client: StudioClient): McpServer {
     "studio_inspect",
     {
       description:
-        "Current state, connections, outbox and links of one actor. Values the actor declared in studio.redact come back as \"[redacted]\"; callers are hashed for agents.",
+        'Current state, connections, outbox and links of one actor. Values the actor declared in studio.redact come back as "[redacted]"; callers are hashed for agents.',
       inputSchema: { actorType, actorId },
       annotations: READ_ONLY,
     },
@@ -95,7 +95,12 @@ export function createStudioMcpServer(client: StudioClient): McpServer {
     "studio_view",
     {
       description: "What one role (and caller, for perCaller views) would receive, redacted like inspect.",
-      inputSchema: { actorType, actorId, role: z.string().min(1).max(128), caller: z.string().min(1).max(512).optional() },
+      inputSchema: {
+        actorType,
+        actorId,
+        role: z.string().min(1).max(128),
+        caller: z.string().min(1).max(512).optional(),
+      },
       annotations: READ_ONLY,
     },
     (args) =>

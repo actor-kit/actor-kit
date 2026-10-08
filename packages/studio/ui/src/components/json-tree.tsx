@@ -66,7 +66,7 @@ function CollapsibleObject({ entries, level }: { entries: [string, unknown][]; l
 
   if (!open) {
     return (
-      <button onClick={() => setOpen(true)} className="text-zinc-500 hover:text-zinc-300 cursor-pointer">
+      <button type="button" onClick={() => setOpen(true)} className="text-zinc-500 hover:text-zinc-300 cursor-pointer">
         {"{"} {entries.length} keys {"}"}
       </button>
     );
@@ -75,7 +75,7 @@ function CollapsibleObject({ entries, level }: { entries: [string, unknown][]; l
   const hidden = entries.length - visible;
   return (
     <div>
-      <button onClick={() => setOpen(false)} className="text-zinc-500 hover:text-zinc-300 cursor-pointer">
+      <button type="button" onClick={() => setOpen(false)} className="text-zinc-500 hover:text-zinc-300 cursor-pointer">
         {"{"}
       </button>
       <div className="pl-4 border-l border-zinc-800">
@@ -99,7 +99,7 @@ function CollapsibleArray({ data, level }: { data: unknown[]; level: number }) {
 
   if (!open) {
     return (
-      <button onClick={() => setOpen(true)} className="text-zinc-500 hover:text-zinc-300 cursor-pointer">
+      <button type="button" onClick={() => setOpen(true)} className="text-zinc-500 hover:text-zinc-300 cursor-pointer">
         [{data.length} items]
       </button>
     );
@@ -108,11 +108,12 @@ function CollapsibleArray({ data, level }: { data: unknown[]; level: number }) {
   const hidden = data.length - visible;
   return (
     <div>
-      <button onClick={() => setOpen(false)} className="text-zinc-500 hover:text-zinc-300 cursor-pointer">
+      <button type="button" onClick={() => setOpen(false)} className="text-zinc-500 hover:text-zinc-300 cursor-pointer">
         [
       </button>
       <div className="pl-4 border-l border-zinc-800">
         {data.slice(0, visible).map((item, i) => (
+          // biome-ignore lint/suspicious/noArrayIndexKey: JSON array items have no identity besides their position
           <div key={i}>
             <JsonTree data={item} level={level + 1} />
             {i < data.length - 1 && <span className="text-zinc-600">,</span>}

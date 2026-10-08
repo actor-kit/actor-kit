@@ -175,8 +175,13 @@ export function JsonDiff({ before, after }: JsonDiffProps) {
   const hidden = diffs.length - MAX_DIFF_ROWS;
   return (
     <div className="space-y-0.5">
-      {diffs.slice(0, MAX_DIFF_ROWS).map((diff, i) => (
-        <div key={i} className="flex gap-2 items-baseline min-w-0 break-all" data-diff-row data-diff-type={diff.type}>
+      {diffs.slice(0, MAX_DIFF_ROWS).map((diff) => (
+        <div
+          key={`${diff.type}:${diff.path}`}
+          className="flex gap-2 items-baseline min-w-0 break-all"
+          data-diff-row
+          data-diff-type={diff.type}
+        >
           <span className="text-violet-400 shrink-0">{diff.path}</span>
           {diff.type === "added" && (
             <>

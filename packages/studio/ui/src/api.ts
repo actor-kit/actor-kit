@@ -2,15 +2,15 @@
 
 import type { z } from "zod";
 import {
-  ActorTypesResponseSchema,
-  ActorsResponseSchema,
   type ActorEntry,
+  ActorsResponseSchema,
+  ActorTypesResponseSchema,
   ErrorBodySchema,
+  formatIssues,
   type InspectResult,
   InspectSchema,
-  TimelineResponseSchema,
   type TimelineItem,
-  formatIssues,
+  TimelineResponseSchema,
 } from "./protocol";
 
 export type { ActorEntry, InspectResult, StudioConnectionInfo, TimelineItem } from "./protocol";
@@ -137,5 +137,9 @@ export function fetchTimeline(
   if (opts?.limit) params.set("limit", String(opts.limit));
   if (opts?.before) params.set("before", String(opts.before));
   const query = params.toString();
-  return request(`${actorPath(actorType, actorId)}/timeline${query ? `?${query}` : ""}`, TimelineResponseSchema, signal);
+  return request(
+    `${actorPath(actorType, actorId)}/timeline${query ? `?${query}` : ""}`,
+    TimelineResponseSchema,
+    signal,
+  );
 }
