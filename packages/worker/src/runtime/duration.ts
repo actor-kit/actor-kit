@@ -9,17 +9,18 @@ const UNIT_MS: Record<string, number> = { ms: 1, s: 1000, m: 60_000, h: 3_600_00
 
 const DURATION = /^(\d+(?:\.\d+)?)(ms|s|m|h|d)$/;
 
-function millisecondsOf(duration: unknown): number | null {
+/** The duration in ms, or NaN when it is neither a number nor a "<number><unit>" string. */
+function millisecondsOf(duration: unknown): number {
   if (typeof duration === "number") return duration;
-  if (typeof duration !== "string") return null;
+  if (typeof duration !== "string") return Number.NaN;
   const match = DURATION.exec(duration);
-  return match === null ? null : Number(match[1]) * (UNIT_MS[match[2] ?? ""] ?? Number.NaN);
+  return match === null ? Number.NaN : Number(match[1]) * (UNIT_MS[match[2] ?? ""] ?? Number.NaN);
 }
 
 /** A duration in milliseconds. Throws on anything that is not a finite, non-negative duration. */
 export function parseDuration(duration: unknown): number {
   const ms = millisecondsOf(duration);
-  if (ms === null || !Number.isFinite(ms) || ms < 0) {
+  if (!Number.isFinite(ms) || ms < 0) {
     throw new Error(
       `Invalid duration ${JSON.stringify(duration)}: use milliseconds or e.g. "500ms", "30s", "5m", "2h", "1d"`,
     );

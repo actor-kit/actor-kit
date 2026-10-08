@@ -42,6 +42,7 @@ export {
   appendJournalEvent,
   applyJournalEvent,
   checksumState,
+  clockedSources,
   createLiveFacts,
   createReplayFacts,
   foldJournal,

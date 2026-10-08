@@ -4,7 +4,9 @@
  */
 import {
   ACTOR_KIT_MIGRATIONS,
+  applyJournalEvent,
   applyTimerOps,
+  clockedSources,
   createLiveFacts,
   deleteTimer,
   dueTimer,
@@ -28,6 +30,7 @@ describe("parseDuration", () => {
     ["500ms", 500],
     ["30s", 30_000],
     ["1.5s", 1500],
+    ["1.25s", 1250],
     ["5m", 300_000],
     ["2h", 7_200_000],
     ["1d", 86_400_000],
@@ -35,12 +38,24 @@ describe("parseDuration", () => {
     expect(parseDuration(input)).toBe(ms);
   });
 
-  it.each([-1, Number.NaN, Number.POSITIVE_INFINITY, "", "5", "s", "5 s", "-5s", "5w", "1e3s", "5sx", "x5s"])(
-    "rejects %j",
-    (input) => {
-      expect(() => parseDuration(input)).toThrow(/duration/);
-    },
-  );
+  it.each([
+    -1,
+    Number.NaN,
+    Number.POSITIVE_INFINITY,
+    "",
+    "5",
+    "s",
+    "5 s",
+    "-5s",
+    "5w",
+    "1e3s",
+    "5sx",
+    "x5s",
+    ["5s"],
+    null,
+  ])("rejects %j", (input) => {
+    expect(() => parseDuration(input)).toThrow(/duration/);
+  });
 });
 
 type S = { log: string[] };
@@ -155,6 +170,24 @@ describe("ctx.schedule / ctx.cancel in the step core", () => {
   it("needs exactly one of `in` and `at`", () => {
     expect(() => step(def, { log: [] }, message("BOTH"), facts(), {})).toThrow(/exactly one of/);
     expect(() => step(def, { log: [] }, message("NEITHER"), facts(), {})).toThrow(/exactly one of/);
+  });
+
+  it("refuses an `at` that is not a finite time", () => {
+    const at = {
+      ...def,
+      messages: {
+        any: {
+          AT: {
+            schema: z.object({}),
+            handler: (s: S, _p: unknown, ctx: Ctx) => {
+              ctx.schedule("tick", { at: Number.NaN });
+              return s;
+            },
+          },
+        },
+      },
+    };
+    expect(() => step(at, { log: [] }, message("AT"), facts(), {})).toThrow("ctx.schedule: invalid `at` NaN");
   });
 
   it("an actor without a timers block cannot schedule", () => {
@@ -314,5 +347,55 @@ describe("earliestDeadline and timerFailedEvent", () => {
       error: "bad payload",
     });
     expect(timerFailedEvent("quiz", "q1", due, "plain").error).toBe("plain");
+  });
+});
+
+describe("timer events in the journal", () => {
+  const timerEvent = (over: Record<string, unknown> = {}) => ({
+    seq: 2,
+    causeType: "timer" as const,
+    name: "roundEnd",
+    payload: { id: "1:0", key: "round-1", payload: { round: 1 }, fireAt: 900, lateBy: 25 },
+    caller: null,
+    callerType: null,
+    role: null,
+    facts: { now: 925 },
+    codeVersion: 1,
+    stateChecksum: "",
+    createdAt: 925,
+    ...over,
+  });
+
+  it("replays through the timer's handler with its key and lateBy", async () => {
+    const replayDef = {
+      timers: {
+        roundEnd: {
+          schema: z.unknown(),
+          handler: (s: S, p: { round: number }, ctx: { key: string; lateBy: number; now(): number }) => ({
+            log: [...s.log, `${p.round}:${ctx.key}:${ctx.lateBy}:${ctx.now()}`],
+          }),
+        },
+      },
+    };
+    expect(await applyJournalEvent(replayDef, { log: [] }, timerEvent())).toEqual({ log: ["1:round-1:25:925"] });
+  });
+
+  it("refuses a timer that is no longer declared, or a malformed timer payload", async () => {
+    await expect(applyJournalEvent({}, { log: [] }, timerEvent())).rejects.toThrow('timer "roundEnd" is not defined');
+    await expect(applyJournalEvent({ timers: {} }, { log: [] }, timerEvent())).rejects.toThrow('timer "roundEnd"');
+    const declared = { timers: { roundEnd: { schema: z.unknown(), handler: (s: S) => s } } };
+    await expect(applyJournalEvent(declared, { log: [] }, timerEvent({ payload: { id: "1:0" } }))).rejects.toThrow();
+  });
+});
+
+describe("clockedSources", () => {
+  it("pins now and keeps real ids and randoms", () => {
+    const sources = clockedSources(1234);
+    expect(sources.now()).toBe(1234);
+    expect(sources.id()).toMatch(/^[0-9a-f-]{36}$/);
+    expect(sources.id()).not.toBe(sources.id());
+    const r = sources.random();
+    expect(r).toBeGreaterThanOrEqual(0);
+    expect(r).toBeLessThan(1);
   });
 });

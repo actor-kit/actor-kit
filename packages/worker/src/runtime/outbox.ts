@@ -167,7 +167,7 @@ export function createOutbox(): OutboxCollector {
 
     toTimerOps(seq = 0): TimerOp[] {
       return timerOps.map((entry) => {
-        if (entry.op === "cancel") return entry;
+        if (entry.op !== "schedule") return entry;
         const id = formatEffectId(seq, entry.index);
         const { name, key, payload, fireAt } = entry.timer;
         return { op: "schedule", id, seq, index: entry.index, name, key: key ?? id, payload, fireAt };

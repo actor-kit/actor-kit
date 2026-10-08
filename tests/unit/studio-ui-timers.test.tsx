@@ -115,3 +115,44 @@ describe("Timers panel", () => {
     await waitFor(() => expect(button.hasAttribute("disabled")).toBe(false));
   });
 });
+
+describe("Timers panel: due-in", () => {
+  const due = async (offsetMs: number) => {
+    cleanup();
+    await open([timerRow("k", Date.now() + offsetMs)]);
+    return screen.getByTestId("timer-due").textContent;
+  };
+
+  it("counts seconds up to a minute, minutes up to an hour, then shows the time", async () => {
+    expect(await due(400)).toBe("in 0s");
+    expect(await due(59_000)).toBe("in 59s");
+    expect(await due(60_000)).toBe("in 1m");
+    expect(await due(3_599_000)).toBe("in 60m");
+    expect(await due(3_600_000)).not.toMatch(/^in /);
+  });
+
+  it("counts down while the panel is open", async () => {
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval", "Date"] });
+    try {
+      await open([timerRow("k", Date.now() + 10_000)]);
+      expect(screen.getByTestId("timer-due").textContent).toBe("in 10s");
+      act(() => {
+        vi.advanceTimersByTime(3000);
+      });
+      expect(screen.getByTestId("timer-due").textContent).toBe("in 7s");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("shows no error until Fire now fails, and clears it when a later one works", async () => {
+    actionResponse = () => Response.json({ error: "nope" }, { status: 409 });
+    await open([timerRow("k", Date.now() + 10_000)]);
+    expect(screen.queryByRole("alert")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Fire k now" }));
+    expect(await screen.findByRole("alert")).toBeTruthy();
+    actionResponse = () => Response.json({ ok: true });
+    fireEvent.click(screen.getByRole("button", { name: "Fire k now" }));
+    await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
+  });
+});

@@ -91,7 +91,7 @@ function applyFrame(state: StudioViewState, frame: StudioFrame): StudioViewState
           actorId: frame.actorId,
           connections: frame.connections,
           outbox: frame.outbox,
-          ...(frame.timers === undefined ? {} : { timers: frame.timers }),
+          timers: frame.timers,
           activeLinks: frame.activeLinks,
           linkSubscribers: frame.linkSubscribers,
         },
