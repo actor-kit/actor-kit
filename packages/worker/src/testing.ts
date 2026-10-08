@@ -145,6 +145,7 @@ export {
   toOutboxEntry,
   toTimelineEntry,
 } from "./runtime/studio-protocol";
+export { findStudioRegistry, looksLikeDONamespace } from "./runtime/studio-registry";
 export type { DueTimer, TimerFailedEvent, TimerRow } from "./runtime/timers-store";
 export {
   applyTimerOps,

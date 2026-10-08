@@ -172,3 +172,11 @@ class_name = "QuizLifecycle"
 [[migrations]]
 tag = "v14"
 new_sqlite_classes = ["QuizLifecycle"]
+
+[[durable_objects.bindings]]
+name = "KIOSK"
+class_name = "Kiosk"
+
+[[migrations]]
+tag = "v15"
+new_sqlite_classes = ["Kiosk"]

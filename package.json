@@ -13,7 +13,8 @@
     "lint:fix": "biome check --write packages/core/src/ packages/worker/src/ packages/client/src/ packages/react/src/ packages/test/src/ packages/studio/src/ packages/studio-cli/src/ packages/studio/ui/src/ packages/storybook/src/ tests/ scripts/",
     "build": "pnpm -r run build",
     "prepare": "husky",
-    "crap": "vitest run --coverage --coverage.reporter=json --coverage.include='packages/*/src/**' --coverage.include='packages/studio/ui/src/**' --silent > /dev/null && node scripts/crap.mts"
+    "crap": "vitest run --coverage --coverage.reporter=json --coverage.include='packages/*/src/**' --coverage.include='packages/studio/ui/src/**' --silent > /dev/null && node scripts/crap.mts",
+    "crap:worker": "vitest run --coverage --coverage.reporter=json --coverage.include='packages/*/src/**' --silent > /dev/null && pnpm build > /dev/null && ACTOR_KIT_COVERAGE=1 pnpm --filter @actor-kit/integration-tests exec vitest run --coverage --silent > /dev/null && node scripts/crap.mts --coverage coverage/coverage-final.json --coverage coverage/integration/coverage-final.json packages/worker/src"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.5.14",

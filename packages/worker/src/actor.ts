@@ -97,6 +97,7 @@ import {
   viewerTags,
 } from "./runtime/studio-protocol";
 import { compileRedaction } from "./runtime/studio-redact";
+import { findStudioRegistry, looksLikeDONamespace } from "./runtime/studio-registry";
 import {
   applyTimerOps,
   type DueTimer,
@@ -115,15 +116,6 @@ import { toRuntimeDef } from "./runtime/versions";
 const STUDIO_CALLER_ID = "__studio";
 
 // --- Studio registry helpers ---
-
-/**
- * Runtime type guard for DurableObjectNamespace.
- * Used to detect StudioRegistry in env bindings without compile-time knowledge of the binding.
- */
-function looksLikeDONamespace(val: unknown): boolean {
-  if (typeof val !== "object" || val === null) return false;
-  return "idFromName" in val && "get" in val;
-}
 
 /**
  * Resolve a singleton DO stub from a namespace-like binding.
@@ -327,6 +319,25 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
 }
 
+type ServiceOutcome = { ok: true; result: unknown } | { ok: false; message: string };
+
+/** One try of a service: its result, or the message it failed with. */
+async function tryService(
+  serviceDef: { fn(input: unknown, env: unknown, info: { effectId: string; attempt: number }): unknown },
+  entry: { id: string; input: unknown },
+  env: unknown,
+  attempt: number,
+): Promise<ServiceOutcome> {
+  try {
+    return { ok: true, result: await serviceDef.fn(entry.input, env, { effectId: entry.id, attempt }) };
+  } catch (error) {
+    return { ok: false, message: error instanceof Error ? error.message : String(error) };
+  }
+}
+
+/** The binding name for an actor type: upper case, `-` → `_` (e.g. "chat-room" → "CHAT_ROOM"). */
+const bindingName = (name: string): string => name.toUpperCase().replace(/-/g, "_");
+
 /** A transition declared effects to persist: executions, forwards, or timer schedules / cancels. */
 function declaresEffects(result: StepResult): boolean {
   const { effects } = result;
@@ -477,21 +488,19 @@ export function actor(
 
       this.runMigrations();
 
-      const rows = this.ctx.storage.sql.exec("SELECT state, version, actor_id FROM snapshots WHERE id = 1").toArray();
-      if (rows.length === 0 || rows[0] === undefined) return;
+      const [first] = this.ctx.storage.sql
+        .exec("SELECT state, version, actor_id FROM snapshots WHERE id = 1")
+        .toArray();
+      if (first === undefined) return;
+      this.restoreSnapshot(SnapshotRowSchema.parse(first));
+      this.resumeAfterLoad();
+    }
 
-      const row = SnapshotRowSchema.parse(rows[0]);
+    /** Put the stored snapshot in memory, migrating it through the step core when its version is older. */
+    restoreSnapshot(row: z.infer<typeof SnapshotRowSchema>): void {
       const persisted: unknown = JSON.parse(row.state);
       this.journalAhead = this.isJournalAhead();
-
-      // Migrate (and restore) through the step core when the stored version is older. A bump across a
-      // version that rebuilds by replay waits for catchUpJournal() (replay is async).
-      const rebuild = row.version !== this.version && row.version < (def.rebuildVersion ?? 0);
-      this.rebuildFrom = rebuild ? row.version : null;
-      const migration =
-        !rebuild && def.migrate !== undefined && row.version !== this.version
-          ? this.runStep({ type: "migrate", fromVersion: row.version, toVersion: this.version, persisted })
-          : null;
+      const migration = this.loadMigration(row.version, persisted);
       this.state = migration !== null ? migration.state : def.restore ? def.restore(persisted) : persisted;
 
       // Restore actor ID
@@ -510,7 +519,25 @@ export function actor(
         this.pendingCause = { type: "migrate", fromVersion: row.version, toVersion: this.version };
         this.commit(this.state, migration.event);
       }
+    }
 
+    /**
+     * The migrate transition for state stored at `storedVersion`, or null when there is none. A bump
+     * across a version that rebuilds by replay waits for catchUpJournal() instead (replay is async).
+     */
+    loadMigration(storedVersion: number, persisted: unknown): StepResult | null {
+      const rebuild = this.needsRebuild(storedVersion);
+      this.rebuildFrom = rebuild ? storedVersion : null;
+      if (rebuild || def.migrate === undefined || storedVersion === this.version) return null;
+      return this.runStep({ type: "migrate", fromVersion: storedVersion, toVersion: this.version, persisted });
+    }
+
+    needsRebuild(storedVersion: number): boolean {
+      return storedVersion !== this.version && storedVersion < (def.rebuildVersion ?? 0);
+    }
+
+    /** After a load: resume interrupted effects and links. */
+    resumeAfterLoad(): void {
       // Drain any pending executions from before crash/restart; tries cut off mid-flight run again.
       requeueInterrupted(this.ctx.storage.sql);
       this.drainExecutions();
@@ -561,27 +588,11 @@ export function actor(
 
     /** Detect StudioRegistry in ctx.exports or env and cache the stub. */
     detectStudio(): boolean {
-      // Try ctx.exports first (production with enable_ctx_exports)
-      const exports = getExports(this.ctx);
-      if (exports) {
-        for (const [, val] of Object.entries(exports)) {
-          if (typeof val === "object" && val !== null && "__actorKitStudioRegistry" in val) {
-            const stub = resolveSingletonStub(val, "registry");
-            if (stub) this.registryStub = stub;
-            return true;
-          }
-        }
-      }
-
-      // Fall back to env.STUDIO_REGISTRY binding (works in wrangler dev)
-      const registryBinding: unknown = this.envBindings["STUDIO_REGISTRY"];
-      if (looksLikeDONamespace(registryBinding)) {
-        const stub = resolveSingletonStub(registryBinding, "registry");
-        if (stub) this.registryStub = stub;
-        return true;
-      }
-
-      return false;
+      const registry = findStudioRegistry(getExports(this.ctx), this.envBindings);
+      if (registry === undefined) return false;
+      const stub = resolveSingletonStub(registry, "registry");
+      if (stub) this.registryStub = stub;
+      return true;
     }
 
     /**
@@ -858,14 +869,7 @@ export function actor(
 
       const attempt = startAttempt(sql, entry.id);
       this.pushStudioOutbox();
-      const parsedInput = entry.input;
-
-      let outcome: { ok: true; result: unknown } | { ok: false; message: string };
-      try {
-        outcome = { ok: true, result: await serviceDef.fn(parsedInput, this.env, { effectId: entry.id, attempt }) };
-      } catch (error) {
-        outcome = { ok: false, message: error instanceof Error ? error.message : String(error) };
-      }
+      const outcome = await tryService(serviceDef, entry, this.env, attempt);
 
       // A restore may have cancelled this try while it ran: its transition is undone, settle nothing.
       if (!isRunning(sql, entry.id)) {
@@ -881,9 +885,19 @@ export function actor(
       if (settlement.status === "retrying") {
         settle();
         this.syncAlarm();
-        this.pushStudioOutbox();
-        return;
+      } else {
+        this.endExecution(entry, attempt, outcome, settle);
       }
+      this.pushStudioOutbox();
+    }
+
+    /** The try that ends a row: log a dead letter, then run onDone/onError with the final status. */
+    endExecution(
+      entry: { id: string; service: string; input: unknown },
+      attempt: number,
+      outcome: ServiceOutcome,
+      settle: () => void,
+    ): void {
       if (!outcome.ok) {
         console.error(
           JSON.stringify(
@@ -898,16 +912,15 @@ export function actor(
           ),
         );
       }
-
       try {
-        this.settleExecution(entry.service, entry.id, parsedInput, outcome, settle);
+        this.settleExecution(entry.service, entry.id, entry.input, outcome, settle);
       } catch (error) {
         // onDone/onError threw, or its transition could not be persisted: nothing was written.
         // The row ends as a dead letter carrying the reason, instead of staying `running`.
         const reason = error instanceof Error ? error.message : String(error);
-        finishAttempt(sql, entry.id, { status: "failed" }, `${outcome.ok ? "onDone" : "onError"}: ${reason}`);
+        const which = outcome.ok ? "onDone" : "onError";
+        finishAttempt(this.ctx.storage.sql, entry.id, { status: "failed" }, `${which}: ${reason}`);
       }
-      this.pushStudioOutbox();
     }
 
     /** Run onDone/onError for a try that ended the row, committing it with the row's final status. */
@@ -1063,33 +1076,37 @@ export function actor(
         .toArray();
 
       for (const row of rows) {
-        const entry = ForwardRowSchema.parse(row);
+        await this.deliverForward(ForwardRowSchema.parse(row));
+      }
+    }
 
-        // Resolve contract name: prefer declared link def, else lowercase the link name.
-        const linkDef = def.links?.[entry.link_name];
-        const contractName = linkDef ? linkDef.contract.name : entry.link_name.toLowerCase().replace(/_/g, "-");
+    /** Send one pending forward to its target; the row ends done or failed (forwards are not retried). */
+    async deliverForward(entry: z.infer<typeof ForwardRowSchema>): Promise<void> {
+      const sql = this.ctx.storage.sql;
+      const fail = () => sql.exec("UPDATE forwards SET status = 'failed' WHERE id = ?", entry.id);
 
-        const send = rpcMethod(resolveStub(contractName, entry.target_id, this.ctx, this.env), "send");
-        if (send === null) {
-          this.ctx.storage.sql.exec("UPDATE forwards SET status = 'failed' WHERE id = ?", entry.id);
-          continue;
-        }
+      // Resolve contract name: prefer declared link def, else lowercase the link name.
+      const linkDef = def.links?.[entry.link_name];
+      const contractName = linkDef ? linkDef.contract.name : entry.link_name.toLowerCase().replace(/_/g, "-");
 
-        const parsedMessage = MessageEnvelopeSchema.safeParse(JSON.parse(entry.message));
-        if (!parsedMessage.success) {
-          this.ctx.storage.sql.exec("UPDATE forwards SET status = 'failed' WHERE id = ?", entry.id);
-          continue;
-        }
+      const send = rpcMethod(resolveStub(contractName, entry.target_id, this.ctx, this.env), "send");
+      if (send === null) {
+        fail();
+        return;
+      }
+      const parsedMessage = MessageEnvelopeSchema.safeParse(JSON.parse(entry.message));
+      if (!parsedMessage.success) {
+        fail();
+        return;
+      }
 
-        const callerType: "user" | "service" = entry.caller_type === "service" ? "service" : "user";
-
-        this.ctx.storage.sql.exec("UPDATE forwards SET attempts = attempts + 1 WHERE id = ?", entry.id);
-        try {
-          await send(entry.caller, callerType, parsedMessage.data);
-          this.ctx.storage.sql.exec("UPDATE forwards SET status = 'done' WHERE id = ?", entry.id);
-        } catch {
-          this.ctx.storage.sql.exec("UPDATE forwards SET status = 'failed' WHERE id = ?", entry.id);
-        }
+      const callerType: "user" | "service" = entry.caller_type === "service" ? "service" : "user";
+      sql.exec("UPDATE forwards SET attempts = attempts + 1 WHERE id = ?", entry.id);
+      try {
+        await send(entry.caller, callerType, parsedMessage.data);
+        sql.exec("UPDATE forwards SET status = 'done' WHERE id = ?", entry.id);
+      } catch {
+        fail();
       }
     }
 
@@ -1120,37 +1137,8 @@ export function actor(
       unlinkCalls: Array<{ name: string; id: string | undefined }>,
     ): void {
       // Persist link intents atomically (already inside the send() transaction)
-      for (const call of linkCalls) {
-        const linkDef = def.links?.[call.name];
-        if (!linkDef) continue;
-        const targetType = linkDef.contract.name.toUpperCase().replace(/-/g, "_");
-        this.ctx.storage.sql.exec(
-          "INSERT OR IGNORE INTO active_links (target_type, target_id, link_name, version, created_at) VALUES (?, ?, ?, 0, ?)",
-          targetType,
-          call.id,
-          call.name,
-          Date.now(),
-        );
-      }
-
-      // Process unlinks
-      for (const call of unlinkCalls) {
-        const linkDef = def.links?.[call.name];
-        if (!linkDef) continue;
-        const targetType = linkDef.contract.name.toUpperCase().replace(/-/g, "_");
-
-        if (call.id !== undefined) {
-          // Unlink specific target
-          this.ctx.storage.sql.exec(
-            "DELETE FROM active_links WHERE target_type = ? AND target_id = ? AND link_name = ?",
-            targetType,
-            call.id,
-            call.name,
-          );
-        } else {
-          this.ctx.storage.sql.exec("DELETE FROM active_links WHERE link_name = ?", call.name);
-        }
-      }
+      for (const call of linkCalls) this.insertLink(call.name, call.id, "INSERT OR IGNORE");
+      for (const call of unlinkCalls) this.deleteLink(call.name, call.id);
 
       // Async: register subscriptions with target actors (fire-and-forget)
       if (linkCalls.length > 0) {
@@ -1159,6 +1147,35 @@ export function actor(
       if (unlinkCalls.length > 0) {
         this.unregisterSubscriptions(unlinkCalls);
       }
+    }
+
+    /** Record an active link (declared links only), at version 0. */
+    insertLink(name: string, id: string, insert: "INSERT OR IGNORE" | "INSERT OR REPLACE"): void {
+      const linkDef = def.links?.[name];
+      if (!linkDef) return;
+      this.ctx.storage.sql.exec(
+        `${insert} INTO active_links (target_type, target_id, link_name, version, created_at) VALUES (?, ?, ?, 0, ?)`,
+        bindingName(linkDef.contract.name),
+        id,
+        name,
+        Date.now(),
+      );
+    }
+
+    /** Drop one target of a link, or (no id) every target of it. */
+    deleteLink(name: string, id: string | undefined): void {
+      const linkDef = def.links?.[name];
+      if (!linkDef) return;
+      if (id === undefined) {
+        this.ctx.storage.sql.exec("DELETE FROM active_links WHERE link_name = ?", name);
+        return;
+      }
+      this.ctx.storage.sql.exec(
+        "DELETE FROM active_links WHERE target_type = ? AND target_id = ? AND link_name = ?",
+        bindingName(linkDef.contract.name),
+        id,
+        name,
+      );
     }
 
     /**
@@ -1182,34 +1199,34 @@ export function actor(
             resolveStub(linkDef.contract.name, call.id, this.ctx, this.env),
             "__linkSubscribe",
           );
-          if (subscribe !== null) {
-            await subscribe(_actorName.toUpperCase().replace(/-/g, "_"), this.subscriberId());
-          }
+          await subscribe?.(bindingName(_actorName), this.subscriberId());
         } catch (error) {
           // Target unreachable — invoke onError if defined, otherwise retry on restart
-          const linkDef2 = def.links?.[call.name];
-          if (linkDef2?.onError) {
-            const errorMessage = error instanceof Error ? error.message : String(error);
-            const result = this.runStep({
-              type: "link.onError",
-              link: call.name,
-              targetId: call.id,
-              error: { message: errorMessage, code: "unreachable" },
-            });
-            if (result.state !== this.state) {
-              const targetType = linkDef2.contract.name.toUpperCase().replace(/-/g, "_");
-              this.pendingCause = {
-                type: "link.onError",
-                sourceType: targetType,
-                sourceId: call.id,
-                error: errorMessage,
-              };
-              this.commit(result.state, result.event);
-              this.broadcastViews();
-            }
-          }
+          this.linkUnreachable(call.name, call.id, error);
         }
       }
+    }
+
+    /** A link target could not be reached: run the link's onError, if it has one. */
+    linkUnreachable(name: string, targetId: string, error: unknown): void {
+      const linkDef = def.links?.[name];
+      if (!linkDef?.onError) return;
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      const result = this.runStep({
+        type: "link.onError",
+        link: name,
+        targetId,
+        error: { message: errorMessage, code: "unreachable" },
+      });
+      if (result.state === this.state) return;
+      this.pendingCause = {
+        type: "link.onError",
+        sourceType: bindingName(linkDef.contract.name),
+        sourceId: targetId,
+        error: errorMessage,
+      };
+      this.commit(result.state, result.event);
+      this.broadcastViews();
     }
 
     /**
@@ -1304,43 +1321,43 @@ export function actor(
         )
         .toArray();
 
-      if (rows.length === 0) return;
-
       for (const row of rows) {
-        const linkRow = LinkVersionRowSchema.parse(row);
-
+        const link = LinkVersionRowSchema.parse(row);
         // Monotonic version check
-        if (version <= linkRow.version) continue;
-
-        const linkDef = def.links?.[linkRow.link_name];
-        if (!linkDef) continue;
-
-        // Add role discriminant to view data
-        const fields = ViewFieldsSchema.safeParse(viewData);
-        const viewWithRole = { ...(fields.success ? fields.data : {}), role };
-
-        // Run onUpdate reducer
-        const result = this.runStep({ type: "link.onUpdate", link: linkRow.link_name, sourceId, view: viewWithRole });
-        if (result.state !== this.state) {
-          this.pendingCause = {
-            type: "link.onUpdate",
-            sourceType,
-            sourceId,
-            viewData: viewWithRole,
-          };
-          this.commit(result.state, result.event, () => {
-            this.ctx.storage.sql.exec(
-              "UPDATE active_links SET version = ? WHERE target_type = ? AND target_id = ? AND link_name = ?",
-              version,
-              sourceType,
-              sourceId,
-              linkRow.link_name,
-            );
-            this.pushStudioLinks();
-          });
-          this.broadcastViews();
-        }
+        if (version > link.version) this.applyLinkUpdate(link.link_name, sourceType, sourceId, viewData, role, version);
       }
+    }
+
+    /** Run a link's onUpdate with the source's view (role added) and commit it with the link's new version. */
+    applyLinkUpdate(
+      linkName: string,
+      sourceType: string,
+      sourceId: string,
+      viewData: unknown,
+      role: string,
+      version: number,
+    ): void {
+      if (!def.links?.[linkName]) return;
+
+      // Add role discriminant to view data
+      const fields = ViewFieldsSchema.safeParse(viewData);
+      const viewWithRole = { ...(fields.success ? fields.data : {}), role };
+
+      // Run onUpdate reducer
+      const result = this.runStep({ type: "link.onUpdate", link: linkName, sourceId, view: viewWithRole });
+      if (result.state === this.state) return;
+      this.pendingCause = { type: "link.onUpdate", sourceType, sourceId, viewData: viewWithRole };
+      this.commit(result.state, result.event, () => {
+        this.ctx.storage.sql.exec(
+          "UPDATE active_links SET version = ? WHERE target_type = ? AND target_id = ? AND link_name = ?",
+          version,
+          sourceType,
+          sourceId,
+          linkName,
+        );
+        this.pushStudioLinks();
+      });
+      this.broadcastViews();
     }
 
     // --- Source-side push to DO subscribers ---
@@ -1429,15 +1446,7 @@ export function actor(
       await this.loadState();
       if (this.initialized) {
         // Already initialized (auto-spawn or prior spawn call).
-        // Update actorId if a human-readable name was provided and we only have the hex ID.
-        if (input.actorId && this.actorId !== input.actorId) {
-          const previousActorId = this.actorId ?? this.ctx.id.toString();
-          this.actorId = input.actorId;
-          this.ctx.storage.sql.exec("UPDATE snapshots SET actor_id = ? WHERE id = 1", this.actorId);
-          // Force registry touch with the correct name (bypass debounce), replacing the old row
-          this.lastRegistryTouch = 0;
-          this.touchRegistry(previousActorId);
-        }
+        if (input.actorId) this.rename(input.actorId);
         return;
       }
 
@@ -1454,20 +1463,9 @@ export function actor(
       const initLinks: Array<{ name: string; id: string }> = [];
       const live = createLiveFacts();
       const link = async (name: string, id: string): Promise<unknown> => {
-        const linkDef = def.links?.[name];
-        if (!linkDef) throw new Error(`Link "${name}" not declared in actor definition`);
-
-        const getSnapshot = rpcMethod(resolveStub(linkDef.contract.name, id, this.ctx, this.env), "getSnapshot");
-        if (getSnapshot === null) {
-          throw new Error(`Link "${name}": target actor unreachable`);
-        }
-        const result = LinkedSnapshotSchema.parse(await getSnapshot("system", "service"));
-
-        // Record the link for persistence
+        const view = await this.linkedView(name, id);
+        // Record the link for persistence, and the view as a fact for replay
         initLinks.push({ name, id });
-
-        // Return view with role discriminant (recorded as a fact for replay)
-        const view = { role: result.role, ...result.snapshot };
         live.recordLinkView(name, id, view);
         return view;
       };
@@ -1482,19 +1480,7 @@ export function actor(
       // Persist state + init links atomically
       this.pendingCause = { type: "init" };
       this.commit(init.state, init.event, () => {
-        for (const { name, id } of initLinks) {
-          const linkDef = def.links?.[name];
-          if (linkDef) {
-            const targetType = linkDef.contract.name.toUpperCase().replace(/-/g, "_");
-            this.ctx.storage.sql.exec(
-              "INSERT OR REPLACE INTO active_links (target_type, target_id, link_name, version, created_at) VALUES (?, ?, ?, 0, ?)",
-              targetType,
-              id,
-              name,
-              Date.now(),
-            );
-          }
-        }
+        for (const { name, id } of initLinks) this.insertLink(name, id, "INSERT OR REPLACE");
       });
       this.initialized = true;
 
@@ -1502,6 +1488,32 @@ export function actor(
       if (initLinks.length > 0) {
         this.registerSubscriptions(initLinks);
       }
+    }
+
+    /**
+     * A human-readable name for an actor known only by its hex ID (auto-spawned, or spawned again
+     * with a name): store it and re-key the registry row, bypassing the touch debounce.
+     */
+    rename(actorId: string): void {
+      if (this.actorId === actorId) return;
+      const previousActorId = this.actorId ?? this.ctx.id.toString();
+      this.actorId = actorId;
+      this.ctx.storage.sql.exec("UPDATE snapshots SET actor_id = ? WHERE id = 1", this.actorId);
+      this.lastRegistryTouch = 0;
+      this.touchRegistry(previousActorId);
+    }
+
+    /** init()'s link(): the target's current view, with its role as a discriminant. */
+    async linkedView(name: string, id: string): Promise<Record<string, unknown>> {
+      const linkDef = def.links?.[name];
+      if (!linkDef) throw new Error(`Link "${name}" not declared in actor definition`);
+
+      const getSnapshot = rpcMethod(resolveStub(linkDef.contract.name, id, this.ctx, this.env), "getSnapshot");
+      if (getSnapshot === null) {
+        throw new Error(`Link "${name}": target actor unreachable`);
+      }
+      const result = LinkedSnapshotSchema.parse(await getSnapshot("system", "service"));
+      return { role: result.role, ...result.snapshot };
     }
 
     async send(

@@ -299,8 +299,12 @@ function projectView<TState>(
     return { ok: false, error: `View for role "${role}" is perCaller: caller is required` };
   }
 
+  return runView(viewDef, state, caller ?? "__studio");
+}
+
+function runView<TState>(viewDef: StudioViewSource<TState>["views"][string], state: TState, caller: string): Projected {
   try {
-    return { ok: true, data: viewDef.fn(state, caller ?? "__studio") };
+    return { ok: true, data: viewDef.fn(state, caller) };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     return { ok: false, error: `View projection threw: ${message}` };
