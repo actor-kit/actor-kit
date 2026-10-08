@@ -1,5 +1,5 @@
 import { Link, useParams } from "@tanstack/react-router";
-import { useState } from "react";
+import { type ReactNode, useState } from "react";
 import { ConnectionsPanel, LinksPanel } from "../components/actor-detail/inspect-panels";
 import { StatusBadge } from "../components/actor-detail/status-badge";
 import { type Tab, TabBar, tabsFor } from "../components/actor-detail/tab-bar";
@@ -85,31 +85,31 @@ function ActorTabs({
   const [expandedEntry, setExpandedEntry] = useState<number | null>(null);
   const toggleEntry = (id: number) => setExpandedEntry((current) => (current === id ? null : id));
 
+  // One renderer per tab: only the active one is called.
+  const panels: Record<Tab, () => ReactNode> = {
+    state: () => (
+      <div className="bg-zinc-900 border border-zinc-800 rounded p-4 text-sm overflow-x-auto" data-testid="state-panel">
+        <JsonTree data={inspect.state} />
+      </div>
+    ),
+    timeline: () => (
+      <TimelinePanel
+        actor={{ actorType, actorId }}
+        timeline={timeline}
+        expandedEntry={expandedEntry}
+        onToggle={toggleEntry}
+      />
+    ),
+    connections: () => <ConnectionsPanel connections={inspect.connections} />,
+    outbox: () => <OutboxPanel actorType={actorType} actorId={actorId} outbox={inspect.outbox} />,
+    timers: () => <TimersPanel actorType={actorType} actorId={actorId} timers={inspect.timers ?? []} />,
+    links: () => <LinksPanel activeLinks={inspect.activeLinks} linkSubscribers={inspect.linkSubscribers} />,
+  };
+
   return (
     <>
       <TabBar tabs={tabsFor(inspect, timeline.length)} active={activeTab} onSelect={setActiveTab} />
-      {activeTab === "state" && (
-        <div
-          className="bg-zinc-900 border border-zinc-800 rounded p-4 text-sm overflow-x-auto"
-          data-testid="state-panel"
-        >
-          <JsonTree data={inspect.state} />
-        </div>
-      )}
-      {activeTab === "timeline" && (
-        <TimelinePanel
-          actor={{ actorType, actorId }}
-          timeline={timeline}
-          expandedEntry={expandedEntry}
-          onToggle={toggleEntry}
-        />
-      )}
-      {activeTab === "connections" && <ConnectionsPanel connections={inspect.connections} />}
-      {activeTab === "outbox" && <OutboxPanel actorType={actorType} actorId={actorId} outbox={inspect.outbox} />}
-      {activeTab === "timers" && <TimersPanel actorType={actorType} actorId={actorId} timers={inspect.timers ?? []} />}
-      {activeTab === "links" && (
-        <LinksPanel activeLinks={inspect.activeLinks} linkSubscribers={inspect.linkSubscribers} />
-      )}
+      {panels[activeTab]()}
     </>
   );
 }

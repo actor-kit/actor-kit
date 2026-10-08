@@ -354,19 +354,23 @@ const OTHER_HANDLERS: Record<Exclude<StudioRoute, ActorRoute>, (req: StudioReque
   ui: (req) => serveUi(req.path),
 };
 
-function route(req: StudioRequest, match: RouteMatch): Response | Promise<Response> {
+/** Actions are the only POST route (they check their own method), and the only route that changes an actor. */
+function methodRefusal(req: StudioRequest, match: RouteMatch): Response | null {
   const method = req.request.method;
-  // Actions are the only POST route (they check their own method), and the only route that changes an actor.
-  if (match.route !== "action" && method !== "GET" && method !== "HEAD") {
-    return jsonError(405, `Method ${method} not allowed`, { Allow: ALLOWED_METHODS });
-  }
+  if (match.route === "action" || method === "GET" || method === "HEAD") return null;
+  return jsonError(405, `Method ${method} not allowed`, { Allow: ALLOWED_METHODS });
+}
 
-  // Agents only ever see hashed callers; without the key the DO could not hash, so refuse up front.
+/** Agents only ever see hashed callers; without the key the DO could not hash, so refuse up front. */
+function agentRefusal(req: StudioRequest): Response | null {
   const hashKey = req.env["STUDIO_CALLER_HASH_KEY"];
-  if (req.principal.kind === "agent" && (typeof hashKey !== "string" || hashKey === "")) {
-    return jsonError(503, "Studio is not configured for agents: set STUDIO_CALLER_HASH_KEY");
-  }
+  if (req.principal.kind !== "agent" || (typeof hashKey === "string" && hashKey !== "")) return null;
+  return jsonError(503, "Studio is not configured for agents: set STUDIO_CALLER_HASH_KEY");
+}
 
+function route(req: StudioRequest, match: RouteMatch): Response | Promise<Response> {
+  const refusal = methodRefusal(req, match) ?? agentRefusal(req);
+  if (refusal !== null) return refusal;
   if ("rawType" in match) return ACTOR_HANDLERS[match.route](req, match.rawType, match.rawId);
   return OTHER_HANDLERS[match.route](req);
 }
