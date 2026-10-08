@@ -43,19 +43,38 @@ A Zod schema that validates the data provided when the actor is first created (`
 
 Returns the initial state. The return type is inferred — no manual type annotations needed.
 
-### `version`
+### `versions`
 
-An optional version number for migration:
+A typed chain of state versions (ADR-015). Each version names the schema of the persisted state at that version and
+how to get there from the previous one:
 
 ```typescript
-version: 2,
-migrate: (persisted, fromVersion) => {
-  if (fromVersion < 2) {
-    return { ...persisted, newField: "default" };
-  }
-  return persisted;
-},
+import { version } from "@actor-kit/worker";
+
+const V1 = z.object({ players: z.array(z.string()) });
+const V2 = z.object({ players: z.array(z.object({ id: z.string() })) });
+const V3 = z.object({ players: z.array(z.object({ id: z.string(), avatar: z.string().nullable() })) });
+
+versions: [
+  version(1, V1),
+  version(2, V2, {
+    state: (s: z.infer<typeof V1>) => ({ players: s.players.map((id) => ({ id })) }),
+    events: { JOIN: (payload) => ({ ...payload, avatar: null }) },
+  }),
+  version(3, V3, { rebuild: "replay" }),
+],
 ```
+
+- **`state`** steps the previous version's state to this one. Its argument is typed by the previous version: a step
+  that takes the wrong shape, or a last version that does not describe what `init` returns, is a type error.
+- **`events`** upcasts message payloads journaled before this version, by message name, when the journal is replayed.
+- **`rebuild: "replay"`** rebuilds the state by replaying the whole journal under the new handlers (older payloads
+  upcast) instead of stepping it. It needs the journal.
+
+When an actor wakes with state stored by an older version, it is parsed with that version's schema, stepped (or
+rebuilt) to the current version, and journaled as a `migrate` event with a checkpoint. From then on the journal
+replays from that bump; `replayJournal()` refuses events written by a version that is not in the chain. Without
+`versions`, an actor is at version 1. The old `version` / `migrate` options are refused.
 
 ## Persistence
 

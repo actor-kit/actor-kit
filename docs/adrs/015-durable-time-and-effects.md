@@ -1,7 +1,7 @@
 # ADR 015: Durable Time and Effects (ideas from XState v6)
 
 **Date**: 2026-10-07
-**Status**: Accepted (recommendations approved by Jon, 2026-10-07)
+**Status**: Accepted (recommendations approved by Jon, 2026-10-07). Built 2026-10-08: D1–D5 on branch `claude/adr015-build-15d006` (see docs/quality.md for per-step scores).
 **Depends on**: ADR-003 (transactional outbox), ADR-010 (services), ADR-013 (actor journal), ADR-014 (Studio production access)
 **Visual version**: https://claude.ai/artifact/HWYzXNta6scCAPbfDN5qEq
 

@@ -13,6 +13,7 @@ export { Bulletin, Desk } from "./studio-effects";
 export { StudioOff, StudioProbe } from "./studio-probe";
 export { StudioRedacted } from "./studio-redacted";
 export { Quiz, QuizNoJournal, QuizNoStudio } from "./timers-actors";
+export { RosterActor } from "./versions-actors";
 export { StudioRegistry };
 
 // --- Counter actor (v3: defineActor + flat messages + guards) ---

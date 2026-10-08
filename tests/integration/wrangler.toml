@@ -156,3 +156,11 @@ class_name = "LedgerNoStudio"
 [[migrations]]
 tag = "v12"
 new_sqlite_classes = ["Ledger", "LedgerNoJournal", "LedgerNoStudio"]
+
+[[durable_objects.bindings]]
+name = "ROSTER"
+class_name = "RosterActor"
+
+[[migrations]]
+tag = "v13"
+new_sqlite_classes = ["RosterActor"]

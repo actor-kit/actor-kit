@@ -26,6 +26,7 @@ export { getTokenFromRequest } from "./runtime/get-token";
 export type {
   FactSources,
   Facts,
+  FoldOptions,
   FoldPoint,
   Journal,
   JournalCauseType,
@@ -53,9 +54,11 @@ export {
   foldJournal,
   JournalDivergenceError,
   JournalNondeterminismError,
+  JournalVersionError,
   journalHighWater,
   nextTransitionSeq,
   readJournal,
+  rebuildFromJournal,
   resolveJournalConfig,
 } from "./runtime/journal";
 // Live app connections from held sockets (pure)
@@ -149,5 +152,8 @@ export {
   timerByKey,
   timerFailedEvent,
 } from "./runtime/timers-store";
+// Typed version chain (ADR-015 D5)
+export type { CompiledVersions, RuntimeVersioning, VersionDef, VersionOptions } from "./runtime/versions";
+export { compileVersions, toRuntimeDef, version } from "./runtime/versions";
 // Timer helper (ADR-015 D2)
 export { timer } from "./timer";

@@ -12,7 +12,7 @@
 import { DurableObject } from "cloudflare:workers";
 import type { DeterministicContext } from "@actor-kit/core";
 import { schema, string, uint32, view } from "@actor-kit/core";
-import { createActorClass, defineActor, link, message } from "@actor-kit/worker";
+import { createActorClass, defineActor, link, message, version } from "@actor-kit/worker";
 import { z } from "zod";
 
 export class NotAnActor extends DurableObject {}
@@ -38,8 +38,28 @@ const ProbeView = schema({ owner: string, notes: uint32 });
 
 export const JOURNAL_PROBE_VERSION = 2;
 
+const JournalProbeStateSchema = z.object({
+  owner: z.string(),
+  createdAt: z.number(),
+  notes: z.array(z.object({ id: z.string(), text: z.string(), at: z.number(), roll: z.number() })),
+  connects: z.array(z.string()),
+  disconnects: z.array(z.string()),
+  results: z.array(z.unknown()),
+  errors: z.array(z.string()),
+  linkViews: z.array(z.object({ id: z.string().optional(), keys: z.array(z.string()), at: z.number() })),
+  linkErrors: z.array(z.string()),
+  unlinked: z.array(z.string()),
+  migratedFrom: z.number(),
+});
+
 const JournalProbeContract = defineActor("journal-probe", {
-  version: JOURNAL_PROBE_VERSION,
+  // Version 1 knew only the owner; version 2 records which version it was migrated from.
+  versions: [
+    version(1, z.looseObject({ owner: z.string() })),
+    version(JOURNAL_PROBE_VERSION, JournalProbeStateSchema, {
+      state: (v1: { owner: string }) => JournalProbeStateSchema.parse({ ...v1, migratedFrom: 1 }),
+    }),
+  ],
   input: z.object({ owner: z.string() }),
   init: ({ owner }: { owner: string }, ctx: DeterministicContext): JournalProbeState => ({
     owner,
@@ -53,10 +73,6 @@ const JournalProbeContract = defineActor("journal-probe", {
     linkErrors: [],
     unlinked: [],
     migratedFrom: 0,
-  }),
-  migrate: (persisted: unknown, fromVersion: number) => ({
-    ...z.looseObject({ owner: z.string() }).parse(persisted),
-    migratedFrom: fromVersion,
   }),
   roles: { user: () => true },
   messages: {

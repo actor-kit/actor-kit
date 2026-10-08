@@ -5,6 +5,7 @@
  */
 
 import type { JournalOption, RolePredicate, StepDef, StepMessageSlot } from "@actor-kit/worker/testing";
+import { toRuntimeDef } from "@actor-kit/worker/testing";
 
 export interface SimDef extends StepDef {
   readonly input: {
@@ -63,5 +64,6 @@ export function toSimDef(contract: { readonly name: string; readonly def: unknow
   if (!isSimDef(def)) {
     throw new Error(`simulate: "${contract.name}" is not an actor contract (input, init, roles and views)`);
   }
-  return { ...def, messages: roleNested(def.messages, def.roles) };
+  // The version chain (ADR-015 D5) compiles into version, migrate and upcast, as in the runtime.
+  return { ...toRuntimeDef(def), messages: roleNested(def.messages, def.roles) };
 }

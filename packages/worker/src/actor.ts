@@ -35,6 +35,7 @@ import {
   journalHighWater,
   nextTransitionSeq,
   readJournal,
+  rebuildFromJournal,
   resolveJournalConfig,
 } from "./runtime/journal";
 import {
@@ -106,6 +107,7 @@ import {
   timerByKey,
   timerFailedEvent,
 } from "./runtime/timers-store";
+import { toRuntimeDef } from "./runtime/versions";
 
 /** Reserved caller ID for studio WebSocket connections (stamped by the studio middleware). */
 const STUDIO_CALLER_ID = "__studio";
@@ -220,7 +222,14 @@ interface ActorDef {
       onUnlink?: ((state: unknown, id: string | undefined, ctx: DeterministicContext) => unknown) | undefined;
     }
   >;
+  /** Compiled from `versions` by createActorClass (ADR-015 D5); never written by hand. */
   migrate?(persisted: unknown, fromVersion: number): unknown;
+  /** Compiled from `versions`: message payload upcasts for older journal events. */
+  upcast?(message: string, payload: unknown, fromVersion: number): unknown;
+  /** Compiled from `versions`: every version in the chain. */
+  knownVersions?: readonly number[];
+  /** Compiled from `versions`: the newest version that rebuilds by replaying the journal. */
+  rebuildVersion?: number | null;
   serialize?(state: unknown): unknown;
   restore?(serialized: unknown): unknown;
   /** Event journal (ADR-013). Omitted: on, keep everything. `false`: off. `{ keep }`: prune. */
@@ -379,6 +388,7 @@ export function actor(
     drainingExecutions = false; // Prevents concurrent execution drains
     timersChanged = false; // A commit scheduled or cancelled timers: push them to Studio after it
     journalAhead = false; // The snapshot lags the journal (same code version): rebuild it on wake
+    rebuildFrom: number | null = null; // Stored version to rebuild from by replay (ADR-015 D5), on wake
     previousSubscriberViews = new Map<string, string>(); // dedupe: "type:id" → "role:json"
 
     // --- Timeline (studio instrumentation) ---
@@ -454,9 +464,12 @@ export function actor(
       const persisted: unknown = JSON.parse(row.state);
       this.journalAhead = this.isJournalAhead();
 
-      // Migrate (and restore) through the step core when the stored version is older.
+      // Migrate (and restore) through the step core when the stored version is older. A bump across a
+      // version that rebuilds by replay waits for catchUpJournal() (replay is async).
+      const rebuild = row.version !== this.version && row.version < (def.rebuildVersion ?? 0);
+      this.rebuildFrom = rebuild ? row.version : null;
       const migration =
-        def.migrate !== undefined && row.version !== this.version
+        !rebuild && def.migrate !== undefined && row.version !== this.version
           ? this.runStep({ type: "migrate", fromVersion: row.version, toVersion: this.version, persisted })
           : null;
       this.state = migration !== null ? migration.state : def.restore ? def.restore(persisted) : persisted;
@@ -921,6 +934,10 @@ export function actor(
      * that does not replay leaves the snapshot as it was (and is logged).
      */
     async catchUpJournal(): Promise<void> {
+      if (this.rebuildFrom !== null) {
+        await this.rebuildByReplay(this.rebuildFrom);
+        return;
+      }
       if (!this.journalAhead) return;
       this.journalAhead = false;
       const sql = this.ctx.storage.sql;
@@ -942,6 +959,25 @@ export function actor(
           JSON.stringify({ event: "actor_kit.journal.replay_failed", actorType: _actorName, error: message }),
         );
       }
+    }
+
+    /**
+     * A version bump across `rebuild: "replay"` (ADR-015 D5): the state is what the new handlers make
+     * of the whole journal (older payloads upcast), journaled as a migrate event with a checkpoint.
+     */
+    async rebuildByReplay(fromVersion: number): Promise<void> {
+      this.rebuildFrom = null;
+      const state = await rebuildFromJournal(def, readJournal(this.ctx.storage.sql), { env: this.env });
+      this.pendingCause = { type: "migrate", fromVersion, toVersion: this.version };
+      this.commit(state, {
+        causeType: "migrate",
+        name: null,
+        payload: { fromVersion, toVersion: this.version },
+        caller: null,
+        callerType: null,
+        role: null,
+        facts: {},
+      });
     }
 
     /** Targets stored under a link name, in insertion order (what `unlink(name)` removes). */
@@ -2594,7 +2630,8 @@ export function createActorClass<TContract extends { readonly name: string; read
     throw new Error("createActorClass: contract.def must have init, roles, and views");
   }
 
-  const def = contract.def;
+  // The version chain (ADR-015 D5) compiles into version, migrate and upcast.
+  const def = toRuntimeDef(contract.def);
 
   // Detect flat messages and wrap into role-nested format
   if (def.messages && isFlatMessages(def.messages)) {

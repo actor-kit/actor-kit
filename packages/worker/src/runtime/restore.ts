@@ -71,6 +71,23 @@ function resultsToRedeliver(events: readonly JournalEvent[], toSeq: number): Jou
   return redeliver;
 }
 
+/** toSeq must be a seq the journal has reached. */
+function assertInJournal(events: readonly JournalEvent[], toSeq: number): void {
+  const lastSeq = Math.max(0, ...events.map((e) => e.seq));
+  if (!Number.isInteger(toSeq) || toSeq < 1 || toSeq > lastSeq) {
+    throw new Error(`Cannot restore to seq ${toSeq}: the journal runs from 1 to ${lastSeq}`);
+  }
+}
+
+/** State shapes differ across a version bump: toSeq must have been written by the current version. */
+function assertCurrentVersion(def: ReplayableDef, events: readonly JournalEvent[], toSeq: number): void {
+  if (def.version === undefined) return;
+  const written = events.find((e) => e.seq === toSeq)?.codeVersion ?? def.version;
+  if (written < def.version) {
+    throw new Error(`Cannot restore to seq ${toSeq}: it was written by version ${written} (current: ${def.version})`);
+  }
+}
+
 /** Plan a restore of `journal` to `toSeq` (1 to its last seq). Throws when the journal cannot get there. */
 export async function planRestore(
   def: ReplayableDef,
@@ -79,10 +96,8 @@ export async function planRestore(
   options: { env?: unknown } = {},
 ): Promise<RestorePlan> {
   const events = [...journal.events].sort((a, b) => a.seq - b.seq);
-  const lastSeq = Math.max(0, ...events.map((e) => e.seq));
-  if (!Number.isInteger(toSeq) || toSeq < 1 || toSeq > lastSeq) {
-    throw new Error(`Cannot restore to seq ${toSeq}: the journal runs from 1 to ${lastSeq}`);
-  }
+  assertInJournal(events, toSeq);
+  assertCurrentVersion(def, events, toSeq);
   const start = restoreStart(def, journal, events, toSeq);
   const folded = events.filter((e) => e.seq > start.seq && e.seq <= toSeq);
   const point = (await foldEvents(def, start, folded, options)).get(toSeq) ?? start.point;

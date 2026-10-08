@@ -68,6 +68,12 @@ export interface StepDef {
   migrate?(persisted: unknown, fromVersion: number): unknown;
   serialize?(state: unknown): unknown;
   restore?(serialized: unknown): unknown;
+  /** The current code version (ADR-015 D5; compiled from `versions`). */
+  version?: number;
+  /** Every version in the chain: journal events written by any other version have no path. */
+  knownVersions?: readonly number[];
+  /** Upcast a message payload journaled at `fromVersion` to the current version. */
+  upcast?(message: string, payload: unknown, fromVersion: number): unknown;
 }
 
 interface SafeParser {

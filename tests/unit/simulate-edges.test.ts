@@ -4,7 +4,7 @@
  */
 import { schema, uint32, view } from "@actor-kit/core";
 import { simulate, testActor } from "@actor-kit/test";
-import { defineActor, link, message, timer } from "@actor-kit/worker/testing";
+import { defineActor, link, message, timer, version } from "@actor-kit/worker/testing";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { nextRandom, uuidFrom } from "../../packages/test/src/seeded";
@@ -55,8 +55,11 @@ describe("toSimDef", () => {
 type S = { log: string[] };
 const add = (s: S, line: string): S => ({ log: [...s.log, line] });
 
+const HubState = z.object({ log: z.array(z.string()) });
+const ClockState = z.object({ n: z.number() });
+
 const Hub = defineActor("hub", {
-  version: 3,
+  versions: [version(1, HubState), version(2, HubState), version(3, HubState)],
   input: z.object({}),
   init: (): S => ({ log: [] }),
   roles: {
@@ -397,7 +400,7 @@ describe("testActor rejections", () => {
 
 const fired: string[] = [];
 const Clock = defineActor("clock", {
-  version: 4,
+  versions: [version(1, ClockState), version(4, ClockState)],
   input: z.object({}),
   init: () => ({ n: 0 }),
   roles: { any: () => true },

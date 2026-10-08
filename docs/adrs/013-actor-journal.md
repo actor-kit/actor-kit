@@ -1,7 +1,7 @@
 # ADR 013: Actor Journal — Snapshot Cache + Append-Only Events
 
 **Date**: 2026-10-07
-**Status**: Accepted (steps 1–3 implemented; step 3, restore, built as ADR-015 D3; step 4 as ADR-015 D5)
+**Status**: Accepted (steps 1–4 implemented; step 3, restore, built as ADR-015 D3; step 4, migrate, as ADR-015 D5's version chain)
 **Depends on**: ADR-003 (transactional outbox), ADR-010 (services and execute), ADR-011 (links)
 **Replaces**: the unbuilt CDC `change_log` in [phase-5-cf-integration.md](../specs/phase-5-cf-integration.md)
 
@@ -82,7 +82,7 @@ A checkpoint is written every `checkpointEvery` events (default 100). Checkpoint
 | `service.onError` | service | `{ input, error: { message }, effectId }` | `onError(state, error, input, ctx)` |
 | `link.onUpdate` | link | `{ sourceId, view }` | `onUpdate(state, view, sourceId, ctx)` |
 | `link.onError` | link | `{ targetId, error: { message, code } }` | `onError(state, error, targetId, ctx)` |
-| `migrate` | — | `{ fromVersion, toVersion }` | `restore(migrate(serialize(state), fromVersion))` |
+| `migrate` | — | `{ fromVersion, toVersion }` | Version bump (ADR-015 D5): always checkpointed; replay across older versions starts there |
 | `restore` | — | `{ toSeq }` | State (and pending timers) as they were after `toSeq` (ADR-015 D3); replayed by `foldJournal`. |
 | `timer` | timer name | `{ id, key, payload, fireAt, lateBy }` | `timers[name].handler(state, payload, { key, lateBy, ...ctx })` (ADR-015 D2) |
 

@@ -20,6 +20,8 @@
  *   type Messages = keyof typeof Counter.def.messages;
  */
 
+import type { ChainIsTyped, CurrentState } from "./runtime/versions";
+
 /**
  * A typed contract that preserves the full definition type.
  * TName is the actor name (string literal).
@@ -41,9 +43,23 @@ export function defineActor<
     input: import("zod").ZodType;
     init(...args: never[]): unknown;
   },
->(name: TName, def: TDef): ActorContract<TName, TDef> {
+>(name: TName, def: TDef & VersionsCheck<TDef>): ActorContract<TName, TDef> {
   return { name, def };
 }
+
+type InitState<TDef> = TDef extends { init(...args: never[]): infer S } ? Awaited<S> : never;
+
+/**
+ * ADR-015 D5: every step of `versions` must take the previous version's state, and the last
+ * version must describe what init returns. A mismatch makes `versions` a type error.
+ */
+type VersionsCheck<TDef> = TDef extends { versions: infer V extends readonly unknown[] }
+  ? ChainIsTyped<V> extends true
+    ? [InitState<TDef>] extends [CurrentState<V>]
+      ? unknown
+      : { versions: "the last version's schema must describe the state init returns" }
+    : { versions: "each version's state step must take the previous version's state" }
+  : unknown;
 
 /**
  * What lifecycle.connect / lifecycle.disconnect receive. Each socket is its own

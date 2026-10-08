@@ -12,7 +12,7 @@
  */
 
 import { schema, string, uint32, view } from "@actor-kit/core";
-import { createActorClass, defineActor, message } from "@actor-kit/worker";
+import { createActorClass, defineActor, message, version } from "@actor-kit/worker";
 import { z } from "zod";
 
 export type ProbeState = {
@@ -30,8 +30,30 @@ const ProbeMemberView = schema({ count: uint32, viewer: string, isOwner: string 
 export const PROBE_TIMELINE_SIZE = 5;
 export const PROBE_VERSION = 2;
 
+const ProbeV1 = z.object({ owner: z.string(), count: z.number() });
+const ProbeStateSchema = z.object({
+  owner: z.string(),
+  count: z.number(),
+  connects: z.number(),
+  disconnects: z.number(),
+  lastResult: z.string(),
+  migratedFrom: z.number(),
+});
+
 const StudioProbeContract = defineActor("studio-probe", {
-  version: PROBE_VERSION,
+  // Version 1 stored only owner and count; version 2 adds the rest and remembers where it came from.
+  versions: [
+    version(1, ProbeV1),
+    version(PROBE_VERSION, ProbeStateSchema, {
+      state: (v1: z.infer<typeof ProbeV1>): ProbeState => ({
+        ...v1,
+        connects: 0,
+        disconnects: 0,
+        lastResult: "",
+        migratedFrom: 1,
+      }),
+    }),
+  ],
   // Required input: the actor stays uninitialised (empty timeline) until spawn().
   input: z.object({ owner: z.string() }),
   init: ({ owner }: { owner: string }): ProbeState => ({
@@ -42,10 +64,6 @@ const StudioProbeContract = defineActor("studio-probe", {
     lastResult: "",
     migratedFrom: 0,
   }),
-  migrate: (persisted: unknown, fromVersion: number): ProbeState => {
-    const v1 = z.object({ owner: z.string(), count: z.number() }).parse(persisted);
-    return { ...v1, connects: 0, disconnects: 0, lastResult: "", migratedFrom: fromVersion };
-  },
   roles: {
     admin: (_state: ProbeState, _caller: string, { callerType }: { callerType: "user" | "service" }) =>
       callerType === "service",

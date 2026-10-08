@@ -5,7 +5,7 @@
  */
 
 import type { Journal, ReplayableDef } from "@actor-kit/worker/testing";
-import { foldJournal } from "@actor-kit/worker/testing";
+import { foldJournal, toRuntimeDef } from "@actor-kit/worker/testing";
 
 export { JournalDivergenceError, JournalNondeterminismError } from "@actor-kit/worker/testing";
 
@@ -49,6 +49,8 @@ export async function replayJournal(
     throw new Error(`replayJournal: "${contract.name}" is not an actor contract`);
   }
   const flat = roleNestedMessages(def.messages, def.roles);
-  const replayable: ReplayableDef = flat === undefined ? def : { ...def, messages: flat };
+  // The version chain (ADR-015 D5): events from versions with no path are refused, replay starts at the last bump.
+  const versioned = toRuntimeDef(def);
+  const replayable: ReplayableDef = flat === undefined ? versioned : { ...versioned, messages: flat };
   return foldJournal(replayable, journal, options);
 }

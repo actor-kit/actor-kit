@@ -289,7 +289,8 @@ export function appendJournalEvent(
     .toArray()[0];
   const seq = z.object({ seq: z.number() }).parse(row).seq;
 
-  if (seq % config.checkpointEvery === 0) {
+  // A version bump always checkpoints: replay across it starts there (ADR-015 D5).
+  if (seq % config.checkpointEvery === 0 || draft.causeType === "migrate") {
     sql.exec(
       "INSERT OR REPLACE INTO journal_checkpoints (seq, version, state, checksum, timers) VALUES (?, ?, ?, ?, ?)",
       seq,
@@ -643,7 +644,7 @@ export async function foldEvents(
   def: ReplayableDef,
   start: { seq: number; point: FoldPoint },
   events: readonly JournalEvent[],
-  options: { env?: unknown } = {},
+  options: FoldOptions = {},
 ): Promise<Map<number, FoldPoint>> {
   const points = new Map<number, FoldPoint>([[start.seq, start.point]]);
   let point = start.point;
@@ -653,14 +654,33 @@ export async function foldEvents(
       throw new Error(`Journal replay: expected seq ${expectedSeq}, found ${event.seq}`);
     }
     point = await foldEvent(def, point, event, points, options);
-    const actual = checksumState(def, point.state);
-    if (actual !== event.stateChecksum) {
-      throw new JournalDivergenceError(event.seq, event.causeType, event.name, event.stateChecksum, actual);
-    }
+    if (options.rebuild !== true) verifyChecksum(def, point, event);
     points.set(event.seq, point);
     expectedSeq += 1;
   }
   return points;
+}
+
+export interface FoldOptions {
+  readonly env?: unknown;
+  /**
+   * Rebuild by replay (ADR-015 D5): run every event under the current handlers, upcasting payloads
+   * journaled by older versions, skipping version bumps, and without comparing checksums.
+   */
+  readonly rebuild?: boolean;
+}
+
+function verifyChecksum(def: ReplayableDef, point: FoldPoint, event: JournalEvent): void {
+  const actual = checksumState(def, point.state);
+  if (actual !== event.stateChecksum) {
+    throw new JournalDivergenceError(event.seq, event.causeType, event.name, event.stateChecksum, actual);
+  }
+}
+
+/** An event as a rebuild replays it: payload upcast from the version that wrote it. */
+function upcastEvent(def: ReplayableDef, event: JournalEvent): JournalEvent {
+  if (event.causeType !== "message" || def.upcast === undefined || event.name === null) return event;
+  return { ...event, payload: def.upcast(event.name, event.payload, event.codeVersion) };
 }
 
 async function foldEvent(
@@ -668,8 +688,12 @@ async function foldEvent(
   point: FoldPoint,
   event: JournalEvent,
   points: ReadonlyMap<number, FoldPoint>,
-  options: { env?: unknown },
+  options: FoldOptions,
 ): Promise<FoldPoint> {
+  if (options.rebuild === true) {
+    if (event.causeType === "migrate") return point;
+    return foldEvent(def, point, upcastEvent(def, event), points, { ...options, rebuild: false });
+  }
   if (event.causeType === "restore") {
     const { toSeq } = RestorePayload.parse(event.payload);
     const target = points.get(toSeq);
@@ -686,15 +710,87 @@ async function foldEvent(
   return { state: replayed.state, timers: applyScheduleOps(remaining, replayed.timerOps) };
 }
 
+/** Thrown when a journal event was written by a version with no path to the current one. */
+export class JournalVersionError extends Error {
+  override name = "JournalVersionError";
+  constructor(
+    readonly seq: number,
+    readonly codeVersion: number,
+    readonly currentVersion: number,
+  ) {
+    super(
+      `Journal replay: event ${seq} was written by version ${codeVersion}, which has no path to version ${currentVersion}`,
+    );
+  }
+}
+
+/** Every event must come from a version in the chain, not newer than the current one. */
+function checkVersions(def: ReplayableDef, events: readonly JournalEvent[]): void {
+  const { knownVersions, version } = def;
+  if (knownVersions === undefined || version === undefined) return;
+  for (const event of events) {
+    if (!knownVersions.includes(event.codeVersion) || event.codeVersion > version) {
+      throw new JournalVersionError(event.seq, event.codeVersion, version);
+    }
+  }
+}
+
 /** Where a journal can be folded from: init (seq 0) or the checkpoint just before its first event. */
 function journalStart(def: ReplayableDef, journal: Journal, first: JournalEvent): { seq: number; point: FoldPoint } {
   if (first.causeType === "init") return { seq: first.seq - 1, point: { state: undefined, timers: [] } };
-  const baseSeq = first.seq - 1;
-  const checkpoint = journal.checkpoints.find((c) => c.seq === baseSeq);
-  if (checkpoint === undefined) {
-    throw new Error(`Journal replay: no checkpoint at seq ${baseSeq} to start from`);
+  return checkpointStart(def, journal, first.seq - 1, `no checkpoint at seq ${first.seq - 1} to start from`);
+}
+
+function checkpointStart(def: ReplayableDef, journal: Journal, seq: number, missing: string) {
+  const checkpoint = journal.checkpoints.find((c) => c.seq === seq);
+  if (checkpoint === undefined) throw new Error(`Journal replay: ${missing}`);
+  return { seq, point: checkpointPoint(def, checkpoint) };
+}
+
+/**
+ * The events a journal's current code can replay: all of them, or, when older versions wrote
+ * some, those after the last version bump (from the checkpoint written with it).
+ */
+function replayable(
+  def: ReplayableDef,
+  journal: Journal,
+  events: JournalEvent[],
+): { start: { seq: number; point: FoldPoint }; events: JournalEvent[] } {
+  const current = def.version;
+  const older = current === undefined ? [] : events.filter((e) => e.codeVersion < current);
+  const [first] = events;
+  if (older.length === 0 || first === undefined) {
+    return {
+      start:
+        first === undefined ? { seq: 0, point: { state: undefined, timers: [] } } : journalStart(def, journal, first),
+      events,
+    };
   }
-  return { seq: baseSeq, point: checkpointPoint(def, checkpoint) };
+  const bump = events.filter((e) => e.causeType === "migrate").at(-1)?.seq ?? 0;
+  const start = checkpointStart(def, journal, bump, `no checkpoint at the version bump (seq ${bump})`);
+  return { start, events: events.filter((e) => e.seq > bump) };
+}
+
+/**
+ * Rebuild by replay (ADR-015 D5): the state the current handlers make of the whole journal, from
+ * init, with older payloads upcast. Checksums are not compared: older events were written by
+ * other code.
+ */
+export async function rebuildFromJournal(
+  def: ReplayableDef,
+  journal: Journal,
+  options: { env?: unknown } = {},
+): Promise<unknown> {
+  const events = [...journal.events].sort((a, b) => a.seq - b.seq);
+  const first = events[0];
+  if (first?.causeType !== "init") {
+    throw new Error(`Rebuilding by replay needs the whole journal: it starts at seq ${first?.seq ?? 0}`);
+  }
+  const points = await foldEvents(def, { seq: 0, point: { state: undefined, timers: [] } }, events, {
+    ...options,
+    rebuild: true,
+  });
+  return points.get(events.at(-1)?.seq ?? 0)?.state;
 }
 
 /**
@@ -706,9 +802,10 @@ export async function foldJournal(
   journal: Journal,
   options: { env?: unknown } = {},
 ): Promise<{ state: unknown; replayed: number }> {
-  const events = [...journal.events].sort((a, b) => a.seq - b.seq);
-  const first = events[0];
-  if (first === undefined) return { state: undefined, replayed: 0 };
-  const points = await foldEvents(def, journalStart(def, journal, first), events, options);
-  return { state: points.get(events.at(-1)?.seq ?? 0)?.state, replayed: events.length };
+  const sorted = [...journal.events].sort((a, b) => a.seq - b.seq);
+  if (sorted.length === 0) return { state: undefined, replayed: 0 };
+  checkVersions(def, sorted);
+  const { start, events } = replayable(def, journal, sorted);
+  const points = await foldEvents(def, start, events, options);
+  return { state: points.get(events.at(-1)?.seq ?? start.seq)?.state, replayed: events.length };
 }

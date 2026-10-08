@@ -349,6 +349,20 @@ On wake, when `snapshots.last_seq` is behind the journal at the same code versio
 the journal from its newest usable checkpoint and rewrites the snapshot. Timeline rows carry the journal `seq`
 they recorded, which Studio uses for "Restore to here".
 
+### Versions (ADR-015 D5)
+
+`versions: [version(n, Schema, { state, events, rebuild })]` is compiled by `toRuntimeDef()` (`runtime/versions.ts`)
+when a contract becomes a DO class (`createActorClass`), a simulation or a replay: `version` (the last), `migrate`
+(parse with the old version's schema, then each `state` step parsed by its version's schema), `upcast` (message
+payloads through every later `events` map), `knownVersions` and `rebuildVersion`. A contract with the old `version`
+/ `migrate` keys is refused.
+
+On wake with an older stored version: `migrate` through the step core, or, across a `rebuild: "replay"` version,
+`rebuildFromJournal()` (whole journal, current handlers, payloads upcast, no checksum comparison) in
+`catchUpJournal()`. Either way a `migrate` event is appended, always with a checkpoint. `foldJournal()` checks every
+event's `code_version` is in the chain and not newer than the current one, and, when older versions wrote some
+events, starts at the last bump's checkpoint. Restore refuses a seq written by an older version.
+
 ### Actor-to-actor communication (DO RPC)
 
 ```typescript
