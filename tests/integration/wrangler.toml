@@ -124,3 +124,19 @@ class_name = "RetrierNoJournal"
 [[migrations]]
 tag = "v10"
 new_sqlite_classes = ["Retrier", "RetrierNoJournal"]
+
+[[durable_objects.bindings]]
+name = "QUIZ"
+class_name = "Quiz"
+
+[[durable_objects.bindings]]
+name = "QUIZ_NO_JOURNAL"
+class_name = "QuizNoJournal"
+
+[[durable_objects.bindings]]
+name = "QUIZ_NO_STUDIO"
+class_name = "QuizNoStudio"
+
+[[migrations]]
+tag = "v11"
+new_sqlite_classes = ["Quiz", "QuizNoJournal", "QuizNoStudio"]

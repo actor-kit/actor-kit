@@ -22,8 +22,10 @@ export { array, boolean, float32, float64, nullable, schema, string, uint8, uint
 
 // Shared types
 export type {
+  CancelFn,
   ContractMessages,
   DeterministicContext,
+  Duration,
   ExecuteFn,
   Execution,
   ForwardCall,
@@ -35,7 +37,11 @@ export type {
   MessageDef,
   MessageEvent,
   MutationCause,
+  ScheduleFn,
+  ScheduleOptions,
   TimelineEntry,
+  TimerContext,
+  TimerDef,
   UnlinkFn,
 } from "./types";
 

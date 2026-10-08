@@ -13,6 +13,7 @@ import type {
   ForwardCall,
   Infer,
   MessageContext,
+  ScheduleOptions,
   SchemaDefinition,
   TimelineEntry,
 } from "@actor-kit/core";
@@ -102,6 +103,10 @@ interface SendResult<TState> {
   links: LinkCall[];
   unlinks: UnlinkCall[];
   forwards: ForwardCall[];
+  /** ctx.schedule() calls, as made (timers are not run; use simulate() for that). */
+  schedules: Array<{ timer: string; options: ScheduleOptions }>;
+  /** ctx.cancel() keys. */
+  cancels: string[];
   timeline: TimelineEntry[];
 }
 
@@ -231,6 +236,8 @@ export function testActor(
     const links: LinkCall[] = [];
     const unlinks: UnlinkCall[] = [];
     const forwards: ForwardCall[] = [];
+    const schedules: Array<{ timer: string; options: ScheduleOptions }> = [];
+    const cancels: string[] = [];
 
     const ctx: Omit<MessageContext, "role"> = {
       ...createLiveFacts().ctx,
@@ -248,6 +255,12 @@ export function testActor(
       },
       forward: (linkName, targetId, message) => {
         forwards.push({ linkName, targetId, message });
+      },
+      schedule: (timer, options) => {
+        schedules.push({ timer, options });
+      },
+      cancel: (key) => {
+        cancels.push(key);
       },
     };
 
@@ -287,7 +300,7 @@ export function testActor(
       },
     ];
 
-    return { state: result.state, executions, links, unlinks, forwards, timeline };
+    return { state: result.state, executions, links, unlinks, forwards, schedules, cancels, timeline };
   }
 
   return {

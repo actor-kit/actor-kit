@@ -142,4 +142,22 @@ export const ACTOR_KIT_MIGRATIONS: ReadonlyArray<{ readonly name: string; readon
       UPDATE snapshots SET last_seq = COALESCE((SELECT seq FROM sqlite_sequence WHERE name = 'events'), 0);
     `,
   },
+  {
+    // Durable timers (ADR-015 D2): one row per pending timer, keyed by its effect id; `key` is unique
+    // (scheduling an existing key replaces it). Fired and cancelled timers are deleted.
+    name: "0011_timers",
+    sql: `
+      CREATE TABLE IF NOT EXISTS timers (
+        id TEXT PRIMARY KEY,
+        seq INTEGER NOT NULL,
+        idx INTEGER NOT NULL,
+        name TEXT NOT NULL,
+        key TEXT NOT NULL UNIQUE,
+        payload TEXT NOT NULL,
+        fire_at INTEGER NOT NULL,
+        created_at INTEGER NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_timers_due ON timers(fire_at, seq, idx);
+    `,
+  },
 ];

@@ -91,6 +91,7 @@ function applyFrame(state: StudioViewState, frame: StudioFrame): StudioViewState
           actorId: frame.actorId,
           connections: frame.connections,
           outbox: frame.outbox,
+          ...(frame.timers === undefined ? {} : { timers: frame.timers }),
           activeLinks: frame.activeLinks,
           linkSubscribers: frame.linkSubscribers,
         },
@@ -107,25 +108,29 @@ function applyFrame(state: StudioViewState, frame: StudioFrame): StudioViewState
       };
     }
 
+    default:
+      return state.inspect === null ? state : { ...state, inspect: patchInspect(state.inspect, frame) };
+  }
+}
+
+/** Live frames that patch one part of the inspected actor (connections, outbox, timers, links). */
+function patchInspect(
+  inspect: InspectResult,
+  frame: Exclude<StudioFrame, { type: "studio.snapshot" | "studio.timeline" }>,
+): InspectResult {
+  switch (frame.type) {
     case "studio.connection": {
-      if (state.inspect === null) return state;
       // One row per app socket: only the socket that connected or closed changes.
       const { connectionId } = frame.connection;
-      const others = state.inspect.connections.filter((c) => c.connectionId !== connectionId);
-      const connections = frame.action === "connect" ? [...others, frame.connection] : others;
-      return { ...state, inspect: { ...state.inspect, connections } };
+      const others = inspect.connections.filter((c) => c.connectionId !== connectionId);
+      return { ...inspect, connections: frame.action === "connect" ? [...others, frame.connection] : others };
     }
-
     case "studio.outbox":
-      if (state.inspect === null) return state;
-      return { ...state, inspect: { ...state.inspect, outbox: frame.outbox } };
-
+      return { ...inspect, outbox: frame.outbox };
+    case "studio.timers":
+      return { ...inspect, timers: frame.timers };
     case "studio.links":
-      if (state.inspect === null) return state;
-      return {
-        ...state,
-        inspect: { ...state.inspect, activeLinks: frame.activeLinks, linkSubscribers: frame.linkSubscribers },
-      };
+      return { ...inspect, activeLinks: frame.activeLinks, linkSubscribers: frame.linkSubscribers };
   }
 }
 

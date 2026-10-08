@@ -52,6 +52,31 @@ export interface ForwardEntry {
   createdAt: number;
 }
 
+// --- Timer ops (ADR-015 D2) ---
+
+/** A timer as scheduled: its deadline is already absolute (computed from ctx.now()). */
+export interface TimerSchedule {
+  readonly name: string;
+  /** null: the timer's key is its effect id. */
+  readonly key: string | null;
+  readonly payload: unknown;
+  readonly fireAt: number;
+}
+
+export type TimerOp =
+  | {
+      readonly op: "schedule";
+      /** Effect id, `seq:index`. */
+      readonly id: string;
+      readonly seq: number;
+      readonly index: number;
+      readonly name: string;
+      readonly key: string;
+      readonly payload: unknown;
+      readonly fireAt: number;
+    }
+  | { readonly op: "cancel"; readonly key: string };
+
 // --- Outbox collector (used during a transition) ---
 
 interface OutboxCollector {
@@ -67,6 +92,11 @@ interface OutboxCollector {
   toExecutionEntries(seq?: number): ExecutionEntry[];
   /** Forwards as outbox rows for the transition numbered `seq` (0 outside a runtime). */
   toForwardEntries(seq?: number): ForwardEntry[];
+  /** Record a timer (validated and given its deadline by the caller). Takes an effect index. */
+  schedule(timer: TimerSchedule): void;
+  cancel(key: string): void;
+  /** Schedules and cancels, in declaration order, for the transition numbered `seq`. */
+  toTimerOps(seq?: number): TimerOp[];
 }
 
 export function createOutbox(): OutboxCollector {
@@ -74,6 +104,10 @@ export function createOutbox(): OutboxCollector {
   const links: LinkCall[] = [];
   const unlinks: UnlinkCall[] = [];
   const forwards: Array<ForwardCall & { readonly index: number }> = [];
+  const timerOps: Array<
+    | { readonly op: "schedule"; readonly timer: TimerSchedule; readonly index: number }
+    | { readonly op: "cancel"; readonly key: string }
+  > = [];
   let effects = 0;
 
   return {
@@ -121,6 +155,23 @@ export function createOutbox(): OutboxCollector {
         attempts: 0,
         createdAt: now,
       }));
+    },
+
+    schedule(timer: TimerSchedule): void {
+      timerOps.push({ op: "schedule", timer, index: effects++ });
+    },
+
+    cancel(key: string): void {
+      timerOps.push({ op: "cancel", key });
+    },
+
+    toTimerOps(seq = 0): TimerOp[] {
+      return timerOps.map((entry) => {
+        if (entry.op === "cancel") return entry;
+        const id = formatEffectId(seq, entry.index);
+        const { name, key, payload, fireAt } = entry.timer;
+        return { op: "schedule", id, seq, index: entry.index, name, key: key ?? id, payload, fireAt };
+      });
     },
 
     toForwardEntries(seq = 0): ForwardEntry[] {

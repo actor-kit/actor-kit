@@ -40,11 +40,12 @@ const adminJwt = () => jwt({ sub: "a1", email: "admin@example.com" });
 const userJwt = () => jwt({ sub: "u1", email: "reader@example.com" });
 const agentJwt = () => jwt({ sub: "", common_name: "sre-agent.access" });
 
-function setup(opts: { exists?: boolean; redrive?: () => unknown; access?: boolean } = {}) {
+function setup(opts: { exists?: boolean; redrive?: () => unknown; fireTimer?: () => unknown; access?: boolean } = {}) {
   const events: StudioAuditEvent[] = [];
   const calls: Array<{ method: string; args: unknown[] }> = [];
   const stubMethods: Record<string, (...args: unknown[]) => unknown> = {
     __redrive: opts.redrive ?? (() => ({ ok: true })),
+    __fireTimer: opts.fireTimer ?? (() => ({ ok: true })),
   };
   const ns = (methods: Record<string, (...args: unknown[]) => unknown>) => ({
     idFromName: (name: string) => ({ toString: () => `name:${name}` }),
@@ -296,5 +297,81 @@ describe("agents and the caller-hash key", () => {
     );
     expect(res?.status).toBe(503);
     expect(calls).toEqual([]);
+  });
+});
+
+describe("studio actions: routing", () => {
+  it("an actions path under another prefix is not an action", async () => {
+    const studio = createActorKitStudio({ access: { keysFor: () => jwks }, log: () => {} });
+    const res = await studio(
+      new Request("http://localhost/__studio/assets/api/actors/counter/abc/actions", { method: "POST", body: "{}" }),
+      {},
+      ctx,
+    );
+    expect(res?.status).toBe(405);
+    expect(res?.headers.get("Allow")).toBe("GET, HEAD");
+  });
+
+  it('an actor RPC that throws a non-Error is a 500 "Unknown error"', async () => {
+    const { post } = setup({
+      redrive: () => {
+        throw "boom";
+      },
+    });
+    const res = await post(
+      PATH,
+      { action: "redrive", effectId: "4:0" },
+      { "Cf-Access-Jwt-Assertion": await adminJwt() },
+    );
+    expect(res.status).toBe(500);
+    expect(await res.json()).toEqual({ error: "Unknown error" });
+  });
+});
+
+describe("studio actions: fire a timer now", () => {
+  it("an admin fires a pending timer by key through __fireTimer", async () => {
+    const { post, actorCalls } = setup();
+    const res = await post(
+      PATH,
+      { action: "fireTimer", key: "round-1" },
+      { "Cf-Access-Jwt-Assertion": await adminJwt() },
+    );
+    expect(res.status).toBe(200);
+    expect(actorCalls()).toEqual([{ method: "__fireTimer", args: [{ key: "round-1" }] }]);
+  });
+
+  it("an unknown key is a 409 with the actor's reason", async () => {
+    const { post } = setup({ fireTimer: () => ({ ok: false, error: 'No pending timer with key "x"' }) });
+    const res = await post(PATH, { action: "fireTimer", key: "x" }, { "Cf-Access-Jwt-Assertion": await adminJwt() });
+    expect(res.status).toBe(409);
+    expect(await res.json()).toEqual({ error: 'No pending timer with key "x"' });
+  });
+
+  it.each([
+    ["no key", { action: "fireTimer" }],
+    ["empty key", { action: "fireTimer", key: "" }],
+    ["a key over 256 characters", { action: "fireTimer", key: "k".repeat(257) }],
+    ["extra fields", { action: "fireTimer", key: "k", effectId: "1:0" }],
+  ])("rejects %s as 400", async (_what, body) => {
+    const { post, actorCalls } = setup();
+    expect((await post(PATH, body, { "Cf-Access-Jwt-Assertion": await adminJwt() })).status).toBe(400);
+    expect(actorCalls()).toEqual([]);
+  });
+
+  it("accepts a key of exactly 256 characters", async () => {
+    const { post } = setup();
+    const res = await post(
+      PATH,
+      { action: "fireTimer", key: "k".repeat(256) },
+      { "Cf-Access-Jwt-Assertion": await adminJwt() },
+    );
+    expect(res.status).toBe(200);
+  });
+
+  it("is refused without the mutate scope", async () => {
+    const { post, actorCalls } = setup();
+    const res = await post(PATH, { action: "fireTimer", key: "k" }, { "Cf-Access-Jwt-Assertion": await agentJwt() });
+    expect(res.status).toBe(403);
+    expect(actorCalls()).toEqual([]);
   });
 });

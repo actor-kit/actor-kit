@@ -30,6 +30,7 @@ describe("ACTOR_KIT_MIGRATIONS", () => {
       "0008_drop_studio_connections",
       "0009_journal",
       "0010_effect_ids_and_retries",
+      "0011_timers",
     ]);
   });
 
@@ -40,6 +41,7 @@ describe("ACTOR_KIT_MIGRATIONS", () => {
       "index:idx_forwards_status_created",
       "index:idx_outbox_status_created",
       "index:idx_timeline_created",
+      "index:idx_timers_due",
       "table:active_links",
       "table:actor_meta",
       "table:events",
@@ -50,6 +52,7 @@ describe("ACTOR_KIT_MIGRATIONS", () => {
       "table:outbox",
       "table:snapshots",
       "table:timeline",
+      "table:timers",
     ]);
   });
 });

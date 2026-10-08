@@ -22,3 +22,5 @@ export { resolveNamespace } from "./runtime/resolve-namespace";
 export type { ActorRoute } from "./runtime/route-to-actor";
 // Runtime utilities
 export { parseActorRoute } from "./runtime/route-to-actor";
+// Timer helper (ADR-015 D2)
+export { timer } from "./timer";

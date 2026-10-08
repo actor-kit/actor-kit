@@ -25,3 +25,11 @@ class_name = "AuctionRoom"
 [[migrations]]
 tag = "v2"
 new_sqlite_classes = ["Lobby", "AuctionRoom"]
+
+[[durable_objects.bindings]]
+name = "OVEN"
+class_name = "Oven"
+
+[[migrations]]
+tag = "v3"
+new_sqlite_classes = ["Oven"]

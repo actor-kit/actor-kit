@@ -51,6 +51,28 @@ export interface DeterministicContext {
   readonly random: () => number;
 }
 
+// --- Timers (ADR-015 D2) ---
+
+/** Milliseconds, or a number with a unit: "500ms", "30s", "5m", "2h", "1d". */
+export type Duration = number | `${number}${"ms" | "s" | "m" | "h" | "d"}`;
+
+export interface ScheduleOptions {
+  /** Fire this long after the transition (from ctx.now(), so replay computes the same deadline). */
+  readonly in?: Duration;
+  /** Or fire at this time (ms since the epoch). Exactly one of `in` and `at`. */
+  readonly at?: number;
+  /** Unique per actor: scheduling an existing key replaces that timer. Default: the timer's effect id. */
+  readonly key?: string;
+  /** Validated by the timer's schema when scheduled. */
+  readonly payload?: unknown;
+}
+
+/** schedule() starts a durable timer declared in the actor's `timers` block. */
+export type ScheduleFn = (timer: string, options: ScheduleOptions) => void;
+
+/** cancel() removes a pending timer by key. Cancelling a key that is not pending does nothing. */
+export type CancelFn = (key: string) => void;
+
 export interface MessageContext<TEnv = unknown> extends DeterministicContext {
   readonly caller: string;
   readonly callerType: "user" | "service";
@@ -60,6 +82,26 @@ export interface MessageContext<TEnv = unknown> extends DeterministicContext {
   readonly link: LinkFn;
   readonly unlink: UnlinkFn;
   readonly forward: ForwardFn;
+  readonly schedule: ScheduleFn;
+  readonly cancel: CancelFn;
+}
+
+/** What a timer's handler gets. A timer has no caller and no role. */
+export interface TimerContext<TEnv = unknown> extends DeterministicContext {
+  readonly env: TEnv;
+  /** The timer's key. */
+  readonly key: string;
+  /** How late it fired, in ms (0 when on time or fired early from Studio). */
+  readonly lateBy: number;
+  readonly execute: ExecuteFn;
+  readonly forward: ForwardFn;
+  readonly schedule: ScheduleFn;
+  readonly cancel: CancelFn;
+}
+
+export interface TimerDef<TState = unknown, TPayload = unknown, TEnv = unknown> {
+  readonly schema: z.ZodType<TPayload>;
+  readonly handler: (state: TState, payload: TPayload, ctx: TimerContext<TEnv>) => TState;
 }
 
 // --- Guard context ---
@@ -138,7 +180,15 @@ export type MutationCause =
       readonly viewData: unknown;
     }
   | { readonly type: "link.onError"; readonly sourceType: string; readonly sourceId: string; readonly error: string }
-  | { readonly type: "link.onUnlink"; readonly sourceType: string; readonly sourceId: string };
+  | { readonly type: "link.onUnlink"; readonly sourceType: string; readonly sourceId: string }
+  | {
+      readonly type: "timer";
+      readonly name: string;
+      readonly key: string;
+      readonly payload: unknown;
+      readonly fireAt: number;
+      readonly lateBy: number;
+    };
 
 /** A single entry in the actor's timeline — records a state mutation and its cause. */
 export interface TimelineEntry {

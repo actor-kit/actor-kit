@@ -26,6 +26,7 @@ import type { LifecycleEvent } from "./define";
 import { BINARY_SUPPORT_HEADER, CALLER_ID_HEADER, CALLER_TYPE_HEADER } from "./identity";
 import {
   appendJournalEvent,
+  clockedSources,
   createLiveFacts,
   type JournalDraft,
   type JournalOption,
@@ -64,6 +65,7 @@ import {
   projectOutboxRow,
   projectState,
   projectTimelineEntry,
+  projectTimerRow,
   projectView,
   type StudioOutboxRow,
   type StudioProjection,
@@ -85,6 +87,18 @@ import {
   viewerTags,
 } from "./runtime/studio-protocol";
 import { compileRedaction } from "./runtime/studio-redact";
+import {
+  applyTimerOps,
+  type DueTimer,
+  deleteTimer,
+  dueTimer,
+  earliestDeadline,
+  nextTimerAt,
+  readTimers,
+  type TimerRow,
+  timerByKey,
+  timerFailedEvent,
+} from "./runtime/timers-store";
 
 /** Reserved caller ID for studio WebSocket connections (stamped by the studio middleware). */
 const STUDIO_CALLER_ID = "__studio";
@@ -167,6 +181,11 @@ interface ActorDef {
       ctx: { caller: string; role: string },
     ): void;
   };
+  /** Durable timers (ADR-015 D2): `timer(schema, handler)` per name. */
+  timers?: Record<
+    string,
+    { readonly schema: z.ZodType; handler(state: unknown, payload: unknown, ctx: unknown): unknown }
+  >;
   services?: Record<
     string,
     {
@@ -227,6 +246,7 @@ const SnapshotRowSchema = z.object({
 });
 
 const RedriveOptionsSchema = z.object({ effectId: z.string().min(1) });
+const FireTimerOptionsSchema = z.object({ key: z.string().min(1) });
 
 // SQL rows and RPC payloads, parsed at the boundary.
 const TargetIdRowSchema = z.object({ target_id: z.string() });
@@ -343,6 +363,7 @@ export function actor(
     connectionChecksums = new Map<WebSocket, string>(); // last checksum sent per connection
     supportsBinary = new Map<WebSocket, boolean>(); // per-connection binary capability
     drainingExecutions = false; // Prevents concurrent execution drains
+    timersChanged = false; // A commit scheduled or cancelled timers: push them to Studio after it
     previousSubscriberViews = new Map<string, string>(); // dedupe: "type:id" → "role:json"
 
     // --- Timeline (studio instrumentation) ---
@@ -595,9 +616,14 @@ export function actor(
       } catch (error) {
         this.state = previous;
         this.pendingCause = null;
+        this.timersChanged = false;
         throw error;
       }
       this.syncAlarm();
+      if (this.timersChanged) {
+        this.timersChanged = false;
+        this.pushStudioTimers();
+      }
     }
 
     /** Write the snapshot (and its journal event). Only call inside commit()'s transaction. */
@@ -679,7 +705,7 @@ export function actor(
      * Runs after every commit and every settled try.
      */
     syncAlarm(): void {
-      const next = nextRetryAt(this.ctx.storage.sql);
+      const next = earliestDeadline(nextTimerAt(this.ctx.storage.sql), nextRetryAt(this.ctx.storage.sql));
       if (next === null) {
         void this.ctx.storage.deleteAlarm();
       } else {
@@ -687,12 +713,63 @@ export function actor(
       }
     }
 
-    /** DO alarm: run the outbox retries that are due, then re-arm for the next one. */
+    /**
+     * DO alarm: fire every due timer (late ones too, in (fire_at, id) order, each in its own
+     * transaction), run the outbox retries that are due, then re-arm for the next deadline.
+     */
     async alarm(): Promise<void> {
       this.loadPersisted({ create: false });
       if (!this.initialized) return;
+      this.fireDueTimers(Date.now());
       await this.drainExecutions();
       this.syncAlarm();
+    }
+
+    /** Fire due timers one at a time. Timers scheduled while firing wait for the next alarm. */
+    fireDueTimers(now: number): void {
+      const sql = this.ctx.storage.sql;
+      const scheduledBy = nextTransitionSeq(sql) - 1;
+      for (let due = dueTimer(sql, now, scheduledBy); due !== null; due = dueTimer(sql, now, scheduledBy)) {
+        this.fireTimer(due, now);
+      }
+    }
+
+    /**
+     * Fire one timer: its handler runs through the step core and commits with the timer's row
+     * deleted. A timer whose payload no longer parses, or whose transition fails, is dropped and
+     * logged (it would otherwise fail on every alarm).
+     */
+    fireTimer(due: DueTimer, now: number): void {
+      const sql = this.ctx.storage.sql;
+      const lateBy = Math.max(0, now - due.fireAt);
+      const parsed = def.timers?.[due.name]?.schema.safeParse(due.payload);
+      try {
+        if (parsed !== undefined && !parsed.success) throw new Error(`invalid payload: ${parsed.error.message}`);
+        const payload = parsed?.success ? parsed.data : due.payload;
+        const result = this.runStep({ type: "timer", ...due, payload, lateBy }, now);
+        this.pendingCause = { type: "timer", name: due.name, key: due.key, payload, fireAt: due.fireAt, lateBy };
+        this.commit(result.state, result.event, (seq) => {
+          deleteTimer(sql, due.id);
+          this.writeEffects(result, seq, `timer:${due.name}`, "service");
+        });
+        this.afterEffects(result);
+      } catch (error) {
+        deleteTimer(sql, due.id);
+        console.error(JSON.stringify(timerFailedEvent(_actorName, this.actorId ?? this.ctx.id.toString(), due, error)));
+      }
+      this.pushStudioTimers();
+    }
+
+    /** After a committed transition: views, Studio, and draining the effects it declared. */
+    afterEffects(result: StepResult): void {
+      this.broadcastViews();
+      if (result.effects.getExecutions().length > 0) {
+        this.pushStudioOutbox();
+        this.drainExecutions();
+      }
+      if (result.effects.getForwards().length > 0) {
+        this.drainForwards();
+      }
     }
 
     async drainExecutions(): Promise<void> {
@@ -798,8 +875,9 @@ export function actor(
     }
 
     /** Run one transition through the step core with live facts (now/id/random, stored link targets). */
-    runStep(cause: StepCause): StepResult {
-      const facts = liveStepFacts(createLiveFacts(), (name) => this.readLinkTargets(name));
+    runStep(cause: StepCause, now?: number): StepResult {
+      const live = createLiveFacts(now === undefined ? undefined : clockedSources(now));
+      const facts = liveStepFacts(live, (name) => this.readLinkTargets(name));
       return step(def, this.state, cause, facts, this.env);
     }
 
@@ -907,6 +985,11 @@ export function actor(
         this.writeLinks(linkCalls, unlinkCalls);
       }
       this.persistForwards(result.effects.toForwardEntries(seq), caller, callerType);
+      const timerOps = result.effects.toTimerOps(seq);
+      if (timerOps.length > 0) {
+        applyTimerOps(this.ctx.storage.sql, timerOps, Date.now());
+        this.timersChanged = true;
+      }
     }
 
     /**
@@ -1925,6 +2008,7 @@ export function actor(
         timeline,
         connections: this.liveConnections(),
         outbox: this.readOutbox(),
+        timers: readTimers(this.ctx.storage.sql),
         activeLinks: this.readActiveLinks(),
         linkSubscribers: this.readLinkSubscribers(),
         actorId: this.actorId ?? this.ctx.id.toString(),
@@ -1944,6 +2028,7 @@ export function actor(
         timeline: await Promise.all(snapshot.timeline.map((e) => projectTimelineEntry(e, projection))),
         connections: await projectConnections(snapshot.connections, projection),
         outbox: snapshot.outbox.map((row) => projectOutboxRow(row, projection)),
+        timers: snapshot.timers.map((row) => projectTimerRow(row, projection)),
         activeLinks: snapshot.activeLinks,
         linkSubscribers: snapshot.linkSubscribers,
         actorType: _actorName,
@@ -1959,6 +2044,16 @@ export function actor(
       this.broadcastToStudio(async (projection) => ({
         type: "studio.outbox",
         outbox: outbox.map((row) => projectOutboxRow(row, projection)),
+      }));
+    }
+
+    /** Push the pending timers to studio sockets after a commit schedules, cancels or fires one. */
+    pushStudioTimers(): void {
+      if (!this.hasStudioWs()) return;
+      const timers = readTimers(this.ctx.storage.sql);
+      this.broadcastToStudio(async (projection) => ({
+        type: "studio.timers",
+        timers: timers.map((row) => projectTimerRow(row, projection)),
       }));
     }
 
@@ -2039,6 +2134,8 @@ export function actor(
       actorId: string | null;
       connections: LiveConnection[];
       outbox: StudioOutboxRow[];
+      /** Pending timers (ADR-015 D2). Absent for an actor that does not exist. */
+      timers?: TimerRow[];
       activeLinks: Array<{
         targetType: string;
         targetId: string;
@@ -2076,6 +2173,7 @@ export function actor(
         version: this.version,
         actorId: this.actorId ?? null,
         outbox: this.readOutbox().map((row) => projectOutboxRow(row, projection)),
+        timers: readTimers(this.ctx.storage.sql).map((row) => projectTimerRow(row, projection)),
         activeLinks: this.readActiveLinks(),
         linkSubscribers: this.readLinkSubscribers(),
       };
@@ -2136,6 +2234,22 @@ export function actor(
       }
       this.pushStudioOutbox();
       void this.drainExecutions();
+      return Promise.resolve({ ok: true });
+    }
+
+    /**
+     * Studio RPC (mutate scope, ADR-014): fire a pending timer now, by key, exactly as alarm()
+     * would (its own transaction and journal event; lateBy 0 when early). Unknown keys are refused.
+     */
+    __fireTimer(opts: { key: string }): Promise<{ ok: true } | { ok: false; error: string }> {
+      this.loadPersisted({ create: false });
+      this.assertStudioEnabled();
+      const { key } = FireTimerOptionsSchema.parse(opts);
+      if (!this.persistedLoaded) return Promise.resolve({ ok: false, error: "Actor not found" });
+      const due = timerByKey(this.ctx.storage.sql, key);
+      if (due === null) return Promise.resolve({ ok: false, error: `No pending timer with key "${key}"` });
+      this.fireTimer(due, Date.now());
+      this.syncAlarm();
       return Promise.resolve({ ok: true });
     }
 
@@ -2276,6 +2390,7 @@ export interface TypedActorClass<TContract> {
         nextAttemptAt: number | null;
         lastError: string | null;
       }>;
+      timers?: Array<{ id: string; name: string; key: string; payload: string; fireAt: number; createdAt: number }>;
       activeLinks: Array<{
         targetType: string;
         targetId: string;
@@ -2299,6 +2414,7 @@ export interface TypedActorClass<TContract> {
       hasMore: boolean;
     }>;
     __redrive(opts: { effectId: string }): Promise<{ ok: true } | { ok: false; error: string }>;
+    __fireTimer(opts: { key: string }): Promise<{ ok: true } | { ok: false; error: string }>;
     __getView(opts: {
       role: string;
       caller?: string;

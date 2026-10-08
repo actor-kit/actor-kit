@@ -147,7 +147,7 @@ describe("step: message", () => {
 
   it("gives the handler caller, callerType, role, env, the effect verbs and now/id/random", () => {
     expect(step(def, { log: [] }, msg("CTX"), facts(), {}).state).toEqual({
-      log: ["caller,callerType,env,execute,forward,id,link,now,random,role,unlink"],
+      log: ["caller,callerType,cancel,env,execute,forward,id,link,now,random,role,schedule,unlink"],
     });
   });
 
@@ -217,7 +217,7 @@ describe("step: lifecycle", () => {
       {},
     );
     expect(result.state).toEqual({
-      log: ["disconnect:bob:caller,callerType,env,execute,forward,id,now,random", "promoted"],
+      log: ["disconnect:bob:caller,callerType,cancel,env,execute,forward,id,now,random,schedule", "promoted"],
     });
     expect(result.event).toMatchObject({ causeType: "lifecycle.disconnect", role: "admin", callerType: "service" });
   });
@@ -399,7 +399,7 @@ describe("stepInit", () => {
   it("throws when the def has no init", async () => {
     await expect(
       stepInit({}, { input: {}, caller: null, callerType: null }, facts(), { env: {}, link: async () => null }),
-    ).rejects.toThrow(/init/);
+    ).rejects.toThrow("This actor has no init");
   });
 });
 
@@ -624,5 +624,16 @@ describe("live and replay step facts", () => {
     expect(f.takeLinkView("room", "r1")).toEqual({ v: 1 });
     expect(f.ctx.now()).toBe(9);
     expect(f.recorded()).toBe(recorded);
+  });
+});
+
+describe("step: services and links that are missing by name", () => {
+  it.each([
+    { type: "service.onError", service: "OTHER", input: 1, error: { message: "x" } },
+    { type: "link.onError", link: "OTHER", targetId: "t", error: { message: "m", code: "c" } },
+  ] as const)("leaves the state alone when $type names an undeclared one", (cause) => {
+    const state = { log: [] };
+    const declared = { services: { S: {} }, links: { L: { onUpdate: (s: S) => s } } };
+    expect(step(declared, state, cause, facts(), {}).state).toBe(state);
   });
 });

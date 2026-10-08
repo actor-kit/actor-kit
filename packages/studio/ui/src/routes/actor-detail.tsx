@@ -4,6 +4,7 @@ import { formatCauseSummary } from "../cause-summary";
 import { JsonDiff } from "../components/json-diff";
 import { JsonTree } from "../components/json-tree";
 import { OutboxPanel } from "../components/outbox-panel";
+import { TimersPanel } from "../components/timers-panel";
 import { useStudioWs } from "../hooks/use-studio-ws";
 import type { TimelineItem } from "../protocol";
 import type { StudioStatus } from "../studio-state";
@@ -19,6 +20,7 @@ const CAUSE_LABELS: Record<string, { label: string; color: string }> = {
   "link.onUpdate": { label: "link update", color: "bg-violet-700" },
   "link.onError": { label: "link err", color: "bg-red-700" },
   "link.onUnlink": { label: "link unlink", color: "bg-zinc-500" },
+  timer: { label: "timer", color: "bg-amber-700" },
 };
 
 function relativeTime(ts: number): string {
@@ -29,7 +31,7 @@ function relativeTime(ts: number): string {
   return new Date(ts).toLocaleTimeString();
 }
 
-type Tab = "state" | "timeline" | "connections" | "outbox" | "links";
+type Tab = "state" | "timeline" | "connections" | "outbox" | "timers" | "links";
 
 function StatusBadge({ status }: { status: StudioStatus }) {
   switch (status) {
@@ -164,6 +166,7 @@ function ActorDetail({ actorType, actorId }: { actorType: string; actorId: strin
     { key: "timeline", label: "Timeline", count: timeline.length },
     { key: "connections", label: "Connections", count: inspect.connections.length },
     { key: "outbox", label: "Outbox", count: inspect.outbox.length },
+    { key: "timers", label: "Timers", count: inspect.timers?.length ?? 0 },
     { key: "links", label: "Links", count: inspect.activeLinks.length + inspect.linkSubscribers.length },
   ];
 
@@ -268,6 +271,8 @@ function ActorDetail({ actorType, actorId }: { actorType: string; actorId: strin
       )}
 
       {activeTab === "outbox" && <OutboxPanel actorType={actorType} actorId={actorId} outbox={inspect.outbox} />}
+
+      {activeTab === "timers" && <TimersPanel actorType={actorType} actorId={actorId} timers={inspect.timers ?? []} />}
 
       {activeTab === "links" && (
         <div data-testid="links-panel" className="space-y-4">

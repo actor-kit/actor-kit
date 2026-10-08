@@ -42,6 +42,11 @@ const realSources: FactSources = {
   random: () => Math.random(),
 };
 
+/** The real sources with the clock pinned to `now` (a timer runs on its alarm's clock). */
+export function clockedSources(now: number): FactSources {
+  return { ...realSources, now: () => now };
+}
+
 export interface LiveFacts {
   readonly ctx: DeterministicContext;
   recordUnlinked(name: string, ids: string[]): void;
@@ -182,6 +187,7 @@ export const JOURNAL_CAUSE_TYPES = [
   "link.onError",
   "migrate",
   "restore",
+  "timer",
 ] as const;
 
 export type JournalCauseType = (typeof JOURNAL_CAUSE_TYPES)[number];
@@ -392,6 +398,13 @@ const LinkErrorPayload = z.object({
   error: z.object({ message: z.string(), code: z.string() }),
 });
 const MigratePayload = z.object({ fromVersion: z.number(), toVersion: z.number() });
+const TimerPayload = z.object({
+  id: z.string(),
+  key: z.string(),
+  payload: z.unknown(),
+  fireAt: z.number(),
+  lateBy: z.number(),
+});
 
 function required<T>(value: T | undefined, what: string): T {
   if (value === undefined) throw new Error(`Journal replay: ${what} is not defined on this actor`);
@@ -453,6 +466,11 @@ const REPLAY_CAUSES: Record<Exclude<JournalCauseType, "init" | "restore">, Repla
     const link = nameOf(event);
     required(def.links?.[link]?.onError, `link "${link}" onError`);
     return { type: "link.onError", link, ...LinkErrorPayload.parse(event.payload) };
+  },
+  timer: (def, _state, event) => {
+    const name = nameOf(event);
+    required(def.timers?.[name], `timer "${name}"`);
+    return { type: "timer", name, ...TimerPayload.parse(event.payload) };
   },
   migrate: (def, state, event) => {
     required(def.migrate, "migrate");

@@ -53,6 +53,8 @@ export const AuctionRoomContract = defineActor("auction-room", {
   roles: { bidder: () => true },
   services: {
     NOTIFY_WINNER: {
+      // One try: the spec watches pending → failed without waiting out retries (ADR-015 D1).
+      retry: { attempts: 1 },
       fn: async (input: NotifyInput): Promise<{ sentTo: string }> => {
         await new Promise((resolve) => setTimeout(resolve, input.delayMs));
         if (input.fail) throw new Error(`mailbox full for ${input.winner}`);

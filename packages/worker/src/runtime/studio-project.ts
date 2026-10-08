@@ -10,6 +10,7 @@ import type { LiveConnection } from "./live-connections";
 import type { OutboxRow } from "./outbox-store";
 import type { StudioTimelineEntry } from "./studio-protocol";
 import { REDACTED, type Redactor } from "./studio-redact";
+import type { TimerRow } from "./timers-store";
 
 export type CallerHasher = (caller: string) => Promise<string>;
 
@@ -96,6 +97,11 @@ export async function projectTimelineEntry(
 export type { OutboxRow as StudioOutboxRow } from "./outbox-store";
 
 export function projectOutboxRow(row: OutboxRow, projection: StudioProjection): OutboxRow {
+  return { ...row, payload: projectJson(row.payload, projection) };
+}
+
+/** A pending timer as Studio may see it: the payload is redacted like any application value. */
+export function projectTimerRow(row: TimerRow, projection: StudioProjection): TimerRow {
   return { ...row, payload: projectJson(row.payload, projection) };
 }
 

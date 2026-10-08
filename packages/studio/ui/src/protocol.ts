@@ -55,6 +55,17 @@ const OutboxEntrySchema = z.object({
 });
 export type OutboxEntry = z.infer<typeof OutboxEntrySchema>;
 
+/** A pending durable timer (ADR-015 D2); its payload arrives as redacted JSON text. */
+const TimerEntrySchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  key: z.string(),
+  payload: JsonText,
+  fireAt: z.number(),
+  createdAt: z.number(),
+});
+export type TimerEntry = z.infer<typeof TimerEntrySchema>;
+
 const ActiveLinkSchema = z.object({
   targetType: z.string(),
   targetId: z.string(),
@@ -73,6 +84,8 @@ export const InspectSchema = z.object({
   actorId: z.string().nullable(),
   connections: z.array(ConnectionSchema),
   outbox: z.array(OutboxEntrySchema),
+  /** Absent from actors older than ADR-015 and for actors that do not exist. */
+  timers: z.array(TimerEntrySchema).optional(),
   activeLinks: z.array(ActiveLinkSchema),
   linkSubscribers: z.array(LinkSubscriberSchema),
 });
@@ -107,7 +120,7 @@ export const TimelineResponseSchema = z.object({
 export const ErrorBodySchema = z.object({ error: z.string() });
 
 /** Actions an admin can take from Studio (POST .../actions, mutate scope). */
-export type StudioAction = { action: "redrive"; effectId: string };
+export type StudioAction = { action: "redrive"; effectId: string } | { action: "fireTimer"; key: string };
 
 // --- WebSocket frames ---
 
@@ -142,6 +155,12 @@ const OutboxFrameSchema = z.object({
   outbox: z.array(OutboxEntrySchema),
 });
 
+/** The pending timers, pushed whenever one is scheduled, cancelled or fires. */
+const TimersFrameSchema = z.object({
+  type: z.literal("studio.timers"),
+  timers: z.array(TimerEntrySchema),
+});
+
 /** Active links and subscribers, pushed whenever either changes. */
 const LinksFrameSchema = z.object({
   type: z.literal("studio.links"),
@@ -154,6 +173,7 @@ const FrameSchema = z.union([
   TimelineFrameSchema,
   ConnectionFrameSchema,
   OutboxFrameSchema,
+  TimersFrameSchema,
   LinksFrameSchema,
 ]);
 export type StudioFrame = z.infer<typeof FrameSchema>;
@@ -164,6 +184,7 @@ const KNOWN_FRAME_TYPES = new Set([
   "studio.timeline",
   "studio.connection",
   "studio.outbox",
+  "studio.timers",
   "studio.links",
 ]);
 

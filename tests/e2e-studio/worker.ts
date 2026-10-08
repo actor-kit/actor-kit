@@ -8,6 +8,7 @@ import { actorKitStudio, StudioRegistry } from "@actor-kit/studio";
 import { createActorClass, createRef, defineActor, message, withCallerIdentity } from "@actor-kit/worker";
 import { z } from "zod";
 import { AuctionRoom, Lobby } from "./effects-actors";
+import { Oven } from "./timers-actors";
 
 // --- Counter actor ---
 
@@ -36,18 +37,18 @@ const CounterContract = defineActor("counter", {
 });
 
 export const Counter = createActorClass(CounterContract);
-export { AuctionRoom, Lobby, StudioRegistry };
+export { AuctionRoom, Lobby, Oven, StudioRegistry };
 
 // --- Effects endpoints (spawn / send for the Outbox + Links actors) ---
 
-const EffectsTarget = z.object({ type: z.enum(["lobby", "auction-room"]), actorId: z.string().min(1) });
+const EffectsTarget = z.object({ type: z.enum(["lobby", "auction-room", "oven"]), actorId: z.string().min(1) });
 const EffectsSpawnBody = EffectsTarget.extend({ input: z.record(z.string(), z.unknown()) });
 const EffectsSendBody = EffectsTarget.extend({
   caller: z.string().default("e2e-test"),
   message: z.object({ type: z.string() }).catchall(z.unknown()),
 });
 
-const EFFECTS_BINDINGS = { lobby: "LOBBY", "auction-room": "AUCTION_ROOM" } satisfies Record<
+const EFFECTS_BINDINGS = { lobby: "LOBBY", "auction-room": "AUCTION_ROOM", oven: "OVEN" } satisfies Record<
   z.infer<typeof EffectsTarget>["type"],
   string
 >;

@@ -7,7 +7,7 @@
  * - Actor listing from StudioRegistry
  * - Actor inspection via __inspect() RPC
  * - Timeline retrieval via __getTimeline() RPC
- * - Actions (mutate scope only): POST .../actions, e.g. redrive a dead letter (ADR-015)
+ * - Actions (mutate scope only): POST .../actions — redrive a dead letter, fire a timer now (ADR-015)
  * - WebSocket upgrade for live studio connections
  * - Serving the bundled SPA
  *
@@ -586,7 +586,10 @@ const ACTIONS_ROUTE = /^\/api\/actors\/([^/]+)\/([^/]+)\/actions$/;
 const MAX_ACTION_BODY = 4096;
 
 /** Every Studio action, by name: the actor RPC it calls and its arguments. */
-const ActionBody = z.union([z.object({ action: z.literal("redrive"), effectId: z.string().min(1).max(64) }).strict()]);
+const ActionBody = z.union([
+  z.object({ action: z.literal("redrive"), effectId: z.string().min(1).max(64) }).strict(),
+  z.object({ action: z.literal("fireTimer"), key: z.string().min(1).max(256) }).strict(),
+]);
 type ActionBody = z.infer<typeof ActionBody>;
 
 const ActionReply = z.union([z.object({ ok: z.literal(true) }), z.object({ ok: z.literal(false), error: z.string() })]);
@@ -595,6 +598,8 @@ function actionRpc(body: ActionBody): { method: string; args: unknown } {
   switch (body.action) {
     case "redrive":
       return { method: "__redrive", args: { effectId: body.effectId } };
+    case "fireTimer":
+      return { method: "__fireTimer", args: { key: body.key } };
   }
 }
 

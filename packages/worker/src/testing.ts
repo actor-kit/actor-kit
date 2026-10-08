@@ -17,6 +17,7 @@ export { createRef } from "./ref";
 // CDC
 export type { ChangeEntry } from "./runtime/cdc";
 export { createChangeEntry } from "./runtime/cdc";
+export { parseDuration } from "./runtime/duration";
 // Effect ids, retries, outbox store (ADR-015 D1)
 export type { EffectIdParts } from "./runtime/effect-id";
 export { formatEffectId, parseEffectId } from "./runtime/effect-id";
@@ -64,7 +65,15 @@ export type { RouteResult } from "./runtime/message-router";
 export { routeMessage } from "./runtime/message-router";
 export { ACTOR_KIT_MIGRATIONS } from "./runtime/migrations";
 // Outbox
-export type { ExecutionEntry, ForwardCall, ForwardEntry, LinkCall, UnlinkCall } from "./runtime/outbox";
+export type {
+  ExecutionEntry,
+  ForwardCall,
+  ForwardEntry,
+  LinkCall,
+  TimerOp,
+  TimerSchedule,
+  UnlinkCall,
+} from "./runtime/outbox";
 export { createOutbox } from "./runtime/outbox";
 export type { DueExecution, NewExecution, OutboxFailedEvent, OutboxRow } from "./runtime/outbox-store";
 export {
@@ -119,3 +128,16 @@ export {
   toOutboxEntry,
   toTimelineEntry,
 } from "./runtime/studio-protocol";
+export type { DueTimer, TimerFailedEvent, TimerRow } from "./runtime/timers-store";
+export {
+  applyTimerOps,
+  deleteTimer,
+  dueTimer,
+  earliestDeadline,
+  nextTimerAt,
+  readTimers,
+  timerByKey,
+  timerFailedEvent,
+} from "./runtime/timers-store";
+// Timer helper (ADR-015 D2)
+export { timer } from "./timer";

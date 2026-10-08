@@ -344,23 +344,28 @@ await other.call("ACCEPT_TRANSFER", { callerId, playerData });
 
 RPC handlers live in the `rpc` block. They are NOT exposed to WebSocket clients. They don't go through role evaluation (the calling actor is trusted).
 
-### Timers
+### Timers (ADR-015 D2)
 
-Two mechanisms:
+`ctx.schedule(name, { in | at, key, payload })` and `ctx.cancel(key)` are effects of the transition: the step
+core validates the name and payload, computes `fire_at` (`ctx.now() + in`, so replay computes the same deadline)
+and records them in declaration order with an effect index. `commit()` applies them to the `timers` table (one
+row per pending timer: `id` = effect id, unique `key`, `payload`, `fire_at`; scheduling an existing key replaces
+it) in the same transaction.
 
-| Feature | Mechanism | Survives hibernation | Min granularity |
-|---------|-----------|---------------------|-----------------|
-| `tick` | `setInterval` while DO is awake | No (re-created on wake) | 1ms |
-| `after` | DO Alarm | Yes | ~1s |
+```
+syncAlarm() (after every commit and settled try): setAlarm(min(next timer, next outbox retry)) or deleteAlarm()
+alarm():
+  scheduledBy = last committed seq
+  while dueTimer(now, scheduledBy):        -- ORDER BY fire_at, seq, idx; late timers included
+    step({ type: "timer", name, id, key, payload, fireAt, lateBy }, clock = now)
+    commit: DELETE the timer row, write its effects, journal event cause_type "timer"
+  drain due outbox retries; syncAlarm()
+```
 
-`tick` only runs when at least one WebSocket is connected. Zero connections = no tick = DO hibernates.
-
-`after` timers are persisted as DO Alarms. They fire even if the DO was evicted and restarted.
-
-**Alarm idempotency:** CF may fire alarms more than once in rare cases. Actor Kit guards against double-transitions by:
-1. Checking `after_fired_keys` before running a handler (idempotency guard)
-2. Deleting `scheduled_alarm` in the same coalesced SQL batch as the state write, so a repeat alarm fire finds no timer to run
-3. Logging a warning when `alarmInfo.retryCount >= 5` (indicates a persistent failure)
+Timers a firing schedules have a later seq than `scheduledBy`, so they wait for the next alarm. A timer that
+cannot fire (payload no longer parses, transition fails) is deleted and logged (`actor_kit.timer.failed`). Studio
+reads the table (`__inspect().timers`, `studio.timers` frames, payloads redacted) and can fire one now
+(`__fireTimer({ key })`, mutate scope).
 
 ### Throughput limits
 

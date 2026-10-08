@@ -14,7 +14,8 @@
  * run transitions through here, so they cannot drift apart. Nothing here touches storage.
  */
 
-import type { DeterministicContext, GuardContext } from "@actor-kit/core";
+import type { DeterministicContext, GuardContext, ScheduleOptions } from "@actor-kit/core";
+import { parseDuration } from "./duration";
 import { createReplayFacts, type Facts, type JournalDraft, type LiveFacts } from "./journal";
 import { createOutbox, type UnlinkCall } from "./outbox";
 import { resolveRole } from "./roles";
@@ -60,9 +61,17 @@ export interface StepDef {
       onUnlink?: ((state: unknown, id: string | undefined, ctx: DeterministicContext) => unknown) | undefined;
     }
   >;
+  timers?: Record<
+    string,
+    { readonly schema: SafeParser; handler(state: unknown, payload: unknown, ctx: unknown): unknown }
+  >;
   migrate?(persisted: unknown, fromVersion: number): unknown;
   serialize?(state: unknown): unknown;
   restore?(serialized: unknown): unknown;
+}
+
+interface SafeParser {
+  safeParse(data: unknown): { success: true; data: unknown } | { success: false; error: { message: string } };
 }
 
 interface LifecycleCallEvent {
@@ -98,7 +107,17 @@ export type StepCause =
       readonly targetId: string;
       readonly error: { readonly message: string; readonly code: string };
     }
-  | { readonly type: "migrate"; readonly fromVersion: number; readonly toVersion: number; readonly persisted: unknown };
+  | { readonly type: "migrate"; readonly fromVersion: number; readonly toVersion: number; readonly persisted: unknown }
+  | {
+      readonly type: "timer";
+      readonly name: string;
+      /** The timer's effect id (`seq:index` of the transition that scheduled it). */
+      readonly id: string;
+      readonly key: string;
+      readonly payload: unknown;
+      readonly fireAt: number;
+      readonly lateBy: number;
+    };
 
 // --- Facts ---
 
@@ -227,6 +246,37 @@ function applyUnlinks(def: StepDef, state: unknown, effects: StepEffects, facts:
   return next;
 }
 
+/** When a timer fires: `at`, or ctx.now() + `in`. Exactly one of the two. */
+function fireAtOf(options: ScheduleOptions, det: DeterministicContext): number {
+  if ((options.in === undefined) === (options.at === undefined)) {
+    throw new Error("ctx.schedule needs exactly one of `in` and `at`");
+  }
+  if (options.at !== undefined) {
+    if (!Number.isFinite(options.at)) throw new Error(`ctx.schedule: invalid \`at\` ${options.at}`);
+    return options.at;
+  }
+  return det.now() + parseDuration(options.in);
+}
+
+/** ctx.schedule / ctx.cancel for a transition: the timer must be declared and its payload must parse. */
+function timerVerbs(def: StepDef, effects: StepEffects, det: DeterministicContext) {
+  return {
+    schedule: (name: string, options: ScheduleOptions): void => {
+      const timer = def.timers?.[name];
+      if (timer === undefined) throw new Error(`Timer "${name}" is not declared on this actor`);
+      const parsed = timer.schema.safeParse(options.payload);
+      if (!parsed.success) throw new Error(`Timer "${name}": invalid payload: ${parsed.error.message}`);
+      effects.schedule({
+        name,
+        key: options.key ?? null,
+        payload: parsed.data ?? null,
+        fireAt: fireAtOf(options, det),
+      });
+    },
+    cancel: (key: string): void => effects.cancel(key),
+  };
+}
+
 function stepMessage(
   def: StepDef,
   state: unknown,
@@ -247,6 +297,7 @@ function stepMessage(
     link: effects.link,
     unlink: effects.unlink,
     forward: effects.forward,
+    ...timerVerbs(def, effects, facts.ctx),
   });
   assertSync(
     handlerState,
@@ -280,7 +331,14 @@ function stepLifecycle(
   const next =
     handler === undefined
       ? state
-      : handler(state, event, { ...facts.ctx, ...who, env, execute: effects.execute, forward: effects.forward });
+      : handler(state, event, {
+          ...facts.ctx,
+          ...who,
+          env,
+          execute: effects.execute,
+          forward: effects.forward,
+          ...timerVerbs(def, effects, facts.ctx),
+        });
   assertSync(next, `lifecycle.${which} returned a Promise. Handlers must be synchronous.`);
   const role =
     which === "connect"
@@ -294,7 +352,7 @@ function stepLifecycle(
   };
 }
 
-type CallbackCause = Exclude<StepCause, { type: "message" | "lifecycle.connect" | "lifecycle.disconnect" }>;
+type CallbackCause = Exclude<StepCause, { type: "message" | "lifecycle.connect" | "lifecycle.disconnect" | "timer" }>;
 type CallbackOutcome = { next: unknown; name: string | null; payload: unknown };
 type On<K extends CallbackCause["type"]> = Extract<CallbackCause, { type: K }>;
 
@@ -370,6 +428,45 @@ function stepCallback(def: StepDef, state: unknown, cause: CallbackCause, facts:
   };
 }
 
+/** A timer fires: its handler runs with no caller and no role; a timer no longer declared is a no-op. */
+function stepTimer(
+  def: StepDef,
+  state: unknown,
+  cause: Extract<StepCause, { type: "timer" }>,
+  facts: StepFacts,
+  env: unknown,
+): StepResult {
+  const timer = def.timers?.[cause.name];
+  const effects = createOutbox();
+  const next =
+    timer === undefined
+      ? state
+      : timer.handler(state, cause.payload, {
+          ...facts.ctx,
+          env,
+          key: cause.key,
+          lateBy: cause.lateBy,
+          execute: effects.execute,
+          forward: effects.forward,
+          ...timerVerbs(def, effects, facts.ctx),
+        });
+  assertSync(
+    next,
+    `Timer "${cause.name}" returned a Promise. Handlers must be synchronous — use execute() for async side effects.`,
+  );
+  const { id, key, payload, fireAt, lateBy } = cause;
+  return {
+    state: next,
+    handlerState: next,
+    effects,
+    event: draft(
+      { causeType: "timer", name: cause.name, payload: { id, key, payload, fireAt, lateBy } },
+      NOBODY,
+      facts,
+    ),
+  };
+}
+
 /** One synchronous transition. Init is `stepInit()` (init may be async). */
 export function step(def: StepDef, state: unknown, cause: StepCause, facts: StepFacts, env: unknown): StepResult {
   switch (cause.type) {
@@ -378,6 +475,8 @@ export function step(def: StepDef, state: unknown, cause: StepCause, facts: Step
     case "lifecycle.connect":
     case "lifecycle.disconnect":
       return stepLifecycle(def, state, cause, facts, env);
+    case "timer":
+      return stepTimer(def, state, cause, facts, env);
     default:
       return stepCallback(def, state, cause, facts);
   }
