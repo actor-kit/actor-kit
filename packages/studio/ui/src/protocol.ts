@@ -100,15 +100,20 @@ export const TimelineEntrySchema = z
     stateSnapshot: JsonText,
     checksum: z.string(),
     createdAt: z.number(),
+    /** The journal seq the entry recorded (ADR-015 D3). Absent from older rows. */
+    seq: z.number().int().optional(),
   })
-  .transform((entry) => ({
-    id: entry.id,
-    causeType: entry.causeType,
-    cause: entry.causeData,
-    state: entry.stateSnapshot,
-    checksum: entry.checksum,
-    createdAt: entry.createdAt,
-  }));
+  .transform((entry) => {
+    const item = {
+      id: entry.id,
+      causeType: entry.causeType,
+      cause: entry.causeData,
+      state: entry.stateSnapshot,
+      checksum: entry.checksum,
+      createdAt: entry.createdAt,
+    };
+    return entry.seq === undefined ? item : { ...item, seq: entry.seq };
+  });
 export type TimelineItem = z.infer<typeof TimelineEntrySchema>;
 
 export const ActorsResponseSchema = z.object({ actors: z.array(ActorEntrySchema) });
@@ -120,7 +125,10 @@ export const TimelineResponseSchema = z.object({
 export const ErrorBodySchema = z.object({ error: z.string() });
 
 /** Actions an admin can take from Studio (POST .../actions, mutate scope). */
-export type StudioAction = { action: "redrive"; effectId: string } | { action: "fireTimer"; key: string };
+export type StudioAction =
+  | { action: "redrive"; effectId: string }
+  | { action: "fireTimer"; key: string }
+  | { action: "restore"; toSeq: number };
 
 // --- WebSocket frames ---
 

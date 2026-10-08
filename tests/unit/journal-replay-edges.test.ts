@@ -207,9 +207,9 @@ describe("applyJournalEvent refuses what it cannot replay", () => {
     ).toContain("migrate is not defined");
   });
 
-  it("restore events are not replayable yet", async () => {
+  it("a restore event replays only within its journal", async () => {
     expect(await failure(() => applyJournalEvent({}, {}, ev({ causeType: "restore" })))).toContain(
-      "restore events are not supported",
+      "a restore event replays only within its journal (use foldJournal)",
     );
   });
 });

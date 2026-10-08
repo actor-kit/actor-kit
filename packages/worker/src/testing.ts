@@ -26,6 +26,7 @@ export { getTokenFromRequest } from "./runtime/get-token";
 export type {
   FactSources,
   Facts,
+  FoldPoint,
   Journal,
   JournalCauseType,
   JournalCheckpoint,
@@ -37,14 +38,18 @@ export type {
   LiveFacts,
   ReplayableDef,
   ReplayFacts,
+  ScheduledTimer,
 } from "./runtime/journal";
 export {
   appendJournalEvent,
   applyJournalEvent,
+  applyScheduleOps,
+  checkpointPoint,
   checksumState,
   clockedSources,
   createLiveFacts,
   createReplayFacts,
+  foldEvents,
   foldJournal,
   JournalDivergenceError,
   JournalNondeterminismError,
@@ -78,9 +83,11 @@ export type {
 export { createOutbox } from "./runtime/outbox";
 export type { DueExecution, NewExecution, OutboxFailedEvent, OutboxRow } from "./runtime/outbox-store";
 export {
+  cancelUndoneEffects,
   dueExecutions,
   finishAttempt,
   insertExecutions,
+  isRunning,
   nextRetryAt,
   outboxFailedEvent,
   readOutboxRows,
@@ -90,6 +97,8 @@ export {
 } from "./runtime/outbox-store";
 // Namespace resolution
 export { resolveNamespace } from "./runtime/resolve-namespace";
+export type { RestorePlan } from "./runtime/restore";
+export { planRestore } from "./runtime/restore";
 export type { AttemptSettlement, RetryOption, RetryPolicy } from "./runtime/retry";
 export { DEFAULT_RETRY_POLICY, resolveRetryPolicy, retryDelay, settleAttempt } from "./runtime/retry";
 // Role resolution

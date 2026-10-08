@@ -1,7 +1,7 @@
 # ADR 013: Actor Journal — Snapshot Cache + Append-Only Events
 
 **Date**: 2026-10-07
-**Status**: Accepted (steps 1–2 implemented; steps 3–4 pending)
+**Status**: Accepted (steps 1–3 implemented; step 3, restore, built as ADR-015 D3; step 4 as ADR-015 D5)
 **Depends on**: ADR-003 (transactional outbox), ADR-010 (services and execute), ADR-011 (links)
 **Replaces**: the unbuilt CDC `change_log` in [phase-5-cf-integration.md](../specs/phase-5-cf-integration.md)
 
@@ -78,12 +78,12 @@ A checkpoint is written every `checkpointEvery` events (default 100). Checkpoint
 | `init` | — | parsed input | `def.init(payload, ctx)` |
 | `message` | message type | parsed payload | `handler(state, payload, ctx)` + `onUnlink` for recorded unlinks. **No guard**: only accepted messages are journaled, and replay never asks again. |
 | `lifecycle.connect` / `lifecycle.disconnect` | — | `{ callerConnections }` (`{}` in events written before ADR-015) | `lifecycle.connect/disconnect(state, { caller, callerType, callerConnections }, ctx)` |
-| `service.onDone` | service | `{ input, result }` | `onDone(state, result, input, ctx)` |
-| `service.onError` | service | `{ input, error: { message } }` | `onError(state, error, input, ctx)` |
+| `service.onDone` | service | `{ input, result, effectId }` | `onDone(state, result, input, ctx)` |
+| `service.onError` | service | `{ input, error: { message }, effectId }` | `onError(state, error, input, ctx)` |
 | `link.onUpdate` | link | `{ sourceId, view }` | `onUpdate(state, view, sourceId, ctx)` |
 | `link.onError` | link | `{ targetId, error: { message, code } }` | `onError(state, error, targetId, ctx)` |
 | `migrate` | — | `{ fromVersion, toVersion }` | `restore(migrate(serialize(state), fromVersion))` |
-| `restore` | — | `{ toSeq }` | Reserved for step 3. |
+| `restore` | — | `{ toSeq }` | State (and pending timers) as they were after `toSeq` (ADR-015 D3); replayed by `foldJournal`. |
 | `timer` | timer name | `{ id, key, payload, fireAt, lateBy }` | `timers[name].handler(state, payload, { key, lateBy, ...ctx })` (ADR-015 D2) |
 
 Every transition that persists state appends exactly one event. A rejected message (no role, validation, guard) appends nothing.
@@ -108,9 +108,9 @@ Service results and link views are not facts; they are the event's payload. On r
 
 `ctx.execute`, `ctx.link`, `ctx.unlink` and `ctx.forward` are no-ops on replay. The outbox already records executions and forwards with their status; replay only rebuilds state.
 
-### Restore (step 3, not built)
+### Restore (step 3, built by ADR-015 D3)
 
-`stub.__restore({ toSeq })` appends a `restore` event whose after-state is the fold up to `toSeq`. It never deletes history, so undoing a restore is another restore. Restore does not notify linked actors (decision above).
+`stub.__restore({ toSeq })` appends a `restore` event whose after-state is the fold up to `toSeq`. It never deletes history, so undoing a restore is another restore. Restore does not notify linked actors (decision above). Pending timers, effects and recorded results are handled as ADR-015 D3 describes; checkpoints also store the pending timers so a fold can start from one.
 
 ### Configuration
 

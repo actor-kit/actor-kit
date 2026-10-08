@@ -140,3 +140,19 @@ class_name = "QuizNoStudio"
 [[migrations]]
 tag = "v11"
 new_sqlite_classes = ["Quiz", "QuizNoJournal", "QuizNoStudio"]
+
+[[durable_objects.bindings]]
+name = "LEDGER"
+class_name = "Ledger"
+
+[[durable_objects.bindings]]
+name = "LEDGER_NO_JOURNAL"
+class_name = "LedgerNoJournal"
+
+[[durable_objects.bindings]]
+name = "LEDGER_NO_STUDIO"
+class_name = "LedgerNoStudio"
+
+[[migrations]]
+tag = "v12"
+new_sqlite_classes = ["Ledger", "LedgerNoJournal", "LedgerNoStudio"]

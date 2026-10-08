@@ -1,8 +1,10 @@
 import {
   ACTOR_KIT_MIGRATIONS,
+  cancelUndoneEffects,
   dueExecutions,
   finishAttempt,
   insertExecutions,
+  isRunning,
   journalHighWater,
   nextRetryAt,
   nextTransitionSeq,
@@ -238,5 +240,59 @@ describe("outboxFailedEvent", () => {
       error: "smtp down",
     });
     expect(Object.keys(event).slice(0, 4)).toEqual(["event", "actorType", "actorId", "kind"]);
+  });
+});
+
+describe("cancelUndoneEffects / isRunning (restore, ADR-015 D3)", () => {
+  it("fails pending, retrying and running executions declared after toSeq, with the reason", () => {
+    insertExecutions(sql, [
+      exec("2:0", 2, 0),
+      exec("3:0", 3, 0),
+      exec("4:0", 4, 0),
+      exec("5:0", 5, 0),
+      exec("6:0", 6, 0),
+    ]);
+    startAttempt(sql, "4:0");
+    finishAttempt(sql, "4:0", { status: "retrying", nextAttemptAt: 99 }, "x");
+    startAttempt(sql, "5:0");
+    startAttempt(sql, "6:0");
+    finishAttempt(sql, "6:0", { status: "done" }, null);
+    cancelUndoneEffects(sql, 2, "cancelled: the actor was restored to seq 2");
+    expect(readOutboxRows(sql).map((r) => [r.id, r.status, r.lastError, r.nextAttemptAt])).toEqual([
+      ["6:0", "done", null, null],
+      ["5:0", "failed", "cancelled: the actor was restored to seq 2", null],
+      ["4:0", "failed", "cancelled: the actor was restored to seq 2", null],
+      ["3:0", "failed", "cancelled: the actor was restored to seq 2", null],
+      ["2:0", "pending", null, null],
+    ]);
+  });
+
+  it("fails pending forwards declared after toSeq", () => {
+    const forward = (id: string, seq: number, status: string) =>
+      sql.exec(
+        "INSERT INTO forwards (id, seq, idx, link_name, target_id, message, caller, caller_type, status, attempts, created_at) VALUES (?, ?, 0, 'l', 't', '{}', 'c', 'user', ?, 0, 0)",
+        id,
+        seq,
+        status,
+      );
+    forward("2:0", 2, "pending");
+    forward("3:0", 3, "pending");
+    forward("4:0", 4, "done");
+    cancelUndoneEffects(sql, 2, "why");
+    expect(sql.exec("SELECT id, status FROM forwards ORDER BY seq").toArray()).toEqual([
+      { id: "2:0", status: "pending" },
+      { id: "3:0", status: "failed" },
+      { id: "4:0", status: "done" },
+    ]);
+  });
+
+  it("isRunning tells whether a try is still the row's current one", () => {
+    insertExecutions(sql, [exec("1:0", 1, 0)]);
+    expect(isRunning(sql, "1:0")).toBe(false);
+    startAttempt(sql, "1:0");
+    expect(isRunning(sql, "1:0")).toBe(true);
+    cancelUndoneEffects(sql, 0, "restored");
+    expect(isRunning(sql, "1:0")).toBe(false);
+    expect(isRunning(sql, "9:9")).toBe(false);
   });
 });

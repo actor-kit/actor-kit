@@ -83,8 +83,8 @@ describe("appendJournalEvent", () => {
     const config = resolveJournalConfig({ checkpointEvery: 2 });
     for (let seq = 1; seq <= 5; seq++) append(seq, config);
     expect(readJournal(sql).checkpoints).toEqual([
-      { seq: 2, version: 2, state: '{"n":2}', checksum: "c2" },
-      { seq: 4, version: 2, state: '{"n":4}', checksum: "c4" },
+      { seq: 2, version: 2, state: '{"n":2}', checksum: "c2", timers: "[]" },
+      { seq: 4, version: 2, state: '{"n":4}', checksum: "c4", timers: "[]" },
     ]);
   });
 
@@ -109,5 +109,17 @@ describe("appendJournalEvent", () => {
     // 7 - 3 = 4: base 4; checkpoint 2 goes too.
     expect(readJournal(sql).events.map((e) => e.seq)).toEqual([5, 6, 7]);
     expect(readJournal(sql).checkpoints.map((c) => c.seq)).toEqual([4, 6]);
+  });
+});
+
+describe("appendJournalEvent: checkpoint timers", () => {
+  it("saves the timers pending at the checkpoint's seq", () => {
+    sql.exec(
+      "INSERT INTO timers (id, seq, idx, name, key, payload, fire_at, created_at) VALUES ('1:0', 1, 0, 'ring', 'k', '{\"a\":1}', 900, 0)",
+    );
+    append(1, resolveJournalConfig({ checkpointEvery: 1 }));
+    expect(JSON.parse(readJournal(sql).checkpoints[0]?.timers ?? "")).toEqual([
+      { id: "1:0", seq: 1, index: 0, name: "ring", key: "k", payload: { a: 1 }, fireAt: 900 },
+    ]);
   });
 });

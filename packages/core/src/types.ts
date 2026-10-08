@@ -181,6 +181,7 @@ export type MutationCause =
     }
   | { readonly type: "link.onError"; readonly sourceType: string; readonly sourceId: string; readonly error: string }
   | { readonly type: "link.onUnlink"; readonly sourceType: string; readonly sourceId: string }
+  | { readonly type: "restore"; readonly toSeq: number }
   | {
       readonly type: "timer";
       readonly name: string;

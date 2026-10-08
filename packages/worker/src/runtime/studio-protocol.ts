@@ -98,6 +98,7 @@ const TimelineRowSchema = z.object({
   state_snapshot: z.string(),
   checksum: z.string(),
   created_at: z.number(),
+  seq: z.number().nullable().optional(),
 });
 
 export interface StudioTimelineEntry {
@@ -107,12 +108,14 @@ export interface StudioTimelineEntry {
   stateSnapshot: string;
   checksum: string;
   createdAt: number;
+  /** The journal seq this entry recorded (ADR-015 D3: "restore to here"). Absent for older rows. */
+  seq?: number;
 }
 
 /** Parse a `timeline` SQLite row into the wire shape shared by __getTimeline, the snapshot and live pushes. */
 export function toTimelineEntry(raw: unknown): StudioTimelineEntry {
   const row = TimelineRowSchema.parse(raw);
-  return {
+  const entry = {
     id: row.id,
     causeType: row.cause_type,
     causeData: row.cause_data,
@@ -120,6 +123,7 @@ export function toTimelineEntry(raw: unknown): StudioTimelineEntry {
     checksum: row.checksum,
     createdAt: row.created_at,
   };
+  return typeof row.seq === "number" ? { ...entry, seq: row.seq } : entry;
 }
 
 // --- Outbox and links (shared by __inspect, the snapshot and live pushes) ---

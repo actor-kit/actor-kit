@@ -7,7 +7,7 @@
  * - Actor listing from StudioRegistry
  * - Actor inspection via __inspect() RPC
  * - Timeline retrieval via __getTimeline() RPC
- * - Actions (mutate scope only): POST .../actions — redrive a dead letter, fire a timer now (ADR-015)
+ * - Actions (mutate scope only): POST .../actions — redrive a dead letter, fire a timer now, restore (ADR-015)
  * - WebSocket upgrade for live studio connections
  * - Serving the bundled SPA
  *
@@ -589,6 +589,7 @@ const MAX_ACTION_BODY = 4096;
 const ActionBody = z.union([
   z.object({ action: z.literal("redrive"), effectId: z.string().min(1).max(64) }).strict(),
   z.object({ action: z.literal("fireTimer"), key: z.string().min(1).max(256) }).strict(),
+  z.object({ action: z.literal("restore"), toSeq: z.number().int().positive() }).strict(),
 ]);
 type ActionBody = z.infer<typeof ActionBody>;
 
@@ -600,6 +601,8 @@ function actionRpc(body: ActionBody): { method: string; args: unknown } {
       return { method: "__redrive", args: { effectId: body.effectId } };
     case "fireTimer":
       return { method: "__fireTimer", args: { key: body.key } };
+    case "restore":
+      return { method: "__restore", args: { toSeq: body.toSeq } };
   }
 }
 

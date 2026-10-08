@@ -28,9 +28,13 @@ import {
   appendJournalEvent,
   clockedSources,
   createLiveFacts,
+  foldJournal,
   type JournalDraft,
+  type JournalEvent,
   type JournalOption,
+  journalHighWater,
   nextTransitionSeq,
+  readJournal,
   resolveJournalConfig,
 } from "./runtime/journal";
 import {
@@ -43,9 +47,11 @@ import {
 } from "./runtime/live-connections";
 import { ACTOR_KIT_MIGRATIONS } from "./runtime/migrations";
 import {
+  cancelUndoneEffects,
   dueExecutions,
   finishAttempt,
   insertExecutions,
+  isRunning,
   nextRetryAt,
   outboxFailedEvent,
   readOutboxRows,
@@ -54,6 +60,7 @@ import {
   startAttempt,
 } from "./runtime/outbox-store";
 import { resolveNamespace } from "./runtime/resolve-namespace";
+import { planRestore } from "./runtime/restore";
 import { type RetryPolicy, resolveRetryPolicy, settleAttempt } from "./runtime/retry";
 import { resolveRole } from "./runtime/roles";
 import { admitMessage, liveStepFacts, type StepCause, type StepResult, step, stepInit } from "./runtime/step";
@@ -247,6 +254,13 @@ const SnapshotRowSchema = z.object({
 
 const RedriveOptionsSchema = z.object({ effectId: z.string().min(1) });
 const FireTimerOptionsSchema = z.object({ key: z.string().min(1) });
+const RestoreOptionsSchema = z.object({ toSeq: z.number().int().positive() });
+const SnapshotSeqSchema = z.object({ version: z.number(), last_seq: z.number() });
+/** A recorded service result to redeliver after a restore (journal payloads carry the effect id). */
+const RecordedResultSchema = z.union([
+  z.object({ input: z.unknown(), result: z.unknown(), effectId: z.string() }),
+  z.object({ input: z.unknown(), error: z.object({ message: z.string() }), effectId: z.string() }),
+]);
 
 // SQL rows and RPC payloads, parsed at the boundary.
 const TargetIdRowSchema = z.object({ target_id: z.string() });
@@ -364,6 +378,7 @@ export function actor(
     supportsBinary = new Map<WebSocket, boolean>(); // per-connection binary capability
     drainingExecutions = false; // Prevents concurrent execution drains
     timersChanged = false; // A commit scheduled or cancelled timers: push them to Studio after it
+    journalAhead = false; // The snapshot lags the journal (same code version): rebuild it on wake
     previousSubscriberViews = new Map<string, string>(); // dedupe: "type:id" → "role:json"
 
     // --- Timeline (studio instrumentation) ---
@@ -391,6 +406,7 @@ export function actor(
       // point that may create the actor (fetch/send/getSnapshot/spawn) calls loadState().
       this.ctx.blockConcurrencyWhile(async () => {
         this.loadPersisted({ create: false });
+        await this.catchUpJournal();
       });
     }
 
@@ -436,6 +452,7 @@ export function actor(
 
       const row = SnapshotRowSchema.parse(rows[0]);
       const persisted: unknown = JSON.parse(row.state);
+      this.journalAhead = this.isJournalAhead();
 
       // Migrate (and restore) through the step core when the stored version is older.
       const migration =
@@ -477,6 +494,7 @@ export function actor(
     /** Load persisted state, auto-spawning with empty input if the actor doesn't exist yet. */
     async loadState(): Promise<void> {
       this.loadPersisted({ create: true });
+      await this.catchUpJournal();
       if (this.initialized) return;
       this.autoSpawning ??= this.autoSpawn().finally(() => {
         this.autoSpawning = null;
@@ -662,12 +680,13 @@ export function actor(
         const entry = toTimelineEntry(
           this.ctx.storage.sql
             .exec(
-              "INSERT INTO timeline (cause_type, cause_data, state_snapshot, checksum, created_at) VALUES (?, ?, ?, ?, ?) RETURNING id, cause_type, cause_data, state_snapshot, checksum, created_at",
+              "INSERT INTO timeline (cause_type, cause_data, state_snapshot, checksum, created_at, seq) VALUES (?, ?, ?, ?, ?, ?) RETURNING id, cause_type, cause_data, state_snapshot, checksum, created_at, seq",
               causeType,
               causeDataJson,
               json,
               checksum,
               now,
+              seq,
             )
             .one(),
         );
@@ -815,6 +834,12 @@ export function actor(
         outcome = { ok: false, message: error instanceof Error ? error.message : String(error) };
       }
 
+      // A restore may have cancelled this try while it ran: its transition is undone, settle nothing.
+      if (!isRunning(sql, entry.id)) {
+        this.pushStudioOutbox();
+        return;
+      }
+
       const settlement = settleAttempt(outcome, attempt, policy, Date.now(), Math.random);
       const settle = () => {
         finishAttempt(sql, entry.id, settlement, outcome.ok ? null : outcome.message);
@@ -880,6 +905,43 @@ export function actor(
       const live = createLiveFacts(now === undefined ? undefined : clockedSources(now));
       const facts = liveStepFacts(live, (name) => this.readLinkTargets(name));
       return step(def, this.state, cause, facts, this.env);
+    }
+
+    /** The snapshot (at this code version) is behind the journal's last seq. */
+    isJournalAhead(): boolean {
+      if (!journalConfig.enabled) return false;
+      const sql = this.ctx.storage.sql;
+      const row = SnapshotSeqSchema.parse(sql.exec("SELECT version, last_seq FROM snapshots WHERE id = 1").one());
+      return row.version === this.version && row.last_seq < journalHighWater(sql);
+    }
+
+    /**
+     * Replay on wake (ADR-015 D3): when the snapshot lags the journal, rebuild the state by folding
+     * the journal from its newest usable checkpoint, then write the snapshot up to date. A journal
+     * that does not replay leaves the snapshot as it was (and is logged).
+     */
+    async catchUpJournal(): Promise<void> {
+      if (!this.journalAhead) return;
+      this.journalAhead = false;
+      const sql = this.ctx.storage.sql;
+      const journal = readJournal(sql);
+      try {
+        const { state } = await foldJournal(def, journal, { env: this.env });
+        const json = JSON.stringify(def.serialize ? def.serialize(state) : state);
+        sql.exec(
+          "UPDATE snapshots SET state = ?, checksum = ?, last_seq = ?, updated_at = ? WHERE id = 1",
+          json,
+          this.computeChecksum(json),
+          journal.events.at(-1)?.seq ?? 0,
+          Date.now(),
+        );
+        this.state = state;
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        console.error(
+          JSON.stringify({ event: "actor_kit.journal.replay_failed", actorType: _actorName, error: message }),
+        );
+      }
     }
 
     /** Targets stored under a link name, in insertion order (what `unlink(name)` removes). */
@@ -2000,7 +2062,7 @@ export function actor(
     readStudioSnapshot() {
       const timeline = this.ctx.storage.sql
         .exec(
-          "SELECT id, cause_type, cause_data, state_snapshot, checksum, created_at FROM timeline ORDER BY id DESC LIMIT 50",
+          "SELECT id, cause_type, cause_data, state_snapshot, checksum, created_at, seq FROM timeline ORDER BY id DESC LIMIT 50",
         )
         .toArray()
         .map(toTimelineEntry);
@@ -2199,14 +2261,14 @@ export function actor(
         before !== undefined
           ? this.ctx.storage.sql
               .exec(
-                "SELECT id, cause_type, cause_data, state_snapshot, checksum, created_at FROM timeline WHERE id < ? ORDER BY id DESC LIMIT ?",
+                "SELECT id, cause_type, cause_data, state_snapshot, checksum, created_at, seq FROM timeline WHERE id < ? ORDER BY id DESC LIMIT ?",
                 before,
                 limit + 1,
               )
               .toArray()
           : this.ctx.storage.sql
               .exec(
-                "SELECT id, cause_type, cause_data, state_snapshot, checksum, created_at FROM timeline ORDER BY id DESC LIMIT ?",
+                "SELECT id, cause_type, cause_data, state_snapshot, checksum, created_at, seq FROM timeline ORDER BY id DESC LIMIT ?",
                 limit + 1,
               )
               .toArray();
@@ -2252,6 +2314,85 @@ export function actor(
       this.fireTimer(due, Date.now());
       this.syncAlarm();
       return Promise.resolve({ ok: true });
+    }
+
+    /**
+     * Studio RPC (mutate scope, ADR-014): restore the actor to journal seq `toSeq` (ADR-015 D3).
+     * Appends a `restore` event (history is kept), puts back the state and the timers pending at
+     * toSeq, fails effects only undone transitions declared, and redelivers service results
+     * recorded after toSeq as new events, without calling any service again.
+     */
+    __restore(opts: { toSeq: number }): Promise<{ ok: true } | { ok: false; error: string }> {
+      this.loadPersisted({ create: false });
+      this.assertStudioEnabled();
+      const { toSeq } = RestoreOptionsSchema.parse(opts);
+      if (!this.persistedLoaded) return Promise.resolve({ ok: false, error: "Actor not found" });
+      if (!journalConfig.enabled)
+        return Promise.resolve({ ok: false, error: "Restore needs the journal (journal: false)" });
+      return this.restoreTo(toSeq);
+    }
+
+    async restoreTo(toSeq: number): Promise<{ ok: true } | { ok: false; error: string }> {
+      const sql = this.ctx.storage.sql;
+      let plan: Awaited<ReturnType<typeof planRestore>>;
+      try {
+        plan = await planRestore(def, readJournal(sql), toSeq, { env: this.env });
+      } catch (error) {
+        return { ok: false, error: error instanceof Error ? error.message : String(error) };
+      }
+      this.pendingCause = { type: "restore", toSeq };
+      const draft: JournalDraft = {
+        causeType: "restore",
+        name: null,
+        payload: { toSeq },
+        caller: null,
+        callerType: null,
+        role: null,
+        facts: {},
+      };
+      this.commit(plan.state, draft, () => {
+        sql.exec("DELETE FROM timers");
+        applyTimerOps(
+          sql,
+          plan.timers.map((timer) => ({ op: "schedule", ...timer })),
+          Date.now(),
+        );
+        cancelUndoneEffects(sql, toSeq, `cancelled: the actor was restored to seq ${toSeq}`);
+        this.timersChanged = true;
+      });
+      for (const recorded of plan.redeliver) this.redeliver(recorded);
+      this.broadcastViews();
+      this.pushStudioOutbox();
+      return { ok: true };
+    }
+
+    /** Deliver a recorded service result again as a new event (the service is not called). */
+    redeliver(recorded: JournalEvent): void {
+      const payload = RecordedResultSchema.parse(recorded.payload);
+      const service = recorded.name ?? "";
+      const cause: StepCause =
+        "result" in payload
+          ? {
+              type: "service.onDone",
+              service,
+              input: payload.input,
+              result: payload.result,
+              effectId: payload.effectId,
+            }
+          : {
+              type: "service.onError",
+              service,
+              input: payload.input,
+              error: payload.error,
+              effectId: payload.effectId,
+            };
+      const result = this.runStep(cause);
+      if (result.state === this.state) return;
+      this.pendingCause =
+        cause.type === "service.onDone"
+          ? { type: cause.type, service, input: cause.input, result: cause.result }
+          : { type: cause.type, service, input: cause.input, error: cause.error.message };
+      this.commit(result.state, result.event);
     }
 
     /** Studio RPC: one role's view, as `studio.requestView` would return it, redacted (ADR-014). */
@@ -2411,11 +2552,13 @@ export interface TypedActorClass<TContract> {
         stateSnapshot: string;
         checksum: string;
         createdAt: number;
+        seq?: number;
       }>;
       hasMore: boolean;
     }>;
     __redrive(opts: { effectId: string }): Promise<{ ok: true } | { ok: false; error: string }>;
     __fireTimer(opts: { key: string }): Promise<{ ok: true } | { ok: false; error: string }>;
+    __restore(opts: { toSeq: number }): Promise<{ ok: true } | { ok: false; error: string }>;
     __getView(opts: {
       role: string;
       caller?: string;

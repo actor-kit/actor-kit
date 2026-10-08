@@ -155,6 +155,12 @@ POST /__studio/api/actors/:type/:id/actions
 → 200 { "ok": true } | 409 { "error": "Effect 12:0 is not a failed execution" }
 ```
 
+### `__fireTimer({ key })` and `__restore({ toSeq })`
+
+Also Studio actions (mutate scope): `{ "action": "fireTimer", "key": "round-1" }` fires a pending timer now, exactly
+as the alarm would; `{ "action": "restore", "toSeq": 12 }` restores the actor to journal seq 12 (ADR-015 D3). Both
+return `{ ok: true }` or `{ ok: false, error }` (409 over HTTP). Restore needs the journal.
+
 ## Studio WebSocket protocol
 
 Connect to an actor's studio WebSocket to receive live updates:

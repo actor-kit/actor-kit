@@ -31,6 +31,7 @@ describe("ACTOR_KIT_MIGRATIONS", () => {
       "0009_journal",
       "0010_effect_ids_and_retries",
       "0011_timers",
+      "0012_restore",
     ]);
   });
 

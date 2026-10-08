@@ -160,4 +160,13 @@ export const ACTOR_KIT_MIGRATIONS: ReadonlyArray<{ readonly name: string; readon
       CREATE INDEX IF NOT EXISTS idx_timers_due ON timers(fire_at, seq, idx);
     `,
   },
+  {
+    // Restore (ADR-015 D3): checkpoints keep the timers pending at their seq, and Studio timeline
+    // rows carry the journal seq they recorded (for "restore to here").
+    name: "0012_restore",
+    sql: `
+      ALTER TABLE journal_checkpoints ADD COLUMN timers TEXT NOT NULL DEFAULT '[]';
+      ALTER TABLE timeline ADD COLUMN seq INTEGER;
+    `,
+  },
 ];

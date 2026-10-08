@@ -328,6 +328,27 @@ Retry policy per service: `retry: { attempts, backoff: { baseMs, factor, maxMs, 
 1s then 5s apart, ±20% jitter. `failed` is final: failed rows are the dead letters. Forwards keep a single try
 (their attempts are counted; retrying them is not built yet).
 
+### Restore and replay on wake (ADR-015 D3)
+
+`runtime/restore.ts` plans, `actor.ts` commits:
+
+```
+__restore({ toSeq })  (Studio mutate scope; journal required)
+  plan = planRestore(def, readJournal(), toSeq)
+    start: newest checkpoint <= toSeq (checksum verified, with its pending timers) or init
+    foldEvents(start .. toSeq): state + pending timers; `restore` events jump back to their toSeq
+    redeliver: service results recorded after toSeq whose effectId seq <= toSeq (first per effect)
+  commit(plan.state, restore event { toSeq }):
+    timers table := plan.timers (original ids and fire_at; overdue ones fire on the next alarm)
+    executions/forwards with seq > toSeq still pending/retrying/running := failed
+      ("cancelled: the actor was restored to seq N"; a try in flight is not settled)
+  each redeliver: onDone/onError with the recorded result as a new event (the service is not called)
+```
+
+On wake, when `snapshots.last_seq` is behind the journal at the same code version, `catchUpJournal()` folds
+the journal from its newest usable checkpoint and rewrites the snapshot. Timeline rows carry the journal `seq`
+they recorded, which Studio uses for "Restore to here".
+
 ### Actor-to-actor communication (DO RPC)
 
 ```typescript

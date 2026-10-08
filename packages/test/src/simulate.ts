@@ -232,7 +232,8 @@ function createSimulation(
     });
     if (actor.seq % config.checkpointEvery === 0) {
       const state = JSON.stringify(def.serialize ? def.serialize(actor.state) : actor.state);
-      actor.journal.checkpoints.push({ seq: actor.seq, version: def.version ?? 1, state, checksum });
+      const timers = JSON.stringify(actor.timers);
+      actor.journal.checkpoints.push({ seq: actor.seq, version: def.version ?? 1, state, checksum, timers });
     }
   }
 
@@ -265,7 +266,6 @@ function createSimulation(
     const def = defOf(actor.type);
     actor.seq += 1;
     actor.state = result.state;
-    appendJournal(actor, def, result.event);
     for (const execution of result.effects.toExecutionEntries(actor.seq)) {
       data.pending.push({
         actor: { type: actor.type, id: actor.id },
@@ -276,6 +276,7 @@ function createSimulation(
     }
     applyLinks(actor, def, result);
     applyTimers(actor, result);
+    appendJournal(actor, def, result.event);
     for (const forward of result.effects.toForwardEntries(actor.seq)) {
       if (from !== null) deliver(actor, def, forward.linkName, forward.targetId, forward.message, from);
     }

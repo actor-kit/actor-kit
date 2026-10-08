@@ -155,6 +155,25 @@ export function readOutboxRows(sql: JournalSql): OutboxRow[] {
     });
 }
 
+/**
+ * Restore (ADR-015 D3): executions and forwards declared after `toSeq` belong to undone
+ * transitions. Those still waiting (or in flight) become dead letters carrying `reason`, so an
+ * operator can see and redrive them; nothing is run for an undone transition behind their back.
+ */
+export function cancelUndoneEffects(sql: JournalSql, toSeq: number, reason: string): void {
+  sql.exec(
+    "UPDATE executions SET status = 'failed', next_attempt_at = NULL, last_error = ? WHERE seq > ? AND status IN ('pending', 'retrying', 'running')",
+    reason,
+    toSeq,
+  );
+  sql.exec("UPDATE forwards SET status = 'failed' WHERE seq > ? AND status = 'pending'", toSeq);
+}
+
+/** Whether a row is still `running`: false once a restore cancelled the try in flight. */
+export function isRunning(sql: JournalSql, id: string): boolean {
+  return sql.exec("SELECT 1 AS one FROM executions WHERE id = ? AND status = 'running'", id).toArray().length > 0;
+}
+
 export interface OutboxFailedEvent {
   readonly event: "actor_kit.outbox.failed";
   readonly actorType: string;

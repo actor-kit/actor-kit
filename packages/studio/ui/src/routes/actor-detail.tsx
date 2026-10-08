@@ -4,9 +4,10 @@ import { formatCauseSummary } from "../cause-summary";
 import { JsonDiff } from "../components/json-diff";
 import { JsonTree } from "../components/json-tree";
 import { OutboxPanel } from "../components/outbox-panel";
+import { RestoreButton } from "../components/restore-button";
 import { TimersPanel } from "../components/timers-panel";
 import { useStudioWs } from "../hooks/use-studio-ws";
-import type { TimelineItem } from "../protocol";
+import type { InspectResult, TimelineItem, TimerEntry } from "../protocol";
 import type { StudioStatus } from "../studio-state";
 
 const CAUSE_LABELS: Record<string, { label: string; color: string }> = {
@@ -21,6 +22,7 @@ const CAUSE_LABELS: Record<string, { label: string; color: string }> = {
   "link.onError": { label: "link err", color: "bg-red-700" },
   "link.onUnlink": { label: "link unlink", color: "bg-zinc-500" },
   timer: { label: "timer", color: "bg-amber-700" },
+  restore: { label: "restore", color: "bg-fuchsia-800" },
 };
 
 function relativeTime(ts: number): string {
@@ -72,11 +74,15 @@ function StatusBadge({ status }: { status: StudioStatus }) {
 }
 
 function TimelineRow({
+  actorType,
+  actorId,
   entry,
   previous,
   expanded,
   onToggle,
 }: {
+  actorType: string;
+  actorId: string;
   entry: TimelineItem;
   previous: TimelineItem | undefined;
   expanded: boolean;
@@ -100,6 +106,11 @@ function TimelineRow({
       </button>
       {expanded && (
         <div className="px-3 pb-3 border-t border-zinc-800/50 space-y-2">
+          {"seq" in entry && entry.seq !== undefined && (
+            <div className="pt-2">
+              <RestoreButton actorType={actorType} actorId={actorId} seq={entry.seq} />
+            </div>
+          )}
           {previous !== undefined && (
             <div>
               <p className="text-xs text-zinc-500 mb-1">Changes:</p>
@@ -124,6 +135,11 @@ function TimelineRow({
       )}
     </div>
   );
+}
+
+/** Pending timers (actors older than ADR-015 send none). */
+function pendingTimers(inspect: InspectResult): TimerEntry[] {
+  return inspect.timers ?? [];
 }
 
 export function ActorDetailPage() {
@@ -166,7 +182,7 @@ function ActorDetail({ actorType, actorId }: { actorType: string; actorId: strin
     { key: "timeline", label: "Timeline", count: timeline.length },
     { key: "connections", label: "Connections", count: inspect.connections.length },
     { key: "outbox", label: "Outbox", count: inspect.outbox.length },
-    { key: "timers", label: "Timers", count: inspect.timers?.length ?? 0 },
+    { key: "timers", label: "Timers", count: pendingTimers(inspect).length },
     { key: "links", label: "Links", count: inspect.activeLinks.length + inspect.linkSubscribers.length },
   ];
 
@@ -222,6 +238,8 @@ function ActorDetail({ actorType, actorId }: { actorType: string; actorId: strin
           {timeline.length === 0 && <p className="text-zinc-500">No timeline entries.</p>}
           {timeline.map((entry, idx) => (
             <TimelineRow
+              actorType={actorType}
+              actorId={actorId}
               key={entry.id}
               entry={entry}
               // Timeline is newest-first, so the previous state is the next entry.
@@ -272,7 +290,7 @@ function ActorDetail({ actorType, actorId }: { actorType: string; actorId: strin
 
       {activeTab === "outbox" && <OutboxPanel actorType={actorType} actorId={actorId} outbox={inspect.outbox} />}
 
-      {activeTab === "timers" && <TimersPanel actorType={actorType} actorId={actorId} timers={inspect.timers ?? []} />}
+      {activeTab === "timers" && <TimersPanel actorType={actorType} actorId={actorId} timers={pendingTimers(inspect)} />}
 
       {activeTab === "links" && (
         <div data-testid="links-panel" className="space-y-4">

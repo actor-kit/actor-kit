@@ -11,6 +11,7 @@
 import type { DeterministicContext } from "@actor-kit/core";
 import { xxh64 } from "@actor-kit/core";
 import { z } from "zod";
+import type { TimerOp } from "./outbox";
 import { replayStepFacts, type StepCause, type StepDef, step, stepInit } from "./step";
 
 // --- Facts ---
@@ -216,6 +217,8 @@ export interface JournalCheckpoint {
   /** serialize(state) as JSON. */
   readonly state: string;
   readonly checksum: string;
+  /** The timers pending at this seq, as JSON (ADR-015 D3). Absent from checkpoints written before. */
+  readonly timers?: string;
 }
 
 export interface Journal {
@@ -288,11 +291,12 @@ export function appendJournalEvent(
 
   if (seq % config.checkpointEvery === 0) {
     sql.exec(
-      "INSERT OR REPLACE INTO journal_checkpoints (seq, version, state, checksum) VALUES (?, ?, ?, ?)",
+      "INSERT OR REPLACE INTO journal_checkpoints (seq, version, state, checksum, timers) VALUES (?, ?, ?, ?, ?)",
       seq,
       persisted.version,
       persisted.stateJson,
       persisted.checksum,
+      JSON.stringify(pendingTimers(sql)),
     );
   }
 
@@ -308,6 +312,28 @@ export function appendJournalEvent(
     }
   }
   return seq;
+}
+
+const TimerTableRow = z.object({
+  id: z.string(),
+  seq: z.number(),
+  idx: z.number(),
+  name: z.string(),
+  key: z.string(),
+  payload: z.string(),
+  fire_at: z.number(),
+});
+
+/** The timers table as of now (inside the transaction), for a checkpoint. */
+function pendingTimers(sql: JournalSql): ScheduledTimer[] {
+  return sql
+    .exec("SELECT id, seq, idx, name, key, payload, fire_at FROM timers ORDER BY fire_at, seq, idx")
+    .toArray()
+    .map((raw) => {
+      const row = TimerTableRow.parse(raw);
+      const payload: unknown = JSON.parse(row.payload);
+      return { id: row.id, seq: row.seq, index: row.idx, name: row.name, key: row.key, payload, fireAt: row.fire_at };
+    });
 }
 
 /**
@@ -349,6 +375,7 @@ const CheckpointRowSchema = z.object({
   version: z.number(),
   state: z.string(),
   checksum: z.string(),
+  timers: z.string().optional(),
 });
 
 /** Read and parse a DO's journal (events + checkpoints), oldest first. */
@@ -376,9 +403,12 @@ export function readJournal(sql: JournalSql): Journal {
       };
     });
   const checkpoints = sql
-    .exec("SELECT seq, version, state, checksum FROM journal_checkpoints ORDER BY seq")
+    .exec("SELECT * FROM journal_checkpoints ORDER BY seq")
     .toArray()
-    .map((raw): JournalCheckpoint => CheckpointRowSchema.parse(raw));
+    .map((raw): JournalCheckpoint => {
+      const { timers, ...row } = CheckpointRowSchema.parse(raw);
+      return timers === undefined ? row : { ...row, timers };
+    });
   return { events, checkpoints };
 }
 
@@ -491,6 +521,28 @@ const REPLAY_CAUSES: Record<Exclude<JournalCauseType, "init" | "restore">, Repla
   },
 };
 
+/** One event replayed through the step core: the next state and the timer schedules/cancels it made. */
+async function replayEvent(
+  def: ReplayableDef,
+  state: unknown,
+  event: JournalEvent,
+  options: { env?: unknown },
+): Promise<{ state: unknown; timerOps: TimerOp[] }> {
+  const env = options.env ?? {};
+  const facts = replayStepFacts(event.facts);
+  if (event.causeType === "init") {
+    required(def.init, "init");
+    const io = { env, link: async (name: string, id: string) => facts.takeLinkView(name, id) };
+    const cause = { input: event.payload, caller: event.caller, callerType: event.callerType };
+    return { state: (await stepInit(def, cause, facts, io)).state, timerOps: [] };
+  }
+  if (event.causeType === "restore") {
+    throw new Error("Journal replay: a restore event replays only within its journal (use foldJournal)");
+  }
+  const result = step(def, state, REPLAY_CAUSES[event.causeType](def, state, event), facts, env);
+  return { state: result.state, timerOps: result.effects.toTimerOps(event.seq) };
+}
+
 /** Fold one journal event through the definition's current handlers (the step core, guards never run). */
 export async function applyJournalEvent(
   def: ReplayableDef,
@@ -498,18 +550,7 @@ export async function applyJournalEvent(
   event: JournalEvent,
   options: { env?: unknown } = {},
 ): Promise<unknown> {
-  const env = options.env ?? {};
-  const facts = replayStepFacts(event.facts);
-  if (event.causeType === "init") {
-    required(def.init, "init");
-    const io = { env, link: async (name: string, id: string) => facts.takeLinkView(name, id) };
-    const cause = { input: event.payload, caller: event.caller, callerType: event.callerType };
-    return (await stepInit(def, cause, facts, io)).state;
-  }
-  if (event.causeType === "restore") {
-    throw new Error("Journal replay: restore events are not supported yet (ADR-013 step 3)");
-  }
-  return step(def, state, REPLAY_CAUSES[event.causeType](def, state, event), facts, env).state;
+  return (await replayEvent(def, state, event, options)).state;
 }
 
 /** Thrown when a replayed state's checksum differs from the one recorded when the event was written. */
@@ -529,6 +570,136 @@ export class JournalDivergenceError extends Error {
   }
 }
 
+// --- Folding: state and pending timers, seq by seq ---
+
+/** A pending timer as a fold tracks it (the timers table row, payload parsed). */
+export interface ScheduledTimer {
+  readonly id: string;
+  readonly seq: number;
+  readonly index: number;
+  readonly name: string;
+  readonly key: string;
+  readonly payload: unknown;
+  readonly fireAt: number;
+}
+
+/** The actor at one seq: its state and its pending timers. */
+export interface FoldPoint {
+  readonly state: unknown;
+  readonly timers: readonly ScheduledTimer[];
+}
+
+const ScheduledTimerSchema = z.object({
+  id: z.string(),
+  seq: z.number(),
+  index: z.number(),
+  name: z.string(),
+  key: z.string(),
+  payload: z.unknown(),
+  fireAt: z.number(),
+});
+const ScheduledTimersSchema = z.array(ScheduledTimerSchema);
+const RestorePayload = z.object({ toSeq: z.number().int() });
+const FiredTimerPayload = z.object({ id: z.string() });
+
+/** Apply schedules and cancels in order (a key is unique: scheduling it again replaces it), keep deadline order. */
+export function applyScheduleOps(timers: readonly ScheduledTimer[], ops: readonly TimerOp[]): ScheduledTimer[] {
+  let next = [...timers];
+  for (const op of ops) {
+    next = next.filter((t) => t.key !== op.key);
+    if (op.op === "schedule") {
+      next.push({
+        id: op.id,
+        seq: op.seq,
+        index: op.index,
+        name: op.name,
+        key: op.key,
+        payload: op.payload,
+        fireAt: op.fireAt,
+      });
+    }
+  }
+  return next.sort((a, b) => a.fireAt - b.fireAt || a.seq - b.seq || a.index - b.index);
+}
+
+/** The pending timers stored with a checkpoint (none for checkpoints written before ADR-015). */
+function checkpointTimers(checkpoint: JournalCheckpoint): ScheduledTimer[] {
+  return ScheduledTimersSchema.parse(JSON.parse(checkpoint.timers ?? "[]"));
+}
+
+/** The checkpoint's state, after checking its checksum. */
+export function checkpointPoint(def: ReplayableDef, checkpoint: JournalCheckpoint): FoldPoint {
+  const actual = xxh64(checkpoint.state);
+  if (actual !== checkpoint.checksum) {
+    throw new JournalDivergenceError(checkpoint.seq, "checkpoint", null, checkpoint.checksum, actual);
+  }
+  const parsed: unknown = JSON.parse(checkpoint.state);
+  return { state: def.restore ? def.restore(parsed) : parsed, timers: checkpointTimers(checkpoint) };
+}
+
+/**
+ * Fold events (contiguous, after `start.seq`) from `start`, verifying every after-state checksum.
+ * A `restore` event goes back to the point at its toSeq, which must be `start` or folded here.
+ * Returns the point after each event.
+ */
+export async function foldEvents(
+  def: ReplayableDef,
+  start: { seq: number; point: FoldPoint },
+  events: readonly JournalEvent[],
+  options: { env?: unknown } = {},
+): Promise<Map<number, FoldPoint>> {
+  const points = new Map<number, FoldPoint>([[start.seq, start.point]]);
+  let point = start.point;
+  let expectedSeq = start.seq + 1;
+  for (const event of events) {
+    if (event.seq !== expectedSeq) {
+      throw new Error(`Journal replay: expected seq ${expectedSeq}, found ${event.seq}`);
+    }
+    point = await foldEvent(def, point, event, points, options);
+    const actual = checksumState(def, point.state);
+    if (actual !== event.stateChecksum) {
+      throw new JournalDivergenceError(event.seq, event.causeType, event.name, event.stateChecksum, actual);
+    }
+    points.set(event.seq, point);
+    expectedSeq += 1;
+  }
+  return points;
+}
+
+async function foldEvent(
+  def: ReplayableDef,
+  point: FoldPoint,
+  event: JournalEvent,
+  points: ReadonlyMap<number, FoldPoint>,
+  options: { env?: unknown },
+): Promise<FoldPoint> {
+  if (event.causeType === "restore") {
+    const { toSeq } = RestorePayload.parse(event.payload);
+    const target = points.get(toSeq);
+    if (target === undefined) {
+      throw new Error(`Journal replay: event ${event.seq} restores to seq ${toSeq}, which this journal does not cover`);
+    }
+    return target;
+  }
+  const replayed = await replayEvent(def, point.state, event, options);
+  const remaining =
+    event.causeType === "timer"
+      ? point.timers.filter((t) => t.id !== FiredTimerPayload.parse(event.payload).id)
+      : point.timers;
+  return { state: replayed.state, timers: applyScheduleOps(remaining, replayed.timerOps) };
+}
+
+/** Where a journal can be folded from: init (seq 0) or the checkpoint just before its first event. */
+function journalStart(def: ReplayableDef, journal: Journal, first: JournalEvent): { seq: number; point: FoldPoint } {
+  if (first.causeType === "init") return { seq: first.seq - 1, point: { state: undefined, timers: [] } };
+  const baseSeq = first.seq - 1;
+  const checkpoint = journal.checkpoints.find((c) => c.seq === baseSeq);
+  if (checkpoint === undefined) {
+    throw new Error(`Journal replay: no checkpoint at seq ${baseSeq} to start from`);
+  }
+  return { seq: baseSeq, point: checkpointPoint(def, checkpoint) };
+}
+
 /**
  * Replay a journal from init (or, for a pruned journal, from the checkpoint just before its
  * first event), verifying every event's after-state checksum. Throws on the first divergence.
@@ -541,33 +712,6 @@ export async function foldJournal(
   const events = [...journal.events].sort((a, b) => a.seq - b.seq);
   const first = events[0];
   if (first === undefined) return { state: undefined, replayed: 0 };
-
-  let state: unknown;
-  if (first.causeType !== "init") {
-    const baseSeq = first.seq - 1;
-    const checkpoint = journal.checkpoints.find((c) => c.seq === baseSeq);
-    if (checkpoint === undefined) {
-      throw new Error(`Journal replay: no checkpoint at seq ${baseSeq} to start from`);
-    }
-    const actual = xxh64(checkpoint.state);
-    if (actual !== checkpoint.checksum) {
-      throw new JournalDivergenceError(checkpoint.seq, "checkpoint", null, checkpoint.checksum, actual);
-    }
-    const parsed: unknown = JSON.parse(checkpoint.state);
-    state = def.restore ? def.restore(parsed) : parsed;
-  }
-
-  let expectedSeq = first.seq;
-  for (const event of events) {
-    if (event.seq !== expectedSeq) {
-      throw new Error(`Journal replay: expected seq ${expectedSeq}, found ${event.seq}`);
-    }
-    state = await applyJournalEvent(def, state, event, options);
-    const actual = checksumState(def, state);
-    if (actual !== event.stateChecksum) {
-      throw new JournalDivergenceError(event.seq, event.causeType, event.name, event.stateChecksum, actual);
-    }
-    expectedSeq += 1;
-  }
-  return { state, replayed: events.length };
+  const points = await foldEvents(def, journalStart(def, journal, first), events, options);
+  return { state: points.get(events.at(-1)?.seq ?? 0)?.state, replayed: events.length };
 }

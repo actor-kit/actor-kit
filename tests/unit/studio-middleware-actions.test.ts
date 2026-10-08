@@ -46,6 +46,7 @@ function setup(opts: { exists?: boolean; redrive?: () => unknown; fireTimer?: ()
   const stubMethods: Record<string, (...args: unknown[]) => unknown> = {
     __redrive: opts.redrive ?? (() => ({ ok: true })),
     __fireTimer: opts.fireTimer ?? (() => ({ ok: true })),
+    __restore: () => ({ ok: true }),
   };
   const ns = (methods: Record<string, (...args: unknown[]) => unknown>) => ({
     idFromName: (name: string) => ({ toString: () => `name:${name}` }),
@@ -372,6 +373,35 @@ describe("studio actions: fire a timer now", () => {
     const { post, actorCalls } = setup();
     const res = await post(PATH, { action: "fireTimer", key: "k" }, { "Cf-Access-Jwt-Assertion": await agentJwt() });
     expect(res.status).toBe(403);
+    expect(actorCalls()).toEqual([]);
+  });
+});
+
+describe("studio actions: restore", () => {
+  it("an admin restores an actor to a journal seq through __restore", async () => {
+    const { post, actorCalls } = setup();
+    const res = await post(PATH, { action: "restore", toSeq: 12 }, { "Cf-Access-Jwt-Assertion": await adminJwt() });
+    expect(res.status).toBe(200);
+    expect(actorCalls()).toEqual([{ method: "__restore", args: [{ toSeq: 12 }] }]);
+  });
+
+  it.each([
+    ["no seq", { action: "restore" }],
+    ["seq 0", { action: "restore", toSeq: 0 }],
+    ["a fractional seq", { action: "restore", toSeq: 1.5 }],
+    ["a string seq", { action: "restore", toSeq: "3" }],
+    ["extra fields", { action: "restore", toSeq: 3, key: "k" }],
+  ])("rejects %s as 400", async (_what, body) => {
+    const { post, actorCalls } = setup();
+    expect((await post(PATH, body, { "Cf-Access-Jwt-Assertion": await adminJwt() })).status).toBe(400);
+    expect(actorCalls()).toEqual([]);
+  });
+
+  it("is refused without the mutate scope", async () => {
+    const { post, actorCalls } = setup();
+    expect(
+      (await post(PATH, { action: "restore", toSeq: 2 }, { "Cf-Access-Jwt-Assertion": await userJwt() })).status,
+    ).toBe(403);
     expect(actorCalls()).toEqual([]);
   });
 });
