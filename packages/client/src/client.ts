@@ -125,9 +125,9 @@ export function createActorClient(options: ClientOptions<unknown>): ActorClient<
   let generation = 0;
   let reconnectAttempts = 0;
   let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
-  // Checksum of the last view applied from the server; never the page-load (SSR) view.
+  // Checksum of the last binary view applied in this connect() session; never the page-load (SSR) view.
+  // A reopen reports it in `__reconnect`; disconnect() and JSON snapshots clear it.
   let lastChecksum: string | undefined;
-  let isReconnecting = false;
   let activeSchema: SchemaDefinition<Record<string, FieldDescriptor>> | undefined = viewSchema;
   const messageQueue: Array<{ type: string; [key: string]: unknown }> = [];
 
@@ -185,7 +185,7 @@ export function createActorClient(options: ClientOptions<unknown>): ActorClient<
       const frame = parseFrame(new Uint8Array(data));
       if (frame.type === FrameType.SNAPSHOT) handleSnapshotFrame(frame);
       else if (frame.type === FrameType.DELTA) handleDeltaFrame(frame);
-      else if (frame.controlType !== undefined) handleControlFrame(frame);
+      else handleControlFrame(frame);
     } catch {
       // Binary decode error: keep the last good view (and its checksum).
     }
@@ -219,18 +219,14 @@ export function createActorClient(options: ClientOptions<unknown>): ActorClient<
   }
 
   function clearReconnectTimer() {
-    if (reconnectTimer !== undefined) {
-      clearTimeout(reconnectTimer);
-      reconnectTimer = undefined;
-    }
+    clearTimeout(reconnectTimer);
+    reconnectTimer = undefined;
   }
 
   function scheduleReconnect() {
     setConnectionState("reconnecting");
-    isReconnecting = true;
     const delay = reconnectDelay(reconnectAttempts);
     reconnectAttempts += 1;
-    clearReconnectTimer();
     reconnectTimer = setTimeout(() => {
       reconnectTimer = undefined;
       void openSocket();
@@ -258,26 +254,12 @@ export function createActorClient(options: ClientOptions<unknown>): ActorClient<
     if (typeof document !== "undefined") document.removeEventListener("visibilitychange", onVisibilityChange);
   }
 
-  /** Closes the current socket; its late events are ignored because its generation is now stale. */
-  function retireSocket() {
-    generation += 1;
-    ws?.close();
-    ws = undefined;
-  }
-
-  function flushQueue(socket: WebSocketLike) {
-    for (const queued of messageQueue.splice(0)) {
-      if (socket.readyState === WS_OPEN) socket.send(JSON.stringify(queued));
-    }
-  }
-
   function onOpen(socket: WebSocketLike) {
     reconnectAttempts = 0;
-    if (isReconnecting && lastChecksum) {
+    if (lastChecksum !== undefined) {
       socket.send(JSON.stringify({ type: "__reconnect", lastChecksum }));
     }
-    isReconnecting = false;
-    flushQueue(socket);
+    for (const queued of messageQueue.splice(0)) socket.send(JSON.stringify(queued));
   }
 
   function onMessage(data: unknown) {
@@ -286,8 +268,7 @@ export function createActorClient(options: ClientOptions<unknown>): ActorClient<
   }
 
   async function openSocket() {
-    retireSocket();
-    const mine = generation;
+    const mine = ++generation;
     const current = () => mine === generation;
     let socket: WebSocketLike | undefined;
     try {
@@ -372,9 +353,12 @@ export function createActorClient(options: ClientOptions<unknown>): ActorClient<
       messageQueue.length = 0;
       clearReconnectTimer();
       detachBrowserListeners();
-      isReconnecting = false;
       reconnectAttempts = 0;
-      retireSocket();
+      lastChecksum = undefined;
+      // Bumping the generation makes the closing socket's late events (and any pending open) stale.
+      generation++;
+      ws?.close();
+      ws = undefined;
     },
   };
 }

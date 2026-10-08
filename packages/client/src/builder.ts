@@ -95,39 +95,34 @@ export function actorClient(
 
 // --- Contract-based factory ---
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function isViewSchema(value: unknown): value is SchemaDefinition<Record<string, FieldDescriptor>> {
+  return isRecord(value) && value["kind"] === "schema" && Array.isArray(value["fields"]);
+}
+
+/** Role names in definition order (the server's roleIndex) and the schema of each role's view, if any. */
+function contractSchemas(def: Record<string, unknown>): {
+  roleNames: string[] | undefined;
+  viewSchemas: Record<string, SchemaDefinition<Record<string, FieldDescriptor>>>;
+} {
+  const roles = def["roles"];
+  const views = def["views"];
+  const viewSchemas: Record<string, SchemaDefinition<Record<string, FieldDescriptor>>> = {};
+  for (const [roleName, viewDef] of Object.entries(isRecord(views) ? views : {})) {
+    const viewSchema = isRecord(viewDef) ? viewDef["schema"] : undefined;
+    if (isViewSchema(viewSchema)) viewSchemas[roleName] = viewSchema;
+  }
+  return { roleNames: isRecord(roles) ? Object.keys(roles) : undefined, viewSchemas };
+}
+
 function buildContractFactory(contract: {
   readonly name: string;
   readonly def: Record<string, unknown>;
 }): ActorClientFactory<unknown, { type: string }> {
-  const def = contract.def;
-
-  const roles =
-    typeof def === "object" && def !== null && "roles" in def
-      ? (def as { roles: Record<string, unknown> }).roles
-      : undefined;
-  const roleNames = roles ? Object.keys(roles) : undefined;
-
-  const views =
-    typeof def === "object" && def !== null && "views" in def
-      ? (
-          def as {
-            views: Record<string, { schema?: SchemaDefinition<Record<string, FieldDescriptor>> }>;
-          }
-        ).views
-      : undefined;
-
-  let viewSchemas: Record<string, SchemaDefinition<Record<string, FieldDescriptor>>> | undefined;
-  if (views) {
-    const schemas: Record<string, SchemaDefinition<Record<string, FieldDescriptor>>> = {};
-    for (const [roleName, viewDef] of Object.entries(views)) {
-      if (viewDef && "schema" in viewDef && viewDef.schema) {
-        schemas[roleName] = viewDef.schema;
-      }
-    }
-    if (Object.keys(schemas).length > 0) {
-      viewSchemas = schemas;
-    }
-  }
+  const { roleNames, viewSchemas } = contractSchemas(contract.def);
 
   function build<TEvent extends { type: string }>(): ActorClientFactory<unknown, TEvent> {
     return {
