@@ -103,3 +103,24 @@ describe("Timeline: restore to here", () => {
     expect(screen.queryByRole("alert")).toBeNull();
   });
 });
+
+describe("Timeline: restore to here, retrying", () => {
+  it("clears an earlier error and re-enables the button after a failure", async () => {
+    actionResponse = () => Response.json({ error: "first try failed" }, { status: 409 });
+    await openTimeline([withSeq(1, 6)]);
+    fireEvent.click(screen.getByTestId("timeline-entry-1"));
+    fireEvent.click(screen.getByRole("button", { name: "Restore to here" }));
+    const confirm = screen.getByRole("button", { name: "Confirm restore" });
+    fireEvent.click(confirm);
+    expect(await screen.findByRole("alert")).toBeTruthy();
+    await waitFor(() => expect(confirm.hasAttribute("disabled")).toBe(false));
+    let release: (r: Response) => void = () => {};
+    actionResponse = () =>
+      new Promise<Response>((resolve) => {
+        release = resolve;
+      });
+    fireEvent.click(confirm);
+    await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
+    await act(async () => release(Response.json({ ok: true })));
+  });
+});

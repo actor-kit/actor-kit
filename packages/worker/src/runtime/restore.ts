@@ -40,7 +40,7 @@ function restoreStart(
   events: readonly JournalEvent[],
   toSeq: number,
 ): { seq: number; point: FoldPoint } {
-  const firstSeq = events[0]?.seq ?? 1;
+  const firstSeq = Math.min(...events.map((e) => e.seq));
   const checkpoint = [...journal.checkpoints]
     .filter((c) => c.seq <= toSeq && c.seq >= firstSeq - 1)
     .sort((a, b) => b.seq - a.seq)[0];
@@ -49,11 +49,13 @@ function restoreStart(
   throw new Error(`Cannot restore to seq ${toSeq}: the journal is pruned before it`);
 }
 
-/** The effect id a service result was journaled with (null for other events and older payloads). */
-function resultEffectId(event: JournalEvent): string | null {
+/** The effect a service result was journaled for (null for other events and older payloads). */
+function resultEffect(event: JournalEvent): { id: string; seq: number } | null {
   if (!event.causeType.startsWith("service.")) return null;
   const parsed = ResultEffect.safeParse(event.payload);
-  return parsed.success ? parsed.data.effectId : null;
+  if (!parsed.success) return null;
+  const effect = parseEffectId(parsed.data.effectId);
+  return effect === null ? null : { id: parsed.data.effectId, seq: effect.seq };
 }
 
 /** Recorded service results after `toSeq` for effects declared at or before it, first result per effect. */
@@ -61,11 +63,9 @@ function resultsToRedeliver(events: readonly JournalEvent[], toSeq: number): Jou
   const seen = new Set<string>();
   const redeliver: JournalEvent[] = [];
   for (const event of events.filter((e) => e.seq > toSeq)) {
-    const effectId = resultEffectId(event);
-    if (effectId === null || seen.has(effectId)) continue;
-    const declared = parseEffectId(effectId);
-    if (declared === null || declared.seq > toSeq) continue;
-    seen.add(effectId);
+    const effect = resultEffect(event);
+    if (effect === null || effect.seq > toSeq || seen.has(effect.id)) continue;
+    seen.add(effect.id);
     redeliver.push(event);
   }
   return redeliver;
@@ -79,7 +79,7 @@ export async function planRestore(
   options: { env?: unknown } = {},
 ): Promise<RestorePlan> {
   const events = [...journal.events].sort((a, b) => a.seq - b.seq);
-  const lastSeq = events.at(-1)?.seq ?? 0;
+  const lastSeq = Math.max(0, ...events.map((e) => e.seq));
   if (!Number.isInteger(toSeq) || toSeq < 1 || toSeq > lastSeq) {
     throw new Error(`Cannot restore to seq ${toSeq}: the journal runs from 1 to ${lastSeq}`);
   }

@@ -218,7 +218,7 @@ export interface JournalCheckpoint {
   readonly state: string;
   readonly checksum: string;
   /** The timers pending at this seq, as JSON (ADR-015 D3). Absent from checkpoints written before. */
-  readonly timers?: string;
+  readonly timers?: string | undefined;
 }
 
 export interface Journal {
@@ -405,10 +405,7 @@ export function readJournal(sql: JournalSql): Journal {
   const checkpoints = sql
     .exec("SELECT * FROM journal_checkpoints ORDER BY seq")
     .toArray()
-    .map((raw): JournalCheckpoint => {
-      const { timers, ...row } = CheckpointRowSchema.parse(raw);
-      return timers === undefined ? row : { ...row, timers };
-    });
+    .map((raw): JournalCheckpoint => CheckpointRowSchema.parse(raw));
   return { events, checkpoints };
 }
 

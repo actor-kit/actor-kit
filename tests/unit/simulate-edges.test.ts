@@ -373,11 +373,114 @@ describe("testActor rejections", () => {
   const t = testActor(Hub);
   const state = t.init({});
 
+  /** The Error a rejected send() carries (vitest's rejects.toThrow(string) accepts `undefined`). */
+  async function rejection(run: () => Promise<unknown>): Promise<string> {
+    try {
+      await run();
+    } catch (error) {
+      if (error instanceof Error) return error.message;
+      return `non-error: ${String(error)}`;
+    }
+    return "(resolved)";
+  }
+
   it("say what was rejected", async () => {
     const unknownMessage: { type: string; [key: string]: unknown } = { type: "NOPE" };
     const badPayload: { type: string; [key: string]: unknown } = { type: "LATER", inMs: "x", tag: 1 };
-    await expect(t.send(state, "bob", unknownMessage)).rejects.toThrow('Message "NOPE" not found for role "user"');
-    await expect(t.send(state, "bob", badPayload)).rejects.toThrow(/^Validation failed for "LATER": .+/);
-    await expect(t.send(state, "blocked", { type: "WHO" })).rejects.toThrow('Guard rejected "WHO"');
+    expect(await rejection(() => t.send(state, "bob", unknownMessage))).toBe(
+      'Message "NOPE" not found for role "user"',
+    );
+    expect(await rejection(() => t.send(state, "bob", badPayload))).toMatch(/^Validation failed for "LATER": .*inMs/s);
+    expect(await rejection(() => t.send(state, "blocked", { type: "WHO" }))).toBe('Guard rejected "WHO"');
+  });
+});
+
+const fired: string[] = [];
+const Clock = defineActor("clock", {
+  version: 4,
+  input: z.object({}),
+  init: () => ({ n: 0 }),
+  roles: { any: () => true },
+  messages: {
+    AT: message(z.object({ at: z.number(), tag: z.string() }), (s: { n: number }, { at, tag }, ctx) => {
+      ctx.schedule("tick", { at, key: tag, payload: { tag } });
+      return s;
+    }),
+    COUNT: message(z.object({}), (s: { n: number }, _p, ctx) => {
+      ctx.schedule("count", { in: 0, key: "count" });
+      return s;
+    }),
+    ECHO: message(z.object({}), (s: { n: number }) => ({ n: s.n + 1 })),
+  },
+  timers: {
+    tick: timer(z.object({ tag: z.string() }), (s: { n: number }, { tag }) => {
+      fired.push(tag);
+      return s;
+    }),
+    count: timer(z.unknown(), (s: { n: number }, _p, ctx) => {
+      ctx.schedule("count", { in: 0, key: "count" });
+      return { n: s.n + 1 };
+    }),
+  },
+  lifecycle: {
+    connect: (
+      s: { n: number },
+      _e: unknown,
+      ctx: { execute(n: string, i: unknown): void; forward(l: string, t: string, m: { type: string }): void },
+    ) => {
+      ctx.execute("NOOP", {});
+      ctx.forward("clock", "c2", { type: "ECHO" });
+      return s;
+    },
+  },
+  services: { NOOP: { fn: async () => null } },
+  views: {},
+  journal: { checkpointEvery: 2 },
+  observe: {},
+});
+
+describe("simulate: ordering and bookkeeping", () => {
+  it("fires timers across actors by deadline, ties to the actor spawned first, then seq and index", async () => {
+    fired.length = 0;
+    const sim = simulate({ now: 0 });
+    const c1 = await sim.spawn(Clock, "c1", {});
+    const c2 = await sim.spawn(Clock, "c2", {});
+    c2.send("u", { type: "AT", at: 30, tag: "c2-30" });
+    c1.send("u", { type: "AT", at: 10, tag: "c1-10" });
+    c2.send("u", { type: "AT", at: 20, tag: "c2-20a" });
+    c2.send("u", { type: "AT", at: 20, tag: "c2-20b" });
+    c1.send("u", { type: "AT", at: 20, tag: "c1-20" });
+    sim.advance(100);
+    expect(fired).toEqual(["c1-10", "c1-20", "c2-20a", "c2-20b", "c2-30"]);
+  });
+
+  it("an observe block without onTransition is fine", async () => {
+    const sim = simulate();
+    const c = await sim.spawn(Clock, "c", {});
+    expect(c.send("u", { type: "ECHO" })).toEqual({ ok: true });
+  });
+
+  it("a connect that executes and forwards is committed, its forward sent as the connecting caller", async () => {
+    const sim = simulate();
+    const c1 = await sim.spawn(Clock, "c1", {});
+    const c2 = await sim.spawn(Clock, "c2", {});
+    c1.connect("jon", { callerType: "service" });
+    expect(c1.journal.events.map((e) => e.causeType)).toEqual(["init", "lifecycle.connect"]);
+    expect(c2.journal.events.at(-1)).toMatchObject({ causeType: "message", caller: "jon", callerType: "service" });
+  });
+
+  it("checkpoints carry the code version", async () => {
+    const sim = simulate();
+    const c = await sim.spawn(Clock, "c", {});
+    c.send("u", { type: "ECHO" });
+    expect(c.journal.checkpoints.map((k) => k.version)).toEqual([4]);
+  });
+
+  it("stops exactly at 10000 timer firings in one advance", async () => {
+    const sim = simulate();
+    const c = await sim.spawn(Clock, "c", {});
+    c.send("u", { type: "COUNT" });
+    expect(() => sim.advance(1)).toThrow(/more than 10000/);
+    expect(c.state.n).toBe(10_000);
   });
 });

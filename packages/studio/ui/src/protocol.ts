@@ -112,7 +112,7 @@ export const TimelineEntrySchema = z
       checksum: entry.checksum,
       createdAt: entry.createdAt,
     };
-    return entry.seq === undefined ? item : { ...item, seq: entry.seq };
+    return { ...item, seq: entry.seq };
   });
 export type TimelineItem = z.infer<typeof TimelineEntrySchema>;
 

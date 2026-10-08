@@ -106,7 +106,7 @@ function TimelineRow({
       </button>
       {expanded && (
         <div className="px-3 pb-3 border-t border-zinc-800/50 space-y-2">
-          {"seq" in entry && entry.seq !== undefined && (
+          {entry.seq !== undefined && (
             <div className="pt-2">
               <RestoreButton actorType={actorType} actorId={actorId} seq={entry.seq} />
             </div>
