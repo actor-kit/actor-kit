@@ -113,4 +113,19 @@ describe("Counter DO WebSocket (binary)", () => {
 
     expect(response.status).toBe(401);
   });
+
+  it("accepts the Upgrade header in any case (RFC 7230: it is case-insensitive)", async () => {
+    const actorId = `ws-upgrade-case-${Date.now()}`;
+    const stub = env.COUNTER.get(env.COUNTER.idFromName(actorId));
+    await stub.spawn({ actorId, caller: "user-1", callerType: "user", input: {} });
+
+    for (const upgrade of ["WebSocket", "WEBSOCKET"]) {
+      const response = await stub.fetch(`http://localhost/api/counter/${actorId}`, {
+        headers: { Upgrade: upgrade, "X-Actor-Kit-Caller-Id": "user-1", "X-Actor-Kit-Caller-Type": "user" },
+      });
+      expect(response.status).toBe(101);
+      response.webSocket?.accept();
+      response.webSocket?.close();
+    }
+  });
 });

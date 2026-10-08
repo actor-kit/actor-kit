@@ -152,6 +152,7 @@ export {
   timerByKey,
   timerFailedEvent,
 } from "./runtime/timers-store";
+export { isWebSocketUpgrade } from "./runtime/upgrade";
 // Typed version chain (ADR-015 D5)
 export type { CompiledVersions, RuntimeVersioning, VersionDef, VersionOptions } from "./runtime/versions";
 export { compileVersions, toRuntimeDef, version } from "./runtime/versions";

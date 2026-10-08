@@ -107,6 +107,7 @@ import {
   timerByKey,
   timerFailedEvent,
 } from "./runtime/timers-store";
+import { isWebSocketUpgrade } from "./runtime/upgrade";
 import { toRuntimeDef } from "./runtime/versions";
 
 /** Reserved caller ID for studio WebSocket connections (stamped by the studio middleware). */
@@ -1715,7 +1716,7 @@ export function actor(
 
     async fetch(request: Request): Promise<Response> {
       // WebSocket upgrade
-      if (request.headers.get("Upgrade") !== "websocket") {
+      if (!isWebSocketUpgrade(request)) {
         return new Response("Expected WebSocket", { status: 426 });
       }
 
