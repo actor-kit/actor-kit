@@ -50,6 +50,16 @@ export const initialStudioState: StudioViewState = {
   error: null,
 };
 
+/** A failed request moves the page to this status; null keeps the current one. */
+const STATUS_AFTER_FAILURE: Record<RequestFailure, StudioStatus | null> = {
+  permanent: "error",
+  "not-found": "not-found",
+  transient: null,
+};
+
+/** Statuses a socket close leaves alone: the HTTP probe, not the socket, decides what they become. */
+const KEPT_ON_SOCKET_CLOSE: ReadonlySet<StudioStatus> = new Set<StudioStatus>(["error", "polling", "not-found"]);
+
 export function studioReducer(state: StudioViewState, event: StudioEvent): StudioViewState {
   switch (event.type) {
     case "reset":
@@ -57,72 +67,70 @@ export function studioReducer(state: StudioViewState, event: StudioEvent): Studi
     case "socket-open":
       return { ...state, status: "live", error: null };
     case "socket-closed":
-      if (state.status === "error") return state;
-      if (state.status === "polling" || state.status === "not-found") return state;
-      return { ...state, status: "reconnecting" };
+      return KEPT_ON_SOCKET_CLOSE.has(state.status) ? state : { ...state, status: "reconnecting" };
+    case "frame":
+      return applyFrame(state, event.frame);
+    default:
+      return applyOutcome(state, event);
+  }
+}
+
+type OutcomeEvent = Extract<StudioEvent, { type: "malformed-frame" | "http-loaded" | "request-failed" }>;
+
+/** Results that carry data or an error: a bad frame, an HTTP load, a failed request. */
+function applyOutcome(state: StudioViewState, event: OutcomeEvent): StudioViewState {
+  switch (event.type) {
     case "malformed-frame":
       return { ...state, error: `Malformed studio frame: ${event.error}` };
     case "http-loaded":
-      return {
-        inspect: event.inspect,
-        timeline: capTimeline(event.timeline),
-        status: "polling",
-        error: null,
-      };
+      return { inspect: event.inspect, timeline: capTimeline(event.timeline), status: "polling", error: null };
     case "request-failed":
-      return {
-        ...state,
-        status: event.failure === "permanent" ? "error" : event.failure === "not-found" ? "not-found" : state.status,
-        error: event.error,
-      };
-    case "frame":
-      return applyFrame(state, event.frame);
+      return { ...state, status: STATUS_AFTER_FAILURE[event.failure] ?? state.status, error: event.error };
   }
 }
 
 function applyFrame(state: StudioViewState, frame: StudioFrame): StudioViewState {
   switch (frame.type) {
     case "studio.snapshot":
-      return {
-        ...state,
-        inspect: {
-          state: frame.state,
-          version: frame.version,
-          actorId: frame.actorId,
-          connections: frame.connections,
-          outbox: frame.outbox,
-          timers: frame.timers,
-          activeLinks: frame.activeLinks,
-          linkSubscribers: frame.linkSubscribers,
-        },
-        timeline: capTimeline(frame.timeline),
-        error: null,
-      };
-
-    case "studio.timeline": {
-      if (state.timeline.some((e) => e.id === frame.entry.id)) return state;
-      return {
-        ...state,
-        timeline: capTimeline([frame.entry, ...state.timeline]),
-        inspect: state.inspect === null ? null : { ...state.inspect, state: frame.entry.state },
-      };
-    }
-
+      return applySnapshot(state, frame);
+    case "studio.timeline":
+      return applyTimelineEntry(state, frame.entry);
     default:
       return state.inspect === null ? state : { ...state, inspect: patchInspect(state.inspect, frame) };
   }
 }
 
-/** Live frames that patch one part of the inspected actor (connections, outbox, timers, links). */
-function patchInspect(
-  inspect: InspectResult,
-  frame: Exclude<StudioFrame, { type: "studio.snapshot" | "studio.timeline" }>,
-): InspectResult {
+type SnapshotFrame = Extract<StudioFrame, { type: "studio.snapshot" }>;
+type InspectPatchFrame = Extract<
+  StudioFrame,
+  { type: "studio.connection" | "studio.outbox" | "studio.timers" | "studio.links" }
+>;
+
+function applySnapshot(state: StudioViewState, frame: SnapshotFrame): StudioViewState {
+  const { state: actorState, version, actorId, connections, outbox, timers, activeLinks, linkSubscribers } = frame;
+  return {
+    ...state,
+    inspect: { state: actorState, version, actorId, connections, outbox, timers, activeLinks, linkSubscribers },
+    timeline: capTimeline(frame.timeline),
+    error: null,
+  };
+}
+
+function applyTimelineEntry(state: StudioViewState, entry: TimelineItem): StudioViewState {
+  if (state.timeline.some((e) => e.id === entry.id)) return state;
+  return {
+    ...state,
+    timeline: capTimeline([entry, ...state.timeline]),
+    inspect: state.inspect === null ? null : { ...state.inspect, state: entry.state },
+  };
+}
+
+/** Frames that replace one part of the inspect data; they need a snapshot first. */
+function patchInspect(inspect: InspectResult, frame: InspectPatchFrame): InspectResult {
   switch (frame.type) {
     case "studio.connection": {
       // One row per app socket: only the socket that connected or closed changes.
-      const { connectionId } = frame.connection;
-      const others = inspect.connections.filter((c) => c.connectionId !== connectionId);
+      const others = inspect.connections.filter((c) => c.connectionId !== frame.connection.connectionId);
       return { ...inspect, connections: frame.action === "connect" ? [...others, frame.connection] : others };
     }
     case "studio.outbox":

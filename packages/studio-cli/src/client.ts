@@ -24,28 +24,25 @@ export class StudioClientError extends Error {
   }
 }
 
-const AuthEnv = z.object({
-  CF_ACCESS_CLIENT_ID: z.string().min(1).optional(),
-  CF_ACCESS_CLIENT_SECRET: z.string().min(1).optional(),
-  CF_ACCESS_TOKEN: z.string().min(1).optional(),
-});
+/** An environment setting, with the empty string treated as unset. */
+function setting(env: Record<string, string | undefined>, name: string): string | undefined {
+  const value = env[name];
+  return value === "" ? undefined : value;
+}
 
 /** Credentials from the environment. Values are never logged or echoed. */
 export function authFromEnv(env: Record<string, string | undefined>): StudioAuth {
-  const parsed = AuthEnv.parse({
-    CF_ACCESS_CLIENT_ID: env["CF_ACCESS_CLIENT_ID"] || undefined,
-    CF_ACCESS_CLIENT_SECRET: env["CF_ACCESS_CLIENT_SECRET"] || undefined,
-    CF_ACCESS_TOKEN: env["CF_ACCESS_TOKEN"] || undefined,
-  });
-  const { CF_ACCESS_CLIENT_ID: id, CF_ACCESS_CLIENT_SECRET: secret, CF_ACCESS_TOKEN: token } = parsed;
+  const id = setting(env, "CF_ACCESS_CLIENT_ID");
+  const secret = setting(env, "CF_ACCESS_CLIENT_SECRET");
+  if (id !== undefined && secret !== undefined) return { kind: "service-token", clientId: id, clientSecret: secret };
   if (id !== undefined || secret !== undefined) {
-    if (id === undefined || secret === undefined) {
-      throw new StudioClientError("Set both CF_ACCESS_CLIENT_ID and CF_ACCESS_CLIENT_SECRET (an Access service token)", null);
-    }
-    return { kind: "service-token", clientId: id, clientSecret: secret };
+    throw new StudioClientError(
+      "Set both CF_ACCESS_CLIENT_ID and CF_ACCESS_CLIENT_SECRET (an Access service token)",
+      null,
+    );
   }
-  if (token !== undefined) return { kind: "access-token", token };
-  return { kind: "none" };
+  const token = setting(env, "CF_ACCESS_TOKEN");
+  return token === undefined ? { kind: "none" } : { kind: "access-token", token };
 }
 
 function authHeaders(auth: StudioAuth): Record<string, string> {
@@ -91,11 +88,20 @@ const ViewSchema = z.union([
 const ErrorSchema = z.object({ error: z.string() });
 
 export interface StudioClient {
-  list(opts?: { type?: string; search?: string; limit?: number; offset?: number }): Promise<z.infer<typeof ActorsSchema>["actors"]>;
+  list(opts?: {
+    type?: string;
+    search?: string;
+    limit?: number;
+    offset?: number;
+  }): Promise<z.infer<typeof ActorsSchema>["actors"]>;
   types(): Promise<string[]>;
   inspect(actorType: string, actorId: string): Promise<z.infer<typeof InspectSchema>>;
   timeline(actorType: string, actorId: string, opts?: { limit?: number; before?: number }): Promise<TimelinePage>;
-  view(actorType: string, actorId: string, opts: { role: string; caller?: string }): Promise<z.infer<typeof ViewSchema>>;
+  view(
+    actorType: string,
+    actorId: string,
+    opts: { role: string; caller?: string },
+  ): Promise<z.infer<typeof ViewSchema>>;
 }
 
 function query(params: Record<string, string | number | undefined>): string {
@@ -121,7 +127,10 @@ export function createStudioClient(options: { baseUrl: string; auth: StudioAuth;
     try {
       res = await doFetch(url, { headers, redirect: "manual" });
     } catch (err) {
-      throw new StudioClientError(`Could not reach ${url.origin}: ${err instanceof Error ? err.message : String(err)}`, null);
+      throw new StudioClientError(
+        `Could not reach ${url.origin}: ${err instanceof Error ? err.message : String(err)}`,
+        null,
+      );
     }
     const text = await res.text();
     let json: unknown;
@@ -139,7 +148,10 @@ export function createStudioClient(options: { baseUrl: string; auth: StudioAuth;
     }
     const parsed = schema.safeParse(json);
     if (!parsed.success) {
-      throw new StudioClientError(`Malformed Studio response from ${url.pathname}: ${parsed.error.message}`, res.status);
+      throw new StudioClientError(
+        `Malformed Studio response from ${url.pathname}: ${parsed.error.message}`,
+        res.status,
+      );
     }
     return parsed.data;
   }
@@ -149,12 +161,19 @@ export function createStudioClient(options: { baseUrl: string; auth: StudioAuth;
 
   return {
     list: async (opts = {}) =>
-      (await get(`/actors${query({ type: opts.type, search: opts.search, limit: opts.limit, offset: opts.offset })}`, ActorsSchema))
-        .actors,
+      (
+        await get(
+          `/actors${query({ type: opts.type, search: opts.search, limit: opts.limit, offset: opts.offset })}`,
+          ActorsSchema,
+        )
+      ).actors,
     types: async () => (await get("/actors/types", TypesSchema)).types,
     inspect: (actorType, actorId) => get(actorPath(actorType, actorId), InspectSchema),
     timeline: (actorType, actorId, opts = {}) =>
-      get(`${actorPath(actorType, actorId)}/timeline${query({ limit: opts.limit, before: opts.before })}`, TimelineSchema),
+      get(
+        `${actorPath(actorType, actorId)}/timeline${query({ limit: opts.limit, before: opts.before })}`,
+        TimelineSchema,
+      ),
     view: (actorType, actorId, opts) =>
       get(`${actorPath(actorType, actorId)}/view${query({ role: opts.role, caller: opts.caller })}`, ViewSchema),
   };

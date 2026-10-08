@@ -61,11 +61,11 @@ export function createActorContext<
 
   function useView(): TView {
     const client = useClient();
-    const [view, setView] = useState<TView>(() => client.view as TView);
+    const [view, setView] = useState<TView>(() => client.view);
 
     useEffect(() => {
       if (client.view !== undefined) {
-        setView(client.view as TView);
+        setView(client.view);
       }
       return client.subscribe((newView: TView) => {
         setView(newView);
@@ -112,7 +112,7 @@ export function createActorContext<
 
   function useSelector<T>(selector: (view: TView) => T, equalityFn: (a: T, b: T) => boolean = Object.is): T {
     const client = useClient();
-    const [selected, setSelected] = useState<T>(() => selector(client.view as TView));
+    const [selected, setSelected] = useState<T>(() => selector(client.view));
 
     useEffect(() => {
       return client.subscribe((view: TView) => {

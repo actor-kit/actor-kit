@@ -78,6 +78,45 @@ function emptyToUndefined(value: string | undefined): string | undefined {
   return value === undefined || value.trim() === "" ? undefined : value.trim();
 }
 
+/** A usable Access configuration: who signs the tokens, for which application, and who administers. */
+interface AccessConfig {
+  teamDomain: string;
+  aud: string;
+  adminEmails: string | undefined;
+}
+
+/**
+ * Read the Access settings. Answers directly (dev principal or a 403) when there is nothing to
+ * verify against, so dev-mode and misconfiguration answers stay synchronous.
+ */
+function accessConfig(url: URL, env: Record<string, unknown>): AccessConfig | AuthResult {
+  const parsedEnv = AccessEnv.safeParse(env);
+  if (!parsedEnv.success) {
+    return deny(403, "Studio is misconfigured: STUDIO_ACCESS_* settings must be strings");
+  }
+  const team = emptyToUndefined(parsedEnv.data.STUDIO_ACCESS_TEAM_DOMAIN);
+  const aud = emptyToUndefined(parsedEnv.data.STUDIO_ACCESS_AUD);
+
+  if (team === undefined && aud === undefined) return unconfigured(url);
+  if (team === undefined || aud === undefined) {
+    return deny(403, "Studio is misconfigured: set both STUDIO_ACCESS_TEAM_DOMAIN and STUDIO_ACCESS_AUD");
+  }
+  const teamDomain = TeamDomain.safeParse(team);
+  if (!teamDomain.success) {
+    return deny(403, "Studio is misconfigured: STUDIO_ACCESS_TEAM_DOMAIN must be <team>.cloudflareaccess.com");
+  }
+  return { teamDomain: teamDomain.data, aud, adminEmails: parsedEnv.data.STUDIO_ADMIN_EMAILS };
+}
+
+/** No Access settings at all: dev mode on localhost, refused everywhere else. */
+function unconfigured(url: URL): AuthResult {
+  if (isLocalHost(url)) return { ok: true, principal: { kind: "dev", subject: "dev", scopes: READ_MUTATE } };
+  return deny(
+    403,
+    "Studio is not configured. Put /__studio behind Cloudflare Access and set STUDIO_ACCESS_TEAM_DOMAIN and STUDIO_ACCESS_AUD.",
+  );
+}
+
 /**
  * Authenticate a Studio request. Synchronous when no JWT has to be verified,
  * so dev-mode and misconfiguration answers stay synchronous.
@@ -88,45 +127,21 @@ export function authenticateStudio(
   env: Record<string, unknown>,
   deps: AccessDeps,
 ): AuthResult | Promise<AuthResult> {
-  const parsedEnv = AccessEnv.safeParse(env);
-  if (!parsedEnv.success) {
-    return deny(403, "Studio is misconfigured: STUDIO_ACCESS_* settings must be strings");
-  }
-  const team = emptyToUndefined(parsedEnv.data.STUDIO_ACCESS_TEAM_DOMAIN);
-  const aud = emptyToUndefined(parsedEnv.data.STUDIO_ACCESS_AUD);
-
-  if (team === undefined && aud === undefined) {
-    if (isLocalHost(url)) return { ok: true, principal: { kind: "dev", subject: "dev", scopes: READ_MUTATE } };
-    return deny(
-      403,
-      "Studio is not configured. Put /__studio behind Cloudflare Access and set STUDIO_ACCESS_TEAM_DOMAIN and STUDIO_ACCESS_AUD.",
-    );
-  }
-  if (team === undefined || aud === undefined) {
-    return deny(403, "Studio is misconfigured: set both STUDIO_ACCESS_TEAM_DOMAIN and STUDIO_ACCESS_AUD");
-  }
-  const teamDomain = TeamDomain.safeParse(team);
-  if (!teamDomain.success) {
-    return deny(403, "Studio is misconfigured: STUDIO_ACCESS_TEAM_DOMAIN must be <team>.cloudflareaccess.com");
-  }
+  const config = accessConfig(url, env);
+  if ("ok" in config) return config;
 
   const assertion = request.headers.get(ACCESS_JWT_HEADER);
   if (assertion === null || assertion === "") {
     return deny(401, "Sign in through Cloudflare Access to use Studio");
   }
 
-  const admins = parseAdmins(parsedEnv.data.STUDIO_ADMIN_EMAILS);
-  return verify(assertion, teamDomain.data, aud, admins, deps);
+  return verify(assertion, config.teamDomain, config.aud, parseAdmins(config.adminEmails), deps);
 }
 
 function parseAdmins(raw: string | undefined): ReadonlySet<string> {
   if (raw === undefined) return new Set();
-  return new Set(
-    raw
-      .split(",")
-      .map((email) => email.trim().toLowerCase())
-      .filter((email) => email !== ""),
-  );
+  // An empty entry (e.g. a trailing comma) is harmless: Access emails are never empty.
+  return new Set(raw.split(",").map((email) => email.trim().toLowerCase()));
 }
 
 async function verify(

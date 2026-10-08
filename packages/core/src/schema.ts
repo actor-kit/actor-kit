@@ -9,7 +9,7 @@
 
 // --- Primitive type descriptors ---
 
-type PrimitiveTypeName = "uint8" | "uint16" | "uint32" | "float32" | "float64" | "string" | "boolean";
+export type PrimitiveTypeName = "uint8" | "uint16" | "uint32" | "float32" | "float64" | "string" | "boolean";
 
 export interface PrimitiveDescriptor<T extends PrimitiveTypeName, V> {
   readonly kind: "primitive";
@@ -17,8 +17,17 @@ export interface PrimitiveDescriptor<T extends PrimitiveTypeName, V> {
   readonly _phantom: V;
 }
 
+// `_phantom` only carries the value type for `Infer`; `declare` keeps it out of the runtime object.
+class Primitive<T extends PrimitiveTypeName, V> implements PrimitiveDescriptor<T, V> {
+  readonly kind = "primitive";
+  declare readonly _phantom: V;
+  constructor(readonly type: T) {
+    Object.freeze(this);
+  }
+}
+
 function primitive<T extends PrimitiveTypeName, V>(type: T): PrimitiveDescriptor<T, V> {
-  return Object.freeze({ kind: "primitive" as const, type, _phantom: undefined as unknown as V });
+  return new Primitive<T, V>(type);
 }
 
 export const uint8: PrimitiveDescriptor<"uint8", number> = primitive("uint8");
@@ -71,15 +80,27 @@ export type FieldDescriptor =
 
 // --- Schema definition ---
 
-interface FieldMeta {
-  readonly name: string;
-  readonly type: string;
-  readonly innerType?: string;
-  readonly element?:
-    | FieldMeta
-    | { readonly type: string; readonly schema?: SchemaDefinition<Record<string, FieldDescriptor>> };
-  readonly schema?: SchemaDefinition<Record<string, FieldDescriptor>>;
-}
+type AnySchema = SchemaDefinition<Record<string, FieldDescriptor>>;
+
+/**
+ * How one non-null value is laid out on the wire: a primitive, an array of
+ * values, or a nested schema. Each variant names the other variants' keys as
+ * `undefined` so callers can read `meta.element?.type` without narrowing.
+ */
+export type ValueMeta =
+  | { readonly type: PrimitiveTypeName; readonly element?: undefined; readonly schema?: undefined }
+  | { readonly type: "array"; readonly element: ValueMeta; readonly schema?: undefined }
+  | { readonly type: "schema"; readonly schema: AnySchema; readonly element?: undefined };
+
+/** A nullable field: the inner value's layout, flattened next to `innerType`. */
+export type NullableMeta = { readonly name: string; readonly type: "nullable" } & (
+  | { readonly innerType: PrimitiveTypeName; readonly element?: undefined; readonly schema?: undefined }
+  | { readonly innerType: "array"; readonly element: ValueMeta; readonly schema?: undefined }
+  | { readonly innerType: "schema"; readonly schema: AnySchema; readonly element?: undefined }
+);
+
+/** One top-level field of a schema, in definition order. */
+export type FieldMeta = (ValueMeta & { readonly name: string; readonly innerType?: undefined }) | NullableMeta;
 
 export interface SchemaDefinition<TShape extends Record<string, FieldDescriptor>> {
   readonly kind: "schema";
@@ -89,57 +110,60 @@ export interface SchemaDefinition<TShape extends Record<string, FieldDescriptor>
   readonly hasNullable: boolean;
 }
 
-function buildFieldMeta(name: string, descriptor: FieldDescriptor): FieldMeta {
-  if (descriptor.kind === "primitive") {
-    return { name, type: descriptor.type };
+function buildValueMeta(descriptor: BaseFieldDescriptor): ValueMeta {
+  switch (descriptor.kind) {
+    case "primitive":
+      return { type: descriptor.type };
+    case "array":
+      return { type: "array", element: buildValueMeta(descriptor.element) };
+    case "schema":
+      return { type: "schema", schema: descriptor };
   }
-  if (descriptor.kind === "array") {
-    const elementMeta = buildElementMeta(descriptor.element);
-    return { name, type: "array", element: elementMeta };
-  }
-  if (descriptor.kind === "nullable") {
-    const inner = buildFieldMeta(name, descriptor.field);
-    const meta: FieldMeta = { name, type: "nullable", innerType: inner.type };
-    if (inner.element !== undefined) {
-      return { ...meta, element: inner.element };
-    }
-    if (inner.schema !== undefined) {
-      return { ...meta, schema: inner.schema };
-    }
-    return meta;
-  }
-  // descriptor.kind === "schema"
-  return { name, type: "schema", schema: descriptor };
 }
 
-function buildElementMeta(descriptor: FieldDescriptor): FieldMeta["element"] & object {
-  if (descriptor.kind === "primitive") {
-    return { type: descriptor.type };
+function buildNullableMeta(name: string, inner: ValueMeta): NullableMeta {
+  switch (inner.type) {
+    case "array":
+      return { name, type: "nullable", innerType: "array", element: inner.element };
+    case "schema":
+      return { name, type: "nullable", innerType: "schema", schema: inner.schema };
+    default:
+      return { name, type: "nullable", innerType: inner.type };
   }
-  if (descriptor.kind === "schema") {
-    return { type: "schema", schema: descriptor };
+}
+
+function buildFieldMeta(name: string, descriptor: FieldDescriptor): FieldMeta {
+  if (descriptor.kind === "nullable") {
+    return buildNullableMeta(name, buildValueMeta(descriptor.field));
   }
-  // Nested array — array of arrays. Preserve inner element metadata.
-  if (descriptor.kind === "array") {
-    return { type: "array", element: buildElementMeta(descriptor.element) };
+  return { name, ...buildValueMeta(descriptor) };
+}
+
+/** The layout of a field's non-null value (a nullable field's inner type). */
+export function valueMetaOf(field: FieldMeta): ValueMeta {
+  if (field.type !== "nullable") return field;
+  switch (field.innerType) {
+    case "array":
+      return { type: "array", element: field.element };
+    case "schema":
+      return { type: "schema", schema: field.schema };
+    default:
+      return { type: field.innerType };
   }
-  return { type: "array" };
 }
 
 export function schema<TShape extends Record<string, FieldDescriptor>>(shape: TShape): SchemaDefinition<TShape> {
-  const entries = Object.entries(shape);
-  const fields: FieldMeta[] = entries.map(([name, descriptor]) => buildFieldMeta(name, descriptor as FieldDescriptor));
+  const descriptors: [string, FieldDescriptor][] = Object.entries(shape);
+  const fields = descriptors.map(([name, descriptor]) => buildFieldMeta(name, descriptor));
   const hasNullable = fields.some((f) => f.type === "nullable");
 
-  const def: SchemaDefinition<TShape> = {
+  return Object.freeze({
     kind: "schema" as const,
     type: "schema" as const,
     shape,
     fields: Object.freeze(fields),
     hasNullable,
-  };
-
-  return Object.freeze(def);
+  });
 }
 
 // --- Type inference ---

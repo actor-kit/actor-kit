@@ -23,7 +23,9 @@ export function RestoreButton({ actorType, actorId, seq }: { actorType: string; 
     <div className="flex flex-wrap items-center gap-2 text-xs">
       {confirming ? (
         <>
-          <span className="text-amber-300">Restore this actor to seq {seq}? A new restore event is added; history is kept.</span>
+          <span className="text-amber-300">
+            Restore this actor to seq {seq}? A new restore event is added; history is kept.
+          </span>
           <button
             type="button"
             disabled={busy}

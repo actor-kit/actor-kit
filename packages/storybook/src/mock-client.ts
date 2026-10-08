@@ -15,17 +15,16 @@ interface MockClientOptions<TView, TEvent extends { type: string }> {
   /** Connection state (default: "connected") */
   connectionState?: ConnectionState | undefined;
   /** Optional handler for send — use in play functions to test interactions */
-  onSend?: ((event: TEvent) => TView | void) | undefined;
+  onSend?: ((event: TEvent) => TView | undefined) | undefined;
 }
 
-export function createMockClient<
-  TView,
-  TEvent extends { type: string } = { type: string; [key: string]: unknown },
->(options: MockClientOptions<TView, TEvent>): ActorClient<TView, TEvent> {
+export function createMockClient<TView, TEvent extends { type: string } = { type: string; [key: string]: unknown }>(
+  options: MockClientOptions<TView, TEvent>,
+): ActorClient<TView, TEvent> {
   const { initialView, role = "user", connectionState = "connected", onSend } = options;
 
   let currentView = initialView;
-  let currentRole = role;
+  const currentRole = role;
   let currentState: ConnectionState = connectionState;
   const viewListeners = new Set<(view: TView) => void>();
   const stateListeners = new Set<(state: ConnectionState) => void>();

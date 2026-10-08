@@ -6,6 +6,7 @@
 
 import { parseArgs } from "node:util";
 import { authFromEnv, createStudioClient, type FetchFn, type StudioClient } from "./client";
+import { defined } from "./present";
 import { timelineShape } from "./shape";
 
 export interface CliIo {
@@ -45,8 +46,8 @@ function positiveInt(name: string, value: string | undefined): number | undefine
 }
 
 function actorArgs(command: string, positionals: readonly string[]): [string, string] {
-  const [actorType, actorId] = positionals;
-  if (actorType === undefined || actorId === undefined || positionals.length !== 2) {
+  const [actorType, actorId, ...extra] = positionals;
+  if (actorType === undefined || actorId === undefined || extra.length > 0) {
     throw new UsageError(`Usage: actor-kit studio ${command} <type> <id>`);
   }
   return [actorType, actorId];
@@ -65,75 +66,85 @@ const OPTIONS = {
   help: { type: "boolean" },
 } as const;
 
-async function execute(
-  client: StudioClient,
-  command: string,
-  positionals: readonly string[],
-  values: { [K in keyof typeof OPTIONS]?: (typeof OPTIONS)[K]["type"] extends "boolean" ? boolean : string },
-): Promise<unknown> {
-  switch (command) {
-    case "list": {
-      const opts: { type?: string; search?: string; limit?: number; offset?: number } = {};
-      if (values.type !== undefined) opts.type = values.type;
-      if (values.search !== undefined) opts.search = values.search;
-      const limit = positiveInt("limit", values.limit);
-      if (limit !== undefined) opts.limit = limit;
-      const offset = positiveInt("offset", values.offset);
-      if (offset !== undefined) opts.offset = offset;
-      return await client.list(opts);
-    }
-    case "types":
-      return await client.types();
-    case "inspect":
-      return await client.inspect(...actorArgs(command, positionals));
-    case "timeline": {
-      const [actorType, actorId] = actorArgs(command, positionals);
-      const opts: { limit?: number; before?: number } = {};
-      const limit = positiveInt("limit", values.limit);
-      if (limit !== undefined) opts.limit = limit;
-      const before = positiveInt("before", values.before);
-      if (before !== undefined) opts.before = before;
-      const page = await client.timeline(actorType, actorId, opts);
-      return values.shape === true ? timelineShape(page.entries) : page;
-    }
-    case "view": {
-      const [actorType, actorId] = actorArgs(command, positionals);
-      if (values.role === undefined) throw new UsageError("view needs --role <role>");
-      return await client.view(actorType, actorId, {
-        role: values.role,
-        ...(values.caller === undefined ? {} : { caller: values.caller }),
-      });
-    }
-    default:
-      throw new UsageError(`Unknown command "${command}"`);
+type Values = { [K in keyof typeof OPTIONS]?: (typeof OPTIONS)[K]["type"] extends "boolean" ? boolean : string };
+
+type Command = (client: StudioClient, positionals: readonly string[], values: Values) => Promise<unknown>;
+
+async function timeline(client: StudioClient, positionals: readonly string[], values: Values): Promise<unknown> {
+  const [actorType, actorId] = actorArgs("timeline", positionals);
+  const opts = defined({ limit: positiveInt("limit", values.limit), before: positiveInt("before", values.before) });
+  const page = await client.timeline(actorType, actorId, opts);
+  return values.shape === true ? timelineShape(page.entries) : page;
+}
+
+function view(client: StudioClient, positionals: readonly string[], values: Values): Promise<unknown> {
+  const [actorType, actorId] = actorArgs("view", positionals);
+  if (values.role === undefined) throw new UsageError("view needs --role <role>");
+  return client.view(actorType, actorId, { role: values.role, ...defined({ caller: values.caller }) });
+}
+
+const COMMANDS = new Map<string, Command>([
+  [
+    "list",
+    (client, _positionals, values) =>
+      client.list(
+        defined({
+          type: values.type,
+          search: values.search,
+          limit: positiveInt("limit", values.limit),
+          offset: positiveInt("offset", values.offset),
+        }),
+      ),
+  ],
+  ["types", (client) => client.types()],
+  ["inspect", (client, positionals) => client.inspect(...actorArgs("inspect", positionals))],
+  ["timeline", timeline],
+  ["view", view],
+]);
+
+function studioUrl(values: Values, env: Record<string, string | undefined>): string {
+  const baseUrl = values.url ?? env["ACTOR_KIT_STUDIO_URL"];
+  if (baseUrl === undefined || baseUrl === "") {
+    throw new UsageError("Set ACTOR_KIT_STUDIO_URL or pass --url <worker origin>");
   }
+  return baseUrl;
+}
+
+async function run(argv: readonly string[], env: Record<string, string | undefined>, io: CliIo): Promise<number> {
+  const { values, positionals } = parseArgs({
+    args: [...argv],
+    options: OPTIONS,
+    allowPositionals: true,
+    strict: true,
+  });
+  const [group, commandName, ...rest] = positionals;
+  if (group === "studio" && values.help === true) {
+    io.stdout(USAGE);
+    return 0;
+  }
+  if (group !== "studio" || commandName === undefined) {
+    io.stderr(USAGE);
+    return 2;
+  }
+  const client = createStudioClient({
+    baseUrl: studioUrl(values, env),
+    auth: authFromEnv(env),
+    ...defined({ fetch: io.fetch }),
+  });
+  const command = COMMANDS.get(commandName);
+  if (command === undefined) throw new UsageError(`Unknown command "${commandName}"`);
+  io.stdout(`${JSON.stringify(await command(client, rest, values), null, 2)}\n`);
+  return 0;
 }
 
 /** Run the CLI. Returns the exit code. Never prints credentials. */
-export async function runCli(argv: readonly string[], env: Record<string, string | undefined>, io: CliIo): Promise<number> {
+export async function runCli(
+  argv: readonly string[],
+  env: Record<string, string | undefined>,
+  io: CliIo,
+): Promise<number> {
   try {
-    const { values, positionals } = parseArgs({ args: [...argv], options: OPTIONS, allowPositionals: true, strict: true });
-    const [group, command, ...rest] = positionals;
-    if (values.help === true && group === "studio") {
-      io.stdout(USAGE);
-      return 0;
-    }
-    if (group !== "studio" || command === undefined) {
-      io.stderr(USAGE);
-      return 2;
-    }
-    const baseUrl = values.url ?? env["ACTOR_KIT_STUDIO_URL"];
-    if (baseUrl === undefined || baseUrl === "") {
-      throw new UsageError("Set ACTOR_KIT_STUDIO_URL or pass --url <worker origin>");
-    }
-    const client = createStudioClient({
-      baseUrl,
-      auth: authFromEnv(env),
-      ...(io.fetch === undefined ? {} : { fetch: io.fetch }),
-    });
-    const result = await execute(client, command, rest, values);
-    io.stdout(`${JSON.stringify(result, null, 2)}\n`);
-    return 0;
+    return await run(argv, env, io);
   } catch (err) {
     // node:util parseArgs reports unknown/malformed options as a TypeError with an ERR_PARSE_ARGS_* code.
     if (err instanceof UsageError || (err instanceof TypeError && "code" in err)) {

@@ -19,34 +19,30 @@
  * ```
  */
 
-import { type ReactNode, createElement } from "react";
 import type { ActorClient } from "@actor-kit/client";
+import { createElement, type ReactNode } from "react";
 import { createMockClient } from "./mock-client";
 
 interface WithActorKitOptions<TView, TMessage extends { type: string }> {
   /** The actorContext() result — provides Provider */
   context: {
-    Provider: (props: {
-      client: ActorClient<TView, TMessage>;
-      children?: ReactNode;
-    }) => ReactNode;
+    Provider: (props: { client: ActorClient<TView, TMessage>; children?: ReactNode }) => ReactNode;
   };
   /** Initial view data for the mock client */
   view: TView;
   /** Optional role (default: "user") */
   role?: string;
   /** Optional send handler for interactive stories */
-  onSend?: (message: { type: string; [key: string]: unknown }) => TView | void;
+  onSend?: (message: { type: string; [key: string]: unknown }) => TView | undefined;
 }
 
 /**
  * Storybook decorator that wraps stories in an actor-kit context provider
  * with a mock client.
  */
-export function withActorKit<
-  TView,
-  TMessage extends { type: string } = { type: string; [key: string]: unknown },
->(options: WithActorKitOptions<TView, TMessage>) {
+export function withActorKit<TView, TMessage extends { type: string } = { type: string; [key: string]: unknown }>(
+  options: WithActorKitOptions<TView, TMessage>,
+) {
   const { context, view, role, onSend } = options;
 
   // Return a Storybook decorator function
@@ -59,10 +55,6 @@ export function withActorKit<
       onSend,
     });
 
-    return createElement(
-      context.Provider,
-      { client },
-      createElement(Story),
-    );
+    return createElement(context.Provider, { client }, createElement(Story));
   };
 }

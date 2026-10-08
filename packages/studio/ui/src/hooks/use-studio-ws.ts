@@ -1,8 +1,8 @@
 import { useEffect, useReducer } from "react";
-import { StudioApiError, fetchInspect, fetchTimeline } from "../api";
+import { fetchInspect, fetchTimeline, StudioApiError } from "../api";
 import type { InspectResult, TimelineItem } from "../protocol";
 import { parseStudioFrame } from "../protocol";
-import { type RequestFailure, type StudioStatus, initialStudioState, studioReducer } from "../studio-state";
+import { initialStudioState, type RequestFailure, type StudioStatus, studioReducer } from "../studio-state";
 
 export interface StudioWsState {
   inspect: InspectResult | null;
@@ -21,16 +21,25 @@ export function reconnectDelay(attempt: number): number {
   return Math.min(BASE_RETRY_MS * 2 ** attempt, MAX_RETRY_MS);
 }
 
-function classifyFailure(err: unknown): RequestFailure {
-  if (!(err instanceof StudioApiError)) return "transient";
+function classifyFailure(err: StudioApiError): RequestFailure {
   if (err.permanent) return "permanent";
-  if (err.kind === "not-found") return "not-found";
-  return "transient";
+  return err.kind === "not-found" ? "not-found" : "transient";
 }
 
-function studioSocketUrl(actorType: string, actorId: string): string {
-  const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-  return `${protocol}//${window.location.host}/__studio/actors/${encodeURIComponent(actorType)}/${encodeURIComponent(actorId)}/ws`;
+/** What a failed HTTP probe means for the page. Anything but an API error is worth retrying. */
+export function describeRequestFailure(err: unknown): { error: string; failure: RequestFailure } {
+  if (err instanceof StudioApiError) return { error: err.message, failure: classifyFailure(err) };
+  return { error: err instanceof Error ? err.message : "Request failed", failure: "transient" };
+}
+
+/** The studio socket for one actor, on the page's own host (wss: behind https:). */
+export function studioSocketUrl(
+  location: Pick<Location, "protocol" | "host">,
+  actorType: string,
+  actorId: string,
+): string {
+  const protocol = location.protocol === "https:" ? "wss:" : "ws:";
+  return `${protocol}//${location.host}/__studio/actors/${encodeURIComponent(actorType)}/${encodeURIComponent(actorId)}/ws`;
 }
 
 /**
@@ -51,18 +60,17 @@ export function useStudioWs(actorType: string, actorId: string): StudioWsState {
   useEffect(() => {
     let disposed = false;
     let socket: WebSocket | null = null;
-    let retryTimer: ReturnType<typeof setTimeout> | null = null;
+    let retryTimer: ReturnType<typeof setTimeout> | undefined;
     let attempt = 0;
     const abort = new AbortController();
 
     dispatch({ type: "reset" });
 
+    // Callers only schedule while not disposed, and disposal clears the timer.
     const scheduleReconnect = () => {
-      if (disposed) return;
       const delay = reconnectDelay(attempt);
       attempt++;
       retryTimer = setTimeout(() => {
-        retryTimer = null;
         connect();
       }, delay);
     };
@@ -79,16 +87,14 @@ export function useStudioWs(actorType: string, actorId: string): StudioWsState {
         scheduleReconnect();
       } catch (err) {
         if (disposed) return;
-        const failure = classifyFailure(err);
-        const message = err instanceof Error ? err.message : "Request failed";
-        dispatch({ type: "request-failed", error: message, failure });
+        const { error, failure } = describeRequestFailure(err);
+        dispatch({ type: "request-failed", error, failure });
         if (failure !== "permanent") scheduleReconnect();
       }
     };
 
     const connect = () => {
-      if (disposed) return;
-      const ws = new WebSocket(studioSocketUrl(actorType, actorId));
+      const ws = new WebSocket(studioSocketUrl(window.location, actorType, actorId));
       socket = ws;
       let opened = false;
       const isCurrent = () => !disposed && socket === ws;
@@ -121,7 +127,7 @@ export function useStudioWs(actorType: string, actorId: string): StudioWsState {
     return () => {
       disposed = true;
       abort.abort();
-      if (retryTimer !== null) clearTimeout(retryTimer);
+      clearTimeout(retryTimer); // a no-op when no retry is pending
       if (socket !== null) {
         socket.close(1000, "studio view closed");
         socket = null;

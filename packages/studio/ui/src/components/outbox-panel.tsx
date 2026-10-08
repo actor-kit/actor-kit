@@ -64,7 +64,12 @@ export function OutboxPanel({
           </thead>
           <tbody>
             {outbox.map((exec) => (
-              <tr key={exec.id} className="border-b border-zinc-800/50" data-testid="outbox-row" data-status={exec.status}>
+              <tr
+                key={exec.id}
+                className="border-b border-zinc-800/50"
+                data-testid="outbox-row"
+                data-status={exec.status}
+              >
                 <td className="px-4 py-2 font-mono text-zinc-500">{exec.id}</td>
                 <td className="px-4 py-2">{exec.service}</td>
                 <td className={`px-4 py-2 ${STATUS_COLORS[exec.status] ?? "text-zinc-400"}`}>

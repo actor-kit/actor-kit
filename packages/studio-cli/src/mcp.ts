@@ -9,12 +9,10 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
 import type { StudioClient } from "./client";
+import { defined } from "./present";
 import { timelineShape } from "./shape";
 
 const READ_ONLY = { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true } as const;
-
-const actorType = z.string().min(1).max(128).describe("Actor type, e.g. \"game\"");
-const actorId = z.string().min(1).max(512).describe("Actor id (name or 64-hex DO id)");
 
 async function respond(run: () => Promise<unknown>): Promise<CallToolResult> {
   try {
@@ -26,6 +24,8 @@ async function respond(run: () => Promise<unknown>): Promise<CallToolResult> {
 
 export function createStudioMcpServer(client: StudioClient): McpServer {
   const server = new McpServer({ name: "actor-kit-studio", version: "0.0.1" });
+  const actorType = z.string().min(1).max(128).describe('Actor type, e.g. "game"');
+  const actorId = z.string().min(1).max(512).describe("Actor id (name or 64-hex DO id)");
 
   server.registerTool(
     "studio_list_actors",
@@ -41,12 +41,7 @@ export function createStudioMcpServer(client: StudioClient): McpServer {
     },
     (args) =>
       respond(() =>
-        client.list({
-          ...(args.type === undefined ? {} : { type: args.type }),
-          ...(args.search === undefined ? {} : { search: args.search }),
-          ...(args.limit === undefined ? {} : { limit: args.limit }),
-          ...(args.offset === undefined ? {} : { offset: args.offset }),
-        }),
+        client.list(defined({ type: args.type, search: args.search, limit: args.limit, offset: args.offset })),
       ),
   );
 
@@ -60,7 +55,7 @@ export function createStudioMcpServer(client: StudioClient): McpServer {
     "studio_inspect",
     {
       description:
-        "Current state, connections, outbox and links of one actor. Values the actor declared in studio.redact come back as \"[redacted]\"; callers are hashed for agents.",
+        'Current state, connections, outbox and links of one actor. Values the actor declared in studio.redact come back as "[redacted]"; callers are hashed for agents.',
       inputSchema: { actorType, actorId },
       annotations: READ_ONLY,
     },
@@ -83,10 +78,11 @@ export function createStudioMcpServer(client: StudioClient): McpServer {
     },
     (args) =>
       respond(async () => {
-        const page = await client.timeline(args.actorType, args.actorId, {
-          ...(args.limit === undefined ? {} : { limit: args.limit }),
-          ...(args.before === undefined ? {} : { before: args.before }),
-        });
+        const page = await client.timeline(
+          args.actorType,
+          args.actorId,
+          defined({ limit: args.limit, before: args.before }),
+        );
         return args.shape === false ? page : { shape: timelineShape(page.entries), hasMore: page.hasMore };
       }),
   );
@@ -95,15 +91,17 @@ export function createStudioMcpServer(client: StudioClient): McpServer {
     "studio_view",
     {
       description: "What one role (and caller, for perCaller views) would receive, redacted like inspect.",
-      inputSchema: { actorType, actorId, role: z.string().min(1).max(128), caller: z.string().min(1).max(512).optional() },
+      inputSchema: {
+        actorType,
+        actorId,
+        role: z.string().min(1).max(128),
+        caller: z.string().min(1).max(512).optional(),
+      },
       annotations: READ_ONLY,
     },
     (args) =>
       respond(() =>
-        client.view(args.actorType, args.actorId, {
-          role: args.role,
-          ...(args.caller === undefined ? {} : { caller: args.caller }),
-        }),
+        client.view(args.actorType, args.actorId, { role: args.role, ...defined({ caller: args.caller }) }),
       ),
   );
 

@@ -7,30 +7,23 @@ function field(cause: Record<string, unknown>, key: string): string {
   return "unknown";
 }
 
+type Field = (key: string) => string;
+
+const SUMMARIES = new Map<string, (f: Field) => string>([
+  ["message", (f) => `${f("caller")} sent ${f("messageType")}`],
+  ["lifecycle.connect", (f) => `${f("caller")} connected (${f("role")})`],
+  ["lifecycle.disconnect", (f) => `${f("caller")} disconnected`],
+  ["service.onDone", (f) => `${f("service")} completed`],
+  ["service.onError", (f) => `${f("service")} failed: ${f("error")}`],
+  ["link.onUpdate", (f) => `${f("sourceType")}:${f("sourceId")} updated`],
+  ["link.onError", (f) => `${f("sourceType")}:${f("sourceId")} failed: ${f("error")}`],
+  ["link.onUnlink", (f) => `${f("sourceType")}:${f("sourceId")} unlinked`],
+  ["init", () => "Actor initialized"],
+  ["migrate", (f) => `Migrated from v${f("fromVersion")} to v${f("toVersion")}`],
+]);
+
+/** Unknown cause types are shown by name. */
 export function formatCauseSummary(causeType: string, cause: Record<string, unknown>): string {
-  const f = (key: string) => field(cause, key);
-  switch (causeType) {
-    case "message":
-      return `${f("caller")} sent ${f("messageType")}`;
-    case "lifecycle.connect":
-      return `${f("caller")} connected (${f("role")})`;
-    case "lifecycle.disconnect":
-      return `${f("caller")} disconnected`;
-    case "service.onDone":
-      return `${f("service")} completed`;
-    case "service.onError":
-      return `${f("service")} failed: ${f("error")}`;
-    case "link.onUpdate":
-      return `${f("sourceType")}:${f("sourceId")} updated`;
-    case "link.onError":
-      return `${f("sourceType")}:${f("sourceId")} failed: ${f("error")}`;
-    case "link.onUnlink":
-      return `${f("sourceType")}:${f("sourceId")} unlinked`;
-    case "init":
-      return "Actor initialized";
-    case "migrate":
-      return `Migrated from v${f("fromVersion")} to v${f("toVersion")}`;
-    default:
-      return causeType;
-  }
+  const summary = SUMMARIES.get(causeType);
+  return summary === undefined ? causeType : summary((key) => field(cause, key));
 }

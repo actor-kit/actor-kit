@@ -2,16 +2,16 @@
 
 import type { z } from "zod";
 import {
-  ActorTypesResponseSchema,
-  ActorsResponseSchema,
   type ActorEntry,
+  ActorsResponseSchema,
+  ActorTypesResponseSchema,
   ErrorBodySchema,
+  formatIssues,
   type InspectResult,
   InspectSchema,
   type StudioAction,
-  TimelineResponseSchema,
   type TimelineItem,
-  formatIssues,
+  TimelineResponseSchema,
 } from "./protocol";
 
 export type { ActorEntry, InspectResult, StudioConnectionInfo, TimelineItem } from "./protocol";
@@ -46,50 +46,68 @@ export class StudioApiError extends Error {
   }
 }
 
+const KIND_BY_STATUS = new Map<number, StudioApiErrorKind>([
+  [400, "bad-request"],
+  [401, "unauthorized"],
+  [403, "forbidden"],
+  [404, "not-found"],
+  [503, "unavailable"],
+]);
+
 function kindForStatus(status: number): StudioApiErrorKind {
-  if (status === 400) return "bad-request";
-  if (status === 401) return "unauthorized";
-  if (status === 403) return "forbidden";
-  if (status === 404) return "not-found";
-  if (status === 503) return "unavailable";
-  return "server";
+  return KIND_BY_STATUS.get(status) ?? "server";
+}
+
+/** The parsed body, or undefined for a plain-text one. */
+function jsonOrUndefined(text: string): unknown {
+  try {
+    const json: unknown = JSON.parse(text);
+    return json;
+  } catch {
+    return undefined;
+  }
 }
 
 /** Pull a readable message out of an error response body (JSON `{error}` or plain text). */
 function errorMessage(status: number, text: string): string {
-  let message = text.trim();
-  try {
-    const body = ErrorBodySchema.safeParse(JSON.parse(text));
-    if (body.success) message = body.data.error;
-  } catch {
-    // Plain-text body
-  }
+  const body = ErrorBodySchema.safeParse(jsonOrUndefined(text));
+  let message = body.success ? body.data.error : text.trim();
   if (message === "") message = `HTTP ${status}`;
   if (status === 401 && !/unauthori[sz]ed/i.test(message)) return `Unauthorized: ${message}`;
   return message;
 }
 
-async function request<S extends z.ZodType>(url: string, schema: S, signal?: AbortSignal): Promise<z.output<S>> {
-  let res: Response;
+function isAbortError(err: unknown): boolean {
+  return err instanceof DOMException && err.name === "AbortError";
+}
+
+/** fetch, with every failure except an abort reported as a network error. */
+async function send(url: string, signal: AbortSignal | undefined): Promise<Response> {
   try {
     // Production auth is the Cloudflare Access cookie (ADR-014), sent automatically on same-origin requests.
-    res = await fetch(url, signal === undefined ? {} : { signal });
+    return await fetch(url, signal === undefined ? {} : { signal });
   } catch (err) {
-    if (err instanceof DOMException && err.name === "AbortError") throw err;
+    if (isAbortError(err)) throw err;
     throw new StudioApiError("network", "Network error: could not reach the Studio API", null);
   }
+}
 
+function parseJsonBody(text: string, status: number): unknown {
+  try {
+    const json: unknown = JSON.parse(text);
+    return json;
+  } catch {
+    throw new StudioApiError("malformed", "Malformed response: body is not JSON", status);
+  }
+}
+
+async function request<S extends z.ZodType>(url: string, schema: S, signal?: AbortSignal): Promise<z.output<S>> {
+  const res = await send(url, signal);
   const text = await res.text().catch(() => "");
   if (!res.ok) {
     throw new StudioApiError(kindForStatus(res.status), errorMessage(res.status, text), res.status);
   }
-
-  let json: unknown;
-  try {
-    json = JSON.parse(text);
-  } catch {
-    throw new StudioApiError("malformed", "Malformed response: body is not JSON", res.status);
-  }
+  const json = parseJsonBody(text, res.status);
   const errorBody = ErrorBodySchema.safeParse(json);
   if (errorBody.success) {
     throw new StudioApiError("server", errorBody.data.error, res.status);
@@ -138,7 +156,11 @@ export function fetchTimeline(
   if (opts?.limit) params.set("limit", String(opts.limit));
   if (opts?.before) params.set("before", String(opts.before));
   const query = params.toString();
-  return request(`${actorPath(actorType, actorId)}/timeline${query ? `?${query}` : ""}`, TimelineResponseSchema, signal);
+  return request(
+    `${actorPath(actorType, actorId)}/timeline${query ? `?${query}` : ""}`,
+    TimelineResponseSchema,
+    signal,
+  );
 }
 
 /** Run a Studio action (needs the mutate scope). Rejects with the server's reason when refused. */

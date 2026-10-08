@@ -176,24 +176,26 @@ const LinksFrameSchema = z.object({
   linkSubscribers: z.array(LinkSubscriberSchema),
 });
 
-const FrameSchema = z.union([
-  SnapshotFrameSchema,
-  TimelineFrameSchema,
-  ConnectionFrameSchema,
-  OutboxFrameSchema,
-  TimersFrameSchema,
-  LinksFrameSchema,
-]);
-export type StudioFrame = z.infer<typeof FrameSchema>;
+export type StudioFrame =
+  | z.infer<typeof SnapshotFrameSchema>
+  | z.infer<typeof TimelineFrameSchema>
+  | z.infer<typeof ConnectionFrameSchema>
+  | z.infer<typeof OutboxFrameSchema>
+  | z.infer<typeof TimersFrameSchema>
+  | z.infer<typeof LinksFrameSchema>;
 
-/** Frame types the UI understands. Anything else (e.g. `studio.view`) is ignored. */
-const KNOWN_FRAME_TYPES = new Set([
-  "studio.snapshot",
-  "studio.timeline",
-  "studio.connection",
-  "studio.outbox",
-  "studio.timers",
-  "studio.links",
+/**
+ * The schema for each frame type the UI understands. Anything else (e.g. `studio.view`)
+ * is ignored. Parsing against the frame's own schema (not the union) keeps the failing
+ * path in the error message.
+ */
+const FRAME_SCHEMAS = new Map<string, z.ZodType<StudioFrame>>([
+  ["studio.snapshot", SnapshotFrameSchema],
+  ["studio.timeline", TimelineFrameSchema],
+  ["studio.connection", ConnectionFrameSchema],
+  ["studio.outbox", OutboxFrameSchema],
+  ["studio.timers", TimersFrameSchema],
+  ["studio.links", LinksFrameSchema],
 ]);
 
 const FrameEnvelopeSchema = z.object({ type: z.string() });
@@ -203,28 +205,27 @@ export type ParsedFrame =
   | { kind: "ignored"; type: string }
   | { kind: "malformed"; error: string };
 
+function parseJsonText(raw: unknown): { ok: true; json: unknown } | { ok: false; error: string } {
+  if (typeof raw !== "string") return { ok: false, error: "Expected a text frame" };
+  try {
+    const json: unknown = JSON.parse(raw);
+    return { ok: true, json };
+  } catch {
+    return { ok: false, error: "Frame is not valid JSON" };
+  }
+}
+
 /** Parse one raw WebSocket message. Never throws. */
 export function parseStudioFrame(raw: unknown): ParsedFrame {
-  if (typeof raw !== "string") {
-    return { kind: "malformed", error: "Expected a text frame" };
-  }
-  let json: unknown;
-  try {
-    json = JSON.parse(raw);
-  } catch {
-    return { kind: "malformed", error: "Frame is not valid JSON" };
-  }
-  const envelope = FrameEnvelopeSchema.safeParse(json);
-  if (!envelope.success) {
-    return { kind: "malformed", error: "Frame has no type" };
-  }
-  if (!KNOWN_FRAME_TYPES.has(envelope.data.type)) {
-    return { kind: "ignored", type: envelope.data.type };
-  }
-  const parsed = FrameSchema.safeParse(json);
-  if (!parsed.success) {
-    return { kind: "malformed", error: `Invalid ${envelope.data.type} frame: ${formatIssues(parsed.error)}` };
-  }
+  const text = parseJsonText(raw);
+  if (!text.ok) return { kind: "malformed", error: text.error };
+  const envelope = FrameEnvelopeSchema.safeParse(text.json);
+  if (!envelope.success) return { kind: "malformed", error: "Frame has no type" };
+  const { type } = envelope.data;
+  const schema = FRAME_SCHEMAS.get(type);
+  if (schema === undefined) return { kind: "ignored", type };
+  const parsed = schema.safeParse(text.json);
+  if (!parsed.success) return { kind: "malformed", error: `Invalid ${type} frame: ${formatIssues(parsed.error)}` };
   return { kind: "frame", frame: parsed.data };
 }
 

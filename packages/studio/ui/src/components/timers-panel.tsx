@@ -71,7 +71,11 @@ export function TimersPanel({
               <tr key={timer.id} className="border-b border-zinc-800/50 align-top" data-testid="timer-row">
                 <td className="px-4 py-2">{timer.name}</td>
                 <td className="px-4 py-2 font-mono text-zinc-400">{timer.key}</td>
-                <td className="px-4 py-2 text-amber-300" data-testid="timer-due" title={new Date(timer.fireAt).toISOString()}>
+                <td
+                  className="px-4 py-2 text-amber-300"
+                  data-testid="timer-due"
+                  title={new Date(timer.fireAt).toISOString()}
+                >
                   {dueIn(timer.fireAt, now)}
                 </td>
                 <td className="px-4 py-2 text-xs">
