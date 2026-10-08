@@ -13,6 +13,12 @@ import {
 } from "@actor-kit/core";
 import { describe, expect, it } from "vitest";
 
+/** The value, or a failed test when it is null or undefined. */
+function defined<T>(value: T | null | undefined): T {
+  if (value === null || value === undefined) throw new Error("expected a value");
+  return value;
+}
+
 describe("delta encoding — kill survivors", () => {
   it("detects string field change", () => {
     const S = schema({ name: string, age: uint32 });
@@ -20,7 +26,7 @@ describe("delta encoding — kill survivors", () => {
     const next = { name: "bob", age: 30 };
     const delta = encodeDelta(S, prev, next);
     expect(delta).not.toBeNull();
-    const result = applyDelta(S, prev, delta!);
+    const result = applyDelta(S, prev, defined(delta));
     expect(result.name).toBe("bob");
     expect(result.age).toBe(30);
   });
@@ -31,7 +37,7 @@ describe("delta encoding — kill survivors", () => {
     const next = { active: false, count: 5 };
     const delta = encodeDelta(S, prev, next);
     expect(delta).not.toBeNull();
-    const result = applyDelta(S, prev, delta!);
+    const result = applyDelta(S, prev, defined(delta));
     expect(result.active).toBe(false);
   });
 
@@ -41,7 +47,7 @@ describe("delta encoding — kill survivors", () => {
     const next = { level: 2, name: "a" };
     const delta = encodeDelta(S, prev, next);
     expect(delta).not.toBeNull();
-    const result = applyDelta(S, prev, delta!);
+    const result = applyDelta(S, prev, defined(delta));
     expect(result.level).toBe(2);
   });
 
@@ -51,18 +57,18 @@ describe("delta encoding — kill survivors", () => {
     const next = { port: 3000, name: "a" };
     const delta = encodeDelta(S, prev, next);
     expect(delta).not.toBeNull();
-    const result = applyDelta(S, prev, delta!);
+    const result = applyDelta(S, prev, defined(delta));
     expect(result.port).toBe(3000);
   });
 
   it("detects float64 change", () => {
     const S = schema({ precise: float64, label: string });
-    const prev = { precise: 3.141592653589793, label: "pi" };
-    const next = { precise: 2.718281828459045, label: "pi" };
+    const prev = { precise: Math.PI, label: "pi" };
+    const next = { precise: Math.E, label: "pi" };
     const delta = encodeDelta(S, prev, next);
     expect(delta).not.toBeNull();
-    const result = applyDelta(S, prev, delta!);
-    expect(result.precise).toBeCloseTo(2.718281828459045, 10);
+    const result = applyDelta(S, prev, defined(delta));
+    expect(result.precise).toBeCloseTo(Math.E, 10);
   });
 
   it("detects array change", () => {
@@ -71,7 +77,7 @@ describe("delta encoding — kill survivors", () => {
     const next = { items: [1, 2, 3, 4], total: 10 };
     const delta = encodeDelta(S, prev, next);
     expect(delta).not.toBeNull();
-    const result = applyDelta(S, prev, delta!);
+    const result = applyDelta(S, prev, defined(delta));
     expect(result.items).toEqual([1, 2, 3, 4]);
     expect(result.total).toBe(10);
   });
@@ -83,7 +89,7 @@ describe("delta encoding — kill survivors", () => {
     const next = { pos: { x: 1, y: 2 }, name: "a" };
     const delta = encodeDelta(S, prev, next);
     expect(delta).not.toBeNull();
-    const result = applyDelta(S, prev, delta!);
+    const result = applyDelta(S, prev, defined(delta));
     expect((result.pos as { x: number }).x).toBeCloseTo(1, 0);
     expect((result.pos as { y: number }).y).toBeCloseTo(2, 0);
   });
@@ -94,7 +100,7 @@ describe("delta encoding — kill survivors", () => {
     const next = { label: "" };
     const delta = encodeDelta(S, prev, next);
     expect(delta).not.toBeNull();
-    const result = applyDelta(S, prev, delta!);
+    const result = applyDelta(S, prev, defined(delta));
     expect(result.label).toBe("");
   });
 
@@ -104,7 +110,7 @@ describe("delta encoding — kill survivors", () => {
     const next = { items: [] };
     const delta = encodeDelta(S, prev, next);
     expect(delta).not.toBeNull();
-    const result = applyDelta(S, prev, delta!);
+    const result = applyDelta(S, prev, defined(delta));
     expect(result.items).toEqual([]);
   });
 
@@ -123,7 +129,7 @@ describe("delta encoding — kill survivors", () => {
     expect(delta).not.toBeNull();
     // Delta: 1 byte bitmask + 4 bytes uint32 = 5 bytes
     // Full: 4*4 + 7 + 1 = 24 bytes
-    expect(delta!.byteLength).toBeLessThan(10);
+    expect(defined(delta).byteLength).toBeLessThan(10);
   });
 
   it("array of nested schemas in delta", () => {
@@ -138,7 +144,7 @@ describe("delta encoding — kill survivors", () => {
     };
     const delta = encodeDelta(S, prev, next);
     expect(delta).not.toBeNull();
-    const result = applyDelta(S, prev, delta!);
+    const result = applyDelta(S, prev, defined(delta));
     expect(result.items).toHaveLength(2);
   });
 });

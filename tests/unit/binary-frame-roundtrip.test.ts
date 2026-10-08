@@ -16,6 +16,12 @@ import {
 } from "@actor-kit/core";
 import { describe, expect, it } from "vitest";
 
+/** The value, or a failed test when it is null or undefined. */
+function defined<T>(value: T | null | undefined): T {
+  if (value === null || value === undefined) throw new Error("expected a value");
+  return value;
+}
+
 describe("binary frame round-trip (encode → frame → parse → decode)", () => {
   const PlayerView = schema({
     x: float32,
@@ -49,7 +55,7 @@ describe("binary frame round-trip (encode → frame → parse → decode)", () =
     const deltaPayload = encodeDelta(PlayerView, prev, next);
     expect(deltaPayload).not.toBeNull();
 
-    const frame = createDeltaFrame(1, deltaPayload!);
+    const frame = createDeltaFrame(1, defined(deltaPayload));
     const parsed = parseFrame(frame);
 
     expect(parsed.type).toBe(FrameType.DELTA);
@@ -110,7 +116,7 @@ describe("binary frame round-trip (encode → frame → parse → decode)", () =
     const deltaPayload = encodeDelta(PlayerView, prev, next);
     expect(deltaPayload).not.toBeNull();
 
-    const frame = createDeltaFrame(1, deltaPayload!);
+    const frame = createDeltaFrame(1, defined(deltaPayload));
     // Header(6) + bitmask(1) + uint32(4) = 11 bytes
     expect(frame.byteLength).toBe(11);
   });

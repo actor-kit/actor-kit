@@ -19,7 +19,9 @@ async function connectAndGetSnapshot(stub: DurableObjectStub, actorId: string, c
     },
   });
 
-  const ws = response.webSocket!;
+  const ws = response.webSocket;
+
+  if (ws === null) throw new Error("expected a WebSocket upgrade");
   ws.accept();
 
   const data = await new Promise<ArrayBuffer>((resolve) => {

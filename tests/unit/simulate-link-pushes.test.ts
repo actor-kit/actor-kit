@@ -1,6 +1,6 @@
 /**
  * simulate(): link view pushes, as the runtime does them. After every committed transition a source
- * pushes its view to each actor linked to it (projected for caller `${source}:${subscriberId}`, a
+ * pushes its view to each actor linked to it (projected for caller `<source type>:<subscriber id>`, a
  * service), only when it changed for that subscriber; the subscriber runs link.onUpdate with the
  * role added. A new link (also from init) gets the current view at once.
  *
@@ -166,7 +166,7 @@ async function feedAndWall() {
 }
 
 describe("simulate: link pushes", () => {
-  it("projects the view for the subscriber as a service caller `${source}:${subscriberId}`, role added", async () => {
+  it("projects the view for the subscriber as the service caller <source type>:<subscriber id>, role added", async () => {
     const { wall } = await feedAndWall();
     wall.send("u", { type: "FOLLOW", id: "f1" });
     expect(wall.state.got).toEqual([{ id: "f1", linked: { headline: "Hello", for: "feed:w1", role: "subscriber" } }]);

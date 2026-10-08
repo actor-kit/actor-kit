@@ -16,7 +16,9 @@ describe("Error feedback via WebSocket (integration)", () => {
       },
     });
 
-    const ws = response.webSocket!;
+    const ws = response.webSocket;
+
+    if (ws === null) throw new Error("expected a WebSocket upgrade");
     ws.accept();
 
     // Consume initial snapshot
@@ -61,7 +63,9 @@ describe("Error feedback via WebSocket (integration)", () => {
       },
     });
 
-    const ws = response.webSocket!;
+    const ws = response.webSocket;
+
+    if (ws === null) throw new Error("expected a WebSocket upgrade");
     ws.accept();
 
     // Consume initial snapshot

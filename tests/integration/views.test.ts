@@ -56,7 +56,9 @@ describe("View computation through DO runtime", () => {
       },
     });
 
-    const ws = response.webSocket!;
+    const ws = response.webSocket;
+
+    if (ws === null) throw new Error("expected a WebSocket upgrade");
     ws.accept();
 
     const data = await new Promise<ArrayBuffer>((resolve) => {

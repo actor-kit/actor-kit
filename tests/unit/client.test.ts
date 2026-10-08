@@ -2,8 +2,11 @@ import { createActorClient } from "@actor-kit/client";
 import { describe, expect, it } from "vitest";
 
 // Fake WebSocket for testing
+/** A listener the fake socket calls with its event. */
+type Listener = (event: unknown) => void;
+
 class FakeWebSocket {
-  listeners = new Map<string, Set<Function>>();
+  listeners = new Map<string, Set<Listener>>();
   sent: string[] = [];
   readyState = 1; // OPEN
   protocol = "";
@@ -18,12 +21,12 @@ class FakeWebSocket {
     setTimeout(() => this.fireEvent("open", {}), 0);
   }
 
-  addEventListener(event: string, fn: Function) {
+  addEventListener(event: string, fn: Listener) {
     if (!this.listeners.has(event)) this.listeners.set(event, new Set());
     this.listeners.get(event)?.add(fn);
   }
 
-  removeEventListener(event: string, fn: Function) {
+  removeEventListener(event: string, fn: Listener) {
     this.listeners.get(event)?.delete(fn);
   }
 

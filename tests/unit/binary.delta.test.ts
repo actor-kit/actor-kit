@@ -1,6 +1,12 @@
 import { applyDelta, boolean, encode, encodeDelta, float32, schema, string, uint32 } from "@actor-kit/core";
 import { describe, expect, it } from "vitest";
 
+/** The value, or a failed test when it is null or undefined. */
+function defined<T>(value: T | null | undefined): T {
+  if (value === null || value === undefined) throw new Error("expected a value");
+  return value;
+}
+
 describe("binary delta encoding", () => {
   const PlayerView = schema({
     x: float32,
@@ -36,7 +42,7 @@ describe("binary delta encoding", () => {
     const delta = encodeDelta(PlayerView, prev, next);
     expect(delta).not.toBeNull();
 
-    const result = applyDelta(PlayerView, prev, delta!);
+    const result = applyDelta(PlayerView, prev, defined(delta));
     expect(result.y).toBeCloseTo(5, 0);
     expect(result.health).toBe(80);
     expect(result.x).toBeCloseTo(1, 0);
@@ -50,7 +56,7 @@ describe("binary delta encoding", () => {
     const delta = encodeDelta(PlayerView, prev, next);
     expect(delta).not.toBeNull();
 
-    const result = applyDelta(PlayerView, prev, delta!);
+    const result = applyDelta(PlayerView, prev, defined(delta));
     expect(result.health).toBe(50);
     expect(result.name).toBe("b");
     expect(result.alive).toBe(false);
@@ -66,7 +72,7 @@ describe("binary delta encoding", () => {
     // Bitmask (1 byte for 6 fields) + uint32 health (4 bytes) = 5 bytes
     expect(delta?.byteLength).toBe(5);
 
-    const result = applyDelta(PlayerView, prev, delta!);
+    const result = applyDelta(PlayerView, prev, defined(delta));
     expect(result.health).toBe(99);
   });
 

@@ -2,8 +2,14 @@ import type { LinkedView } from "@actor-kit/core";
 import { float32, schema, string, uint32, view } from "@actor-kit/core";
 import { testActor } from "@actor-kit/test";
 import { defineActor, link, message } from "@actor-kit/worker/testing";
-import { describe, expect, expectTypeOf, it } from "vitest";
+import { describe, expect, it } from "vitest";
 import { z } from "zod";
+
+/** The value, or a failed test when it is null or undefined. */
+function defined<T>(value: T | null | undefined): T {
+  if (value === null || value === undefined) throw new Error("expected a value");
+  return value;
+}
 
 // --- Target contracts (actors we link TO) ---
 
@@ -14,7 +20,7 @@ const ProfileContract = defineActor("profile", {
   input: z.object({ name: z.string() }),
   init: (input: { name: string }) => ({ name: input.name, level: 1, email: "test@test.com" }),
   roles: {
-    self: (state: unknown, caller: string) => caller === "owner",
+    self: (_state: unknown, caller: string) => caller === "owner",
     actor: () => true,
   },
   messages: {},
@@ -62,7 +68,7 @@ const GameContract = defineActor("game", {
 describe("link() declaration", () => {
   it("creates a LinkDef with contract and handlers", () => {
     const profileLink = link(ProfileContract, {
-      onUpdate: (state: unknown, view: unknown) => state,
+      onUpdate: (state: unknown, _view: unknown) => state,
     });
 
     expect(profileLink.contract).toBe(ProfileContract);
@@ -73,9 +79,9 @@ describe("link() declaration", () => {
 
   it("creates a LinkDef with all handlers", () => {
     const gameLink = link(GameContract, {
-      onUpdate: (state: unknown, view: unknown, id?: string) => state,
-      onError: (state: unknown, error: { message: string; code: string }, id?: string) => state,
-      onUnlink: (state: unknown, id?: string) => state,
+      onUpdate: (state: unknown, _view: unknown, _id?: string) => state,
+      onError: (state: unknown, _error: { message: string; code: string }, _id?: string) => state,
+      onUnlink: (state: unknown, _id?: string) => state,
     });
 
     expect(gameLink.contract).toBe(GameContract);
@@ -112,21 +118,21 @@ describe("link() declaration", () => {
   it("onError handler receives error object", () => {
     type State = { error: string | null };
     const profileLink = link(ProfileContract, {
-      onUpdate: (state: State, view: unknown) => state,
+      onUpdate: (state: State, _view: unknown) => state,
       onError: (state: State, error: { message: string; code: string }) => ({
         ...state,
         error: error.message,
       }),
     });
 
-    const result = profileLink.onError!({ error: null }, { message: "Actor not found", code: "not_found" });
+    const result = defined(profileLink.onError)({ error: null }, { message: "Actor not found", code: "not_found" });
     expect(result).toEqual({ error: "Actor not found" });
   });
 
   it("onUnlink handler cleans up state", () => {
     type State = { games: Record<string, unknown> };
     const gameLink = link(GameContract, {
-      onUpdate: (state: State, view: unknown, id?: string) => state,
+      onUpdate: (state: State, _view: unknown, _id?: string) => state,
       onUnlink: (state: State, id?: string) => {
         if (!id) return { ...state, games: {} };
         const { [id]: _, ...rest } = state.games;
@@ -137,11 +143,11 @@ describe("link() declaration", () => {
     const state: State = { games: { "game-1": { count: 5 }, "game-2": { count: 10 } } };
 
     // Unlink specific game
-    const afterUnlinkOne = gameLink.onUnlink!(state, "game-1");
+    const afterUnlinkOne = defined(gameLink.onUnlink)(state, "game-1");
     expect(afterUnlinkOne).toEqual({ games: { "game-2": { count: 10 } } });
 
     // Unlink all
-    const afterUnlinkAll = gameLink.onUnlink!(state);
+    const afterUnlinkAll = defined(gameLink.onUnlink)(state);
     expect(afterUnlinkAll).toEqual({ games: {} });
   });
 });
@@ -165,7 +171,7 @@ describe("links in actor definition", () => {
       errors: {},
     }),
     roles: {
-      owner: (state: PlayerState, caller: string) => caller === "owner",
+      owner: (_state: PlayerState, caller: string) => caller === "owner",
     },
     messages: {
       JOIN_GAME: message(z.object({ gameId: z.string() }), (state: PlayerState, { gameId }, { link }) => {
@@ -243,7 +249,7 @@ describe("testActor with links", () => {
       games: {},
     }),
     roles: {
-      owner: (state: PlayerState, caller: string) => caller === "owner",
+      owner: (_state: PlayerState, caller: string) => caller === "owner",
     },
     messages: {
       JOIN_GAME: message(z.object({ gameId: z.string() }), (state: PlayerState, { gameId }, { link }) => {

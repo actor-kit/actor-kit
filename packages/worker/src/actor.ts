@@ -166,13 +166,7 @@ interface ActorDef {
   ): unknown | Promise<unknown>; // bivariant — optionally async, receives ctx
   /** The typed version chain (ADR-015 D5): `[version(1, Schema), version(2, Schema, { state, events })]`. */
   versions?: readonly unknown[];
-  roles: Record<
-    string,
-    {
-      // bivariant method signature for role predicates
-      (state: unknown, caller: string, claims: { callerType: "user" | "service" }): boolean;
-    }
-  >;
+  roles: Record<string, (state: unknown, caller: string, claims: { callerType: "user" | "service" }) => boolean>;
   messages?: Record<string, Record<string, ActorMessageSlot>>;
   views: Record<
     string,

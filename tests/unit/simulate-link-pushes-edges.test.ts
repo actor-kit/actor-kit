@@ -15,7 +15,7 @@ const SourceContract = defineActor("source", {
   input: z.object({}),
   init: (): Src => ({ v: "a", shape: "object" }),
   roles: {
-    silent: (s: Src, caller: string) => caller.endsWith(":mute"),
+    silent: (_s: Src, caller: string) => caller.endsWith(":mute"),
     any: () => true,
   },
   messages: {

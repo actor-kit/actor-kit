@@ -14,7 +14,9 @@ async function connectWs(stub: DurableObjectStub, actorId: string, callerId: str
     },
   });
 
-  const ws = response.webSocket!;
+  const ws = response.webSocket;
+
+  if (ws === null) throw new Error("expected a WebSocket upgrade");
   ws.accept();
   return ws;
 }

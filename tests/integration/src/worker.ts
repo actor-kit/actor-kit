@@ -119,7 +119,7 @@ const NullableCounterView = schema({ count: uint32, lastUpdatedBy: nullable(stri
 
 const setCount = message(
   z.object({ value: z.number().int() }),
-  (state: NullableCounterState, { value }, { caller }) => ({
+  (_state: NullableCounterState, { value }, { caller }) => ({
     count: value,
     lastUpdatedBy: caller,
   }),

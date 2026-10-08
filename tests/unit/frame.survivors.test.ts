@@ -1,11 +1,4 @@
-import {
-  ControlType,
-  createControlFrame,
-  createDeltaFrame,
-  createSnapshotFrame,
-  FrameType,
-  parseFrame,
-} from "@actor-kit/core";
+import { ControlType, createControlFrame, createDeltaFrame, createSnapshotFrame, parseFrame } from "@actor-kit/core";
 import { describe, expect, it } from "vitest";
 
 describe("frame — kill survivors", () => {

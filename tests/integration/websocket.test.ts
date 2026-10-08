@@ -49,7 +49,9 @@ describe("Counter DO WebSocket (binary)", () => {
     const response = await connectWs(stub, actorId, "user-1");
     expect(response.status).toBe(101);
 
-    const ws = response.webSocket!;
+    const ws = response.webSocket;
+
+    if (ws === null) throw new Error("expected a WebSocket upgrade");
     ws.accept();
 
     const data = await waitForBinaryMessage(ws);
@@ -75,7 +77,8 @@ describe("Counter DO WebSocket (binary)", () => {
     await stub.spawn({ actorId, caller: "user-1", callerType: "user", input: {} });
 
     const response = await connectWs(stub, actorId, "user-1");
-    const ws = response.webSocket!;
+    const ws = response.webSocket;
+    if (ws === null) throw new Error("expected a WebSocket upgrade");
     ws.accept();
 
     // Get initial snapshot

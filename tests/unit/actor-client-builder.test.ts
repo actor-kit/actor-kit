@@ -6,8 +6,11 @@ const CounterView = schema({ count: uint32, lastUpdatedBy: string });
 
 type CounterEvent = { type: "INCREMENT" } | { type: "DECREMENT" } | { type: "RESET" };
 
+/** A listener the fake socket calls with its event. */
+type Listener = (event: unknown) => void;
+
 class FakeWebSocket {
-  listeners = new Map<string, Set<Function>>();
+  listeners = new Map<string, Set<Listener>>();
   readyState = 1;
   protocol = "";
   binaryType = "blob";
@@ -19,12 +22,12 @@ class FakeWebSocket {
     setTimeout(() => this.fireEvent("open", {}), 0);
   }
 
-  addEventListener(event: string, fn: Function) {
+  addEventListener(event: string, fn: Listener) {
     if (!this.listeners.has(event)) this.listeners.set(event, new Set());
     this.listeners.get(event)?.add(fn);
   }
 
-  removeEventListener(_event: string, _fn: Function) {}
+  removeEventListener(_event: string, _fn: Listener) {}
   send(_data: string) {}
 
   close() {

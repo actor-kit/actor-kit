@@ -3,7 +3,6 @@ import { describe, expect, it } from "vitest";
 import { z } from "zod";
 
 type State = { count: number; items: string[] };
-type Env = { ACTOR_KIT_SECRET: string };
 
 describe("message() helper", () => {
   it("pairs a Zod schema with a handler", () => {

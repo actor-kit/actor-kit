@@ -19,7 +19,9 @@ async function connectBinary(stub: DurableObjectStub, actorId: string, callerId:
     },
   });
 
-  const ws = response.webSocket!;
+  const ws = response.webSocket;
+
+  if (ws === null) throw new Error("expected a WebSocket upgrade");
   ws.accept();
 
   const data = await new Promise<ArrayBuffer>((resolve) => {

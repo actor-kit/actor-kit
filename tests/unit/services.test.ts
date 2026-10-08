@@ -16,12 +16,12 @@ const CounterContract = defineActor("counter", {
 
   services: {
     fetchCount: {
-      fn: async (input: { source: string }, env) => {
+      fn: async (input: { source: string }, _env) => {
         const res = await fetch(`https://api.example.com/count?source=${input.source}`);
         if (!res.ok) throw new Error(`API error: ${res.status}`);
         return { count: 42 };
       },
-      onDone: (state, result, input) => ({
+      onDone: (state, result, _input) => ({
         ...state,
         count: result.count,
         status: "loaded",
@@ -35,7 +35,7 @@ const CounterContract = defineActor("counter", {
     },
 
     trackEvent: {
-      fn: async (input: { event: string }, env) => {
+      fn: async (input: { event: string }, _env) => {
         await fetch("https://analytics.example.com/track", {
           method: "POST",
           body: JSON.stringify(input),
@@ -44,7 +44,7 @@ const CounterContract = defineActor("counter", {
     },
 
     saveState: {
-      fn: async (input: { count: number }, env) => {
+      fn: async (input: { count: number }, _env) => {
         await fetch("https://api.example.com/save", {
           method: "POST",
           body: JSON.stringify(input),

@@ -100,7 +100,9 @@ describe("Header-based auth (Worker-trust model)", () => {
     });
     expect(response.status).toBe(101);
 
-    const ws = response.webSocket!;
+    const ws = response.webSocket;
+
+    if (ws === null) throw new Error("expected a WebSocket upgrade");
     ws.accept();
 
     const data = await waitForBinaryMessage(ws);
@@ -129,7 +131,9 @@ describe("Header-based auth (Worker-trust model)", () => {
     });
     expect(response.status).toBe(101);
 
-    const ws = response.webSocket!;
+    const ws = response.webSocket;
+
+    if (ws === null) throw new Error("expected a WebSocket upgrade");
     ws.accept();
 
     // Send DECREMENT (admin-only) — should succeed
