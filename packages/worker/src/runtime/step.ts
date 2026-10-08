@@ -93,11 +93,19 @@ export type StepCause =
       /** The caller's role for connect; ignored for disconnect (resolved on the next state). */
       readonly role: string | null;
     } & Caller)
-  | { readonly type: "service.onDone"; readonly service: string; readonly input: unknown; readonly result: unknown }
+  | {
+      readonly type: "service.onDone";
+      readonly service: string;
+      readonly input: unknown;
+      readonly result: unknown;
+      /** The execution's effect id (journaled, so restore can match results to effects). */
+      readonly effectId?: string | undefined;
+    }
   | {
       readonly type: "service.onError";
       readonly service: string;
       readonly input: unknown;
+      readonly effectId?: string | undefined;
       readonly error: { readonly message: string };
     }
   | { readonly type: "link.onUpdate"; readonly link: string; readonly sourceId: string; readonly view: unknown }
@@ -363,12 +371,16 @@ type On<K extends CallbackCause["type"]> = Extract<CallbackCause, { type: K }>;
 
 // Transitions without a caller: service results, link callbacks, migration. A missing handler is a no-op.
 
+function withEffectId<P extends object>(payload: P, effectId: string | undefined): P | (P & { effectId: string }) {
+  return effectId === undefined ? payload : { ...payload, effectId };
+}
+
 function serviceDone(def: StepDef, state: unknown, cause: On<"service.onDone">, det: DeterministicContext) {
   const onDone = def.services?.[cause.service]?.onDone;
   return {
     next: onDone === undefined ? state : onDone(state, cause.result, cause.input, det),
     name: cause.service,
-    payload: { input: cause.input, result: cause.result },
+    payload: withEffectId({ input: cause.input, result: cause.result }, cause.effectId),
   };
 }
 
@@ -377,7 +389,7 @@ function serviceError(def: StepDef, state: unknown, cause: On<"service.onError">
   return {
     next: onError === undefined ? state : onError(state, { message: cause.error.message }, cause.input, det),
     name: cause.service,
-    payload: { input: cause.input, error: cause.error },
+    payload: withEffectId({ input: cause.input, error: cause.error }, cause.effectId),
   };
 }
 

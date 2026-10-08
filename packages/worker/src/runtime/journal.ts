@@ -390,8 +390,12 @@ export function readJournal(sql: JournalSql): Journal {
  */
 export type ReplayableDef = StepDef;
 
-const ServicePayload = z.object({ input: z.unknown(), result: z.unknown() });
-const ServiceErrorPayload = z.object({ input: z.unknown(), error: z.object({ message: z.string() }) });
+const ServicePayload = z.object({ input: z.unknown(), result: z.unknown(), effectId: z.string().optional() });
+const ServiceErrorPayload = z.object({
+  input: z.unknown(),
+  error: z.object({ message: z.string() }),
+  effectId: z.string().optional(),
+});
 const LinkUpdatePayload = z.object({ sourceId: z.string(), view: z.unknown() });
 const LinkErrorPayload = z.object({
   targetId: z.string(),

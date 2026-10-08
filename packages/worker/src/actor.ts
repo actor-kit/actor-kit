@@ -842,7 +842,7 @@ export function actor(
       }
 
       try {
-        this.settleExecution(entry.service, parsedInput, outcome, settle);
+        this.settleExecution(entry.service, entry.id, parsedInput, outcome, settle);
       } catch (error) {
         // onDone/onError threw, or its transition could not be persisted: nothing was written.
         // The row ends as a dead letter carrying the reason, instead of staying `running`.
@@ -855,13 +855,14 @@ export function actor(
     /** Run onDone/onError for a try that ended the row, committing it with the row's final status. */
     settleExecution(
       service: string,
+      effectId: string,
       input: unknown,
       outcome: { ok: true; result: unknown } | { ok: false; message: string },
       settle: () => void,
     ): void {
       const cause: StepCause = outcome.ok
-        ? { type: "service.onDone", service, input, result: outcome.result }
-        : { type: "service.onError", service, input, error: { message: outcome.message } };
+        ? { type: "service.onDone", service, input, result: outcome.result, effectId }
+        : { type: "service.onError", service, input, error: { message: outcome.message }, effectId };
       const result = this.runStep(cause);
       if (result.state === this.state) {
         settle();

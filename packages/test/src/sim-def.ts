@@ -48,10 +48,9 @@ function isSimDef(def: unknown): def is SimDef {
 function roleNested(
   messages: unknown,
   roles: Record<string, unknown>,
-): Record<string, Record<string, StepMessageSlot>> | undefined {
-  if (!isRecord(messages)) return undefined;
+): Record<string, Record<string, StepMessageSlot>> {
   const flat: Record<string, StepMessageSlot> = {};
-  for (const [name, slot] of Object.entries(messages)) {
+  for (const [name, slot] of Object.entries(isRecord(messages) ? messages : {})) {
     if (!isMessageSlot(slot)) throw new Error(`simulate: message "${name}" is not a message() definition`);
     flat[name] = slot;
   }
@@ -64,6 +63,5 @@ export function toSimDef(contract: { readonly name: string; readonly def: unknow
   if (!isSimDef(def)) {
     throw new Error(`simulate: "${contract.name}" is not an actor contract (input, init, roles and views)`);
   }
-  const messages = roleNested(def.messages, def.roles);
-  return messages === undefined ? def : { ...def, messages };
+  return { ...def, messages: roleNested(def.messages, def.roles) };
 }

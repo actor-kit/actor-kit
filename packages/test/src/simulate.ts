@@ -163,6 +163,8 @@ interface SimData {
 
 const MAX_TIMER_FIRINGS = 10_000;
 
+type Caller = { readonly caller: string; readonly callerType: "user" | "service" };
+
 const keyOf = (address: ActorAddress): string => `${address.type}/${address.id}`;
 
 function errorOf(error: string | { message: string }): { message: string } {
@@ -199,8 +201,6 @@ function createSimulation(
   }
 
   function register(contract: AnyContract): SimDef {
-    const known = contracts.get(contract.name);
-    if (known !== undefined) return known.def;
     const def = toSimDef(contract);
     contracts.set(contract.name, { contract, def });
     return def;
@@ -260,7 +260,8 @@ function createSimulation(
     actor.timers.sort((a, b) => a.fireAt - b.fireAt || a.seq - b.seq || a.index - b.index);
   }
 
-  function commit(actor: ActorData, result: StepResult, caller: string, callerType: "user" | "service"): void {
+  /** `from`: who forwarded messages are sent as (null for transitions that cannot forward). */
+  function commit(actor: ActorData, result: StepResult, from: Caller | null): void {
     const def = defOf(actor.type);
     actor.seq += 1;
     actor.state = result.state;
@@ -276,33 +277,32 @@ function createSimulation(
     applyLinks(actor, def, result);
     applyTimers(actor, result);
     for (const forward of result.effects.toForwardEntries(actor.seq)) {
-      deliver(actor, def, forward.linkName, forward.targetId, forward.message, caller, callerType);
+      if (from !== null) deliver(actor, def, forward.linkName, forward.targetId, forward.message, from);
     }
   }
 
   function deliver(
-    from: ActorData,
+    source: ActorData,
     def: SimDef,
     linkName: string,
     targetId: string,
     message: { type: string; [key: string]: unknown },
-    caller: string,
-    callerType: "user" | "service",
+    as: Caller,
   ): void {
     const type = def.links?.[linkName]?.contract.name ?? linkName.toLowerCase().replace(/_/g, "-");
     const to = { type, id: targetId };
     if (data.actors[keyOf(to)] === undefined) {
-      data.failedForwards.push({ from: { type: from.type, id: from.id }, to, message });
+      data.failedForwards.push({ from: { type: source.type, id: source.id }, to, message });
       return;
     }
-    sendTo(to, caller, message, { callerType });
+    sendTo(to, as.caller, message, { callerType: as.callerType });
   }
 
   /** Commit a transition only when it changed something (lifecycle, service, link callbacks). */
-  function commitIfChanged(actor: ActorData, result: StepResult, caller: string, callerType: "user" | "service"): void {
+  function commitIfChanged(actor: ActorData, result: StepResult, from: Caller): void {
     const effects = result.effects.getExecutions().length + result.effects.getForwards().length;
     const timers = result.effects.toTimerOps().length;
-    if (result.state !== actor.state || effects + timers > 0) commit(actor, result, caller, callerType);
+    if (result.state !== actor.state || effects + timers > 0) commit(actor, result, from);
   }
 
   // --- Operations ---
@@ -330,7 +330,7 @@ function createSimulation(
     };
     const result = step(def, actor.state, cause, factsFor(actor), env);
     def.observe?.onTransition?.(actor.state, result.handlerState, message, { caller, role });
-    commit(actor, result, caller, callerType);
+    commit(actor, result, { caller, callerType });
     return { ok: true };
   }
 
@@ -344,7 +344,7 @@ function createSimulation(
     const lifecycle = (type: "lifecycle.connect" | "lifecycle.disconnect", connectionRole: string | null) => {
       const callerConnections = actor.connections[slot] ?? 0;
       const cause: StepCause = { type, caller, callerType, callerConnections, role: connectionRole };
-      commitIfChanged(actor, step(def, actor.state, cause, factsFor(actor), env), caller, callerType);
+      commitIfChanged(actor, step(def, actor.state, cause, factsFor(actor), env), { caller, callerType });
     };
     actor.connections[slot] = (actor.connections[slot] ?? 0) + 1;
     lifecycle("lifecycle.connect", role);
@@ -378,7 +378,7 @@ function createSimulation(
     data.pending = data.pending.filter((p) => p !== pending);
     const actor = record(pending.actor);
     const result = step(defOf(actor.type), actor.state, cause(pending), factsFor(actor), env);
-    if (result.state !== actor.state) commit(actor, result, "service", "service");
+    if (result.state !== actor.state) commit(actor, result, null);
   }
 
   function nextDueTimer(until: number): { actor: ActorData; timer: ActorData["timers"][number] } | null {
@@ -397,7 +397,10 @@ function createSimulation(
     actor.timers = actor.timers.filter((t) => t !== timer);
     const { id, name, key, payload, fireAt } = timer;
     const cause: StepCause = { type: "timer", id, name, key, payload, fireAt, lateBy: data.clock - fireAt };
-    commit(actor, step(defOf(actor.type), actor.state, cause, factsFor(actor), env), `timer:${name}`, "service");
+    commit(actor, step(defOf(actor.type), actor.state, cause, factsFor(actor), env), {
+      caller: `timer:${name}`,
+      callerType: "service",
+    });
   }
 
   function advance(duration: Duration): void {
@@ -472,15 +475,6 @@ function createSimulation(
       if (data.actors[keyOf(address)] !== undefined) throw new Error(`simulate: ${keyOf(address)} is already spawned`);
       const parsed = def.input.safeParse(input);
       if (!parsed.success) throw new Error(`Invalid input: ${parsed.error.message}`);
-      const actor: ActorData = {
-        ...address,
-        state: undefined,
-        seq: 0,
-        journal: { events: [], checkpoints: [] },
-        timers: [],
-        links: [],
-        connections: {},
-      };
       const links: Array<{ name: string; id: string }> = [];
       const live = createLiveFacts(sources);
       const facts = liveStepFacts(live, () => []);
@@ -496,9 +490,15 @@ function createSimulation(
         callerType: options.callerType ?? "service",
       };
       const init = await stepInit(def, caller, facts, { env, link });
-      actor.seq = 1;
-      actor.state = init.state;
-      actor.links = links;
+      const actor: ActorData = {
+        ...address,
+        state: init.state,
+        seq: 1,
+        journal: { events: [], checkpoints: [] },
+        timers: [],
+        links,
+        connections: {},
+      };
       data.actors[keyOf(address)] = actor;
       appendJournal(actor, def, init.event);
       return handle(address);
@@ -571,9 +571,21 @@ function createSimulation(
     send: sendTyped,
     pendingEffects: () => [...data.pending],
     resolve: (effect, result) =>
-      settle(effect, (p) => ({ type: "service.onDone", service: p.service, input: p.input, result })),
+      settle(effect, (p) => ({
+        type: "service.onDone",
+        service: p.service,
+        input: p.input,
+        result,
+        effectId: p.effectId,
+      })),
     reject: (effect, error) =>
-      settle(effect, (p) => ({ type: "service.onError", service: p.service, input: p.input, error: errorOf(error) })),
+      settle(effect, (p) => ({
+        type: "service.onError",
+        service: p.service,
+        input: p.input,
+        error: errorOf(error),
+        effectId: p.effectId,
+      })),
     advance,
     failedForwards: () => [...data.failedForwards],
     branch: () => createSimulation(new Map(contracts), structuredClone(data), env),

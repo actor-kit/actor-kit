@@ -156,3 +156,13 @@ describe("Timers panel: due-in", () => {
     await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
   });
 });
+
+describe("Timers panel: interval", () => {
+  it("is cleared when the panel goes away", async () => {
+    const clear = vi.spyOn(globalThis, "clearInterval");
+    await open([]);
+    cleanup();
+    expect(clear).toHaveBeenCalled();
+    clear.mockRestore();
+  });
+});

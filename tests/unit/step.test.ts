@@ -647,3 +647,29 @@ describe("step: lifecycle payload", () => {
     expect(step(def, { log: [] }, cause, facts(), {}).event.payload).toEqual({});
   });
 });
+
+describe("step: service results name their effect", () => {
+  it("journals the effect id with the result or error when the cause has one", () => {
+    const done = step(
+      def,
+      { log: [] },
+      { type: "service.onDone", service: "FETCH", input: 1, result: 2, effectId: "4:0" },
+      facts(),
+      {},
+    );
+    expect(done.event.payload).toEqual({ input: 1, result: 2, effectId: "4:0" });
+    const failed = step(
+      def,
+      { log: [] },
+      { type: "service.onError", service: "FETCH", input: 1, error: { message: "x" }, effectId: "4:1" },
+      facts(),
+      {},
+    );
+    expect(failed.event.payload).toEqual({ input: 1, error: { message: "x" }, effectId: "4:1" });
+  });
+
+  it("leaves it out when the cause has none (journals written before effect ids)", () => {
+    const done = step(def, { log: [] }, { type: "service.onDone", service: "FETCH", input: 1, result: 2 }, facts(), {});
+    expect(done.event.payload).toStrictEqual({ input: 1, result: 2 });
+  });
+});
