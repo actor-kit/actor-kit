@@ -29,7 +29,7 @@ killed+timeout / total; "max CRAP" is the highest function score, with the numbe
 | core | 78.02% (710/910) | 99.77% (427/428) | 27.7 `encodeDelta` (10) | 6.0 `xxh64` (0) |
 | client | 50.23% (222/442) | 97.02% (391/403) | 130.0 `handleBinaryMessage` (5) | 7.0 `handleJsonMessage` (0) |
 | react | 50.00% (26/52) | 94.23% (49/52) | 2.1 (0) | 2.0 (0) |
-| test | 70.55% (115/163) | 98.17% (161/164); with simulate() 97.92% (707/722) | 9.0 `sendWithEffectsImpl` (1) | 7.0 (0) |
+| test | 70.55% (115/163) | 98.17% (161/164); with simulate() 97.92% (705/720) | 9.0 `sendWithEffectsImpl` (1) | 7.0 (0) |
 | storybook | no tests (0%) | 100% (35/35) | 20.0 `send` (2) | 4.0 (0) |
 | studio (server) | 75.58% (622/823) | 99.19% (732/738) | 42.0 middleware handler (6) | 7.0 `accessConfig`, `route` (0) |
 | studio UI (`ui/src`) | 65.45% (896/1369) | 93.05% (1298/1395) | 19.2 `alignPrimitiveArrays` (12) | 7.0 `diffAt` (0) |
@@ -105,14 +105,15 @@ Surviving mutants that no test can kill, because the mutated program behaves ide
 | worker | studio-redact.ts:57 | `if (segment === undefined) continue` → `false` | `walk` returns REDACTED before `step` whenever a cursor is complete, so `step` never sees a past-the-end segment; the check is for the type checker. |
 | worker | studio-redact.ts:59 | `segment.kind === "literal" && …` → `true && …` | Kinds are any / one / literal; with any and one excluded only literal is left. |
 | worker | versions.ts:118 (×2) | `first?.state` / `first?.rebuild` → `first.…` | The chain schema has `.min(1)`, so `first` is always defined; `?.` is for unchecked index access. |
-| test | simulate.ts:175, 538 (×2) | `value !== null` → `true` (view spread) | Spreading `null` adds no keys, so `{ role, ...null }` equals `{ role }`. |
-| test | simulate.ts:207 (×2, one NoCoverage) | unknown-contract guard in `defOf` → removed / message `""` | Unreachable: an actor exists only after `spawn` registered its contract, and every lookup is for an existing actor's type. The guard is for the type checker. |
-| test | simulate.ts:253 | undeclared or present link `return false` → `true` | Subscribing such a link pushes nothing: an undeclared link has no source, and a present one's view is already pushed (dedupe). |
-| test | simulate.ts:261 | unlink(name) unsubscribes `[]` → `["Stryker was here"]` | A string has no `name`, so it points at no source and nothing is forgotten. |
-| test | simulate.ts:272 (×2) | `def.links?.[name]?.contract` → without `?.` | Only declared links are ever recorded on an actor, so the link definition always exists. |
-| test | simulate.ts:301 | `if (role === null) return` → `if (false)` | `def.views[null]` is `views["null"]`, undefined, so the next check returns. |
-| test | simulate.ts:353 | `if (from !== null)` before delivering forwards → `true` | `from` is null only for callbacks (onDone, onError, onUpdate), whose step has an empty outbox: there are no forwards to deliver. |
-| test | simulate.ts:555 (×2, one NoCoverage) | init's unlink targets `() => []` → `undefined` / `["…"]` | `init` gets no `unlink`, so the fact is never read. |
+| test | simulate.ts:179 | `value !== null` → `true` (pushed view spread) | Spreading `null` adds no keys, so `{ role, ...null }` equals `{ role }`. |
+| test | simulate.ts:543 | `issues[0]?.message` → `issues[0].message` | A failed parse always has at least one issue. |
+| test | simulate.ts:211 (×2, one NoCoverage) | unknown-contract guard in `defOf` → removed / message `""` | Unreachable: an actor exists only after `spawn` registered its contract, and every lookup is for an existing actor's type. The guard is for the type checker. |
+| test | simulate.ts:257 | undeclared or present link `return false` → `true` | Subscribing such a link pushes nothing: an undeclared link has no source, and a present one's view is already pushed (dedupe). |
+| test | simulate.ts:265 | unlink(name) unsubscribes `[]` → `["Stryker was here"]` | A string has no `name`, so it points at no source and nothing is forgotten. |
+| test | simulate.ts:276 (×2) | `def.links?.[name]?.contract` → without `?.` | Only declared links are ever recorded on an actor, so the link definition always exists. |
+| test | simulate.ts:305 | `if (role === null) return` → `if (false)` | `def.views[null]` is `views["null"]`, undefined, so the next check returns. |
+| test | simulate.ts:357 | `if (from !== null)` before delivering forwards → `true` | `from` is null only for callbacks (onDone, onError, onUpdate), whose step has an empty outbox: there are no forwards to deliver. |
+| test | simulate.ts:562 (×2, one NoCoverage) | init's unlink targets `() => []` → `undefined` / `["…"]` | `init` gets no `unlink`, so the fact is never read. |
 
 ## Bugs found while hardening (2026-10-07)
 

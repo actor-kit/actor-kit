@@ -344,7 +344,7 @@ describe("simulate: forwards and links", () => {
     expect(b.links).toEqual([]);
   });
 
-  it("an init link needs a role for the system caller, and a non-object view becomes just the role", async () => {
+  it("an init link needs a role for the system caller, and a view that is an object (as the runtime parses it)", async () => {
     const Source = defineActor("source", {
       input: z.object({}),
       init: () => ({}),
@@ -367,7 +367,9 @@ describe("simulate: forwards and links", () => {
     const sim = simulate({ contracts: [Source, Closed] });
     await sim.spawn(Source, "s1", {});
     await sim.spawn(Closed, "s1", {});
-    expect((await sim.spawn(Reader("source"), "r", {})).state).toEqual({ v: { role: "system" } });
+    await expect(sim.spawn(Reader("source"), "r", {})).rejects.toThrow(
+      'Link "src": the target\'s view is not an object: Invalid input: expected record, received null',
+    );
     await expect(sim.spawn(Reader("closed"), "r", {})).rejects.toThrow('Link "src": no role for the linking actor');
   });
 });

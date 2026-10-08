@@ -150,7 +150,7 @@ describe("simulate: unlinks and subscriptions", () => {
 });
 
 describe("simulate: init link views", () => {
-  it("a string view is not spread: the init gets just the role", async () => {
+  it("a view that is not an object fails the spawn, as the runtime's parse does", async () => {
     const sim = simulate({ contracts: [SourceContract] });
     const s1 = await sim.spawn(SourceContract, "s1", {});
     s1.send("u", { type: "SHAPE", shape: "string" });
@@ -164,7 +164,12 @@ describe("simulate: init link views", () => {
       messages: {},
       views: {},
     });
-    expect((await sim.spawn(Reader, "r1", {})).state).toEqual({ v: { role: "any" } });
+    const error = await sim.spawn(Reader, "r1", {}).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(Error);
+    expect(error).toHaveProperty(
+      "message",
+      'Link "src": the target\'s view is not an object: Invalid input: expected record, received string',
+    );
   });
 });
 

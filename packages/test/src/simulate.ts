@@ -37,6 +37,7 @@ import {
   step,
   stepInit,
 } from "@actor-kit/worker/testing";
+import { z } from "zod";
 import type { ContractInput, ContractState } from "./contract-types";
 import { nextRandom, uuidFrom } from "./seeded";
 import { type SimDef, toSimDef } from "./sim-def";
@@ -166,6 +167,9 @@ interface SimData {
 }
 
 const MAX_TIMER_FIRINGS = 10_000;
+
+/** How the runtime parses a linked actor's snapshot for init(): the view must be a record. */
+const LinkedViewSchema = z.record(z.string(), z.unknown());
 
 type Caller = { readonly caller: string; readonly callerType: "user" | "service" };
 
@@ -534,8 +538,11 @@ function createSimulation(
     const linked = handle({ type: target.contract.name, id });
     const role = linked.role("system", { callerType: "service" });
     if (role === null) throw new Error(`Link "${name}": no role for the linking actor`);
-    const view = linked.view("system", { callerType: "service" });
-    return { role, ...(typeof view === "object" && view !== null ? view : {}) };
+    const view = LinkedViewSchema.safeParse(linked.view("system", { callerType: "service" }));
+    if (!view.success) {
+      throw new Error(`Link "${name}": the target's view is not an object: ${view.error.issues[0]?.message}`);
+    }
+    return { role, ...view.data };
   }
 
   function spawn(
