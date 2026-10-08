@@ -29,12 +29,12 @@ killed+timeout / total; "max CRAP" is the highest function score, with the numbe
 | core | 78.02% (710/910) | 99.77% (427/428) | 27.7 `encodeDelta` (10) | 6.0 `xxh64` (0) |
 | client | 50.23% (222/442) | 97.02% (391/403) | 130.0 `handleBinaryMessage` (5) | 7.0 `handleJsonMessage` (0) |
 | react | 50.00% (26/52) | 94.23% (49/52) | 2.1 (0) | 2.0 (0) |
-| test | 70.55% (115/163) | 98.17% (161/164) | 9.0 `sendWithEffectsImpl` (1) | 5.0 (0) |
+| test | 70.55% (115/163) | 98.17% (161/164); with simulate() 97.92% (707/722) | 9.0 `sendWithEffectsImpl` (1) | 7.0 (0) |
 | storybook | no tests (0%) | 100% (35/35) | 20.0 `send` (2) | 4.0 (0) |
 | studio (server) | 75.58% (622/823) | 99.19% (732/738) | 42.0 middleware handler (6) | 7.0 `accessConfig`, `route` (0) |
 | studio UI (`ui/src`) | 65.45% (896/1369) | 93.05% (1298/1395) | 19.2 `alignPrimitiveArrays` (12) | 7.0 `diffAt` (0) |
 | studio-cli | 78.87% (362/459) | 99.28% (414/417) | 30.0 mcp tool handler (6) | 7.0 `get` (0) |
-| worker (`src`, ADR-015 branch) | not measured | 99.31% (2165/2180) | 702.0 `fetch` (62, unit coverage only) | 7.8 `pushToSubscriber` (0) |
+| worker (`src`, ADR-015 branch) | not measured | 99.32% (2195/2210) | 702.0 `fetch` (62, unit coverage only) | 7.8 `pushToSubscriber` (0) |
 
 Notes:
 - Survivors are equivalent mutants (table below). Remaining `as` casts in these packages: one commented
@@ -74,9 +74,9 @@ Surviving mutants that no test can kill, because the mutated program behaves ide
 | react | context.ts:67 | `client.view !== undefined` → `true` | Only adds `setView(undefined)` when the state is already `undefined`. |
 | react | context.ts:91 | `client.role !== role` → `true` | Setting the same state value is a React no-op. |
 | react | context.ts:135 | effect deps `[client]` → `[]` | The client comes from a `useState` initializer and never changes. |
-| test | test-actor.ts:143 | `typeof record !== "object" \|\| record === null` → `false` | A primitive role entry still yields no messages. |
-| test | test-actor.ts:162 | `slots !== undefined` → `true` | The router treats an `undefined` role entry as "message not found" anyway. |
-| test | test-actor.ts:356 | `if (def.observe)` → `true` | Assigns `undefined`, which `send` reads with optional chaining. |
+| test | test-actor.ts:148 | `typeof record !== "object" \|\| record === null` → `false` | A primitive role entry still yields no messages. |
+| test | test-actor.ts:167 | `slots !== undefined` → `true` | The router treats an `undefined` role entry as "message not found" anyway. |
+| test | test-actor.ts:372 | `if (def.observe)` → `true` | Assigns `undefined`, which `send` reads with optional chaining. |
 | studio | access.ts:161 | `catch` block → `{}` | Falls through to the same 401 "Invalid Cloudflare Access token". |
 | studio | middleware.ts:147 | `join(".")` → `join("")` | Every request schema's error paths have a single segment, so there is nothing to join. |
 | studio | middleware.ts:237 (×3) | `rawType !== undefined && rawId !== undefined` → `\|\|` / `true` | Both regex groups are required, so a match always fills both; the check exists for the type checker. |
@@ -105,7 +105,7 @@ Surviving mutants that no test can kill, because the mutated program behaves ide
 | worker | studio-redact.ts:57 | `if (segment === undefined) continue` → `false` | `walk` returns REDACTED before `step` whenever a cursor is complete, so `step` never sees a past-the-end segment; the check is for the type checker. |
 | worker | studio-redact.ts:59 | `segment.kind === "literal" && …` → `true && …` | Kinds are any / one / literal; with any and one excluded only literal is left. |
 | worker | versions.ts:118 (×2) | `first?.state` / `first?.rebuild` → `first.…` | The chain schema has `.min(1)`, so `first` is always defined; `?.` is for unchecked index access. |
-| test | simulate.ts:175, 538 | `value !== null` → `true` (view spread) | Spreading `null` adds no keys, so `{ role, ...null }` equals `{ role }`. |
+| test | simulate.ts:175, 538 (×2) | `value !== null` → `true` (view spread) | Spreading `null` adds no keys, so `{ role, ...null }` equals `{ role }`. |
 | test | simulate.ts:207 (×2, one NoCoverage) | unknown-contract guard in `defOf` → removed / message `""` | Unreachable: an actor exists only after `spawn` registered its contract, and every lookup is for an existing actor's type. The guard is for the type checker. |
 | test | simulate.ts:253 | undeclared or present link `return false` → `true` | Subscribing such a link pushes nothing: an undeclared link has no source, and a present one's view is already pushed (dedupe). |
 | test | simulate.ts:261 | unlink(name) unsubscribes `[]` → `["Stryker was here"]` | A string has no `name`, so it points at no source and nothing is forgotten. |
