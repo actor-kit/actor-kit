@@ -51,9 +51,10 @@ const client = CounterClient.create({
 |--------|------|----------|-------------|
 | `url` | `string` | Yes | Full WebSocket URL (routed through your Worker) |
 | `initialView` | `TView` | Yes | Initial view from server (SSR snapshot). The client starts with this view immediately. |
-| `maxReconnectAttempts` | `number` | No | Max reconnect attempts (default: 10) |
 | `onRedirect` | `(target: { actorType: string; actorId: string }) => void` | No | Called on redirect |
 | `onError` | `(error: { message: string; error: string }) => void` | No | Called on error |
+
+Reconnection is automatic and never gives up: after an unexpected close the client retries with exponential backoff (1 s, 2 s, 4 s … capped at 30 s), and retries at once when the browser fires `online` or the page becomes visible again. `disconnect()` cancels any pending retry.
 
 ### Returns: `ActorClient<TView, TMessage>`
 

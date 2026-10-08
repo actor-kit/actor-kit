@@ -18,7 +18,7 @@
  */
 
 import type { ContractMessages, FieldDescriptor, Infer, SchemaDefinition } from "@actor-kit/core";
-import { type ActorClient, createActorClient } from "./client";
+import { type ActorClient, createActorClient, type WebSocketConstructor } from "./client";
 
 /** Runtime options for creating a client connection. */
 export interface CreateOptions<TView = unknown> {
@@ -32,10 +32,9 @@ export interface CreateOptions<TView = unknown> {
   getToken?: () => string | Promise<string>;
   /** Headers getter — native (RN/Node) only; throws in the browser. */
   getHeaders?: () => Record<string, string> | Promise<Record<string, string>>;
-  WebSocketImpl?: typeof WebSocket;
+  WebSocketImpl?: WebSocketConstructor;
   onRedirect?: (target: { actorType: string; actorId: string }) => void;
   onError?: (error: { message: string; error: string }) => void;
-  maxReconnectAttempts?: number;
 }
 
 /** Typed actor client factory — knows TView and TEvent at compile time. */

@@ -7,13 +7,18 @@
  *      DOES NOT open the WebSocket. Safe in React Strict Mode.
  *   2. client.connect() — opens the WebSocket. Idempotent if already connected.
  *
+ * Reconnection: an unexpected close retries forever with exponential backoff (1 s doubling, capped at
+ * 30 s). The browser's "online" event and the page becoming visible retry at once. Every socket is tagged
+ * with a generation; events from a socket that a newer connect/disconnect superseded are ignored.
+ * On reopen the client sends `__reconnect` with the checksum of the last view it applied.
+ *
  * Auth: getToken() is called on every (re)connect and sent via Sec-WebSocket-Protocol.
  * Native (RN/Node): getHeaders() can be passed as the third arg to WebSocket.
  *
  * Handles both binary frames and JSON fallback. Browser-safe: no CF deps.
  */
 
-import type { FieldDescriptor, Infer, SchemaDefinition } from "@actor-kit/core";
+import type { FieldDescriptor, Infer, ParsedFrame, SchemaDefinition } from "@actor-kit/core";
 import { applyDelta, decode, FrameType, parseFrame, xxh64 } from "@actor-kit/core";
 import { buildUrl } from "./url";
 
@@ -51,10 +56,38 @@ interface ClientOptions<TView = unknown> {
   viewSchemas?: Record<string, SchemaDefinition<Record<string, FieldDescriptor>>> | undefined;
   /** Role names in definition order (for mapping roleIndex to role name). Internal. */
   roleNames?: string[] | undefined;
-  WebSocketImpl?: typeof WebSocket;
+  /** WebSocket constructor. Defaults to the global WebSocket; RN/Node implementations also accept { headers }. */
+  WebSocketImpl?: WebSocketConstructor | undefined;
   onRedirect?: ((target: { actorType: string; actorId: string }) => void) | undefined;
   onError?: ((error: { message: string; error: string }) => void) | undefined;
-  maxReconnectAttempts?: number | undefined;
+}
+
+/** The part of a WebSocket the client uses. The DOM WebSocket satisfies it. */
+export interface WebSocketLike {
+  readonly readyState: number;
+  binaryType?: string;
+  send(data: string): void;
+  close(): void;
+  addEventListener(
+    type: "open" | "close" | "error" | "message",
+    listener: (event: { readonly data?: unknown }) => void,
+  ): void;
+}
+
+/** A WebSocket constructor; the third argument carries upgrade headers on React Native and Node. */
+export type WebSocketConstructor = new (
+  url: string,
+  protocols?: string | string[],
+  options?: { headers?: Record<string, string> },
+) => WebSocketLike;
+
+const WS_OPEN = 1;
+const BASE_RECONNECT_DELAY_MS = 1000;
+const MAX_RECONNECT_DELAY_MS = 30_000;
+
+/** Backoff before retry number `attempt` (0-based): 1 s, 2 s, 4 s … capped at 30 s. */
+export function reconnectDelay(attempt: number): number {
+  return Math.min(BASE_RECONNECT_DELAY_MS * 2 ** attempt, MAX_RECONNECT_DELAY_MS);
 }
 
 export type { ClientOptions };
@@ -76,20 +109,9 @@ export function createActorClient<TView, TEvent extends { type: string } = { typ
 
 // Implementation
 export function createActorClient(options: ClientOptions<unknown>): ActorClient<unknown> {
-  const {
-    path,
-    host,
-    initialView,
-    getToken,
-    getHeaders,
-    viewSchema,
-    viewSchemas,
-    roleNames,
-    WebSocketImpl = WebSocket,
-    onRedirect,
-    onError,
-    maxReconnectAttempts = 10,
-  } = options;
+  const { path, host, initialView, getToken, getHeaders, viewSchema, viewSchemas, roleNames, onRedirect, onError } =
+    options;
+  const WebSocketImpl: WebSocketConstructor = options.WebSocketImpl ?? WebSocket;
 
   let connectionState: ConnectionState = "disconnected";
   let currentView: unknown = initialView;
@@ -98,18 +120,16 @@ export function createActorClient(options: ClientOptions<unknown>): ActorClient<
   let currentRole: string | undefined = roleFromView(initialView);
   const listeners = new Set<(view: unknown) => void>();
   const stateListeners = new Set<(state: ConnectionState) => void>();
-  let ws: InstanceType<typeof WebSocketImpl> | undefined;
-  let intentionalClose = false;
+  let ws: WebSocketLike | undefined;
+  // Bumped by every open and by disconnect(); a socket (or a pending open) whose generation is older is stale.
+  let generation = 0;
   let reconnectAttempts = 0;
   let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
+  // Checksum of the last view applied from the server; never the page-load (SSR) view.
   let lastChecksum: string | undefined;
   let isReconnecting = false;
   let activeSchema: SchemaDefinition<Record<string, FieldDescriptor>> | undefined = viewSchema;
   const messageQueue: Array<{ type: string; [key: string]: unknown }> = [];
-
-  function computeChecksum(json: string): string {
-    return xxh64(json);
-  }
 
   function notifyListeners() {
     for (const listener of listeners) {
@@ -125,184 +145,192 @@ export function createActorClient(options: ClientOptions<unknown>): ActorClient<
     }
   }
 
+  /** A view decoded from a binary frame; its checksum is what a reconnect reports. */
+  function applyView(view: unknown) {
+    currentView = view;
+    lastChecksum = xxh64(JSON.stringify(view));
+  }
+
   function resolveSchema(roleIndex: number | undefined): SchemaDefinition<Record<string, FieldDescriptor>> | undefined {
-    if (viewSchemas && roleNames && roleIndex !== undefined) {
-      const roleName = roleNames[roleIndex];
-      if (roleName !== undefined && roleName in viewSchemas) {
-        return viewSchemas[roleName];
-      }
+    const roleName = roleIndex === undefined ? undefined : roleNames?.[roleIndex];
+    return (roleName === undefined ? undefined : viewSchemas?.[roleName]) ?? viewSchema;
+  }
+
+  function handleSnapshotFrame(frame: ParsedFrame) {
+    const resolved = resolveSchema(frame.roleIndex);
+    if (!resolved) return;
+    activeSchema = resolved;
+    applyView(decode(resolved, frame.payload));
+    const roleName = frame.roleIndex === undefined ? undefined : roleNames?.[frame.roleIndex];
+    if (roleName !== undefined) currentRole = roleName;
+    setConnectionState("connected");
+    notifyListeners();
+  }
+
+  function handleDeltaFrame(frame: ParsedFrame) {
+    if (!activeSchema || !isRecord(currentView)) return;
+    applyView(applyDelta(activeSchema, currentView, frame.payload));
+    notifyListeners();
+  }
+
+  function handleControlFrame(frame: ParsedFrame) {
+    const ctrl = parseJson(new TextDecoder().decode(frame.payload));
+    if (isRecord(ctrl) && ("actorType" in ctrl || "actorId" in ctrl)) {
+      onRedirect?.(redirectTarget(ctrl));
     }
-    return viewSchema;
   }
 
   function handleBinaryMessage(data: ArrayBuffer) {
     try {
-      const bytes = new Uint8Array(data);
-      const frame = parseFrame(bytes);
-
-      if (frame.type === FrameType.SNAPSHOT) {
-        const resolved = resolveSchema(frame.roleIndex);
-        if (resolved) {
-          activeSchema = resolved;
-          currentView = decode(resolved, frame.payload);
-        } else {
-          return;
-        }
-        if (roleNames && frame.roleIndex !== undefined) {
-          currentRole = roleNames[frame.roleIndex];
-        }
-        lastChecksum = computeChecksum(JSON.stringify(currentView));
-        setConnectionState("connected");
-        notifyListeners();
-      } else if (frame.type === FrameType.DELTA) {
-        if (activeSchema && currentView) {
-          currentView = applyDelta(activeSchema, currentView as Record<string, unknown>, frame.payload);
-          lastChecksum = computeChecksum(JSON.stringify(currentView));
-          notifyListeners();
-        }
-      } else if (frame.type === FrameType.CONTROL && frame.controlType !== undefined) {
-        const controlPayload = new TextDecoder().decode(frame.payload);
-        try {
-          const ctrl = JSON.parse(controlPayload);
-          if (typeof ctrl === "object" && ctrl !== null) {
-            if ("actorType" in ctrl || "actorId" in ctrl) {
-              onRedirect?.({
-                actorType: typeof ctrl.actorType === "string" ? ctrl.actorType : "",
-                actorId: typeof ctrl.actorId === "string" ? ctrl.actorId : "",
-              });
-            }
-          }
-        } catch {
-          // Invalid control payload
-        }
-      }
+      const frame = parseFrame(new Uint8Array(data));
+      if (frame.type === FrameType.SNAPSHOT) handleSnapshotFrame(frame);
+      else if (frame.type === FrameType.DELTA) handleDeltaFrame(frame);
+      else if (frame.controlType !== undefined) handleControlFrame(frame);
     } catch {
-      // Binary decode error — ignore
+      // Binary decode error: keep the last good view (and its checksum).
     }
   }
 
   function handleJsonMessage(data: string) {
-    try {
-      const msg: unknown = JSON.parse(data);
-      if (typeof msg !== "object" || msg === null) return;
-
-      const msgObj = msg as Record<string, unknown>;
-
-      if (msgObj["type"] === "snapshot") {
-        currentView = msgObj["data"];
-        currentRole = typeof msgObj["role"] === "string" ? msgObj["role"] : currentRole;
+    const msg = parseJson(data);
+    if (!isRecord(msg)) return;
+    switch (msg["type"]) {
+      case "snapshot":
+        // JSON mode never reports a checksum on reconnect; forget the one of the view this replaces.
+        currentView = msg["data"];
+        lastChecksum = undefined;
+        currentRole = typeof msg["role"] === "string" ? msg["role"] : currentRole;
         setConnectionState("connected");
         notifyListeners();
-      } else if (msgObj["type"] === "__redirect") {
-        onRedirect?.({
-          actorType: typeof msgObj["actorType"] === "string" ? msgObj["actorType"] : "",
-          actorId: typeof msgObj["actorId"] === "string" ? msgObj["actorId"] : "",
-        });
-      } else if (msgObj["type"] === "__reconnect_ack") {
+        return;
+      case "__redirect":
+        onRedirect?.(redirectTarget(msg));
+        return;
+      case "__reconnect_ack":
         setConnectionState("connected");
-      } else if (msgObj["type"] === "__error") {
-        const errorData = {
-          message: typeof msgObj["message"] === "string" ? msgObj["message"] : "",
-          error:
-            typeof msgObj["error"] === "string"
-              ? msgObj["error"]
-              : typeof msgObj["detail"] === "string"
-                ? msgObj["detail"]
-                : "unknown",
-        };
-        onError?.(errorData);
-      }
-    } catch {
-      // Invalid JSON
+        return;
+      case "__error":
+        onError?.({
+          message: stringOr(msg["message"], ""),
+          error: stringOr(msg["error"], stringOr(msg["detail"], "unknown")),
+        });
+        return;
     }
   }
 
-  function isBrowserEnv(): boolean {
-    return typeof window !== "undefined" && typeof (window as { WebSocket?: unknown }).WebSocket !== "undefined";
+  function clearReconnectTimer() {
+    if (reconnectTimer !== undefined) {
+      clearTimeout(reconnectTimer);
+      reconnectTimer = undefined;
+    }
+  }
+
+  function scheduleReconnect() {
+    setConnectionState("reconnecting");
+    isReconnecting = true;
+    const delay = reconnectDelay(reconnectAttempts);
+    reconnectAttempts += 1;
+    clearReconnectTimer();
+    reconnectTimer = setTimeout(() => {
+      reconnectTimer = undefined;
+      void openSocket();
+    }, delay);
+  }
+
+  /** "online" / page visible: skip the rest of the backoff wait. */
+  function reconnectNow() {
+    if (reconnectTimer === undefined) return;
+    clearReconnectTimer();
+    void openSocket();
+  }
+
+  function onVisibilityChange() {
+    if (document.visibilityState === "visible") reconnectNow();
+  }
+
+  function attachBrowserListeners() {
+    if (typeof window !== "undefined") window.addEventListener("online", reconnectNow);
+    if (typeof document !== "undefined") document.addEventListener("visibilitychange", onVisibilityChange);
+  }
+
+  function detachBrowserListeners() {
+    if (typeof window !== "undefined") window.removeEventListener("online", reconnectNow);
+    if (typeof document !== "undefined") document.removeEventListener("visibilitychange", onVisibilityChange);
+  }
+
+  /** Closes the current socket; its late events are ignored because its generation is now stale. */
+  function retireSocket() {
+    generation += 1;
+    ws?.close();
+    ws = undefined;
+  }
+
+  function flushQueue(socket: WebSocketLike) {
+    for (const queued of messageQueue.splice(0)) {
+      if (socket.readyState === WS_OPEN) socket.send(JSON.stringify(queued));
+    }
+  }
+
+  function onOpen(socket: WebSocketLike) {
+    reconnectAttempts = 0;
+    if (isReconnecting && lastChecksum) {
+      socket.send(JSON.stringify({ type: "__reconnect", lastChecksum }));
+    }
+    isReconnecting = false;
+    flushQueue(socket);
+  }
+
+  function onMessage(data: unknown) {
+    if (data instanceof ArrayBuffer) handleBinaryMessage(data);
+    else if (typeof data === "string") handleJsonMessage(data);
   }
 
   async function openSocket() {
+    retireSocket();
+    const mine = generation;
+    const current = () => mine === generation;
+    let socket: WebSocketLike | undefined;
+    try {
+      socket = await createSocket(current);
+    } catch {
+      // Token or header fetch failed: retry with backoff like a dropped connection.
+      if (current()) scheduleReconnect();
+      return;
+    }
+    // undefined: disconnect() or a newer open happened while the token was being fetched.
+    if (!socket) return;
+    const opened = socket;
+    ws = opened;
+    opened.binaryType = "arraybuffer";
+    opened.addEventListener("open", () => current() && onOpen(opened));
+    opened.addEventListener("message", (event) => current() && onMessage(event.data));
+    opened.addEventListener("close", () => current() && scheduleReconnect());
+    // "error" is always followed by "close", which handles reconnection.
+  }
+
+  /** Builds the socket, or returns undefined if `stillCurrent()` turns false while awaiting credentials. */
+  async function createSocket(stillCurrent: () => boolean): Promise<WebSocketLike | undefined> {
     const url = buildUrl(path, host);
-
-    // getHeaders is native-only — fail loudly in browsers.
-    if (getHeaders && isBrowserEnv()) {
-      throw new Error("getHeaders is not supported in browser environments — use getToken instead");
-    }
-
-    // Build subprotocols. Always include the actor-kit version marker.
+    // Always include the actor-kit version marker.
     const protocols: string[] = ["actor-kit.v1"];
-    if (getToken) {
-      const token = await getToken();
-      protocols.push(`auth.${token}`);
-    }
-
-    // Native only: optional headers as 3rd ctor arg.
-    let headers: Record<string, string> | undefined;
-    if (getHeaders && !isBrowserEnv()) {
-      headers = await getHeaders();
-    }
-
-    // Construct the WebSocket. RN/Node allow an optional 3rd-arg options bag with `headers`.
-    interface ExtendedWebSocketCtor {
-      new (url: string, protocols?: string | string[], options?: { headers?: Record<string, string> }): WebSocket;
-    }
-    const Ctor: ExtendedWebSocketCtor = WebSocketImpl;
-    ws = headers ? new Ctor(url, protocols, { headers }) : new Ctor(url, protocols);
-
-    if ("binaryType" in ws) {
-      (ws as { binaryType: string }).binaryType = "arraybuffer";
-    }
-
-    ws.addEventListener("open", () => {
-      reconnectAttempts = 0;
-      if (isReconnecting && lastChecksum) {
-        ws?.send(JSON.stringify({ type: "__reconnect", lastChecksum }));
-        isReconnecting = false;
-      }
-      while (messageQueue.length > 0) {
-        const queued = messageQueue.shift();
-        if (queued && ws && ws.readyState === 1) {
-          ws.send(JSON.stringify(queued));
-        }
-      }
-    });
-
-    ws.addEventListener("message", (event: MessageEvent) => {
-      if (event.data instanceof ArrayBuffer) {
-        handleBinaryMessage(event.data);
-      } else if (typeof event.data === "string") {
-        handleJsonMessage(event.data);
-      }
-    });
-
-    ws.addEventListener("close", () => {
-      if (intentionalClose) {
-        setConnectionState("disconnected");
-        return;
-      }
-
-      if (reconnectAttempts < maxReconnectAttempts) {
-        setConnectionState("reconnecting");
-        isReconnecting = true;
-        const delay = Math.min(1000 * 2 ** reconnectAttempts, 30000);
-        reconnectAttempts += 1;
-        reconnectTimer = setTimeout(() => {
-          void openSocket();
-        }, delay);
-      } else {
-        setConnectionState("disconnected");
-      }
-    });
-
-    ws.addEventListener("error", () => {
-      // Error triggers close, which handles reconnection
-    });
+    if (getToken) protocols.push(`auth.${await getToken()}`);
+    // Native only: optional headers as the third constructor argument.
+    const headers = getHeaders ? await getHeaders() : undefined;
+    if (!stillCurrent()) return undefined;
+    return headers ? new WebSocketImpl(url, protocols, { headers }) : new WebSocketImpl(url, protocols);
   }
 
   function connect() {
     if (connectionState === "connecting" || connectionState === "connected") return;
-    intentionalClose = false;
-    setConnectionState("connecting");
+    // getHeaders is native-only: fail loudly in browsers.
+    if (getHeaders && isBrowserEnv()) {
+      throw new Error("getHeaders is not supported in browser environments — use getToken instead");
+    }
+    clearReconnectTimer();
+    if (connectionState === "disconnected") {
+      setConnectionState("connecting");
+      attachBrowserListeners();
+    }
     void openSocket();
   }
 
@@ -329,7 +357,7 @@ export function createActorClient(options: ClientOptions<unknown>): ActorClient<
       };
     },
     send(event: { type: string; [key: string]: unknown }) {
-      if (ws && ws.readyState === 1) {
+      if (ws && ws.readyState === WS_OPEN) {
         ws.send(JSON.stringify(event));
       } else if (connectionState === "reconnecting" || connectionState === "connecting") {
         messageQueue.push(event);
@@ -340,16 +368,39 @@ export function createActorClient(options: ClientOptions<unknown>): ActorClient<
     },
     connect,
     disconnect() {
-      intentionalClose = true;
       setConnectionState("disconnected");
       messageQueue.length = 0;
-      if (reconnectTimer !== undefined) {
-        clearTimeout(reconnectTimer);
-      }
-      ws?.close();
-      ws = undefined;
+      clearReconnectTimer();
+      detachBrowserListeners();
+      isReconnecting = false;
+      reconnectAttempts = 0;
+      retireSocket();
     },
   };
+}
+
+function isBrowserEnv(): boolean {
+  return typeof window !== "undefined" && "WebSocket" in window;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function parseJson(text: string): unknown {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return undefined;
+  }
+}
+
+function stringOr(value: unknown, fallback: string): string {
+  return typeof value === "string" ? value : fallback;
+}
+
+function redirectTarget(source: Record<string, unknown>): { actorType: string; actorId: string } {
+  return { actorType: stringOr(source["actorType"], ""), actorId: stringOr(source["actorId"], "") };
 }
 
 function roleFromView(view: unknown): string | undefined {
