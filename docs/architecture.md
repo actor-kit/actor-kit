@@ -171,23 +171,39 @@ if (view.role === "owner") {
 ### Message processing
 
 ```
-1. WebSocket frame arrives (binary)
-2. Decode message type + payload
-3. Extract caller identity from headers (stamped by Worker via withCallerIdentity)
-4. Resolve caller role: iterate roles top-to-bottom, first match wins
-5. Validate message type exists for this role
-6. Validate payload against Zod schema for this message type
-7. Run handler: (state, payload, { caller, role, env, emit }) → newState
-8. BEGIN SQLite transaction:
-   a. Persist new state snapshot
-   b. Persist any emit() calls to outbox table
+1. WebSocket frame (or send() RPC) arrives; the frame is parsed: an object with a string `type`
+2. Caller identity from the socket's tags (stamped by the Worker via withCallerIdentity)
+3. Resolve caller role: iterate roles top-to-bottom, first match wins
+4. admitMessage(): the message exists for the role, the payload parses with its Zod schema, the guard passes
+5. step(): run the handler with { caller, callerType, role, env, now, id, random, execute, link, unlink, forward },
+   then onUnlink for each unlink → { state, effects, event }
+6. commit(): BEGIN
+     seq = nextTransitionSeq()
+     executions + forwards (ids seq:index), active_links writes
+     snapshot (last_seq = seq) + journal event (seq)
    COMMIT
-9. Compute view for each connected caller (may differ per role)
-10. Diff previous view vs new view per caller
-11. Encode delta as binary frame
-12. Send binary frame to each WebSocket
-13. Drain outbox (async, outside transaction)
+7. Compute view for each connected caller (may differ per role), diff, encode, send
+8. Drain executions and forwards (async, outside the transaction)
 ```
+
+### The step core (ADR-015 D4)
+
+`runtime/step.ts` holds one transition as a pure function: `step(def, state, cause, facts, env) → { state,
+handlerState, effects, event }` for messages, lifecycle connect/disconnect, service onDone/onError, link
+onUpdate/onError and migration, and `stepInit()` for init (which may be async). It reads the outside world only
+through `facts`:
+
+- `ctx.now()/id()/random()`: live they read the clock/RNG and record what they returned; on replay they hand the
+  recorded values back (`liveStepFacts` / `replayStepFacts`).
+- `unlinkTargets(name, pending)`: the targets of an `unlink(name)` with no id. Live, the stored links in insertion
+  order, plus this transition's links, minus what earlier unlinks removed (`liveUnlinkTargets`); on replay, the
+  recorded list.
+
+`effects` is the outbox collector (executions and forwards share one effect index; links and unlinks apart).
+`event` is the journal draft, facts included. The Durable Object only adds I/O around it: admission, storage
+(commit), alarms, broadcasting. `applyJournalEvent()` (replay) maps each journal event back to a step cause and runs the same function, so the
+runtime and replay cannot drift apart. Because `actor.ts` is excluded from
+Stryker (it imports `cloudflare:workers`), everything worth mutating lives in `runtime/`.
 
 ### WebSocket lifecycle
 

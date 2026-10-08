@@ -16,7 +16,6 @@ import type {
   ContractMessages,
   DeterministicContext,
   FieldDescriptor,
-  MessageContext,
   MutationCause,
   SchemaDefinition,
 } from "@actor-kit/core";
@@ -30,7 +29,6 @@ import {
   createLiveFacts,
   type JournalDraft,
   type JournalOption,
-  type LiveFacts,
   nextTransitionSeq,
   resolveJournalConfig,
 } from "./runtime/journal";
@@ -42,9 +40,7 @@ import {
   type SocketRecord,
   toLiveConnections,
 } from "./runtime/live-connections";
-import { routeMessage } from "./runtime/message-router";
 import { ACTOR_KIT_MIGRATIONS } from "./runtime/migrations";
-import { createOutbox } from "./runtime/outbox";
 import {
   dueExecutions,
   finishAttempt,
@@ -59,6 +55,7 @@ import {
 import { resolveNamespace } from "./runtime/resolve-namespace";
 import { type RetryPolicy, resolveRetryPolicy, settleAttempt } from "./runtime/retry";
 import { resolveRole } from "./runtime/roles";
+import { admitMessage, liveStepFacts, type StepCause, type StepResult, step, stepInit } from "./runtime/step";
 import {
   type CallerHasher,
   createCallerHasher,
@@ -231,6 +228,38 @@ const SnapshotRowSchema = z.object({
 
 const RedriveOptionsSchema = z.object({ effectId: z.string().min(1) });
 
+// SQL rows and RPC payloads, parsed at the boundary.
+const TargetIdRowSchema = z.object({ target_id: z.string() });
+const ActiveLinkRowSchema = z.object({ target_id: z.string(), link_name: z.string() });
+const LinkVersionRowSchema = z.object({ link_name: z.string(), version: z.number() });
+const SubscriberRowSchema = z.object({ subscriber_type: z.string(), subscriber_id: z.string() });
+const ForwardRowSchema = z.object({
+  id: z.string(),
+  link_name: z.string(),
+  target_id: z.string(),
+  message: z.string(),
+  caller: z.string(),
+  caller_type: z.string(),
+});
+/** A message: an object with a string `type` (forwarded rows, WebSocket frames). */
+const MessageEnvelopeSchema = z.looseObject({ type: z.string() });
+const ViewFieldsSchema = z.record(z.string(), z.unknown());
+
+/** What a linked actor's getSnapshot RPC returns (parsed at the RPC boundary). */
+const LinkedSnapshotSchema = z.object({ snapshot: z.record(z.string(), z.unknown()), role: z.string() });
+
+type RpcFunction = (...args: unknown[]) => Promise<unknown>;
+
+function isRpcFunction(value: unknown): value is RpcFunction {
+  return typeof value === "function";
+}
+
+/** A named RPC method on a stub (or null when the stub or the method is missing). */
+function rpcMethod(stub: Record<string, unknown> | undefined, name: string): RpcFunction | null {
+  const method = stub?.[name];
+  return isRpcFunction(method) ? method : null;
+}
+
 /**
  * Safely extract the `exports` map from a DurableObjectState ctx.
  * In multi-DO Workers, the CF runtime populates ctx.exports with co-located bindings.
@@ -254,13 +283,15 @@ function answerClose(ws: WebSocket, code: number | undefined, reason: string | u
   }
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+/** ctx.exports itself (not a copy: its bindings may not all be enumerable). */
 function getExports(ctx: unknown): Record<string, unknown> | undefined {
-  if (typeof ctx !== "object" || ctx === null) return undefined;
-  if ("exports" in ctx) {
-    const val: unknown = (ctx as Record<string, unknown>)["exports"];
-    if (typeof val === "object" && val !== null) return val as Record<string, unknown>;
-  }
-  return undefined;
+  if (!isRecord(ctx)) return undefined;
+  const exports: unknown = Reflect.get(ctx, "exports");
+  return isRecord(exports) ? exports : undefined;
 }
 
 /**
@@ -383,16 +414,14 @@ export function actor(
       if (rows.length === 0 || rows[0] === undefined) return;
 
       const row = SnapshotRowSchema.parse(rows[0]);
-      let parsed: unknown = JSON.parse(row.state);
+      const persisted: unknown = JSON.parse(row.state);
 
-      // Run migration if needed
-      const migrated = def.migrate !== undefined && row.version !== this.version;
-      if (def.migrate && migrated) {
-        parsed = def.migrate(parsed, row.version);
-      }
-
-      // Restore state
-      this.state = def.restore ? def.restore(parsed) : parsed;
+      // Migrate (and restore) through the step core when the stored version is older.
+      const migration =
+        def.migrate !== undefined && row.version !== this.version
+          ? this.runStep({ type: "migrate", fromVersion: row.version, toVersion: this.version, persisted })
+          : null;
+      this.state = migration !== null ? migration.state : def.restore ? def.restore(persisted) : persisted;
 
       // Restore actor ID
       if (row.actor_id !== null) {
@@ -406,17 +435,9 @@ export function actor(
       this.updateRegistryConnections();
 
       // Persist the migrated state once (stamped with the new version) and record it on the timeline.
-      if (migrated) {
+      if (migration !== null) {
         this.pendingCause = { type: "migrate", fromVersion: row.version, toVersion: this.version };
-        this.commit(this.state, () => ({
-          causeType: "migrate",
-          name: null,
-          payload: { fromVersion: row.version, toVersion: this.version },
-          caller: null,
-          callerType: null,
-          role: null,
-          facts: {},
-        }));
+        this.commit(this.state, migration.event);
       }
 
       // Drain any pending executions from before crash/restart; tries cut off mid-flight run again.
@@ -449,25 +470,20 @@ export function actor(
       if (!emptyParsed.success) return;
 
       this.actorId = this.ctx.id.toString();
-      const live = createLiveFacts();
-      const initialState = await def.init(emptyParsed.data, {
-        env: this.env,
-        link: async () => {
-          throw new Error("link() not available during auto-spawn");
+      const init = await stepInit(
+        def,
+        { input: emptyParsed.data, caller: null, callerType: null },
+        liveStepFacts(createLiveFacts(), () => []),
+        {
+          env: this.env,
+          link: async () => {
+            throw new Error("link() not available during auto-spawn");
+          },
         },
-        ...live.ctx,
-      });
+      );
 
       this.pendingCause = { type: "init" };
-      this.commit(initialState, () => ({
-        causeType: "init",
-        name: null,
-        payload: emptyParsed.data,
-        caller: null,
-        callerType: null,
-        role: null,
-        facts: live.facts(),
-      }));
+      this.commit(init.state, init.event);
       this.initialized = true;
     }
 
@@ -566,16 +582,15 @@ export function actor(
      * storage), run `writes` (outbox, links) with that seq, then persist the snapshot and append its
      * journal event, all in one transaction. On failure nothing is written and the in-memory
      * state is put back.
-     * `draft` is read after `writes`, so facts recorded while processing links are included.
      */
-    commit(nextState: unknown, draft: () => JournalDraft, writes?: (seq: number) => void): void {
+    commit(nextState: unknown, draft: JournalDraft, writes?: (seq: number) => void): void {
       const previous = this.state;
       this.state = nextState;
       try {
         this.ctx.storage.transactionSync(() => {
           const seq = nextTransitionSeq(this.ctx.storage.sql);
           writes?.(seq);
-          this.persistState(draft(), seq);
+          this.persistState(draft, seq);
         });
       } catch (error) {
         this.state = previous;
@@ -750,7 +765,7 @@ export function actor(
       }
 
       try {
-        this.settleExecution(serviceDef, entry.service, parsedInput, outcome, settle);
+        this.settleExecution(entry.service, parsedInput, outcome, settle);
       } catch (error) {
         // onDone/onError threw, or its transition could not be persisted: nothing was written.
         // The row ends as a dead letter carrying the reason, instead of staying `running`.
@@ -762,60 +777,38 @@ export function actor(
 
     /** Run onDone/onError for a try that ended the row, committing it with the row's final status. */
     settleExecution(
-      serviceDef: NonNullable<ActorDef["services"]>[string],
       service: string,
-      parsedInput: unknown,
+      input: unknown,
       outcome: { ok: true; result: unknown } | { ok: false; message: string },
       settle: () => void,
     ): void {
-      const live = createLiveFacts();
-      if (outcome.ok) {
-        const { result } = outcome;
-        const nextState = serviceDef.onDone ? serviceDef.onDone(this.state, result, parsedInput, live.ctx) : this.state;
-        if (nextState === this.state) {
-          settle();
-        } else {
-          this.pendingCause = { type: "service.onDone", service, input: parsedInput, result };
-          this.commit(
-            nextState,
-            () => ({
-              causeType: "service.onDone",
-              name: service,
-              payload: { input: parsedInput, result },
-              caller: null,
-              callerType: null,
-              role: null,
-              facts: live.facts(),
-            }),
-            settle,
-          );
-          this.broadcastViews();
-        }
-      } else {
-        const errorMessage = outcome.message;
-        const nextState = serviceDef.onError
-          ? serviceDef.onError(this.state, { message: errorMessage }, parsedInput, live.ctx)
-          : this.state;
-        if (nextState === this.state) {
-          settle();
-        } else {
-          this.pendingCause = { type: "service.onError", service, input: parsedInput, error: errorMessage };
-          this.commit(
-            nextState,
-            () => ({
-              causeType: "service.onError",
-              name: service,
-              payload: { input: parsedInput, error: { message: errorMessage } },
-              caller: null,
-              callerType: null,
-              role: null,
-              facts: live.facts(),
-            }),
-            settle,
-          );
-          this.broadcastViews();
-        }
+      const cause: StepCause = outcome.ok
+        ? { type: "service.onDone", service, input, result: outcome.result }
+        : { type: "service.onError", service, input, error: { message: outcome.message } };
+      const result = this.runStep(cause);
+      if (result.state === this.state) {
+        settle();
+        return;
       }
+      this.pendingCause = outcome.ok
+        ? { type: "service.onDone", service, input, result: outcome.result }
+        : { type: "service.onError", service, input, error: outcome.message };
+      this.commit(result.state, result.event, settle);
+      this.broadcastViews();
+    }
+
+    /** Run one transition through the step core with live facts (now/id/random, stored link targets). */
+    runStep(cause: StepCause): StepResult {
+      const facts = liveStepFacts(createLiveFacts(), (name) => this.readLinkTargets(name));
+      return step(def, this.state, cause, facts, this.env);
+    }
+
+    /** Targets stored under a link name, in insertion order (what `unlink(name)` removes). */
+    readLinkTargets(name: string): string[] {
+      return this.ctx.storage.sql
+        .exec("SELECT target_id FROM active_links WHERE link_name = ? ORDER BY rowid", name)
+        .toArray()
+        .map((row) => TargetIdRowSchema.parse(row).target_id);
     }
 
     // --- Forward processing ---
@@ -873,32 +866,20 @@ export function actor(
         .toArray();
 
       for (const row of rows) {
-        const entry = row as {
-          id: string;
-          link_name: string;
-          target_id: string;
-          message: string;
-          caller: string;
-          caller_type: string;
-        };
+        const entry = ForwardRowSchema.parse(row);
 
         // Resolve contract name: prefer declared link def, else lowercase the link name.
         const linkDef = def.links?.[entry.link_name];
         const contractName = linkDef ? linkDef.contract.name : entry.link_name.toLowerCase().replace(/_/g, "-");
 
-        const stub = resolveStub(contractName, entry.target_id, this.ctx, this.env);
-        if (!stub || typeof stub["send"] !== "function") {
+        const send = rpcMethod(resolveStub(contractName, entry.target_id, this.ctx, this.env), "send");
+        if (send === null) {
           this.ctx.storage.sql.exec("UPDATE forwards SET status = 'failed' WHERE id = ?", entry.id);
           continue;
         }
 
-        const parsedMessage: unknown = JSON.parse(entry.message);
-        if (
-          typeof parsedMessage !== "object" ||
-          parsedMessage === null ||
-          !("type" in parsedMessage) ||
-          typeof (parsedMessage as Record<string, unknown>)["type"] !== "string"
-        ) {
+        const parsedMessage = MessageEnvelopeSchema.safeParse(JSON.parse(entry.message));
+        if (!parsedMessage.success) {
           this.ctx.storage.sql.exec("UPDATE forwards SET status = 'failed' WHERE id = ?", entry.id);
           continue;
         }
@@ -907,12 +888,7 @@ export function actor(
 
         this.ctx.storage.sql.exec("UPDATE forwards SET attempts = attempts + 1 WHERE id = ?", entry.id);
         try {
-          const sendFn = stub["send"] as (
-            caller: string,
-            callerType: "user" | "service",
-            message: { type: string; [key: string]: unknown },
-          ) => Promise<unknown>;
-          await sendFn(entry.caller, callerType, parsedMessage as { type: string; [key: string]: unknown });
+          await send(entry.caller, callerType, parsedMessage.data);
           this.ctx.storage.sql.exec("UPDATE forwards SET status = 'done' WHERE id = ?", entry.id);
         } catch {
           this.ctx.storage.sql.exec("UPDATE forwards SET status = 'failed' WHERE id = ?", entry.id);
@@ -922,14 +898,24 @@ export function actor(
 
     // --- Link processing (subscriber side) ---
 
+    /** Persist a transition's effects under its seq (inside commit()'s transaction). */
+    writeEffects(result: StepResult, seq: number, caller: string, callerType: "user" | "service"): void {
+      insertExecutions(this.ctx.storage.sql, result.effects.toExecutionEntries(seq));
+      const linkCalls = result.effects.getLinks();
+      const unlinkCalls = result.effects.getUnlinks();
+      if (linkCalls.length > 0 || unlinkCalls.length > 0) {
+        this.writeLinks(linkCalls, unlinkCalls);
+      }
+      this.persistForwards(result.effects.toForwardEntries(seq), caller, callerType);
+    }
+
     /**
-     * Process link intents captured during a message handler.
-     * Persists to active_links, then asynchronously registers with target actors.
+     * Persist link intents captured during a message handler (onUnlink already ran in the step),
+     * then asynchronously register with target actors.
      */
-    processLinks(
+    writeLinks(
       linkCalls: Array<{ name: string; id: string }>,
       unlinkCalls: Array<{ name: string; id: string | undefined }>,
-      live: LiveFacts,
     ): void {
       // Persist link intents atomically (already inside the send() transaction)
       for (const call of linkCalls) {
@@ -959,24 +945,7 @@ export function actor(
             call.id,
             call.name,
           );
-
-          // Invoke onUnlink handler if defined
-          if (linkDef.onUnlink) {
-            this.state = linkDef.onUnlink(this.state, call.id, live.ctx);
-          }
         } else {
-          // Unlink all for this link name — collect IDs before deleting for onUnlink
-          if (linkDef.onUnlink) {
-            const idRows = this.ctx.storage.sql
-              .exec("SELECT target_id FROM active_links WHERE link_name = ?", call.name)
-              .toArray();
-            const targetIds = idRows.map((row) => String(row["target_id"]));
-            live.recordUnlinked(call.name, targetIds);
-            for (const targetId of targetIds) {
-              this.state = linkDef.onUnlink(this.state, targetId, live.ctx);
-            }
-          }
-
           this.ctx.storage.sql.exec("DELETE FROM active_links WHERE link_name = ?", call.name);
         }
       }
@@ -1007,22 +976,25 @@ export function actor(
         const linkDef = def.links?.[call.name];
         if (!linkDef) continue;
         try {
-          const stub = resolveStub(linkDef.contract.name, call.id, this.ctx, this.env);
-          if (stub && typeof stub["__linkSubscribe"] === "function") {
-            await (stub["__linkSubscribe"] as (subscriberType: string, subscriberId: string) => Promise<void>)(
-              _actorName.toUpperCase().replace(/-/g, "_"),
-              this.subscriberId(),
-            );
+          const subscribe = rpcMethod(
+            resolveStub(linkDef.contract.name, call.id, this.ctx, this.env),
+            "__linkSubscribe",
+          );
+          if (subscribe !== null) {
+            await subscribe(_actorName.toUpperCase().replace(/-/g, "_"), this.subscriberId());
           }
         } catch (error) {
           // Target unreachable — invoke onError if defined, otherwise retry on restart
           const linkDef2 = def.links?.[call.name];
           if (linkDef2?.onError) {
             const errorMessage = error instanceof Error ? error.message : String(error);
-            const linkError = { message: errorMessage, code: "unreachable" };
-            const live = createLiveFacts();
-            const nextState = linkDef2.onError(this.state, linkError, call.id, live.ctx);
-            if (nextState !== this.state) {
+            const result = this.runStep({
+              type: "link.onError",
+              link: call.name,
+              targetId: call.id,
+              error: { message: errorMessage, code: "unreachable" },
+            });
+            if (result.state !== this.state) {
               const targetType = linkDef2.contract.name.toUpperCase().replace(/-/g, "_");
               this.pendingCause = {
                 type: "link.onError",
@@ -1030,15 +1002,7 @@ export function actor(
                 sourceId: call.id,
                 error: errorMessage,
               };
-              this.commit(nextState, () => ({
-                causeType: "link.onError",
-                name: call.name,
-                payload: { targetId: call.id, error: linkError },
-                caller: null,
-                callerType: null,
-                role: null,
-                facts: live.facts(),
-              }));
+              this.commit(result.state, result.event);
               this.broadcastViews();
             }
           }
@@ -1067,12 +1031,12 @@ export function actor(
 
         for (const targetId of targetIds) {
           try {
-            const stub = resolveStub(linkDef.contract.name, targetId, this.ctx, this.env);
-            if (stub && typeof stub["__linkUnsubscribe"] === "function") {
-              await (stub["__linkUnsubscribe"] as (subscriberType: string, subscriberId: string) => Promise<void>)(
-                _actorName.toUpperCase().replace(/-/g, "_"),
-                this.subscriberId(),
-              );
+            const unsubscribe = rpcMethod(
+              resolveStub(linkDef.contract.name, targetId, this.ctx, this.env),
+              "__linkUnsubscribe",
+            );
+            if (unsubscribe !== null) {
+              await unsubscribe(_actorName.toUpperCase().replace(/-/g, "_"), this.subscriberId());
             }
           } catch {
             // Target unreachable — acceptable
@@ -1141,7 +1105,7 @@ export function actor(
       if (rows.length === 0) return;
 
       for (const row of rows) {
-        const linkRow = row as { link_name: string; version: number };
+        const linkRow = LinkVersionRowSchema.parse(row);
 
         // Monotonic version check
         if (version <= linkRow.version) continue;
@@ -1150,40 +1114,28 @@ export function actor(
         if (!linkDef) continue;
 
         // Add role discriminant to view data
-        const viewWithRole = { ...(viewData as Record<string, unknown>), role };
+        const fields = ViewFieldsSchema.safeParse(viewData);
+        const viewWithRole = { ...(fields.success ? fields.data : {}), role };
 
         // Run onUpdate reducer
-        const live = createLiveFacts();
-        const nextState = linkDef.onUpdate(this.state, viewWithRole, sourceId, live.ctx);
-        if (nextState !== this.state) {
+        const result = this.runStep({ type: "link.onUpdate", link: linkRow.link_name, sourceId, view: viewWithRole });
+        if (result.state !== this.state) {
           this.pendingCause = {
             type: "link.onUpdate",
             sourceType,
             sourceId,
             viewData: viewWithRole,
           };
-          this.commit(
-            nextState,
-            () => ({
-              causeType: "link.onUpdate",
-              name: linkRow.link_name,
-              payload: { sourceId, view: viewWithRole },
-              caller: null,
-              callerType: null,
-              role: null,
-              facts: live.facts(),
-            }),
-            () => {
-              this.ctx.storage.sql.exec(
-                "UPDATE active_links SET version = ? WHERE target_type = ? AND target_id = ? AND link_name = ?",
-                version,
-                sourceType,
-                sourceId,
-                linkRow.link_name,
-              );
-              this.pushStudioLinks();
-            },
-          );
+          this.commit(result.state, result.event, () => {
+            this.ctx.storage.sql.exec(
+              "UPDATE active_links SET version = ? WHERE target_type = ? AND target_id = ? AND link_name = ?",
+              version,
+              sourceType,
+              sourceId,
+              linkRow.link_name,
+            );
+            this.pushStudioLinks();
+          });
           this.broadcastViews();
         }
       }
@@ -1199,9 +1151,8 @@ export function actor(
       const rows = this.ctx.storage.sql.exec("SELECT subscriber_type, subscriber_id FROM link_subscribers").toArray();
 
       for (const row of rows) {
-        const subscriberType = row["subscriber_type"] as string;
-        const subscriberId = row["subscriber_id"] as string;
-        this.pushToSubscriber(subscriberType, subscriberId);
+        const { subscriber_type, subscriber_id } = SubscriberRowSchema.parse(row);
+        this.pushToSubscriber(subscriber_type, subscriber_id);
       }
     }
 
@@ -1234,18 +1185,13 @@ export function actor(
       const version = Date.now(); // Monotonic version using timestamp
 
       try {
-        const stub = resolveStub(subscriberType.toLowerCase().replace(/_/g, "-"), subscriberId, this.ctx, this.env);
-        if (stub && typeof stub["__receiveLinkUpdate"] === "function") {
+        const receive = rpcMethod(
+          resolveStub(subscriberType.toLowerCase().replace(/_/g, "-"), subscriberId, this.ctx, this.env),
+          "__receiveLinkUpdate",
+        );
+        if (receive !== null) {
           // Fire and forget
-          void (
-            stub["__receiveLinkUpdate"] as (
-              sourceType: string,
-              sourceId: string,
-              viewData: unknown,
-              role: string,
-              version: number,
-            ) => Promise<void>
-          )(sourceType, sourceId, viewData, role, version);
+          void receive(sourceType, sourceId, viewData, role, version);
         }
       } catch {
         // Subscriber unreachable — skip
@@ -1263,13 +1209,10 @@ export function actor(
 
       if (rows.length === 0) return;
 
-      const calls: Array<{ name: string; id: string }> = [];
-      for (const row of rows) {
-        calls.push({
-          name: row["link_name"] as string,
-          id: row["target_id"] as string,
-        });
-      }
+      const calls = rows.map((row) => {
+        const link = ActiveLinkRowSchema.parse(row);
+        return { name: link.link_name, id: link.target_id };
+      });
 
       // Fire-and-forget re-registration
       this.registerSubscriptions(calls);
@@ -1308,46 +1251,35 @@ export function actor(
       // Create initial state with link support
       const initLinks: Array<{ name: string; id: string }> = [];
       const live = createLiveFacts();
-      const initCtx = {
-        ...live.ctx,
-        env: this.env,
-        link: async (name: string, id: string): Promise<unknown> => {
-          const linkDef = def.links?.[name];
-          if (!linkDef) throw new Error(`Link "${name}" not declared in actor definition`);
+      const link = async (name: string, id: string): Promise<unknown> => {
+        const linkDef = def.links?.[name];
+        if (!linkDef) throw new Error(`Link "${name}" not declared in actor definition`);
 
-          const stub = resolveStub(linkDef.contract.name, id, this.ctx, this.env);
-          if (!stub || typeof stub["getSnapshot"] !== "function") {
-            throw new Error(`Link "${name}": target actor unreachable`);
-          }
+        const getSnapshot = rpcMethod(resolveStub(linkDef.contract.name, id, this.ctx, this.env), "getSnapshot");
+        if (getSnapshot === null) {
+          throw new Error(`Link "${name}": target actor unreachable`);
+        }
+        const result = LinkedSnapshotSchema.parse(await getSnapshot("system", "service"));
 
-          const result = await (
-            stub["getSnapshot"] as (caller: string, callerType: string) => Promise<{ snapshot: unknown; role: string }>
-          )("system", "service");
+        // Record the link for persistence
+        initLinks.push({ name, id });
 
-          // Record the link for persistence
-          initLinks.push({ name, id });
-
-          // Return view with role discriminant (recorded as a fact for replay)
-          const view = { role: result.role, ...(result.snapshot as Record<string, unknown>) };
-          live.recordLinkView(name, id, view);
-          return view;
-        },
+        // Return view with role discriminant (recorded as a fact for replay)
+        const view = { role: result.role, ...result.snapshot };
+        live.recordLinkView(name, id, view);
+        return view;
       };
 
-      const initialState = await def.init(parsed.data, initCtx);
+      const init = await stepInit(
+        def,
+        { input: parsed.data, caller: input.caller, callerType: input.callerType },
+        liveStepFacts(live, () => []),
+        { env: this.env, link },
+      );
 
       // Persist state + init links atomically
       this.pendingCause = { type: "init" };
-      const initDraft = (): JournalDraft => ({
-        causeType: "init",
-        name: null,
-        payload: parsed.data,
-        caller: input.caller,
-        callerType: input.callerType,
-        role: null,
-        facts: live.facts(),
-      });
-      this.commit(initialState, initDraft, () => {
+      this.commit(init.state, init.event, () => {
         for (const { name, id } of initLinks) {
           const linkDef = def.links?.[name];
           if (linkDef) {
@@ -1390,36 +1322,24 @@ export function actor(
       if (def.messages === undefined) {
         return { ok: false, error: "No messages available" };
       }
-      const messages = def.messages;
 
-      // Create outbox collector
-      const outbox = createOutbox();
-      const live = createLiveFacts();
-
-      const ctx: Omit<MessageContext, "role"> = {
-        ...live.ctx,
-        caller,
-        callerType,
-        env: this.env,
-        execute: (service: string, input: unknown) => outbox.execute(service, input),
-        link: (name: string, id: string) => outbox.link(name, id),
-        unlink: (name: string, id?: string) => outbox.unlink(name, id),
-        forward: (linkName, targetId, message) => outbox.forward(linkName, targetId, message),
-      };
-
-      // Route message
-      const result = routeMessage(messages, role, this.state, event, ctx);
-
-      if (!result.ok) {
-        const base: { ok: false; error: string; detail?: string } = { ok: false, error: result.error };
-        if (result.detail !== undefined) {
-          base.detail = result.detail;
+      // Admit (validate payload, run guard), then run the transition through the step core.
+      const admission = admitMessage(def.messages, role, this.state, event, { caller, callerType, env: this.env });
+      if (!admission.ok) {
+        const base: { ok: false; error: string; detail?: string } = { ok: false, error: admission.error };
+        if (admission.detail !== undefined) {
+          base.detail = admission.detail;
         }
         return base;
       }
-
-      // Observability hook
-      const prevState = this.state;
+      const result = this.runStep({
+        type: "message",
+        name: event.type,
+        payload: admission.payload,
+        caller,
+        callerType,
+        role,
+      });
 
       // Timeline: record message cause
       const { type: _msgType, ...msgPayload } = event;
@@ -1432,40 +1352,21 @@ export function actor(
         payload: msgPayload,
       };
 
-      // Fire onTransition if defined
+      // Fire onTransition if defined (it sees the handler's state, before onUnlink)
       if (def.observe?.onTransition) {
         try {
-          def.observe.onTransition(prevState, result.state, event, { caller, role });
+          def.observe.onTransition(this.state, result.handlerState, event, { caller, role });
         } catch {
           // Observability hooks must not break the transition
         }
       }
 
-      // Persist state + executions + link intents + journal event atomically.
-      // Links are processed before the snapshot is written: onUnlink may change state.
-      const executionCount = outbox.getExecutions().length;
-      const linkCalls = outbox.getLinks();
-      const unlinkCalls = outbox.getUnlinks();
-      const forwardCount = outbox.getForwards().length;
-      this.commit(
-        result.state,
-        () => ({
-          causeType: "message",
-          name: event.type,
-          payload: result.payload,
-          caller,
-          callerType,
-          role,
-          facts: live.facts(),
-        }),
-        (seq) => {
-          insertExecutions(this.ctx.storage.sql, outbox.toExecutionEntries(seq));
-          if (linkCalls.length > 0 || unlinkCalls.length > 0) {
-            this.processLinks(linkCalls, unlinkCalls, live);
-          }
-          this.persistForwards(outbox.toForwardEntries(seq), caller, callerType);
-        },
-      );
+      // Persist state + executions + link intents + forwards + journal event atomically.
+      const executionCount = result.effects.getExecutions().length;
+      const linkCalls = result.effects.getLinks();
+      const unlinkCalls = result.effects.getUnlinks();
+      const forwardCount = result.effects.getForwards().length;
+      this.commit(result.state, result.event, (seq) => this.writeEffects(result, seq, caller, callerType));
 
       // Broadcast views to connected clients and DO subscribers
       this.broadcastViews();
@@ -1753,53 +1654,24 @@ export function actor(
 
       // Run lifecycle.connect if defined
       if (def.lifecycle?.connect) {
-        const connectOutbox = createOutbox();
-        const live = createLiveFacts();
-        const connectCtx = {
-          ...live.ctx,
+        const result = this.runStep({
+          type: "lifecycle.connect",
           caller: callerInfo.caller,
           callerType: callerInfo.callerType,
-          env: this.env,
-          execute: (service: string, input: unknown) => connectOutbox.execute(service, input),
-          forward: (linkName: string, targetId: string, message: { type: string; [key: string]: unknown }) =>
-            connectOutbox.forward(linkName, targetId, message),
-        };
-        const nextState = def.lifecycle.connect(
-          this.state,
-          {
-            caller: callerInfo.caller,
-            callerType: callerInfo.callerType,
-            callerConnections: this.callerConnectionCount(callerInfo.caller, callerInfo.callerType),
-          },
-          connectCtx,
-        );
-        if (nextState instanceof Promise) {
-          throw new Error("lifecycle.connect returned a Promise. Handlers must be synchronous.");
-        }
-        const connectExecutions = connectOutbox.getExecutions().length;
-        const connectForwards = connectOutbox.getForwards().length;
-        if (nextState !== this.state || connectExecutions > 0 || connectForwards > 0) {
+          callerConnections: this.callerConnectionCount(callerInfo.caller, callerInfo.callerType),
+          role,
+        });
+        const connectExecutions = result.effects.getExecutions().length;
+        const connectForwards = result.effects.getForwards().length;
+        if (result.state !== this.state || connectExecutions > 0 || connectForwards > 0) {
           this.pendingCause = {
             type: "lifecycle.connect",
             caller: callerInfo.caller,
             callerType: callerInfo.callerType,
             role,
           };
-          this.commit(
-            nextState,
-            () => ({
-              causeType: "lifecycle.connect",
-              name: null,
-              payload: {},
-              caller: callerInfo.caller,
-              callerType: callerInfo.callerType,
-              role,
-              facts: live.facts(),
-            }),
-            (seq) => {
-              insertExecutions(this.ctx.storage.sql, connectOutbox.toExecutionEntries(seq));
-              this.persistForwards(connectOutbox.toForwardEntries(seq), callerInfo.caller, callerInfo.callerType);
-            },
+          this.commit(result.state, result.event, (seq) =>
+            this.writeEffects(result, seq, callerInfo.caller, callerInfo.callerType),
           );
           this.broadcastViews();
           if (connectExecutions > 0) {
@@ -1837,18 +1709,13 @@ export function actor(
       const { caller, callerType } = info;
 
       try {
-        const parsed: unknown = JSON.parse(data);
         // Parse at the boundary: validate the message has at minimum a type field
-        if (
-          typeof parsed !== "object" ||
-          parsed === null ||
-          !("type" in parsed) ||
-          typeof (parsed as Record<string, unknown>)["type"] !== "string"
-        ) {
+        const parsed = MessageEnvelopeSchema.safeParse(JSON.parse(data));
+        if (!parsed.success) {
           ws.send(JSON.stringify({ type: "__error", detail: "Message must have a string 'type' field" }));
           return;
         }
-        const event = parsed as Record<string, unknown> & { type: string };
+        const event = parsed.data;
 
         // Handle reconnect handshake
         if (event.type === "__reconnect" && typeof event["lastChecksum"] === "string") {
@@ -1945,55 +1812,23 @@ export function actor(
 
       // Run lifecycle.disconnect if defined
       if (def.lifecycle?.disconnect) {
-        const disconnectOutbox = createOutbox();
-        const live = createLiveFacts();
-        const disconnectCtx = {
-          ...live.ctx,
+        const result = this.runStep({
+          type: "lifecycle.disconnect",
           caller,
           callerType: info.callerType,
-          env: this.env,
-          execute: (service: string, input: unknown) => disconnectOutbox.execute(service, input),
-          forward: (linkName: string, targetId: string, message: { type: string; [key: string]: unknown }) =>
-            disconnectOutbox.forward(linkName, targetId, message),
-        };
-        const nextState = def.lifecycle.disconnect(
-          this.state,
-          {
-            caller,
-            callerType: info.callerType,
-            callerConnections: this.callerConnectionCount(caller, info.callerType, ws),
-          },
-          disconnectCtx,
-        );
-        if (nextState instanceof Promise) {
-          throw new Error("lifecycle.disconnect returned a Promise. Handlers must be synchronous.");
-        }
-        const disconnectExecutions = disconnectOutbox.getExecutions().length;
-        const disconnectForwards = disconnectOutbox.getForwards().length;
-        if (nextState !== this.state || disconnectExecutions > 0 || disconnectForwards > 0) {
-          const disconnectRole = resolveRole(def.roles, nextState, caller, { callerType: info.callerType });
+          callerConnections: this.callerConnectionCount(caller, info.callerType, ws),
+          role: null,
+        });
+        const disconnectExecutions = result.effects.getExecutions().length;
+        const disconnectForwards = result.effects.getForwards().length;
+        if (result.state !== this.state || disconnectExecutions > 0 || disconnectForwards > 0) {
           this.pendingCause = {
             type: "lifecycle.disconnect",
             caller,
             callerType: info.callerType,
-            role: disconnectRole ?? "unknown",
+            role: result.event.role ?? "unknown",
           };
-          this.commit(
-            nextState,
-            () => ({
-              causeType: "lifecycle.disconnect",
-              name: null,
-              payload: {},
-              caller,
-              callerType: info.callerType,
-              role: disconnectRole,
-              facts: live.facts(),
-            }),
-            (seq) => {
-              insertExecutions(this.ctx.storage.sql, disconnectOutbox.toExecutionEntries(seq));
-              this.persistForwards(disconnectOutbox.toForwardEntries(seq), caller, info.callerType);
-            },
-          );
+          this.commit(result.state, result.event, (seq) => this.writeEffects(result, seq, caller, info.callerType));
           this.broadcastViews();
           if (disconnectForwards > 0) {
             this.drainForwards();

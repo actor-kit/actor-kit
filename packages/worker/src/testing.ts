@@ -88,8 +88,19 @@ export { resolveRole } from "./runtime/roles";
 // Route parsing
 export type { ActorRoute } from "./runtime/route-to-actor";
 export { parseActorRoute } from "./runtime/route-to-actor";
-// Studio connection row parsing (pure)
-export { toStudioConnections } from "./runtime/studio-connections";
+// Step core (ADR-015 D4): one transition as a pure function
+export type {
+  Admission,
+  InitCause,
+  PendingLinks,
+  StepCause,
+  StepDef,
+  StepEffects,
+  StepFacts,
+  StepMessageSlot,
+  StepResult,
+} from "./runtime/step";
+export { admitMessage, liveUnlinkTargets, step, stepInit } from "./runtime/step";
 // Studio protocol (pure): timeline options, timeline rows, studio WebSocket frames
 export type {
   StudioActiveLink,

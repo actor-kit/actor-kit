@@ -11,6 +11,7 @@
 import type { DeterministicContext } from "@actor-kit/core";
 import { xxh64 } from "@actor-kit/core";
 import { z } from "zod";
+import { replayStepFacts, type StepCause, type StepDef, step, stepInit } from "./step";
 
 // --- Facts ---
 
@@ -378,44 +379,10 @@ export function readJournal(sql: JournalSql): Journal {
 // --- Replay ---
 
 /**
- * The parts of an actor definition replay calls. Runtime-shaped (unknown-typed, bivariant
- * methods); messages are role-nested as the runtime stores them.
+ * The parts of an actor definition replay calls: the step core's definition (runtime-shaped,
+ * unknown-typed, bivariant methods; messages role-nested as the runtime stores them).
  */
-export interface ReplayableDef {
-  init?(input: unknown, ctx: unknown): unknown;
-  messages?: Record<string, Record<string, { handler(state: unknown, payload: unknown, ctx: unknown): unknown }>>;
-  lifecycle?: {
-    connect?(state: unknown, event: { caller: string; callerType: "user" | "service" }, ctx: unknown): unknown;
-    disconnect?(state: unknown, event: { caller: string; callerType: "user" | "service" }, ctx: unknown): unknown;
-  };
-  services?: Record<
-    string,
-    {
-      onDone?(state: unknown, result: unknown, input: unknown, ctx: DeterministicContext): unknown;
-      onError?(state: unknown, error: { message: string }, input: unknown, ctx: DeterministicContext): unknown;
-    }
-  >;
-  links?: Record<
-    string,
-    {
-      onUpdate(state: unknown, view: unknown, id: string | undefined, ctx: DeterministicContext): unknown;
-      onError?:
-        | ((
-            state: unknown,
-            error: { message: string; code: string },
-            id: string | undefined,
-            ctx: DeterministicContext,
-          ) => unknown)
-        | undefined;
-      onUnlink?: ((state: unknown, id: string | undefined, ctx: DeterministicContext) => unknown) | undefined;
-    }
-  >;
-  migrate?(persisted: unknown, fromVersion: number): unknown;
-  serialize?(state: unknown): unknown;
-  restore?(serialized: unknown): unknown;
-}
-
-const noop = (): void => {};
+export type ReplayableDef = StepDef;
 
 const ServicePayload = z.object({ input: z.unknown(), result: z.unknown() });
 const ServiceErrorPayload = z.object({ input: z.unknown(), error: z.object({ message: z.string() }) });
@@ -438,7 +405,48 @@ function callerOf(event: JournalEvent): { caller: string; callerType: "user" | "
   return { caller: event.caller, callerType: event.callerType };
 }
 
-/** Fold one journal event through the definition's current handlers. */
+type ReplayCause = (def: ReplayableDef, state: unknown, event: JournalEvent) => StepCause;
+
+/** How each journaled cause becomes a step cause again. Handlers that are gone fail loudly. */
+const REPLAY_CAUSES: Record<Exclude<JournalCauseType, "init" | "restore">, ReplayCause> = {
+  message: (def, _state, event) => {
+    const name = event.name ?? "";
+    const role = event.role ?? "";
+    required(def.messages?.[role]?.[name], `message "${name}" for role "${role}"`);
+    return { type: "message", name, payload: event.payload, role, ...callerOf(event) };
+  },
+  "lifecycle.connect": (def, _state, event) => {
+    required(def.lifecycle?.connect, "lifecycle.connect");
+    return { type: "lifecycle.connect", role: event.role, ...callerOf(event) };
+  },
+  "lifecycle.disconnect": (def, _state, event) => {
+    required(def.lifecycle?.disconnect, "lifecycle.disconnect");
+    return { type: "lifecycle.disconnect", role: event.role, ...callerOf(event) };
+  },
+  "service.onDone": (def, _state, event) => {
+    required(def.services?.[event.name ?? ""]?.onDone, `service "${event.name}" onDone`);
+    return { type: "service.onDone", service: event.name ?? "", ...ServicePayload.parse(event.payload) };
+  },
+  "service.onError": (def, _state, event) => {
+    required(def.services?.[event.name ?? ""]?.onError, `service "${event.name}" onError`);
+    return { type: "service.onError", service: event.name ?? "", ...ServiceErrorPayload.parse(event.payload) };
+  },
+  "link.onUpdate": (def, _state, event) => {
+    required(def.links?.[event.name ?? ""], `link "${event.name}"`);
+    return { type: "link.onUpdate", link: event.name ?? "", ...LinkUpdatePayload.parse(event.payload) };
+  },
+  "link.onError": (def, _state, event) => {
+    required(def.links?.[event.name ?? ""]?.onError, `link "${event.name}" onError`);
+    return { type: "link.onError", link: event.name ?? "", ...LinkErrorPayload.parse(event.payload) };
+  },
+  migrate: (def, state, event) => {
+    required(def.migrate, "migrate");
+    const persisted = def.serialize ? def.serialize(state) : state;
+    return { type: "migrate", ...MigratePayload.parse(event.payload), persisted };
+  },
+};
+
+/** Fold one journal event through the definition's current handlers (the step core, guards never run). */
 export async function applyJournalEvent(
   def: ReplayableDef,
   state: unknown,
@@ -446,81 +454,17 @@ export async function applyJournalEvent(
   options: { env?: unknown } = {},
 ): Promise<unknown> {
   const env = options.env ?? {};
-  const facts = createReplayFacts(event.facts);
-  const det = facts.ctx;
-
-  switch (event.causeType) {
-    case "init": {
-      const init = required(def.init, "init");
-      return init(event.payload, {
-        env,
-        link: async (name: string, id: string) => facts.takeLinkView(name, id),
-        ...det,
-      });
-    }
-    case "message": {
-      const name = event.name ?? "";
-      const role = event.role ?? "";
-      const slot = required(def.messages?.[role]?.[name], `message "${name}" for role "${role}"`);
-      const { caller, callerType } = callerOf(event);
-      const unlinks: { name: string; id: string | undefined }[] = [];
-      let next = slot.handler(state, event.payload, {
-        caller,
-        callerType,
-        role,
-        env,
-        execute: noop,
-        link: noop,
-        forward: noop,
-        unlink: (linkName: string, id?: string) => {
-          unlinks.push({ name: linkName, id });
-        },
-        ...det,
-      });
-      for (const call of unlinks) {
-        const onUnlink = def.links?.[call.name]?.onUnlink;
-        if (onUnlink === undefined) continue;
-        const ids = call.id !== undefined ? [call.id] : facts.takeUnlinked(call.name);
-        for (const id of ids) next = onUnlink(next, id, det);
-      }
-      return next;
-    }
-    case "lifecycle.connect":
-    case "lifecycle.disconnect": {
-      const which = event.causeType === "lifecycle.connect" ? "connect" : "disconnect";
-      const handler = required(def.lifecycle?.[which], `lifecycle.${which}`);
-      const who = callerOf(event);
-      return handler(state, who, { ...who, env, execute: noop, forward: noop, ...det });
-    }
-    case "service.onDone": {
-      const onDone = required(def.services?.[event.name ?? ""]?.onDone, `service "${event.name}" onDone`);
-      const { input, result } = ServicePayload.parse(event.payload);
-      return onDone(state, result, input, det);
-    }
-    case "service.onError": {
-      const onError = required(def.services?.[event.name ?? ""]?.onError, `service "${event.name}" onError`);
-      const { input, error } = ServiceErrorPayload.parse(event.payload);
-      return onError(state, error, input, det);
-    }
-    case "link.onUpdate": {
-      const linkDef = required(def.links?.[event.name ?? ""], `link "${event.name}"`);
-      const { sourceId, view } = LinkUpdatePayload.parse(event.payload);
-      return linkDef.onUpdate(state, view, sourceId, det);
-    }
-    case "link.onError": {
-      const onError = required(def.links?.[event.name ?? ""]?.onError, `link "${event.name}" onError`);
-      const { targetId, error } = LinkErrorPayload.parse(event.payload);
-      return onError(state, error, targetId, det);
-    }
-    case "migrate": {
-      const migrate = required(def.migrate, "migrate");
-      const { fromVersion } = MigratePayload.parse(event.payload);
-      const migrated = migrate(def.serialize ? def.serialize(state) : state, fromVersion);
-      return def.restore ? def.restore(migrated) : migrated;
-    }
-    case "restore":
-      throw new Error("Journal replay: restore events are not supported yet (ADR-013 step 3)");
+  const facts = replayStepFacts(event.facts);
+  if (event.causeType === "init") {
+    required(def.init, "init");
+    const io = { env, link: async (name: string, id: string) => facts.takeLinkView(name, id) };
+    const cause = { input: event.payload, caller: event.caller, callerType: event.callerType };
+    return (await stepInit(def, cause, facts, io)).state;
   }
+  if (event.causeType === "restore") {
+    throw new Error("Journal replay: restore events are not supported yet (ADR-013 step 3)");
+  }
+  return step(def, state, REPLAY_CAUSES[event.causeType](def, state, event), facts, env).state;
 }
 
 /** Thrown when a replayed state's checksum differs from the one recorded when the event was written. */

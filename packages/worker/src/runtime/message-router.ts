@@ -1,16 +1,14 @@
 /**
  * Message router — validates and dispatches messages to handlers.
  *
- * Flow:
- * 1. Look up message handler for the role
- * 2. Extract payload (strip `type` field)
- * 3. Validate payload with Zod schema (safeParse)
- * 4. Evaluate guard if present
- * 5. Call handler with (state, parsedPayload, ctx)
+ * Flow: admitMessage() (look up the message for the role, strip `type`, parse the payload with
+ * Zod, run the guard), then call the handler with (state, parsedPayload, ctx). The Durable
+ * Object admits and then runs the handler through the step core; testActor() uses this.
  */
 
 import type { GuardContext, MessageContext } from "@actor-kit/core";
 import type { z } from "zod";
+import { admitMessage } from "./step";
 
 // --- Route result ---
 
@@ -34,6 +32,7 @@ interface RoutableMessage<TState> {
 
 // --- Router ---
 
+/** Admit the message (find it for the role, parse its payload, run its guard), then run its handler. */
 export function routeMessage<TState>(
   roleMessages: Record<string, Record<string, RoutableMessage<TState>>>,
   role: string,
@@ -41,52 +40,15 @@ export function routeMessage<TState>(
   event: { type: string; [key: string]: unknown },
   ctxBase: Omit<MessageContext, "role">,
 ): RouteResult<TState> {
-  // 1. Look up messages for this role
-  const messagesForRole = roleMessages[role];
-  if (messagesForRole === undefined) {
-    return { ok: false, error: "message_not_found" };
-  }
+  const admission = admitMessage(roleMessages, role, state, event, {
+    caller: ctxBase.caller,
+    callerType: ctxBase.callerType,
+    env: ctxBase.env,
+  });
+  if (!admission.ok) return admission;
 
-  // 2. Look up handler for this message type
-  const messageDef = messagesForRole[event.type];
-  if (messageDef === undefined) {
-    return { ok: false, error: "message_not_found" };
-  }
-
-  // 3. Extract payload (strip 'type' field)
-  const { type: _type, ...payload } = event;
-
-  // 4. Validate payload with Zod
-  const parseResult = messageDef.schema.safeParse(payload);
-  if (!parseResult.success) {
-    return {
-      ok: false,
-      error: "validation_failed",
-      detail: parseResult.error.message,
-    };
-  }
-
-  // 5. Build full context
-  const ctx: MessageContext = {
-    ...ctxBase,
-    role,
-  };
-
-  // 6. Evaluate guard with (state, payload, guardCtx) — guards are pure predicates, no side effects
-  if (messageDef.guard !== undefined) {
-    const guardCtx: GuardContext = {
-      role,
-      caller: ctxBase.caller,
-      callerType: ctxBase.callerType,
-      env: ctxBase.env,
-    };
-    if (!messageDef.guard(state, parseResult.data, guardCtx)) {
-      return { ok: false, error: "guard_failed" };
-    }
-  }
-
-  // 7. Call handler — payload is Zod-validated, handler is correctly typed at definition site
-  const nextState = messageDef.handler(state, parseResult.data, ctx);
+  // Payload is Zod-validated; the handler is correctly typed at its definition site.
+  const nextState = admission.message.handler(state, admission.payload, { ...ctxBase, role });
 
   // Runtime guard: reject async handlers that slip past the type system (JS consumers, structural typing)
   if (nextState instanceof Promise) {
@@ -95,5 +57,5 @@ export function routeMessage<TState>(
     );
   }
 
-  return { ok: true, state: nextState, payload: parseResult.data };
+  return { ok: true, state: nextState, payload: admission.payload };
 }
