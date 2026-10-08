@@ -164,7 +164,8 @@ interface ActorDef {
     input: unknown,
     ctx: { env: unknown; link: (name: string, id: string) => Promise<unknown> } & DeterministicContext,
   ): unknown | Promise<unknown>; // bivariant — optionally async, receives ctx
-  version?: number;
+  /** The typed version chain (ADR-015 D5): `[version(1, Schema), version(2, Schema, { state, events })]`. */
+  versions?: readonly unknown[];
   roles: Record<
     string,
     {
@@ -227,14 +228,6 @@ interface ActorDef {
       retry?: unknown;
     }
   >;
-  /** Compiled from `versions` by createActorClass (ADR-015 D5); never written by hand. */
-  migrate?(persisted: unknown, fromVersion: number): unknown;
-  /** Compiled from `versions`: message payload upcasts for older journal events. */
-  upcast?(message: string, payload: unknown, fromVersion: number): unknown;
-  /** Compiled from `versions`: every version in the chain. */
-  knownVersions?: readonly number[];
-  /** Compiled from `versions`: the newest version that rebuilds by replaying the journal. */
-  rebuildVersion?: number | null;
   serialize?(state: unknown): unknown;
   restore?(serialized: unknown): unknown;
   /** Event journal (ADR-013). Omitted: on, keep everything. `false`: off. `{ keep }`: prune. */
@@ -412,8 +405,11 @@ function resolveStub(
 
 export function actor(
   _actorName: string,
-  def: ActorDef,
+  actorDef: ActorDef,
 ): { new (ctx: DurableObjectState, env: Record<string, unknown>): DurableObject } {
+  // The version chain (ADR-015 D5) compiles into version, migrate and upcast; the old `version` /
+  // `migrate` options are refused.
+  const def = toRuntimeDef(actorDef);
   // Validate studio config at definition time, not on the first mutation.
   const configuredTimelineSize = resolveTimelineSize(def.studio?.timelineSize);
   const studioRedactor = compileRedaction(def.studio?.redact);
@@ -2581,8 +2577,7 @@ export function createActorClass<TContract extends { readonly name: string; read
     throw new Error("createActorClass: contract.def must have init, roles, and views");
   }
 
-  // The version chain (ADR-015 D5) compiles into version, migrate and upcast.
-  const def = toRuntimeDef(contract.def);
+  const def = contract.def;
 
   // Detect flat messages and wrap into role-nested format
   if (def.messages && isFlatMessages(def.messages)) {

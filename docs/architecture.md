@@ -363,10 +363,10 @@ they recorded, which Studio uses for "Restore to here".
 ### Versions (ADR-015 D5)
 
 `versions: [version(n, Schema, { state, events, rebuild })]` is compiled by `toRuntimeDef()` (`runtime/versions.ts`)
-when a contract becomes a DO class (`createActorClass`), a simulation or a replay: `version` (the last), `migrate`
+when a definition becomes a DO class (`actor()`, which `createActorClass` calls), a simulation or a replay: `version` (the last), `migrate`
 (parse with the old version's schema, then each `state` step parsed by its version's schema), `upcast` (message
-payloads through every later `events` map), `knownVersions` and `rebuildVersion`. A contract with the old `version`
-/ `migrate` keys is refused.
+payloads through every later `events` map), `knownVersions` and `rebuildVersion`. A definition with the old
+`version` / `migrate` keys is refused, by `actor()` as well as by contracts: `versions` is the only path.
 
 On wake with an older stored version: `migrate` through the step core, or, across a `rebuild: "replay"` version,
 `rebuildFromJournal()` (whole journal, current handlers, payloads upcast, no checksum comparison) in

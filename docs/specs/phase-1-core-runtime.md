@@ -128,8 +128,6 @@ const todoList = defineActor({
     memberIds: [] as string[],
   }),
 
-  version: 1,
-
   roles: {
     owner: (state, caller) => caller === state.ownerId,
     member: (state, caller) => state.memberIds.includes(caller),
@@ -208,8 +206,8 @@ Requirements:
 - TMessages constrained: keys must be subset of TRoles keys, values must be `Record<string, MessageDef>`
 - TViews constrained: keys must match TRoles keys exactly
 - `input` is a Zod schema — parsed on spawn, type flows into `init()`
-- `version` is a number — used for migration
-- `migrate(persisted, fromVersion)` is optional — runs when stored version !== current
+- Versioning is the typed chain `versions: [version(n, Schema, { state, events, rebuild })]` (ADR-015 D5); the
+  original `version` / `migrate` options are gone
 - `serialize(state)` / `restore(serialized)` are optional — for non-JSON-safe state
 - No `any` or `as` in the type signature
 

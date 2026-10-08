@@ -7,7 +7,7 @@
 
 import { env, runInDurableObject } from "cloudflare:test";
 import { replayJournal } from "@actor-kit/test";
-import { createActorClass, defineActor } from "@actor-kit/worker";
+import { actor, createActorClass, defineActor, version } from "@actor-kit/worker";
 import { readJournal } from "@actor-kit/worker/testing";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
@@ -82,5 +82,16 @@ describe("no compatibility shim", () => {
     expect(() => createActorClass(defineActor("old-migrate", { ...base, migrate: (p: unknown) => p }))).toThrow(
       /replaced by versions/,
     );
+  });
+
+  it("the low-level actor() refuses version and migrate too, and takes versions", () => {
+    const base = { input: z.object({}), init: () => ({ n: 0 }), roles: { any: () => true }, views: {} };
+    // Built outside the call: the old keys are no longer in actor()'s type, as they are not at runtime.
+    const oldVersion = { ...base, version: 2 };
+    const oldMigrate = { ...base, migrate: (p: unknown) => p };
+    expect(() => actor("old-version", oldVersion)).toThrow(/"version" and "migrate" are replaced by versions/);
+    expect(() => actor("old-migrate", oldMigrate)).toThrow(/replaced by versions/);
+    const N = z.object({ n: z.number() });
+    expect(() => actor("chained", { ...base, versions: [version(1, N), version(2, N)] })).not.toThrow();
   });
 });
