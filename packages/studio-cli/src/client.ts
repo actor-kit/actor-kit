@@ -24,31 +24,25 @@ export class StudioClientError extends Error {
   }
 }
 
-const AuthEnv = z.object({
-  CF_ACCESS_CLIENT_ID: z.string().min(1).optional(),
-  CF_ACCESS_CLIENT_SECRET: z.string().min(1).optional(),
-  CF_ACCESS_TOKEN: z.string().min(1).optional(),
-});
+/** An environment setting, with the empty string treated as unset. */
+function setting(env: Record<string, string | undefined>, name: string): string | undefined {
+  const value = env[name];
+  return value === "" ? undefined : value;
+}
 
 /** Credentials from the environment. Values are never logged or echoed. */
 export function authFromEnv(env: Record<string, string | undefined>): StudioAuth {
-  const parsed = AuthEnv.parse({
-    CF_ACCESS_CLIENT_ID: env["CF_ACCESS_CLIENT_ID"] || undefined,
-    CF_ACCESS_CLIENT_SECRET: env["CF_ACCESS_CLIENT_SECRET"] || undefined,
-    CF_ACCESS_TOKEN: env["CF_ACCESS_TOKEN"] || undefined,
-  });
-  const { CF_ACCESS_CLIENT_ID: id, CF_ACCESS_CLIENT_SECRET: secret, CF_ACCESS_TOKEN: token } = parsed;
+  const id = setting(env, "CF_ACCESS_CLIENT_ID");
+  const secret = setting(env, "CF_ACCESS_CLIENT_SECRET");
+  if (id !== undefined && secret !== undefined) return { kind: "service-token", clientId: id, clientSecret: secret };
   if (id !== undefined || secret !== undefined) {
-    if (id === undefined || secret === undefined) {
-      throw new StudioClientError(
-        "Set both CF_ACCESS_CLIENT_ID and CF_ACCESS_CLIENT_SECRET (an Access service token)",
-        null,
-      );
-    }
-    return { kind: "service-token", clientId: id, clientSecret: secret };
+    throw new StudioClientError(
+      "Set both CF_ACCESS_CLIENT_ID and CF_ACCESS_CLIENT_SECRET (an Access service token)",
+      null,
+    );
   }
-  if (token !== undefined) return { kind: "access-token", token };
-  return { kind: "none" };
+  const token = setting(env, "CF_ACCESS_TOKEN");
+  return token === undefined ? { kind: "none" } : { kind: "access-token", token };
 }
 
 function authHeaders(auth: StudioAuth): Record<string, string> {

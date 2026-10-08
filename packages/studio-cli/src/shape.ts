@@ -11,6 +11,7 @@
 
 import { z } from "zod";
 import type { TimelineEntry } from "./client";
+import { defined } from "./present";
 
 export interface TimelineShapeEntry {
   id: number;
@@ -55,51 +56,63 @@ function keysOf(value: unknown): string[] | undefined {
 export function changedPaths(before: unknown, after: unknown): string[] {
   const out = new Set<string>();
   const visit = (a: unknown, b: unknown, path: string[]): void => {
-    if (Array.isArray(a) && Array.isArray(b)) {
-      for (let i = 0; i < Math.max(a.length, b.length); i++) visit(a[i], b[i], [...path, "*"]);
-      return;
-    }
-    if (isRecord(a) && isRecord(b)) {
-      for (const key of new Set([...Object.keys(a), ...Object.keys(b)])) {
-        visit(Object.hasOwn(a, key) ? a[key] : undefined, Object.hasOwn(b, key) ? b[key] : undefined, [...path, key]);
-      }
-      return;
-    }
-    if (JSON.stringify(a) !== JSON.stringify(b)) out.add(path.length === 0 ? "$" : path.join("."));
+    for (const [childA, childB, segment] of children(a, b)) visit(childA, childB, [...path, segment]);
+    if (isLeafPair(a, b) && JSON.stringify(a) !== JSON.stringify(b)) out.add(path.length === 0 ? "$" : path.join("."));
   };
   visit(before, after, []);
   return [...out].sort();
 }
 
+/** Two arrays or two records are compared child by child; anything else is a leaf pair. */
+function isLeafPair(a: unknown, b: unknown): boolean {
+  return !(Array.isArray(a) && Array.isArray(b)) && !(isRecord(a) && isRecord(b));
+}
+
+/** Child pairs to compare under two arrays (index as `*`) or two records (every key of either). */
+function children(a: unknown, b: unknown): [unknown, unknown, string][] {
+  if (Array.isArray(a) && Array.isArray(b)) {
+    return Array.from({ length: Math.max(a.length, b.length) }, (_, i) => [a[i], b[i], "*"]);
+  }
+  if (isRecord(a) && isRecord(b)) {
+    return [...new Set([...Object.keys(a), ...Object.keys(b)])].map((key) => [ownValue(a, key), ownValue(b, key), key]);
+  }
+  return [];
+}
+
+function ownValue(record: Record<string, unknown>, key: string): unknown {
+  return Object.hasOwn(record, key) ? record[key] : undefined;
+}
+
+type CauseShape = Pick<
+  TimelineShapeEntry,
+  "messageType" | "service" | "role" | "callerType" | "payloadKeys" | "inputKeys"
+>;
+
+/** Names and keys from a cause, never its values. Unparsable cause data gives nothing. */
+function causeShape(causeData: string): CauseShape {
+  const cause = CauseSchema.safeParse(parseJson(causeData));
+  if (!cause.success) return {};
+  const { messageType, service, role, callerType, payload, input } = cause.data;
+  return defined({ messageType, service, role, callerType, payloadKeys: keysOf(payload), inputKeys: keysOf(input) });
+}
+
+/** Changed state paths since the previous entry; none without a predecessor or a parsable pair. */
+function pathsSince(previous: TimelineEntry | undefined, entry: TimelineEntry): string[] {
+  if (previous === undefined) return [];
+  const before = parseJson(previous.stateSnapshot);
+  const after = parseJson(entry.stateSnapshot);
+  return before === undefined || after === undefined ? [] : changedPaths(before, after);
+}
+
 /** Shape of a timeline page, oldest first. The oldest entry has no predecessor, so no changed paths. */
 export function timelineShape(entries: readonly TimelineEntry[]): TimelineShapeEntry[] {
   const ordered = [...entries].sort((a, b) => a.id - b.id);
-  return ordered.map((entry, index) => {
-    const cause = CauseSchema.safeParse(parseJson(entry.causeData));
-    const previous = ordered[index - 1];
-    const shape: TimelineShapeEntry = {
-      id: entry.id,
-      at: entry.createdAt,
-      causeType: entry.causeType,
-      checksum: entry.checksum,
-      changedPaths: [],
-    };
-    if (cause.success) {
-      const { messageType, service, role, callerType, payload, input } = cause.data;
-      if (messageType !== undefined) shape.messageType = messageType;
-      if (service !== undefined) shape.service = service;
-      if (role !== undefined) shape.role = role;
-      if (callerType !== undefined) shape.callerType = callerType;
-      const payloadKeys = keysOf(payload);
-      if (payloadKeys !== undefined) shape.payloadKeys = payloadKeys;
-      const inputKeys = keysOf(input);
-      if (inputKeys !== undefined) shape.inputKeys = inputKeys;
-    }
-    if (previous !== undefined) {
-      const before = parseJson(previous.stateSnapshot);
-      const after = parseJson(entry.stateSnapshot);
-      if (before !== undefined && after !== undefined) shape.changedPaths = changedPaths(before, after);
-    }
-    return shape;
-  });
+  return ordered.map((entry, index) => ({
+    id: entry.id,
+    at: entry.createdAt,
+    causeType: entry.causeType,
+    checksum: entry.checksum,
+    changedPaths: pathsSince(ordered[index - 1], entry),
+    ...causeShape(entry.causeData),
+  }));
 }
