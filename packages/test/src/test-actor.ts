@@ -129,24 +129,39 @@ interface ContractTestHarness<TState, TInput, TMessage, TViewData> {
   view(state: TState, caller: string, opts?: { callerType?: "user" | "service" }): { role: string; data: TViewData };
 }
 
-// --- Flat message detection + wrapping ---
+// --- Message layout: flat ({ NAME: message(...) }) or role-nested ({ role: { NAME: message(...) } }) ---
 
-function isFlatMessages(messages: Record<string, unknown>): boolean {
-  const values = Object.values(messages);
-  if (values.length === 0) return false;
-  return values.every((v) => typeof v === "object" && v !== null && "schema" in v && "handler" in v);
+type MessageSlot = TestableActorDef<unknown, unknown>["messages"][string][string];
+
+/** A message definition as message() builds it: a schema and a handler. */
+function isMessageSlot(value: unknown): value is MessageSlot {
+  return typeof value === "object" && value !== null && "schema" in value && "handler" in value;
 }
 
-function wrapFlatMessages(
-  flatMessages: Record<string, unknown>,
-  roles: Record<string, unknown>,
-): Record<string, Record<string, unknown>> {
-  const roleNames = Object.keys(roles);
-  const result: Record<string, Record<string, unknown>> = {};
-  for (const role of roleNames) {
-    result[role] = flatMessages;
+/** The record's entries when every one is a message definition, otherwise undefined. */
+function messageSlots(record: unknown): Record<string, MessageSlot> | undefined {
+  if (typeof record !== "object" || record === null) return undefined;
+  const slots: Record<string, MessageSlot> = {};
+  for (const [name, slot] of Object.entries(record)) {
+    if (!isMessageSlot(slot)) return undefined;
+    slots[name] = slot;
   }
-  return result;
+  return slots;
+}
+
+/** Role-nested messages. Flat messages apply to every role, as in the runtime. */
+function roleNestedMessages(
+  messages: Record<string, unknown>,
+  roles: Record<string, unknown>,
+): TestableActorDef<unknown, unknown>["messages"] {
+  const flat = messageSlots(messages);
+  if (flat !== undefined) return Object.fromEntries(Object.keys(roles).map((role) => [role, flat]));
+  const nested: TestableActorDef<unknown, unknown>["messages"] = {};
+  for (const [role, record] of Object.entries(messages)) {
+    const slots = messageSlots(record);
+    if (slots !== undefined) nested[role] = slots;
+  }
+  return nested;
 }
 
 // --- Contract detection ---
@@ -179,6 +194,38 @@ function isContract(arg: TestableActorDef<unknown, unknown> | ContractShape): ar
 }
 
 // --- Helpers ---
+
+const ROUTE_ERRORS = {
+  message_not_found: (type: string, role: string) => `Message "${type}" not found for role "${role}"`,
+  validation_failed: (type: string, _role: string, detail: string | undefined) =>
+    `Validation failed for "${type}": ${detail ?? "unknown"}`,
+  guard_failed: (type: string) => `Guard rejected "${type}"`,
+} as const;
+
+/** Effect hooks for a message context, recording every call instead of performing it. */
+function recordEffects() {
+  const captured: Pick<SendResult<unknown>, "executions" | "links" | "unlinks" | "forwards"> = {
+    executions: [],
+    links: [],
+    unlinks: [],
+    forwards: [],
+  };
+  const ctx: Pick<MessageContext, "execute" | "link" | "unlink" | "forward"> = {
+    execute: (service, input) => {
+      captured.executions.push({ service, input });
+    },
+    link: (name, id) => {
+      captured.links.push({ name, id });
+    },
+    unlink: (name, id) => {
+      captured.unlinks.push({ name, id });
+    },
+    forward: (linkName, targetId, message) => {
+      captured.forwards.push({ linkName, targetId, message });
+    },
+  };
+  return { captured, ctx };
+}
 
 // --- Implementation ---
 
@@ -222,72 +269,31 @@ export function testActor(
   ): Promise<SendResult<unknown>> {
     const callerType = opts?.callerType ?? "user";
     const role = resolveRole(def.roles, state, caller, { callerType });
+    if (role === null) throw new Error(`No role matched for caller "${caller}"`);
 
-    if (role === null) {
-      throw new Error(`No role matched for caller "${caller}"`);
-    }
-
-    const executions: Execution[] = [];
-    const links: LinkCall[] = [];
-    const unlinks: UnlinkCall[] = [];
-    const forwards: ForwardCall[] = [];
-
-    const ctx: Omit<MessageContext, "role"> = {
+    const effects = recordEffects();
+    const result = routeMessage(def.messages, role, state, event, {
       ...createLiveFacts().ctx,
       caller,
       callerType,
       env: {},
-      execute: (service: string, input: unknown) => {
-        executions.push({ service, input });
-      },
-      link: (name: string, id: string) => {
-        links.push({ name, id });
-      },
-      unlink: (name: string, id?: string) => {
-        unlinks.push({ name, id });
-      },
-      forward: (linkName, targetId, message) => {
-        forwards.push({ linkName, targetId, message });
-      },
-    };
+      ...effects.ctx,
+    });
+    if (!result.ok) throw new Error(ROUTE_ERRORS[result.error](event.type, role, result.detail));
 
-    const result = routeMessage(def.messages, role, state, event, ctx);
+    def.observe?.onTransition?.(state, result.state, event, { caller, role });
 
-    if (!result.ok) {
-      switch (result.error) {
-        case "message_not_found":
-          throw new Error(`Message "${event.type}" not found for role "${role}"`);
-        case "validation_failed":
-          throw new Error(`Validation failed for "${event.type}": ${result.detail ?? "unknown"}`);
-        case "guard_failed":
-          throw new Error(`Guard rejected "${event.type}"`);
-      }
-    }
-
-    if (def.observe?.onTransition) {
-      def.observe.onTransition(state, result.state, event, { caller, role });
-    }
-
-    // Build timeline entry
     const { type: messageType, ...payload } = event;
-    const json = JSON.stringify(result.state);
     const timeline: TimelineEntry[] = [
       {
-        cause: {
-          type: "message",
-          messageType,
-          caller,
-          callerType,
-          role,
-          payload,
-        },
+        cause: { type: "message", messageType, caller, callerType, role, payload },
         stateSnapshot: result.state,
-        checksum: xxh64(json),
+        checksum: xxh64(JSON.stringify(result.state)),
         createdAt: Date.now(),
       },
     ];
 
-    return { state: result.state, executions, links, unlinks, forwards, timeline };
+    return { state: result.state, ...effects.captured, timeline };
   }
 
   return {
@@ -339,29 +345,14 @@ export function testActor(
  */
 function extractDef(contract: ContractShape): TestableActorDef<unknown, unknown> {
   const def = contract.def;
-
-  // Convert flat messages to role-nested format
-  const messages = isFlatMessages(def.messages)
-    ? (wrapFlatMessages(def.messages, def.roles) as TestableActorDef<unknown, unknown>["messages"])
-    : (def.messages as TestableActorDef<unknown, unknown>["messages"]);
-
   const result: TestableActorDef<unknown, unknown> = {
     input: def.input,
-    init: def.init as (
-      input: unknown,
-      ctx?: { env: unknown; link: (name: string, id: string) => Promise<unknown> },
-    ) => unknown,
+    init: def.init,
     roles: def.roles,
-    messages,
+    messages: roleNestedMessages(def.messages, def.roles),
     views: def.views,
   };
-
-  if (def.lifecycle) {
-    result.lifecycle = def.lifecycle;
-  }
-  if (def.observe) {
-    result.observe = def.observe;
-  }
-
+  // The harness never runs lifecycle handlers, so only observe is carried over.
+  if (def.observe) result.observe = def.observe;
   return result;
 }
