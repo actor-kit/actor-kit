@@ -187,10 +187,22 @@ that take the structural `JournalSql` slice of `SqlStorage`. Unit tests run them
 `tests/unit/helpers/node-sql.ts`, with every migration applied, so they are fast and covered by Stryker
 (`actor.ts`, which imports `cloudflare:workers`, is not).
 
+### Coverage for the Durable Object (CRAP)
+
+`actor.ts` runs only under vitest-pool-workers, so unit coverage alone scores it 0%. `pnpm crap:worker` also runs
+the integration suite with `ACTOR_KIT_COVERAGE=1`: `tests/integration/vitest.config.ts` then aliases
+`@actor-kit/worker` to its source and collects istanbul coverage inside workerd (v8 coverage is not available
+there). `scripts/crap.mts` takes `--coverage` more than once and gives each function its best coverage. Leave
+`coverage.include` unset in that config: listing files the tests never load makes Vitest instrument them inside
+workerd, which fails after the run ("Unknown Error: undefined").
+
 ### Mutation-testing gotchas
 
 - `expect(p).rejects.toThrow("msg")` passes when `p` rejects with `undefined` (Vitest 4). Catch the rejection and
   check it is an `Error` with the message.
+- A Stryker run that is killed leaves `.stryker-tmp/sandbox-*` behind, and Playwright then also runs the spec copies
+  inside it. Delete `.stryker-tmp` before `pnpm test:e2e`. `--incremental` takes no value (`--incremental false`
+  is read as a config file named "false").
 - A mutant that makes a module throw while loading (an invalid `z.discriminatedUnion`) is reported as survived by
   Stryker's Vitest runner: prefer constructs that cannot throw at load.
 

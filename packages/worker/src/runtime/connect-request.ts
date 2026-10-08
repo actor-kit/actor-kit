@@ -27,12 +27,11 @@ function callerTypeOf(value: string): "user" | "service" | null {
 }
 
 function responseProtocol(request: Request): string | null {
-  const offered =
-    request.headers
-      .get("Sec-WebSocket-Protocol")
-      ?.split(",")
-      .map((p) => p.trim()) ?? [];
-  return offered.includes(ACTOR_KIT_PROTOCOL) ? ACTOR_KIT_PROTOCOL : null;
+  const offered = request.headers
+    .get("Sec-WebSocket-Protocol")
+    ?.split(",")
+    .map((p) => p.trim());
+  return offered?.includes(ACTOR_KIT_PROTOCOL) ? ACTOR_KIT_PROTOCOL : null;
 }
 
 export function parseConnectRequest(request: Request): ConnectRequest {

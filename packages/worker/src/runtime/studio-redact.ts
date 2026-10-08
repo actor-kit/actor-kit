@@ -18,8 +18,8 @@ export interface Redactor {
 
 type Segment = { kind: "literal"; key: string } | { kind: "one" } | { kind: "any" };
 type Pattern = readonly Segment[];
-/** A position inside one pattern: [pattern index, segment index]. */
-type Cursor = readonly [number, number];
+/** A position inside one pattern: [pattern index, pattern, segment index]. */
+type Cursor = readonly [number, Pattern, number];
 
 function parsePattern(raw: string): Pattern {
   if (raw === "") throw new Error("studio.redact patterns must not be empty");
@@ -35,70 +35,66 @@ function parsePattern(raw: string): Pattern {
 }
 
 /** Expand cursors sitting on `**` to also skip it (it matches zero segments). */
-function closure(patterns: readonly Pattern[], cursors: readonly Cursor[]): Cursor[] {
+function closure(cursors: readonly Cursor[]): Cursor[] {
   const out: Cursor[] = [];
   const seen = new Set<string>();
   const stack = [...cursors];
   for (let cursor = stack.pop(); cursor !== undefined; cursor = stack.pop()) {
-    const id = `${cursor[0]}:${cursor[1]}`;
+    const [p, pattern, i] = cursor;
+    const id = `${p}:${i}`;
     if (seen.has(id)) continue;
     seen.add(id);
     out.push(cursor);
-    const segment = patterns[cursor[0]]?.[cursor[1]];
-    if (segment?.kind === "any") stack.push([cursor[0], cursor[1] + 1]);
+    if (pattern[i]?.kind === "any") stack.push([p, pattern, i + 1]);
   }
   return out;
 }
 
-function step(patterns: readonly Pattern[], cursors: readonly Cursor[], key: string): Cursor[] {
+function step(cursors: readonly Cursor[], key: string): Cursor[] {
   const next: Cursor[] = [];
-  for (const [p, i] of cursors) {
-    const segment = patterns[p]?.[i];
+  for (const [p, pattern, i] of cursors) {
+    const segment = pattern[i];
     if (segment === undefined) continue;
-    if (segment.kind === "any") next.push([p, i]);
-    else if (segment.kind === "one" || (segment.kind === "literal" && segment.key === key)) next.push([p, i + 1]);
+    if (segment.kind === "any") next.push([p, pattern, i]);
+    else if (segment.kind === "one" || (segment.kind === "literal" && segment.key === key))
+      next.push([p, pattern, i + 1]);
   }
-  return closure(patterns, next);
+  return closure(next);
 }
 
-function isComplete(patterns: readonly Pattern[], cursors: readonly Cursor[]): boolean {
-  return cursors.some(([p, i]) => i === patterns[p]?.length);
+function isComplete(cursors: readonly Cursor[]): boolean {
+  return cursors.some(([, pattern, i]) => i === pattern.length);
 }
 
-function walk(patterns: readonly Pattern[], value: unknown, cursors: readonly Cursor[]): unknown {
+function walk(value: unknown, cursors: readonly Cursor[]): unknown {
   if (cursors.length === 0) return value;
-  if (isComplete(patterns, cursors)) return REDACTED;
+  if (isComplete(cursors)) return REDACTED;
   if (typeof value !== "object" || value === null) return value;
-  return walkObject(patterns, value, cursors);
+  return walkObject(value, cursors);
 }
 
-function walkObject(patterns: readonly Pattern[], value: object, cursors: readonly Cursor[]): unknown {
+function walkObject(value: object, cursors: readonly Cursor[]): unknown {
   if (Array.isArray(value)) {
-    return value.map((item, index) => walk(patterns, item, step(patterns, cursors, String(index))));
+    return value.map((item, index) => walk(item, step(cursors, String(index))));
   }
   if (value instanceof Map) {
     const out = new Map<unknown, unknown>();
-    for (const [key, item] of value) out.set(key, walk(patterns, item, step(patterns, cursors, String(key))));
+    for (const [key, item] of value) out.set(key, walk(item, step(cursors, String(key))));
     return out;
   }
   if (value instanceof Set) {
-    return new Set([...value].map((item, index) => walk(patterns, item, step(patterns, cursors, String(index)))));
+    return new Set([...value].map((item, index) => walk(item, step(cursors, String(index)))));
   }
   if (value instanceof Date) return value;
 
   // fromEntries defines own data properties, so a "__proto__" key stays a plain key.
-  return Object.fromEntries(
-    Object.entries(value).map(([key, item]) => [key, walk(patterns, item, step(patterns, cursors, key))]),
-  );
+  return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, walk(item, step(cursors, key))]));
 }
 
 /** Compile `studio.redact`. Throws on a malformed pattern, so actors fail at definition time. */
 export function compileRedaction(raw: readonly string[] | undefined): Redactor {
   const patterns = (raw ?? []).map(parsePattern);
   if (patterns.length === 0) return { active: false, apply: (value) => value };
-  const start = closure(
-    patterns,
-    patterns.map((_, p): Cursor => [p, 0]),
-  );
-  return { active: true, apply: (value) => walk(patterns, value, start) };
+  const start = closure(patterns.map((pattern, p): Cursor => [p, pattern, 0]));
+  return { active: true, apply: (value) => walk(value, start) };
 }

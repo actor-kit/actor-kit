@@ -646,6 +646,16 @@ export async function foldEvents(
   events: readonly JournalEvent[],
   options: FoldOptions = {},
 ): Promise<Map<number, FoldPoint>> {
+  return (await foldToEnd(def, start, events, options)).points;
+}
+
+/** foldEvents, plus the point after the last event (`start.point` when there are none). */
+async function foldToEnd(
+  def: ReplayableDef,
+  start: { seq: number; point: FoldPoint },
+  events: readonly JournalEvent[],
+  options: FoldOptions,
+): Promise<{ points: Map<number, FoldPoint>; end: FoldPoint }> {
   const points = new Map<number, FoldPoint>([[start.seq, start.point]]);
   let point = start.point;
   let expectedSeq = start.seq + 1;
@@ -658,7 +668,7 @@ export async function foldEvents(
     points.set(event.seq, point);
     expectedSeq += 1;
   }
-  return points;
+  return { points, end: point };
 }
 
 export interface FoldOptions {
@@ -735,9 +745,14 @@ function checkVersions(def: ReplayableDef, events: readonly JournalEvent[]): voi
   }
 }
 
+/** The actor before init: no state, no timers. */
+function beforeInit(): FoldPoint {
+  return { state: undefined, timers: [] };
+}
+
 /** Where a journal can be folded from: init (seq 0) or the checkpoint just before its first event. */
 function journalStart(def: ReplayableDef, journal: Journal, first: JournalEvent): { seq: number; point: FoldPoint } {
-  if (first.causeType === "init") return { seq: first.seq - 1, point: { state: undefined, timers: [] } };
+  if (first.causeType === "init") return { seq: first.seq - 1, point: beforeInit() };
   return checkpointStart(def, journal, first.seq - 1, `no checkpoint at seq ${first.seq - 1} to start from`);
 }
 
@@ -754,17 +769,11 @@ function checkpointStart(def: ReplayableDef, journal: Journal, seq: number, miss
 function replayable(
   def: ReplayableDef,
   journal: Journal,
-  events: JournalEvent[],
+  events: [JournalEvent, ...JournalEvent[]],
 ): { start: { seq: number; point: FoldPoint }; events: JournalEvent[] } {
   const current = def.version;
-  const older = current === undefined ? [] : events.filter((e) => e.codeVersion < current);
-  const [first] = events;
-  if (older.length === 0 || first === undefined) {
-    return {
-      start:
-        first === undefined ? { seq: 0, point: { state: undefined, timers: [] } } : journalStart(def, journal, first),
-      events,
-    };
+  if (current === undefined || events.every((e) => e.codeVersion >= current)) {
+    return { start: journalStart(def, journal, events[0]), events };
   }
   const bump = events.filter((e) => e.causeType === "migrate").at(-1)?.seq ?? 0;
   const start = checkpointStart(def, journal, bump, `no checkpoint at the version bump (seq ${bump})`);
@@ -786,11 +795,8 @@ export async function rebuildFromJournal(
   if (first?.causeType !== "init") {
     throw new Error(`Rebuilding by replay needs the whole journal: it starts at seq ${first?.seq ?? 0}`);
   }
-  const points = await foldEvents(def, { seq: 0, point: { state: undefined, timers: [] } }, events, {
-    ...options,
-    rebuild: true,
-  });
-  return points.get(events.at(-1)?.seq ?? 0)?.state;
+  const { end } = await foldToEnd(def, { seq: 0, point: beforeInit() }, events, { ...options, rebuild: true });
+  return end.state;
 }
 
 /**
@@ -802,10 +808,11 @@ export async function foldJournal(
   journal: Journal,
   options: { env?: unknown } = {},
 ): Promise<{ state: unknown; replayed: number }> {
-  const sorted = [...journal.events].sort((a, b) => a.seq - b.seq);
-  if (sorted.length === 0) return { state: undefined, replayed: 0 };
+  const [first, ...rest] = [...journal.events].sort((a, b) => a.seq - b.seq);
+  if (first === undefined) return { state: undefined, replayed: 0 };
+  const sorted: [JournalEvent, ...JournalEvent[]] = [first, ...rest];
   checkVersions(def, sorted);
   const { start, events } = replayable(def, journal, sorted);
-  const points = await foldEvents(def, start, events, options);
-  return { state: points.get(events.at(-1)?.seq ?? start.seq)?.state, replayed: events.length };
+  const { end } = await foldToEnd(def, start, events, options);
+  return { state: end.state, replayed: events.length };
 }

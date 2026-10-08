@@ -8,8 +8,8 @@ export function closeCodeToSend(code: number | undefined): number {
 }
 
 function isSendable(code: number): boolean {
-  if (code === 1000) return true;
   if (code >= 3000 && code <= 4999) return true;
+  // 1000 is the answer anyway when a code is not echoed.
   return code >= 1001 && code <= 1014 && !isReserved(code);
 }
 

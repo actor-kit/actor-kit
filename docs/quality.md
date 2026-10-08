@@ -34,6 +34,7 @@ killed+timeout / total; "max CRAP" is the highest function score, with the numbe
 | studio (server) | 75.58% (622/823) | 99.19% (732/738) | 42.0 middleware handler (6) | 7.0 `accessConfig`, `route` (0) |
 | studio UI (`ui/src`) | 65.45% (896/1369) | 93.05% (1298/1395) | 19.2 `alignPrimitiveArrays` (12) | 7.0 `diffAt` (0) |
 | studio-cli | 78.87% (362/459) | 99.28% (414/417) | 30.0 mcp tool handler (6) | 7.0 `get` (0) |
+| worker (`src`, ADR-015 branch) | not measured | 99.31% (2165/2180) | 702.0 `fetch` (62, unit coverage only) | 7.8 `pushToSubscriber` (0) |
 
 Notes:
 - Survivors are equivalent mutants (table below). Remaining `as` casts in these packages: one commented
@@ -44,6 +45,14 @@ Notes:
   they colour is also shown as text or `data-status`). They are grouped in one row below rather than listed.
 - Stryker's incremental mode can keep stale "Survived" results for module-level mutants after new tests kill
   them. Delete `reports/stryker-<pkg>.incremental.json` (or pass `--force`) for final numbers.
+- Worker: `actor.ts` (the Durable Object class) is excluded from Stryker: it imports `cloudflare:workers` and runs
+  only under vitest-pool-workers, which Stryker cannot drive. Its logic that is worth mutating lives in `runtime/`
+  (step core, journal, outbox, timers, restore, versions, connect-request, close-code, ...). `index.ts`, `testing.ts`
+  and `token.ts` are re-exports. Worker CRAP is measured with `pnpm crap:worker`, which adds the integration
+  suite's istanbul coverage (run inside workerd from source) to unit coverage; with unit coverage alone every
+  `actor.ts` function scores as uncovered.
+- ADR-015 per-step runs on the changed modules, before the final worker-wide run: steps 1-2 (effect ids, retries,
+  step core) 98.79%; step 3 (timers) 96.21%; steps 4-5 (simulate, restore) 94.76%. Survivors were then killed.
 - Studio's registry Durable Object runs under unit tests through `tests/unit/studio-server-fake-do.ts`, a thin
   `SqlStorage` fake over `node:sqlite`.
 
@@ -85,6 +94,17 @@ Surviving mutants that no test can kill, because the mutated program behaves ide
 | studio UI | api.ts:65 | `catch { return undefined }` → `{}` | Returns `undefined` either way. |
 | studio UI | protocol.ts:17 | addIssue code `"custom"` → `""` | Same message. |
 | studio UI | use-actor-list.ts:37,38,44 | empty catch, `[]` deps, initial `{ kind: "loading" }` | The effect sets loading before first paint; same behaviour. |
+| worker | identity.ts:32, 33 | `headers.delete(CALLER_ID_HEADER / CALLER_TYPE_HEADER)` → removed | `headers.set()` just after replaces every inbound value of the name; the explicit scrub is kept on purpose (security code reads as intended). |
+| worker | close-code.ts:7 | `code !== undefined && …` → `true && …` | `isSendable(undefined)` is false (every comparison with `undefined` is false); the check is for the type checker. |
+| worker | route-to-actor.ts:23 | `actorType === undefined \|\| …` → `false \|\| …` | Parts come from `filter(Boolean)`, so `actorId` (`parts[2]`) is undefined whenever `actorType` (`parts[1]`) is. |
+| worker | journal.ts:112, 113 | `facts.unlinked ?? []` / `facts.linkViews ?? []` → `["Stryker was here"]` | Only `findIndex` on `.name` / `.id`: a string has neither, so the same "missing fact" error. |
+| worker | journal.ts:310 | `if (base !== null)` → `true` | With `base` NULL, `WHERE seq <= NULL` matches no rows in SQLite. |
+| worker | journal.ts:469 | `callerConnections === undefined ? cause : {…}` → always spread | The step core reads `cause.callerConnections === undefined`: a missing key and an `undefined` one behave the same. |
+| worker | journal.ts:535, 750 | init / pre-init `timers: []` → `["Stryker was here"]` | Schedule ops filter by `op.key` and only add on `op === "schedule"`; fold results return state only and timer handlers read their payload from the event. |
+| worker | studio-project.ts:30 | HMAC key `extractable: false` → `true` | The key never leaves the closure, so the hashes are identical. |
+| worker | studio-redact.ts:57 | `if (segment === undefined) continue` → `false` | `walk` returns REDACTED before `step` whenever a cursor is complete, so `step` never sees a past-the-end segment; the check is for the type checker. |
+| worker | studio-redact.ts:59 | `segment.kind === "literal" && …` → `true && …` | Kinds are any / one / literal; with any and one excluded only literal is left. |
+| worker | versions.ts:118 (×2) | `first?.state` / `first?.rebuild` → `first.…` | The chain schema has `.min(1)`, so `first` is always defined; `?.` is for unchecked index access. |
 
 ## Bugs found while hardening (2026-10-07)
 
@@ -96,4 +116,5 @@ Surviving mutants that no test can kill, because the mutated program behaves ide
 | studio | `Upgrade: WebSocket` (capital W) got a 426 | `studio-server-ws-upgrade.test.ts` |
 | studio UI | computeDiff treated inherited keys (`toString`, `constructor`) as present | `studio-ui-diff.mutation.test.tsx` |
 | studio UI | Malformed known frames lost the failing field path in the error | `studio-ui-state.mutation.test.ts` |
-| worker (not fixed, other session's scope) | `actor.ts` compares `Upgrade` case-sensitively, same as the studio bug | — |
+| worker | `actor.ts` compared `Upgrade` case-sensitively, same as the studio bug (fixed on the ADR-015 branch) | `websocket-upgrade.test.ts` (unit, red before); `websocket.test.ts` (workerd lowercases it, so the integration test passed either way) |
+| worker | A lifecycle connect/disconnect that only scheduled or cancelled a timer was not committed | `timers.test.ts` "lifecycle handlers" (red before) |

@@ -203,7 +203,11 @@ through `facts`:
 `event` is the journal draft, facts included. The Durable Object only adds I/O around it: admission, storage
 (commit), alarms, broadcasting. `applyJournalEvent()` (replay) maps each journal event back to a step cause and runs the same function, so the
 runtime and replay cannot drift apart. Because `actor.ts` is excluded from
-Stryker (it imports `cloudflare:workers`), everything worth mutating lives in `runtime/`.
+Stryker (it imports `cloudflare:workers`), everything worth mutating lives in `runtime/`. That includes the
+socket-facing checks: `connect-request.ts` (Upgrade header, caller identity headers, binary flag, subprotocol),
+`close-code.ts` (the code that answers a client's close), `actor-def.ts` (the definition shape check) and
+`studio-registry.ts` (finding the StudioRegistry). `actor.ts` itself is covered by the integration tests;
+`pnpm crap:worker` scores its CRAP with unit and integration (istanbul, workerd) coverage combined.
 
 ### WebSocket lifecycle
 

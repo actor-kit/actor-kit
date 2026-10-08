@@ -94,8 +94,7 @@ export function toLiveConnections<TState>(
 export function nextConnectionSeq(sockets: ReadonlyArray<SocketRecord>): number {
   let highest = 0;
   for (const socket of sockets) {
-    const attachment = readConnectionAttachment(socket.attachment);
-    if (attachment?.seq !== undefined && attachment.seq > highest) highest = attachment.seq;
+    highest = Math.max(highest, readConnectionAttachment(socket.attachment)?.seq ?? 0);
   }
   return highest + 1;
 }

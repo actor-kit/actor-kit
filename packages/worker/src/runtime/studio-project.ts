@@ -49,11 +49,14 @@ export function projectState(state: unknown, projection: StudioProjection): unkn
   return projection.redactor.apply(state);
 }
 
-function parseJson(text: string): { ok: true; value: unknown } | { ok: false } {
+/** What parseJson returns for text that is not JSON (no JSON value is a symbol). */
+const UNPARSABLE: unique symbol = Symbol();
+
+function parseJson(text: string): unknown {
   try {
-    return { ok: true, value: JSON.parse(text) };
+    return JSON.parse(text);
   } catch {
-    return { ok: false };
+    return UNPARSABLE;
   }
 }
 
@@ -61,7 +64,7 @@ function parseJson(text: string): { ok: true; value: unknown } | { ok: false } {
 function projectJson(text: string, projection: StudioProjection): string {
   if (!projection.redactor.active) return text;
   const parsed = parseJson(text);
-  return JSON.stringify(parsed.ok ? projection.redactor.apply(parsed.value) : REDACTED);
+  return JSON.stringify(parsed === UNPARSABLE ? REDACTED : projection.redactor.apply(parsed));
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -71,10 +74,9 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 async function projectCause(text: string, projection: StudioProjection): Promise<string> {
   if (!projection.redactor.active && projection.hashCaller === null) return text;
   const parsed = parseJson(text);
-  if (!parsed.ok || !isRecord(parsed.value)) {
-    return projection.redactor.active ? JSON.stringify(REDACTED) : text;
-  }
-  return JSON.stringify(await projectCauseFields(parsed.value, projection));
+  // UNPARSABLE is not a record either.
+  if (!isRecord(parsed)) return projection.redactor.active ? JSON.stringify(REDACTED) : text;
+  return JSON.stringify(await projectCauseFields(parsed, projection));
 }
 
 async function projectCauseFields(

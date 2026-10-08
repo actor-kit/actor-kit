@@ -13,7 +13,7 @@ export interface ActorRoute {
 export function parseActorRoute(pathname: string): ActorRoute | null {
   const parts = pathname.split("/").filter(Boolean);
   // Expect: ["api", actorType, actorId, ...]
-  if (parts.length < 3 || parts[0] !== "api") {
+  if (parts[0] !== "api") {
     return null;
   }
 

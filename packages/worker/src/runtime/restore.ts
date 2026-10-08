@@ -81,10 +81,11 @@ function assertInJournal(events: readonly JournalEvent[], toSeq: number): void {
 
 /** State shapes differ across a version bump: toSeq must have been written by the current version. */
 function assertCurrentVersion(def: ReplayableDef, events: readonly JournalEvent[], toSeq: number): void {
-  if (def.version === undefined) return;
-  const written = events.find((e) => e.seq === toSeq)?.codeVersion ?? def.version;
-  if (written < def.version) {
-    throw new Error(`Cannot restore to seq ${toSeq}: it was written by version ${written} (current: ${def.version})`);
+  // Without a version every written version passes.
+  const current = def.version ?? Number.NEGATIVE_INFINITY;
+  const written = events.find((e) => e.seq === toSeq)?.codeVersion ?? current;
+  if (written < current) {
+    throw new Error(`Cannot restore to seq ${toSeq}: it was written by version ${written} (current: ${current})`);
   }
 }
 

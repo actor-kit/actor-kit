@@ -5,7 +5,13 @@
 
 export type Duration = number | `${number}${"ms" | "s" | "m" | "h" | "d"}`;
 
-const UNIT_MS: Record<string, number> = { ms: 1, s: 1000, m: 60_000, h: 3_600_000, d: 86_400_000 };
+const UNIT_MS = new Map<string | undefined, number>([
+  ["ms", 1],
+  ["s", 1000],
+  ["m", 60_000],
+  ["h", 3_600_000],
+  ["d", 86_400_000],
+]);
 
 const DURATION = /^(\d+(?:\.\d+)?)(ms|s|m|h|d)$/;
 
@@ -14,7 +20,7 @@ function millisecondsOf(duration: unknown): number {
   if (typeof duration === "number") return duration;
   if (typeof duration !== "string") return Number.NaN;
   const match = DURATION.exec(duration);
-  return match === null ? Number.NaN : Number(match[1]) * (UNIT_MS[match[2] ?? ""] ?? Number.NaN);
+  return match === null ? Number.NaN : Number(match[1]) * (UNIT_MS.get(match[2]) ?? Number.NaN);
 }
 
 /** A duration in milliseconds. Throws on anything that is not a finite, non-negative duration. */
