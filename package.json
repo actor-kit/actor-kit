@@ -9,8 +9,8 @@
     "test:e2e": "pnpm build && pnpm exec playwright test",
     "test:e2e-agent": "pnpm build && pnpm --filter actor-kit-chat-example build && E2E_TELEMETRY_DISABLED=1 pnpm --filter @actor-kit/e2e-agent test:e2e",
     "record:studio": "pnpm build && pnpm --filter actor-kit-chat-example build && node scripts/record-studio-walkthrough.mts",
-    "lint": "biome check packages/core/src/ packages/worker/src/ packages/client/src/ packages/react/src/ packages/test/src/ packages/studio/src/ tests/ scripts/",
-    "lint:fix": "biome check --write packages/core/src/ packages/worker/src/ packages/client/src/ packages/react/src/ packages/test/src/ packages/studio/src/ tests/ scripts/",
+    "lint": "biome check packages/core/src/ packages/worker/src/ packages/client/src/ packages/react/src/ packages/test/src/ packages/studio/src/ packages/studio-cli/src/ tests/ scripts/",
+    "lint:fix": "biome check --write packages/core/src/ packages/worker/src/ packages/client/src/ packages/react/src/ packages/test/src/ packages/studio/src/ packages/studio-cli/src/ tests/ scripts/",
     "build": "pnpm -r run build",
     "prepare": "husky"
   },
@@ -18,6 +18,7 @@
     "@biomejs/biome": "^2.5.14",
     "@changesets/cli": "^3.0.3",
     "@cloudflare/workers-types": "^5.20260927.1",
+    "@modelcontextprotocol/sdk": "^1.32.1",
     "@playwright/test": "^1.63.0",
     "@stryker-mutator/core": "^10.0.0",
     "@stryker-mutator/typescript-checker": "^10.0.0",

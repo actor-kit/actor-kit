@@ -1,6 +1,6 @@
 import { Link, useNavigate } from "@tanstack/react-router";
 import { type FormEvent, useEffect, useState } from "react";
-import { type ActorEntry, StudioApiError, fetchActorTypes, fetchActors, saveStudioKey } from "../api";
+import { type ActorEntry, StudioApiError, fetchActorTypes, fetchActors } from "../api";
 
 /** Rows per dashboard page. One extra row is requested to know whether a next page exists. */
 export const PAGE_SIZE = 50;
@@ -29,8 +29,6 @@ export function DashboardPage() {
   const [typeFilter, setTypeFilter] = useState("");
   const [search, setSearch] = useState("");
   const [offset, setOffset] = useState(0);
-  // Bumped after the studio key changes, to refetch everything with it.
-  const [authEpoch, setAuthEpoch] = useState(0);
 
   useEffect(() => {
     const abort = new AbortController();
@@ -40,7 +38,7 @@ export function DashboardPage() {
         // The type list is optional: the actor list reports registry errors.
       });
     return () => abort.abort();
-  }, [authEpoch]);
+  }, []);
 
   useEffect(() => {
     // Each request owns an AbortController; a newer filter/search/page aborts
@@ -69,7 +67,7 @@ export function DashboardPage() {
         });
       });
     return () => abort.abort();
-  }, [typeFilter, search, offset, authEpoch]);
+  }, [typeFilter, search, offset]);
 
   const actors = list.kind === "loaded" ? list.actors : [];
   const showPager = list.kind === "loaded" && (offset > 0 || list.hasMore);
@@ -115,7 +113,7 @@ export function DashboardPage() {
           <p role="alert" className="text-red-400">
             {list.message}
           </p>
-          {list.unauthorized && <StudioKeyForm onSaved={() => setAuthEpoch((n) => n + 1)} />}
+          {list.unauthorized && <SignInAgain />}
         </div>
       )}
 
@@ -248,33 +246,15 @@ function ManualConnect() {
   );
 }
 
-/** Spec: in production the UI prompts for the studio key and keeps it in localStorage. */
-function StudioKeyForm({ onSaved }: { onSaved: () => void }) {
-  const [key, setKey] = useState("");
-  const onSubmit = (e: FormEvent) => {
-    e.preventDefault();
-    saveStudioKey(key.trim());
-    onSaved();
-  };
+/** ADR-014: production Studio sits behind Cloudflare Access; a full page load goes through its login. */
+function SignInAgain() {
   return (
-    <form className="mt-2 flex gap-2 max-w-md" onSubmit={onSubmit}>
-      <input
-        type="password"
-        placeholder="Studio key"
-        aria-label="Studio key"
-        autoComplete="off"
-        value={key}
-        onChange={(e) => setKey(e.target.value)}
-        className="bg-zinc-900 border border-zinc-700 rounded px-2 py-1 text-sm flex-1"
-        data-testid="studio-key-input"
-      />
-      <button
-        type="submit"
-        className="bg-zinc-700 hover:bg-zinc-600 px-3 py-1 rounded text-sm cursor-pointer"
-        data-testid="studio-key-save"
-      >
-        Save key
-      </button>
-    </form>
+    <a
+      href="/__studio/"
+      className="mt-2 inline-block bg-zinc-700 hover:bg-zinc-600 px-3 py-1 rounded text-sm"
+      data-testid="studio-sign-in"
+    >
+      Sign in through Cloudflare Access
+    </a>
   );
 }

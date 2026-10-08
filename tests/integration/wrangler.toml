@@ -6,6 +6,8 @@ compatibility_flags = []
 # Omitted here because vitest-pool-workers/miniflare may not support it yet.
 
 [vars]
+# Test-only HMAC key for Studio caller hashing (ADR-014). Not a real secret.
+STUDIO_CALLER_HASH_KEY = "integration-test-caller-hash-key"
 
 [[durable_objects.bindings]]
 name = "COUNTER"
@@ -30,6 +32,10 @@ class_name = "StudioProbe"
 [[durable_objects.bindings]]
 name = "STUDIO_OFF"
 class_name = "StudioOff"
+
+[[durable_objects.bindings]]
+name = "STUDIO_REDACTED"
+class_name = "StudioRedacted"
 
 [[migrations]]
 tag = "v1"
@@ -62,3 +68,7 @@ class_name = "Desk"
 [[migrations]]
 tag = "v6"
 new_sqlite_classes = ["Bulletin", "Desk"]
+
+[[migrations]]
+tag = "v7"
+new_sqlite_classes = ["StudioRedacted"]

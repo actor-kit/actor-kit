@@ -7,6 +7,7 @@ import { ChatRoomContract } from "../../../examples/chat-room/src/chat";
 
 export { Bulletin, Desk } from "./studio-effects";
 export { StudioOff, StudioProbe } from "./studio-probe";
+export { StudioRedacted } from "./studio-redacted";
 export { StudioRegistry };
 
 // --- Counter actor (v3: defineActor + flat messages + guards) ---

@@ -6,11 +6,12 @@
  * WebSocket all run for real.
  */
 import { createExecutionContext, env, listDurableObjectIds } from "cloudflare:test";
-import { actorKitStudio } from "@actor-kit/studio";
+import { actorKitStudio, createActorKitStudio } from "@actor-kit/studio";
+import { createLocalJWKSet, exportJWK, generateKeyPair, SignJWT } from "jose";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 
-const STUDIO_KEY_HEADER = "X-Actor-Kit-Studio-Key";
+const ACCESS_ENV = { STUDIO_ACCESS_TEAM_DOMAIN: "team.cloudflareaccess.com", STUDIO_ACCESS_AUD: "studio-aud" };
 
 function studioEnv(extra: Record<string, unknown> = {}): Record<string, unknown> {
   return { ...env, ...extra };
@@ -18,14 +19,20 @@ function studioEnv(extra: Record<string, unknown> = {}): Record<string, unknown>
 
 async function studioFetch(
   path: string,
-  init: { host?: string; headers?: Record<string, string>; method?: string; extraEnv?: Record<string, unknown> } = {},
+  init: {
+    host?: string;
+    headers?: Record<string, string>;
+    method?: string;
+    extraEnv?: Record<string, unknown>;
+    studio?: typeof actorKitStudio;
+  } = {},
 ): Promise<Response> {
   const host = init.host ?? "localhost";
   const request = new Request(`http://${host}${path}`, {
     method: init.method ?? "GET",
     headers: init.headers ?? {},
   });
-  const result = actorKitStudio(request, studioEnv(init.extraEnv), createExecutionContext());
+  const result = (init.studio ?? actorKitStudio)(request, studioEnv(init.extraEnv), createExecutionContext());
   if (result === null) throw new Error(`middleware did not handle ${path}`);
   return await result;
 }
@@ -241,39 +248,53 @@ describe("Studio middleware (integration)", () => {
     });
   });
 
-  describe("production auth (secret configured, non-localhost host)", () => {
-    const SECRET = "integration-test-studio-key";
+  // ADR-014: this block replaced the X-Actor-Kit-Studio-Key cases ("missing key is 401",
+  // "missing key on the WebSocket route is 401", "correct key returns actor data").
+  describe("production auth (Cloudflare Access configured, non-localhost host)", () => {
+    async function accessStudio() {
+      const { publicKey, privateKey } = await generateKeyPair("RS256");
+      const jwks = createLocalJWKSet({ keys: [{ ...(await exportJWK(publicKey)), kid: "k", alg: "RS256" }] });
+      const token = await new SignJWT({ sub: "", common_name: "agent.access" })
+        .setProtectedHeader({ alg: "RS256", kid: "k" })
+        .setIssuer(`https://${ACCESS_ENV.STUDIO_ACCESS_TEAM_DOMAIN}`)
+        .setAudience(ACCESS_ENV.STUDIO_ACCESS_AUD)
+        .setExpirationTime("5m")
+        .sign(privateKey);
+      return { token, studio: createActorKitStudio({ access: { keysFor: () => jwks }, log: () => {} }) };
+    }
 
-    it("missing key is 401 and leaks no actor data", async () => {
+    it("missing Access token is 401 and leaks no actor data", async () => {
       const actorId = `mw-auth-${Date.now()}`;
       await spawnCounter(actorId, 1);
       const res = await studioFetch(`/__studio/api/actors/counter/${actorId}`, {
         host: "studio.example.com",
-        extraEnv: { ACTOR_KIT_STUDIO_SECRET: SECRET },
+        extraEnv: ACCESS_ENV,
       });
       expect(res.status).toBe(401);
       const text = await res.text();
       expect(text).not.toContain("count");
     });
 
-    it("missing key on the WebSocket route is 401", async () => {
+    it("missing Access token on the WebSocket route is 401", async () => {
       const actorId = `mw-auth-ws-${Date.now()}`;
       await spawnCounter(actorId);
       const res = await studioFetch(`/__studio/actors/counter/${actorId}/ws`, {
         host: "studio.example.com",
         headers: { Upgrade: "websocket" },
-        extraEnv: { ACTOR_KIT_STUDIO_SECRET: SECRET },
+        extraEnv: ACCESS_ENV,
       });
       expect(res.status).toBe(401);
     });
 
-    it("correct key returns actor data", async () => {
+    it("a valid Access service token returns actor data", async () => {
       const actorId = `mw-auth-ok-${Date.now()}`;
       await spawnCounter(actorId, 1);
+      const { token, studio } = await accessStudio();
       const res = await studioFetch(`/__studio/api/actors/counter/${actorId}`, {
         host: "studio.example.com",
-        headers: { [STUDIO_KEY_HEADER]: SECRET },
-        extraEnv: { ACTOR_KIT_STUDIO_SECRET: SECRET },
+        headers: { "Cf-Access-Jwt-Assertion": token },
+        extraEnv: ACCESS_ENV,
+        studio,
       });
       expect(res.status).toBe(200);
       const body = await res.json<{ state: { count: number } }>();

@@ -2,7 +2,8 @@
  * actorKitStudio() — middleware that intercepts /__studio and /__studio/* routes.
  *
  * Handles:
- * - Auth (no auth on localhost without a secret, secret key otherwise)
+ * - Auth: Cloudflare Access JWT, or localhost dev mode when Access is not configured (ADR-014)
+ * - One audit wide-event per studio request
  * - Actor listing from StudioRegistry
  * - Actor inspection via __inspect() RPC
  * - Timeline retrieval via __getTimeline() RPC
@@ -15,12 +16,14 @@
  */
 
 import { z } from "zod";
+import { type AccessDeps, authenticateStudio, remoteAccessKeys, type StudioPrincipal } from "./access";
 import { getAsset } from "./ui-assets";
 
 // Identity header constants (duplicated from @actor-kit/worker to avoid cloudflare:workers dependency)
 const CALLER_ID_HEADER = "X-Actor-Kit-Caller-Id";
 const CALLER_TYPE_HEADER = "X-Actor-Kit-Caller-Type";
-const STUDIO_KEY_HEADER = "X-Actor-Kit-Studio-Key";
+/** Who is looking: the DO hashes callers for agents (ADR-014). Stamped by this middleware only. */
+const STUDIO_VIEWER_HEADER = "X-Actor-Kit-Studio-Viewer";
 
 const STUDIO_PREFIX = "/__studio";
 const REGISTRY_BINDING = "STUDIO_REGISTRY";
@@ -30,6 +33,7 @@ const MAX_LIMIT = 1000;
 const MAX_TYPE_LENGTH = 128;
 const MAX_ID_LENGTH = 512;
 const MAX_SEARCH_LENGTH = 256;
+const MAX_ROLE_LENGTH = 128;
 
 // --- Responses ---
 
@@ -124,6 +128,11 @@ const TimelineQuery = z.object({
   before: nonNegativeInt.optional(),
 });
 
+const ViewQuery = z.object({
+  role: z.string().min(1).max(MAX_ROLE_LENGTH),
+  caller: z.string().min(1).max(MAX_ID_LENGTH).optional(),
+});
+
 /** Read the named query params (first occurrence), dropping absent ones. */
 function queryParams(url: URL, names: readonly string[]): Record<string, string> {
   const out: Record<string, string> = {};
@@ -165,43 +174,171 @@ function parseActorParams(rawType: string, rawId: string): Parsed<ActorParams> {
   return { ok: true, value: result.data };
 }
 
+// --- Audit ---
+
+export type StudioRoute = "ui" | "list" | "types" | "inspect" | "timeline" | "view" | "ws" | "unknown";
+
+/** One line per studio request (ADR-014). Never carries bodies, query values or the JWT. */
+export interface StudioAuditEvent {
+  event: "studio.request";
+  principal: StudioPrincipal["kind"] | "anonymous";
+  subject?: string;
+  method: string;
+  route: StudioRoute;
+  actorType?: string;
+  actorId?: string;
+  status: number;
+  durationMs: number;
+  /** ok < 400, denied = 401/403, rejected = other 4xx (bad input, not found), error = 5xx. */
+  outcome: "ok" | "denied" | "rejected" | "error";
+}
+
+function outcomeOf(status: number): StudioAuditEvent["outcome"] {
+  if (status < 400) return "ok";
+  if (status === 401 || status === 403) return "denied";
+  return status < 500 ? "rejected" : "error";
+}
+
+interface RouteInfo {
+  route: StudioRoute;
+  actorType?: string;
+  actorId?: string;
+}
+
+function classify(path: string): RouteInfo {
+  if (path === "/api/actors" || path === "/api/actors/") return { route: "list" };
+  if (path === "/api/actors/types") return { route: "types" };
+  const patterns: Array<[RegExp, StudioRoute]> = [
+    [/^\/api\/actors\/([^/]+)\/([^/]+)\/timeline$/, "timeline"],
+    [/^\/api\/actors\/([^/]+)\/([^/]+)\/view$/, "view"],
+    [/^\/api\/actors\/([^/]+)\/([^/]+)$/, "inspect"],
+    [/^\/actors\/([^/]+)\/([^/]+)\/ws$/, "ws"],
+  ];
+  for (const [pattern, route] of patterns) {
+    const match = path.match(pattern);
+    if (match?.[1] !== undefined && match[2] !== undefined) {
+      const actorType = decodeSegment(match[1]);
+      const actorId = decodeSegment(match[2]);
+      return {
+        route,
+        ...(actorType === null ? {} : { actorType: actorType.slice(0, MAX_TYPE_LENGTH) }),
+        ...(actorId === null ? {} : { actorId: actorId.slice(0, MAX_ID_LENGTH) }),
+      };
+    }
+  }
+  if (path === "/api" || path.startsWith("/api/")) return { route: "unknown" };
+  return { route: "ui" };
+}
+
+/** Apply `f` without introducing a Promise when `value` is already available. */
+function andThen<T, U>(value: T | Promise<T>, f: (t: T) => U | Promise<U>): U | Promise<U> {
+  return value instanceof Promise ? value.then(f) : f(value);
+}
+
 // --- Middleware ---
 
-/**
- * Studio middleware. Returns a Response if the request matches /__studio or /__studio/*,
- * or null if the request should be handled by the user's normal routing.
- */
-export function actorKitStudio(
+export interface StudioOptions {
+  /** Access signing keys. Default: the team's published certs. */
+  access?: AccessDeps;
+  /** Audit sink. Default: one JSON line on console.log (Workers Logs). */
+  log?: (event: StudioAuditEvent) => void;
+}
+
+export type StudioHandler = (
   request: Request,
   env: Record<string, unknown>,
-  _ctx: ExecutionContext,
-): Response | Promise<Response> | null {
-  const url = new URL(request.url);
-  const path = studioSubpath(url.pathname);
-  if (path === null) return null;
+  ctx: ExecutionContext,
+) => Response | Promise<Response> | null;
 
-  // Auth before anything else, so unauthenticated callers cannot probe routes.
-  const authResult = checkAuth(request, url, env);
-  if (authResult !== null) return authResult;
+function consoleAudit(event: StudioAuditEvent): void {
+  console.log(JSON.stringify(event));
+}
 
+/**
+ * Build the studio middleware. It returns a Response if the request matches /__studio or /__studio/*,
+ * or null if the request should be handled by the user's normal routing.
+ */
+export function createActorKitStudio(options: StudioOptions = {}): StudioHandler {
+  const access = options.access ?? remoteAccessKeys;
+  const log = options.log ?? consoleAudit;
+
+  return (request, env, _ctx) => {
+    const url = new URL(request.url);
+    const path = studioSubpath(url.pathname);
+    if (path === null) return null;
+
+    const startedAt = Date.now();
+    const info = classify(path);
+    let principal: StudioPrincipal | null = null;
+
+    const finish = (response: Response): Response => {
+      log({
+        event: "studio.request",
+        principal: principal?.kind ?? "anonymous",
+        ...(principal === null ? {} : { subject: principal.subject }),
+        method: request.method,
+        ...info,
+        status: response.status,
+        durationMs: Date.now() - startedAt,
+        outcome: outcomeOf(response.status),
+      });
+      return response;
+    };
+
+    // Auth before anything else, so unauthenticated callers cannot probe routes.
+    const handled = andThen(authenticateStudio(request, url, env, access), (auth) => {
+      if (!auth.ok) return jsonError(auth.status, auth.error);
+      principal = auth.principal;
+      return route(request, path, url, env, auth.principal);
+    });
+    return andThen(handled, finish);
+  };
+}
+
+/** Studio middleware with the default options (Access certs, console audit). */
+export const actorKitStudio: StudioHandler = createActorKitStudio();
+
+function route(
+  request: Request,
+  path: string,
+  url: URL,
+  env: Record<string, unknown>,
+  principal: StudioPrincipal,
+): Response | Promise<Response> {
   if (request.method !== "GET" && request.method !== "HEAD") {
     return jsonError(405, `Method ${request.method} not allowed`, { Allow: ALLOWED_METHODS });
   }
 
+  // Agents only ever see hashed callers; without the key the DO could not hash, so refuse up front.
+  const hashKey = env["STUDIO_CALLER_HASH_KEY"];
+  if (principal.kind === "agent" && (typeof hashKey !== "string" || hashKey === "")) {
+    return jsonError(503, "Studio is not configured for agents: set STUDIO_CALLER_HASH_KEY");
+  }
+
   if (path === "/api" || path.startsWith("/api/")) {
-    return routeApi(path, url, env);
+    return routeApi(path, url, env, principal);
   }
 
   // Match /actors/:type/:id/ws — WebSocket upgrade
   const wsMatch = path.match(/^\/actors\/([^/]+)\/([^/]+)\/ws$/);
   if (wsMatch?.[1] !== undefined && wsMatch[2] !== undefined) {
-    return handleStudioWebSocket(request, wsMatch[1], wsMatch[2], env);
+    return handleStudioWebSocket(request, wsMatch[1], wsMatch[2], env, principal);
   }
 
   return serveUi(path);
 }
 
-function routeApi(path: string, url: URL, env: Record<string, unknown>): Response | Promise<Response> {
+/** Agents get hashed callers; people (and dev) use the DO's default human view. */
+function viewerArg(principal: StudioPrincipal): { viewer: "agent" } | Record<string, never> {
+  return principal.kind === "agent" ? { viewer: "agent" } : {};
+}
+
+function routeApi(
+  path: string,
+  url: URL,
+  env: Record<string, unknown>,
+  principal: StudioPrincipal,
+): Response | Promise<Response> {
   if (path === "/api/actors" || path === "/api/actors/") {
     return handleListActors(url, env);
   }
@@ -213,13 +350,19 @@ function routeApi(path: string, url: URL, env: Record<string, unknown>): Respons
   // Match /api/actors/:type/:id/timeline
   const timelineMatch = path.match(/^\/api\/actors\/([^/]+)\/([^/]+)\/timeline$/);
   if (timelineMatch?.[1] !== undefined && timelineMatch[2] !== undefined) {
-    return handleTimeline(timelineMatch[1], timelineMatch[2], url, env);
+    return handleTimeline(timelineMatch[1], timelineMatch[2], url, env, principal);
+  }
+
+  // Match /api/actors/:type/:id/view
+  const viewMatch = path.match(/^\/api\/actors\/([^/]+)\/([^/]+)\/view$/);
+  if (viewMatch?.[1] !== undefined && viewMatch[2] !== undefined) {
+    return handleView(viewMatch[1], viewMatch[2], url, env, principal);
   }
 
   // Match /api/actors/:type/:id
   const actorMatch = path.match(/^\/api\/actors\/([^/]+)\/([^/]+)$/);
   if (actorMatch?.[1] !== undefined && actorMatch[2] !== undefined) {
-    return handleInspect(actorMatch[1], actorMatch[2], env);
+    return handleInspect(actorMatch[1], actorMatch[2], env, principal);
   }
 
   return jsonError(404, `Unknown studio API route: ${path}`);
@@ -239,34 +382,6 @@ function serveUi(path: string): Response {
       "Cache-Control": asset.contentType === "text/html" ? "no-cache" : "public, max-age=31536000, immutable",
     },
   });
-}
-
-// --- Auth ---
-
-/**
- * Dev mode = no secret configured AND the request URL's hostname is exactly localhost/127.0.0.1.
- * The hostname comes from the URL Cloudflare routed on; forwarding headers, Origin, Referer and
- * query params are never consulted.
- */
-function checkAuth(request: Request, url: URL, env: Record<string, unknown>): Response | null {
-  const secret = env["ACTOR_KIT_STUDIO_SECRET"];
-
-  if (secret === undefined || secret === "") {
-    if (url.hostname === "localhost" || url.hostname === "127.0.0.1") {
-      return null;
-    }
-    return jsonError(
-      403,
-      "Studio is not configured. Set ACTOR_KIT_STUDIO_SECRET via `wrangler secret put ACTOR_KIT_STUDIO_SECRET`.",
-    );
-  }
-
-  const key = request.headers.get(STUDIO_KEY_HEADER);
-  if (key !== secret) {
-    return jsonError(401, "Unauthorized");
-  }
-
-  return null;
 }
 
 // --- Actor resolution ---
@@ -340,14 +455,21 @@ function handleActorTypes(env: Record<string, unknown>): Response | Promise<Resp
   return asyncJson(async () => ({ types: await callRpc(registry, "getActorTypes") }));
 }
 
-function handleInspect(rawType: string, rawId: string, env: Record<string, unknown>): Response | Promise<Response> {
+function handleInspect(
+  rawType: string,
+  rawId: string,
+  env: Record<string, unknown>,
+  principal: StudioPrincipal,
+): Response | Promise<Response> {
   const params = parseActorParams(rawType, rawId);
   if (!params.ok) return params.response;
 
   const actor = resolveActor(env, params.value);
   if (actor instanceof Response) return actor;
 
-  return withExistingActor(env, actor, params.value, () => asyncJson(() => callRpc(actor.stub, "__inspect")));
+  // People keep the zero-argument call; only agents pass a viewer.
+  const args = principal.kind === "agent" ? [viewerArg(principal)] : [];
+  return withExistingActor(env, actor, params.value, () => asyncJson(() => callRpc(actor.stub, "__inspect", ...args)));
 }
 
 function handleTimeline(
@@ -355,6 +477,7 @@ function handleTimeline(
   rawId: string,
   url: URL,
   env: Record<string, unknown>,
+  principal: StudioPrincipal,
 ): Response | Promise<Response> {
   const params = parseActorParams(rawType, rawId);
   if (!params.ok) return params.response;
@@ -366,7 +489,28 @@ function handleTimeline(
   if (actor instanceof Response) return actor;
 
   return withExistingActor(env, actor, params.value, () =>
-    asyncJson(() => callRpc(actor.stub, "__getTimeline", query.value)),
+    asyncJson(() => callRpc(actor.stub, "__getTimeline", { ...query.value, ...viewerArg(principal) })),
+  );
+}
+
+function handleView(
+  rawType: string,
+  rawId: string,
+  url: URL,
+  env: Record<string, unknown>,
+  principal: StudioPrincipal,
+): Response | Promise<Response> {
+  const params = parseActorParams(rawType, rawId);
+  if (!params.ok) return params.response;
+
+  const query = parseQuery(ViewQuery, url, ["role", "caller"]);
+  if (!query.ok) return query.response;
+
+  const actor = resolveActor(env, params.value);
+  if (actor instanceof Response) return actor;
+
+  return withExistingActor(env, actor, params.value, () =>
+    asyncJson(() => callRpc(actor.stub, "__getView", { ...query.value, ...viewerArg(principal) })),
   );
 }
 
@@ -375,6 +519,7 @@ function handleStudioWebSocket(
   rawType: string,
   rawId: string,
   env: Record<string, unknown>,
+  principal: StudioPrincipal,
 ): Response | Promise<Response> {
   if (request.headers.get("Upgrade") !== "websocket") {
     return jsonError(426, "Expected WebSocket", { Upgrade: "websocket" });
@@ -393,6 +538,7 @@ function handleStudioWebSocket(
     stampedRequest.headers.delete(CALLER_TYPE_HEADER);
     stampedRequest.headers.set(CALLER_ID_HEADER, "__studio");
     stampedRequest.headers.set(CALLER_TYPE_HEADER, "service");
+    stampedRequest.headers.set(STUDIO_VIEWER_HEADER, principal.kind === "agent" ? "agent" : "human");
     return actor.stub.fetch(stampedRequest);
   });
 }

@@ -4,6 +4,8 @@ import { getAsset, listAssetPaths } from "../../packages/studio/src/ui-assets";
 
 // --- Helpers ---
 
+const ACCESS_ENV = { STUDIO_ACCESS_TEAM_DOMAIN: "team.cloudflareaccess.com", STUDIO_ACCESS_AUD: "aud" };
+
 const ctx = { waitUntil: (_p: Promise<unknown>): void => {}, passThroughOnException: (): void => {} };
 
 function request(path: string, init: { method?: string; host?: string; headers?: Record<string, string> } = {}) {
@@ -99,11 +101,7 @@ describe("HTTP methods", () => {
   });
 
   it("unauthenticated POST in prod is 401 before the method check (no route probing)", async () => {
-    const res = await handle(
-      "/__studio/api/actors",
-      { method: "POST", host: "example.com" },
-      { ACTOR_KIT_STUDIO_SECRET: "s" },
-    );
+    const res = await handle("/__studio/api/actors", { method: "POST", host: "example.com" }, ACCESS_ENV);
     expect(res.status).toBe(401);
   });
 });
@@ -265,27 +263,29 @@ describe("dev-mode detection", () => {
     },
   );
 
-  it("localhost with a secret configured still requires the key", async () => {
-    const res = await handle("/__studio/api/actors", { host: "localhost" }, { ACTOR_KIT_STUDIO_SECRET: "s" });
+  // ADR-014: the three cases below were written against the removed X-Actor-Kit-Studio-Key
+  // header; they now assert the same guarantees for Cloudflare Access.
+  it("localhost with Access configured still requires a token", async () => {
+    const res = await handle("/__studio/api/actors", { host: "localhost" }, ACCESS_ENV);
     expect(res.status).toBe(401);
   });
 
-  it("an empty key header never matches a configured secret", async () => {
+  it("an empty Access assertion is rejected", async () => {
     const res = await handle(
       "/__studio/api/actors",
-      { host: "example.com", headers: { "X-Actor-Kit-Studio-Key": "" } },
-      { ACTOR_KIT_STUDIO_SECRET: "s" },
+      { host: "example.com", headers: { "Cf-Access-Jwt-Assertion": "" } },
+      ACCESS_ENV,
     );
     expect(res.status).toBe(401);
   });
 
   it("401 and 403 bodies are JSON errors", async () => {
-    const r401 = await handle("/__studio/api/actors", { host: "example.com" }, { ACTOR_KIT_STUDIO_SECRET: "s" });
+    const r401 = await handle("/__studio/api/actors", { host: "example.com" }, ACCESS_ENV);
     expect(r401.headers.get("Content-Type")).toContain("application/json");
     expect(await r401.json()).toEqual({ error: expect.any(String) });
     const r403 = await handle("/__studio/api/actors", { host: "example.com" });
     expect(r403.headers.get("Content-Type")).toContain("application/json");
-    expect(await r403.json()).toEqual({ error: expect.stringContaining("ACTOR_KIT_STUDIO_SECRET") });
+    expect(await r403.json()).toEqual({ error: expect.stringContaining("STUDIO_ACCESS_TEAM_DOMAIN") });
   });
 });
 

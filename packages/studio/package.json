@@ -15,6 +15,7 @@
   },
   "dependencies": {
     "@actor-kit/core": "workspace:*",
+    "jose": "^6.2.12",
     "workers-qb": "^1.15.0",
     "zod": "^4.6.5"
   },
