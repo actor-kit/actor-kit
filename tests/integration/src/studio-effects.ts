@@ -42,6 +42,8 @@ export const DeskContract = defineActor("desk", {
   roles: { clerk: () => true },
   services: {
     JOB: {
+      // One try: the tests watch a failing job go pending → failed without waiting out retries.
+      retry: { attempts: 1 },
       fn: async (job: Job): Promise<{ tag: string }> => {
         await new Promise((resolve) => setTimeout(resolve, job.delayMs));
         if (job.fail) throw new Error(`job ${job.tag} failed`);

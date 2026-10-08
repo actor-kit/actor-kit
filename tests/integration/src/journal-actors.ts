@@ -104,6 +104,8 @@ const JournalProbeContract = defineActor("journal-probe", {
       }),
     },
     BOOM: {
+      // One try: onError (which fires after the last try) runs right away.
+      retry: { attempts: 1 },
       fn: async (): Promise<unknown> => {
         throw new Error("boom");
       },

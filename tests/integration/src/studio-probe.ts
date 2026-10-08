@@ -62,6 +62,8 @@ const StudioProbeContract = defineActor("studio-probe", {
       onDone: (state: ProbeState, result: { echoed: string }) => ({ ...state, lastResult: `done:${result.echoed}` }),
     },
     FAIL_SVC: {
+      // One try: onError (which fires after the last try) runs right away.
+      retry: { attempts: 1 },
       fn: async (input: { tag: string }): Promise<never> => {
         throw new Error(`boom:${input.tag}`);
       },

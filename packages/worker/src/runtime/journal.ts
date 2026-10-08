@@ -252,17 +252,19 @@ export const JOURNAL_MIGRATION_SQL = `
 
 /**
  * Append one event (and a checkpoint every `checkpointEvery`), then prune if `keep` is set.
- * Must run inside the transaction that writes the state.
+ * `seq` is the transition's number (snapshots.last_seq), so effect ids can be derived from it
+ * before the event is written. Must run inside the transaction that writes the state.
  */
 export function appendJournalEvent(
   sql: JournalSql,
   config: JournalConfig,
   draft: JournalDraft,
-  persisted: { stateJson: string; checksum: string; version: number; now: number },
+  persisted: { seq: number; stateJson: string; checksum: string; version: number; now: number },
 ): number {
   const row = sql
     .exec(
-      "INSERT INTO events (cause_type, name, payload, caller, caller_type, role, facts, code_version, state_checksum, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING seq",
+      "INSERT INTO events (seq, cause_type, name, payload, caller, caller_type, role, facts, code_version, state_checksum, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING seq",
+      persisted.seq,
       draft.causeType,
       draft.name,
       JSON.stringify(draft.payload ?? null),
@@ -299,6 +301,26 @@ export function appendJournalEvent(
     }
   }
   return seq;
+}
+
+/**
+ * The highest journal seq ever written (SQLite's AUTOINCREMENT high-water mark), 0 if none.
+ * Pruning never lowers it, so the next transition's seq never reuses a pruned one.
+ */
+export function journalHighWater(sql: JournalSql): number {
+  const row = sql.exec("SELECT seq FROM sqlite_sequence WHERE name = 'events'").toArray()[0];
+  return row === undefined ? 0 : z.object({ seq: z.number() }).parse(row).seq;
+}
+
+/**
+ * The number of the next transition: one past the larger of snapshots.last_seq and the journal's
+ * high-water mark. Read from storage inside the commit's transaction, so it is right even when the
+ * snapshot was written by an older deploy or another instance of the object.
+ */
+export function nextTransitionSeq(sql: JournalSql): number {
+  const row = sql.exec("SELECT last_seq FROM snapshots WHERE id = 1").toArray()[0];
+  const snapshotSeq = row === undefined ? 0 : z.object({ last_seq: z.number() }).parse(row).last_seq;
+  return Math.max(snapshotSeq, journalHighWater(sql)) + 1;
 }
 
 const EventRowSchema = z.object({

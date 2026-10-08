@@ -1,21 +1,26 @@
 /**
- * Transactional outbox — collects execute() calls during transitions.
+ * Transactional outbox — collects execute() and forward() calls during a transition.
  *
- * After transition, execution entries are available for test assertions.
- * Runtime services (when implemented) will persist and replay them.
+ * Each effect gets its declaration index within the transition (executions and forwards share
+ * one counter; links are not effects). Once the transition's seq is known, the entries carry
+ * deterministic effect ids `seq:index` (ADR-015 D1).
  */
 
 import type { Execution, ForwardCall } from "@actor-kit/core";
+import { formatEffectId } from "./effect-id";
 
 export type { ForwardCall };
 
 // --- Execution entry ---
 
 export interface ExecutionEntry {
+  /** Effect id, `seq:index`. */
   id: string;
+  seq: number;
+  index: number;
   service: string;
   input: unknown;
-  status: "pending" | "running" | "done" | "failed";
+  status: "pending" | "running" | "retrying" | "done" | "failed";
   attempts: number;
   createdAt: number;
 }
@@ -35,7 +40,10 @@ export interface UnlinkCall {
 // --- Forward entry ---
 
 export interface ForwardEntry {
+  /** Effect id, `seq:index`. */
   id: string;
+  seq: number;
+  index: number;
   linkName: string;
   targetId: string;
   message: { type: string; [key: string]: unknown };
@@ -55,26 +63,22 @@ interface OutboxCollector {
   getLinks(): LinkCall[];
   getUnlinks(): UnlinkCall[];
   getForwards(): ForwardCall[];
-  toExecutionEntries(): ExecutionEntry[];
-  toForwardEntries(): ForwardEntry[];
-}
-
-let idCounter = 0;
-
-function generateId(): string {
-  idCounter += 1;
-  return `outbox-${Date.now()}-${idCounter}`;
+  /** Executions as outbox rows for the transition numbered `seq` (0 outside a runtime). */
+  toExecutionEntries(seq?: number): ExecutionEntry[];
+  /** Forwards as outbox rows for the transition numbered `seq` (0 outside a runtime). */
+  toForwardEntries(seq?: number): ForwardEntry[];
 }
 
 export function createOutbox(): OutboxCollector {
-  const executions: Execution[] = [];
+  const executions: Array<Execution & { readonly index: number }> = [];
   const links: LinkCall[] = [];
   const unlinks: UnlinkCall[] = [];
-  const forwards: ForwardCall[] = [];
+  const forwards: Array<ForwardCall & { readonly index: number }> = [];
+  let effects = 0;
 
   return {
     execute(service: string, input: unknown): void {
-      executions.push({ service, input });
+      executions.push({ service, input, index: effects++ });
     },
 
     link(name: string, id: string): void {
@@ -86,11 +90,11 @@ export function createOutbox(): OutboxCollector {
     },
 
     forward(linkName: string, targetId: string, message: { type: string; [key: string]: unknown }): void {
-      forwards.push({ linkName, targetId, message });
+      forwards.push({ linkName, targetId, message, index: effects++ });
     },
 
     getExecutions(): Execution[] {
-      return [...executions];
+      return executions.map(({ service, input }) => ({ service, input }));
     },
 
     getLinks(): LinkCall[] {
@@ -102,13 +106,15 @@ export function createOutbox(): OutboxCollector {
     },
 
     getForwards(): ForwardCall[] {
-      return [...forwards];
+      return forwards.map(({ linkName, targetId, message }) => ({ linkName, targetId, message }));
     },
 
-    toExecutionEntries(): ExecutionEntry[] {
+    toExecutionEntries(seq = 0): ExecutionEntry[] {
       const now = Date.now();
       return executions.map((exec) => ({
-        id: generateId(),
+        id: formatEffectId(seq, exec.index),
+        seq,
+        index: exec.index,
         service: exec.service,
         input: exec.input,
         status: "pending" as const,
@@ -117,10 +123,12 @@ export function createOutbox(): OutboxCollector {
       }));
     },
 
-    toForwardEntries(): ForwardEntry[] {
+    toForwardEntries(seq = 0): ForwardEntry[] {
       const now = Date.now();
       return forwards.map((fwd) => ({
-        id: generateId(),
+        id: formatEffectId(seq, fwd.index),
+        seq,
+        index: fwd.index,
         linkName: fwd.linkName,
         targetId: fwd.targetId,
         message: fwd.message,

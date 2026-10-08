@@ -22,16 +22,16 @@ import type {
 } from "@actor-kit/core";
 import { createDeltaFrame, createSnapshotFrame, encode, encodeDelta, xxh64 } from "@actor-kit/core";
 import { DOQB } from "workers-qb";
-import type { z } from "zod";
+import { z } from "zod";
 import type { LifecycleEvent } from "./define";
 import { BINARY_SUPPORT_HEADER, CALLER_ID_HEADER, CALLER_TYPE_HEADER } from "./identity";
 import {
   appendJournalEvent,
   createLiveFacts,
-  JOURNAL_MIGRATION_SQL,
   type JournalDraft,
   type JournalOption,
   type LiveFacts,
+  nextTransitionSeq,
   resolveJournalConfig,
 } from "./runtime/journal";
 import {
@@ -43,8 +43,21 @@ import {
   toLiveConnections,
 } from "./runtime/live-connections";
 import { routeMessage } from "./runtime/message-router";
+import { ACTOR_KIT_MIGRATIONS } from "./runtime/migrations";
 import { createOutbox } from "./runtime/outbox";
+import {
+  dueExecutions,
+  finishAttempt,
+  insertExecutions,
+  nextRetryAt,
+  outboxFailedEvent,
+  readOutboxRows,
+  redriveExecution,
+  requeueInterrupted,
+  startAttempt,
+} from "./runtime/outbox-store";
 import { resolveNamespace } from "./runtime/resolve-namespace";
+import { type RetryPolicy, resolveRetryPolicy, settleAttempt } from "./runtime/retry";
 import { resolveRole } from "./runtime/roles";
 import {
   type CallerHasher,
@@ -160,7 +173,10 @@ interface ActorDef {
   services?: Record<
     string,
     {
-      fn(input: unknown, env: unknown): Promise<unknown>;
+      /** Third argument: the effect id (`seq:index`, stable across retries) and the try number. */
+      fn(input: unknown, env: unknown, effect: { effectId: string; attempt: number }): Promise<unknown>;
+      /** Tries and backoff (ADR-015 D1). Default: 3 tries, 1s then 5s apart, ±20% jitter. */
+      retry?: unknown;
       onDone?(state: unknown, result: unknown, input: unknown, ctx: DeterministicContext): unknown;
       onError?(state: unknown, error: { message: string }, input: unknown, ctx: DeterministicContext): unknown;
     }
@@ -204,133 +220,16 @@ interface ActorDef {
   };
 }
 
-// --- SQL migrations ---
-// Tracked by workers-qb in _qb_migrations table.
-// Append new migrations here — never edit existing ones.
-
-const ACTOR_KIT_MIGRATIONS = [
-  {
-    name: "0001_initial_schema",
-    sql: `
-      CREATE TABLE IF NOT EXISTS actor_meta (
-        key TEXT PRIMARY KEY,
-        value TEXT
-      );
-      CREATE TABLE IF NOT EXISTS snapshots (
-        id INTEGER PRIMARY KEY CHECK (id = 1),
-        version INTEGER,
-        state TEXT,
-        state_tracker TEXT,
-        actor_id TEXT,
-        checksum TEXT,
-        updated_at INTEGER
-      );
-      CREATE TABLE IF NOT EXISTS outbox (
-        id TEXT PRIMARY KEY,
-        type TEXT,
-        payload TEXT,
-        status TEXT DEFAULT 'pending',
-        attempts INTEGER DEFAULT 0,
-        created_at INTEGER
-      );
-    `,
-  },
-  {
-    name: "0002_outbox_indexes",
-    sql: `
-      CREATE INDEX IF NOT EXISTS idx_outbox_status_created ON outbox(status, created_at);
-    `,
-  },
-  {
-    name: "0003_executions",
-    sql: `
-      CREATE TABLE IF NOT EXISTS executions (
-        id TEXT PRIMARY KEY,
-        service TEXT NOT NULL,
-        payload TEXT NOT NULL,
-        status TEXT DEFAULT 'pending',
-        attempts INTEGER DEFAULT 0,
-        created_at INTEGER
-      );
-      CREATE INDEX IF NOT EXISTS idx_executions_status ON executions(status, created_at);
-    `,
-  },
-  {
-    name: "0004_links",
-    sql: `
-      CREATE TABLE IF NOT EXISTS active_links (
-        target_type TEXT NOT NULL,
-        target_id TEXT NOT NULL,
-        link_name TEXT NOT NULL,
-        version INTEGER DEFAULT 0,
-        created_at INTEGER,
-        PRIMARY KEY (target_type, target_id, link_name)
-      );
-      CREATE TABLE IF NOT EXISTS link_subscribers (
-        subscriber_type TEXT NOT NULL,
-        subscriber_id TEXT NOT NULL,
-        subscribed_at INTEGER,
-        PRIMARY KEY (subscriber_type, subscriber_id)
-      );
-    `,
-  },
-  {
-    name: "0005_forwards",
-    sql: `
-      CREATE TABLE IF NOT EXISTS forwards (
-        id TEXT PRIMARY KEY,
-        link_name TEXT NOT NULL,
-        target_id TEXT NOT NULL,
-        message TEXT NOT NULL,
-        caller TEXT NOT NULL,
-        caller_type TEXT NOT NULL,
-        status TEXT DEFAULT 'pending',
-        attempts INTEGER DEFAULT 0,
-        created_at INTEGER
-      );
-      CREATE INDEX IF NOT EXISTS idx_forwards_status_created ON forwards(status, created_at);
-    `,
-  },
-  {
-    name: "0006_timeline",
-    sql: `
-      CREATE TABLE IF NOT EXISTS timeline (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        cause_type TEXT NOT NULL,
-        cause_data TEXT NOT NULL,
-        state_snapshot TEXT NOT NULL,
-        checksum TEXT NOT NULL,
-        created_at INTEGER NOT NULL
-      );
-      CREATE INDEX IF NOT EXISTS idx_timeline_created ON timeline(created_at DESC);
-    `,
-  },
-  {
-    name: "0007_studio_connections",
-    sql: `
-      CREATE TABLE IF NOT EXISTS studio_connections (
-        caller TEXT NOT NULL,
-        caller_type TEXT NOT NULL,
-        connected_at INTEGER NOT NULL,
-        PRIMARY KEY (caller, caller_type)
-      );
-    `,
-  },
-  {
-    // Connections are read from the sockets the DO holds (exact across
-    // hibernation and restart); this persisted copy went stale on restart and
-    // merged two sockets of the same caller into one row.
-    name: "0008_drop_studio_connections",
-    sql: "DROP TABLE IF EXISTS studio_connections;",
-  },
-  {
-    // Append-only event journal + checkpoints (ADR-013).
-    name: "0009_journal",
-    sql: JOURNAL_MIGRATION_SQL,
-  },
-];
-
 // --- Helpers ---
+
+/** The snapshot row read on wake (parsed at the storage boundary). */
+const SnapshotRowSchema = z.object({
+  state: z.string(),
+  version: z.number(),
+  actor_id: z.string().nullable(),
+});
+
+const RedriveOptionsSchema = z.object({ effectId: z.string().min(1) });
 
 /**
  * Safely extract the `exports` map from a DurableObjectState ctx.
@@ -395,6 +294,9 @@ export function actor(
   const configuredTimelineSize = resolveTimelineSize(def.studio?.timelineSize);
   const studioRedactor = compileRedaction(def.studio?.redact);
   const journalConfig = resolveJournalConfig(def.journal);
+  const retryPolicies = new Map<string, RetryPolicy>(
+    Object.entries(def.services ?? {}).map(([name, service]) => [name, resolveRetryPolicy(service.retry)]),
+  );
 
   const DOClass = class ActorInstance extends DurableObject {
     state: unknown = undefined;
@@ -441,7 +343,7 @@ export function actor(
     }
 
     runMigrations(): void {
-      new DOQB(this.ctx.storage.sql).migrations({ migrations: ACTOR_KIT_MIGRATIONS }).apply();
+      new DOQB(this.ctx.storage.sql).migrations({ migrations: [...ACTOR_KIT_MIGRATIONS] }).apply();
     }
 
     /** Resolve studio enablement once: registry detection OR'd with the config flag; `enabled: false` opts out. */
@@ -480,11 +382,7 @@ export function actor(
       const rows = this.ctx.storage.sql.exec("SELECT state, version, actor_id FROM snapshots WHERE id = 1").toArray();
       if (rows.length === 0 || rows[0] === undefined) return;
 
-      const row = rows[0] as {
-        state: string;
-        version: number;
-        actor_id: string | null;
-      };
+      const row = SnapshotRowSchema.parse(rows[0]);
       let parsed: unknown = JSON.parse(row.state);
 
       // Run migration if needed
@@ -521,7 +419,8 @@ export function actor(
         }));
       }
 
-      // Drain any pending executions from before crash/restart
+      // Drain any pending executions from before crash/restart; tries cut off mid-flight run again.
+      requeueInterrupted(this.ctx.storage.sql);
       this.drainExecutions();
 
       // Drain any pending forwards from before crash/restart
@@ -663,44 +562,49 @@ export function actor(
     }
 
     /**
-     * Apply a transition atomically: set the state, run `writes` (outbox, links), then persist the
-     * snapshot and append its journal event, all in one transaction. On failure nothing is written
-     * and the in-memory state is put back. `draft` is read after `writes`, so facts recorded while
-     * processing links are included.
+     * Apply a transition atomically: set the state, number the transition (`seq`, read from
+     * storage), run `writes` (outbox, links) with that seq, then persist the snapshot and append its
+     * journal event, all in one transaction. On failure nothing is written and the in-memory
+     * state is put back.
+     * `draft` is read after `writes`, so facts recorded while processing links are included.
      */
-    commit(nextState: unknown, draft: () => JournalDraft, writes?: () => void): void {
+    commit(nextState: unknown, draft: () => JournalDraft, writes?: (seq: number) => void): void {
       const previous = this.state;
       this.state = nextState;
       try {
         this.ctx.storage.transactionSync(() => {
-          writes?.();
-          this.persistState(draft());
+          const seq = nextTransitionSeq(this.ctx.storage.sql);
+          writes?.(seq);
+          this.persistState(draft(), seq);
         });
       } catch (error) {
         this.state = previous;
         this.pendingCause = null;
         throw error;
       }
+      this.syncAlarm();
     }
 
     /** Write the snapshot (and its journal event). Only call inside commit()'s transaction. */
-    persistState(draft: JournalDraft): void {
+    persistState(draft: JournalDraft, seq: number): void {
       const serialized = def.serialize ? def.serialize(this.state) : this.state;
       const json = JSON.stringify(serialized);
       const checksum = this.computeChecksum(json);
       const now = Date.now();
 
       this.ctx.storage.sql.exec(
-        "INSERT OR REPLACE INTO snapshots (id, version, state, state_tracker, actor_id, checksum, updated_at) VALUES (1, ?, ?, NULL, ?, ?, ?)",
+        "INSERT OR REPLACE INTO snapshots (id, version, state, state_tracker, actor_id, checksum, updated_at, last_seq) VALUES (1, ?, ?, NULL, ?, ?, ?, ?)",
         this.version,
         json,
         this.actorId ?? null,
         checksum,
         now,
+        seq,
       );
 
       if (journalConfig.enabled) {
         appendJournalEvent(this.ctx.storage.sql, journalConfig, draft, {
+          seq,
           stateJson: json,
           checksum,
           version: this.version,
@@ -755,27 +659,25 @@ export function actor(
       return xxh64(json);
     }
 
-    persistExecutions(
-      entries: Array<{
-        id: string;
-        service: string;
-        input: unknown;
-        status: string;
-        attempts: number;
-        createdAt: number;
-      }>,
-    ): void {
-      for (const entry of entries) {
-        this.ctx.storage.sql.exec(
-          "INSERT INTO executions (id, service, payload, status, attempts, created_at) VALUES (?, ?, ?, ?, ?, ?)",
-          entry.id,
-          entry.service,
-          JSON.stringify(entry.input),
-          entry.status,
-          entry.attempts,
-          entry.createdAt,
-        );
+    /**
+     * Point the DO's single alarm at the earliest outbox retry, or clear it when nothing waits.
+     * Runs after every commit and every settled try.
+     */
+    syncAlarm(): void {
+      const next = nextRetryAt(this.ctx.storage.sql);
+      if (next === null) {
+        void this.ctx.storage.deleteAlarm();
+      } else {
+        void this.ctx.storage.setAlarm(next);
       }
+    }
+
+    /** DO alarm: run the outbox retries that are due, then re-arm for the next one. */
+    async alarm(): Promise<void> {
+      this.loadPersisted({ create: false });
+      if (!this.initialized) return;
+      await this.drainExecutions();
+      this.syncAlarm();
     }
 
     async drainExecutions(): Promise<void> {
@@ -788,92 +690,130 @@ export function actor(
       }
     }
 
+    /** Run due rows, oldest effect first, until none are due (rows added meanwhile are picked up). */
     async drainExecutionsInner(): Promise<void> {
-      const rows = this.ctx.storage.sql
-        .exec("SELECT id, service, payload, attempts FROM executions WHERE status = 'pending' ORDER BY created_at")
-        .toArray();
-
-      for (const row of rows) {
-        const entry = row as { id: string; service: string; payload: string; attempts: number };
-        const serviceDef = def.services?.[entry.service];
-
-        if (!serviceDef) {
-          this.ctx.storage.sql.exec("UPDATE executions SET status = 'failed' WHERE id = ?", entry.id);
-          this.pushStudioOutbox();
-          continue;
+      for (;;) {
+        const due = dueExecutions(this.ctx.storage.sql, Date.now());
+        if (due.length === 0) return;
+        for (const entry of due) {
+          await this.runExecution(entry);
         }
+      }
+    }
 
-        const parsedInput: unknown = JSON.parse(entry.payload);
+    /** One try of one execution: settle the row and, on the outcome that ends it, run onDone/onError. */
+    async runExecution(entry: { id: string; service: string; input: unknown }): Promise<void> {
+      const sql = this.ctx.storage.sql;
+      const serviceDef = def.services?.[entry.service];
+      const policy = retryPolicies.get(entry.service);
+      if (serviceDef === undefined || policy === undefined) {
+        finishAttempt(sql, entry.id, { status: "failed" }, `Service "${entry.service}" is not defined`);
+        this.pushStudioOutbox();
+        return;
+      }
 
-        const markDone = () => {
-          this.ctx.storage.sql.exec("UPDATE executions SET status = 'done' WHERE id = ?", entry.id);
-          this.pushStudioOutbox();
-        };
-        const markFailed = () => {
-          this.ctx.storage.sql.exec("UPDATE executions SET status = 'failed' WHERE id = ?", entry.id);
-          this.pushStudioOutbox();
-        };
+      const attempt = startAttempt(sql, entry.id);
+      this.pushStudioOutbox();
+      const parsedInput = entry.input;
 
-        try {
-          const result = await serviceDef.fn(parsedInput, this.env);
-          const live = createLiveFacts();
-          const nextState = serviceDef.onDone
-            ? serviceDef.onDone(this.state, result, parsedInput, live.ctx)
-            : this.state;
-          if (nextState === this.state) {
-            markDone();
-          } else {
-            this.pendingCause = {
-              type: "service.onDone",
+      let outcome: { ok: true; result: unknown } | { ok: false; message: string };
+      try {
+        outcome = { ok: true, result: await serviceDef.fn(parsedInput, this.env, { effectId: entry.id, attempt }) };
+      } catch (error) {
+        outcome = { ok: false, message: error instanceof Error ? error.message : String(error) };
+      }
+
+      const settlement = settleAttempt(outcome, attempt, policy, Date.now(), Math.random);
+      const settle = () => {
+        finishAttempt(sql, entry.id, settlement, outcome.ok ? null : outcome.message);
+      };
+
+      if (settlement.status === "retrying") {
+        settle();
+        this.syncAlarm();
+        this.pushStudioOutbox();
+        return;
+      }
+      if (!outcome.ok) {
+        console.error(
+          JSON.stringify(
+            outboxFailedEvent({
+              actorType: _actorName,
+              actorId: this.actorId ?? this.ctx.id.toString(),
+              effectId: entry.id,
               service: entry.service,
-              input: parsedInput,
-              result,
-            };
-            this.commit(
-              nextState,
-              () => ({
-                causeType: "service.onDone",
-                name: entry.service,
-                payload: { input: parsedInput, result },
-                caller: null,
-                callerType: null,
-                role: null,
-                facts: live.facts(),
-              }),
-              markDone,
-            );
-            this.broadcastViews();
-          }
-        } catch (error) {
-          const errorMessage = error instanceof Error ? error.message : String(error);
-          const live = createLiveFacts();
-          const nextState = serviceDef.onError
-            ? serviceDef.onError(this.state, { message: errorMessage }, parsedInput, live.ctx)
-            : this.state;
-          if (nextState === this.state) {
-            markFailed();
-          } else {
-            this.pendingCause = {
-              type: "service.onError",
-              service: entry.service,
-              input: parsedInput,
-              error: errorMessage,
-            };
-            this.commit(
-              nextState,
-              () => ({
-                causeType: "service.onError",
-                name: entry.service,
-                payload: { input: parsedInput, error: { message: errorMessage } },
-                caller: null,
-                callerType: null,
-                role: null,
-                facts: live.facts(),
-              }),
-              markFailed,
-            );
-            this.broadcastViews();
-          }
+              attempts: attempt,
+              error: outcome.message,
+            }),
+          ),
+        );
+      }
+
+      try {
+        this.settleExecution(serviceDef, entry.service, parsedInput, outcome, settle);
+      } catch (error) {
+        // onDone/onError threw, or its transition could not be persisted: nothing was written.
+        // The row ends as a dead letter carrying the reason, instead of staying `running`.
+        const reason = error instanceof Error ? error.message : String(error);
+        finishAttempt(sql, entry.id, { status: "failed" }, `${outcome.ok ? "onDone" : "onError"}: ${reason}`);
+      }
+      this.pushStudioOutbox();
+    }
+
+    /** Run onDone/onError for a try that ended the row, committing it with the row's final status. */
+    settleExecution(
+      serviceDef: NonNullable<ActorDef["services"]>[string],
+      service: string,
+      parsedInput: unknown,
+      outcome: { ok: true; result: unknown } | { ok: false; message: string },
+      settle: () => void,
+    ): void {
+      const live = createLiveFacts();
+      if (outcome.ok) {
+        const { result } = outcome;
+        const nextState = serviceDef.onDone ? serviceDef.onDone(this.state, result, parsedInput, live.ctx) : this.state;
+        if (nextState === this.state) {
+          settle();
+        } else {
+          this.pendingCause = { type: "service.onDone", service, input: parsedInput, result };
+          this.commit(
+            nextState,
+            () => ({
+              causeType: "service.onDone",
+              name: service,
+              payload: { input: parsedInput, result },
+              caller: null,
+              callerType: null,
+              role: null,
+              facts: live.facts(),
+            }),
+            settle,
+          );
+          this.broadcastViews();
+        }
+      } else {
+        const errorMessage = outcome.message;
+        const nextState = serviceDef.onError
+          ? serviceDef.onError(this.state, { message: errorMessage }, parsedInput, live.ctx)
+          : this.state;
+        if (nextState === this.state) {
+          settle();
+        } else {
+          this.pendingCause = { type: "service.onError", service, input: parsedInput, error: errorMessage };
+          this.commit(
+            nextState,
+            () => ({
+              causeType: "service.onError",
+              name: service,
+              payload: { input: parsedInput, error: { message: errorMessage } },
+              caller: null,
+              callerType: null,
+              role: null,
+              facts: live.facts(),
+            }),
+            settle,
+          );
+          this.broadcastViews();
         }
       }
     }
@@ -885,6 +825,8 @@ export function actor(
     persistForwards(
       entries: Array<{
         id: string;
+        seq: number;
+        index: number;
         linkName: string;
         targetId: string;
         message: { type: string; [key: string]: unknown };
@@ -897,8 +839,10 @@ export function actor(
     ): void {
       for (const entry of entries) {
         this.ctx.storage.sql.exec(
-          "INSERT INTO forwards (id, link_name, target_id, message, caller, caller_type, status, attempts, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+          "INSERT INTO forwards (id, seq, idx, link_name, target_id, message, caller, caller_type, status, attempts, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
           entry.id,
+          entry.seq,
+          entry.index,
           entry.linkName,
           entry.targetId,
           JSON.stringify(entry.message),
@@ -924,7 +868,7 @@ export function actor(
     async drainForwardsInner(): Promise<void> {
       const rows = this.ctx.storage.sql
         .exec(
-          "SELECT id, link_name, target_id, message, caller, caller_type FROM forwards WHERE status = 'pending' ORDER BY created_at",
+          "SELECT id, link_name, target_id, message, caller, caller_type FROM forwards WHERE status = 'pending' ORDER BY seq, idx",
         )
         .toArray();
 
@@ -961,6 +905,7 @@ export function actor(
 
         const callerType: "user" | "service" = entry.caller_type === "service" ? "service" : "user";
 
+        this.ctx.storage.sql.exec("UPDATE forwards SET attempts = attempts + 1 WHERE id = ?", entry.id);
         try {
           const sendFn = stub["send"] as (
             caller: string,
@@ -1498,10 +1443,10 @@ export function actor(
 
       // Persist state + executions + link intents + journal event atomically.
       // Links are processed before the snapshot is written: onUnlink may change state.
-      const executionEntries = outbox.toExecutionEntries();
+      const executionCount = outbox.getExecutions().length;
       const linkCalls = outbox.getLinks();
       const unlinkCalls = outbox.getUnlinks();
-      const forwardEntries = outbox.toForwardEntries();
+      const forwardCount = outbox.getForwards().length;
       this.commit(
         result.state,
         () => ({
@@ -1513,16 +1458,12 @@ export function actor(
           role,
           facts: live.facts(),
         }),
-        () => {
-          if (executionEntries.length > 0) {
-            this.persistExecutions(executionEntries);
-          }
+        (seq) => {
+          insertExecutions(this.ctx.storage.sql, outbox.toExecutionEntries(seq));
           if (linkCalls.length > 0 || unlinkCalls.length > 0) {
             this.processLinks(linkCalls, unlinkCalls, live);
           }
-          if (forwardEntries.length > 0) {
-            this.persistForwards(forwardEntries, caller, callerType);
-          }
+          this.persistForwards(outbox.toForwardEntries(seq), caller, callerType);
         },
       );
 
@@ -1530,7 +1471,7 @@ export function actor(
       this.broadcastViews();
 
       // Studio: new executions are pending, links may have changed
-      if (executionEntries.length > 0) {
+      if (executionCount > 0) {
         this.pushStudioOutbox();
       }
       if (linkCalls.length > 0 || unlinkCalls.length > 0) {
@@ -1538,12 +1479,12 @@ export function actor(
       }
 
       // Drain executions asynchronously
-      if (executionEntries.length > 0) {
+      if (executionCount > 0) {
         this.drainExecutions();
       }
 
       // Drain forwards asynchronously
-      if (forwardEntries.length > 0) {
+      if (forwardCount > 0) {
         this.drainForwards();
       }
 
@@ -1835,9 +1776,9 @@ export function actor(
         if (nextState instanceof Promise) {
           throw new Error("lifecycle.connect returned a Promise. Handlers must be synchronous.");
         }
-        const connectExecutions = connectOutbox.toExecutionEntries();
-        const connectForwards = connectOutbox.toForwardEntries();
-        if (nextState !== this.state || connectExecutions.length > 0 || connectForwards.length > 0) {
+        const connectExecutions = connectOutbox.getExecutions().length;
+        const connectForwards = connectOutbox.getForwards().length;
+        if (nextState !== this.state || connectExecutions > 0 || connectForwards > 0) {
           this.pendingCause = {
             type: "lifecycle.connect",
             caller: callerInfo.caller,
@@ -1855,20 +1796,16 @@ export function actor(
               role,
               facts: live.facts(),
             }),
-            () => {
-              if (connectExecutions.length > 0) {
-                this.persistExecutions(connectExecutions);
-              }
-              if (connectForwards.length > 0) {
-                this.persistForwards(connectForwards, callerInfo.caller, callerInfo.callerType);
-              }
+            (seq) => {
+              insertExecutions(this.ctx.storage.sql, connectOutbox.toExecutionEntries(seq));
+              this.persistForwards(connectOutbox.toForwardEntries(seq), callerInfo.caller, callerInfo.callerType);
             },
           );
           this.broadcastViews();
-          if (connectExecutions.length > 0) {
+          if (connectExecutions > 0) {
             this.drainExecutions();
           }
-          if (connectForwards.length > 0) {
+          if (connectForwards > 0) {
             this.drainForwards();
           }
         }
@@ -2031,9 +1968,9 @@ export function actor(
         if (nextState instanceof Promise) {
           throw new Error("lifecycle.disconnect returned a Promise. Handlers must be synchronous.");
         }
-        const disconnectExecutions = disconnectOutbox.toExecutionEntries();
-        const disconnectForwards = disconnectOutbox.toForwardEntries();
-        if (nextState !== this.state || disconnectExecutions.length > 0 || disconnectForwards.length > 0) {
+        const disconnectExecutions = disconnectOutbox.getExecutions().length;
+        const disconnectForwards = disconnectOutbox.getForwards().length;
+        if (nextState !== this.state || disconnectExecutions > 0 || disconnectForwards > 0) {
           const disconnectRole = resolveRole(def.roles, nextState, caller, { callerType: info.callerType });
           this.pendingCause = {
             type: "lifecycle.disconnect",
@@ -2052,20 +1989,16 @@ export function actor(
               role: disconnectRole,
               facts: live.facts(),
             }),
-            () => {
-              if (disconnectExecutions.length > 0) {
-                this.persistExecutions(disconnectExecutions);
-              }
-              if (disconnectForwards.length > 0) {
-                this.persistForwards(disconnectForwards, caller, info.callerType);
-              }
+            (seq) => {
+              insertExecutions(this.ctx.storage.sql, disconnectOutbox.toExecutionEntries(seq));
+              this.persistForwards(disconnectOutbox.toForwardEntries(seq), caller, info.callerType);
             },
           );
           this.broadcastViews();
-          if (disconnectForwards.length > 0) {
+          if (disconnectForwards > 0) {
             this.drainForwards();
           }
-          if (disconnectExecutions.length > 0) {
+          if (disconnectExecutions > 0) {
             this.drainExecutions();
           }
         }
@@ -2119,17 +2052,7 @@ export function actor(
 
     /** Raw outbox rows (payloads unredacted — project before returning them to Studio). */
     readOutbox(): StudioOutboxRow[] {
-      return this.ctx.storage.sql
-        .exec("SELECT id, service, payload, status, attempts, created_at FROM executions ORDER BY id DESC")
-        .toArray()
-        .map((row) => ({
-          id: String(row["id"]),
-          service: String(row["service"]),
-          payload: String(row["payload"]),
-          status: String(row["status"]),
-          attempts: Number(row["attempts"]),
-          createdAt: Number(row["created_at"]),
-        }));
+      return readOutboxRows(this.ctx.storage.sql);
     }
 
     readActiveLinks(): Array<{ targetType: string; targetId: string; linkName: string; version: number }> {
@@ -2362,6 +2285,25 @@ export function actor(
       }));
     }
 
+    /**
+     * Studio RPC (mutate scope, ADR-014): move a dead letter (`failed` execution) back to `pending`
+     * under the same effect id, then run it. Any other row, or an unknown id, is refused.
+     */
+    __redrive(opts: { effectId: string }): Promise<{ ok: true } | { ok: false; error: string }> {
+      // Like the other studio RPCs, refusals throw synchronously (an async throw is reported by
+      // workerd as an unhandled rejection even though the RPC caller receives it).
+      this.loadPersisted({ create: false });
+      this.assertStudioEnabled();
+      const { effectId } = RedriveOptionsSchema.parse(opts);
+      if (!this.persistedLoaded) return Promise.resolve({ ok: false, error: "Actor not found" });
+      if (!redriveExecution(this.ctx.storage.sql, effectId)) {
+        return Promise.resolve({ ok: false, error: `Effect ${effectId} is not a failed execution` });
+      }
+      this.pushStudioOutbox();
+      void this.drainExecutions();
+      return Promise.resolve({ ok: true });
+    }
+
     /** Studio RPC: one role's view, as `studio.requestView` would return it, redacted (ADR-014). */
     __getView(opts: {
       role: string;
@@ -2496,6 +2438,8 @@ export interface TypedActorClass<TContract> {
         status: string;
         attempts: number;
         createdAt: number;
+        nextAttemptAt: number | null;
+        lastError: string | null;
       }>;
       activeLinks: Array<{
         targetType: string;
@@ -2519,6 +2463,7 @@ export interface TypedActorClass<TContract> {
       }>;
       hasMore: boolean;
     }>;
+    __redrive(opts: { effectId: string }): Promise<{ ok: true } | { ok: false; error: string }>;
     __getView(opts: {
       role: string;
       caller?: string;

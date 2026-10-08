@@ -7,6 +7,7 @@
  * - Actor listing from StudioRegistry
  * - Actor inspection via __inspect() RPC
  * - Timeline retrieval via __getTimeline() RPC
+ * - Actions (mutate scope only): POST .../actions, e.g. redrive a dead letter (ADR-015)
  * - WebSocket upgrade for live studio connections
  * - Serving the bundled SPA
  *
@@ -16,7 +17,7 @@
  */
 
 import { z } from "zod";
-import { type AccessDeps, authenticateStudio, remoteAccessKeys, type StudioPrincipal } from "./access";
+import { type AccessDeps, authenticateStudio, hasScope, remoteAccessKeys, type StudioPrincipal } from "./access";
 import { getAsset } from "./ui-assets";
 
 // Identity header constants (duplicated from @actor-kit/worker to avoid cloudflare:workers dependency)
@@ -176,7 +177,7 @@ function parseActorParams(rawType: string, rawId: string): Parsed<ActorParams> {
 
 // --- Audit ---
 
-export type StudioRoute = "ui" | "list" | "types" | "inspect" | "timeline" | "view" | "ws" | "unknown";
+export type StudioRoute = "ui" | "list" | "types" | "inspect" | "timeline" | "view" | "action" | "ws" | "unknown";
 
 /** One line per studio request (ADR-014). Never carries bodies, query values or the JWT. */
 export interface StudioAuditEvent {
@@ -211,6 +212,7 @@ function classify(path: string): RouteInfo {
   const patterns: Array<[RegExp, StudioRoute]> = [
     [/^\/api\/actors\/([^/]+)\/([^/]+)\/timeline$/, "timeline"],
     [/^\/api\/actors\/([^/]+)\/([^/]+)\/view$/, "view"],
+    [/^\/api\/actors\/([^/]+)\/([^/]+)\/actions$/, "action"],
     [/^\/api\/actors\/([^/]+)\/([^/]+)$/, "inspect"],
     [/^\/actors\/([^/]+)\/([^/]+)\/ws$/, "ws"],
   ];
@@ -305,6 +307,15 @@ function route(
   env: Record<string, unknown>,
   principal: StudioPrincipal,
 ): Response | Promise<Response> {
+  // Actions are the only POST route, and the only route that changes an actor.
+  const actionMatch = path.match(ACTIONS_ROUTE);
+  if (actionMatch?.[1] !== undefined && actionMatch[2] !== undefined) {
+    if (request.method !== "POST") {
+      return jsonError(405, `Method ${request.method} not allowed`, { Allow: "POST" });
+    }
+    return handleAction(request, actionMatch[1], actionMatch[2], env, principal);
+  }
+
   if (request.method !== "GET" && request.method !== "HEAD") {
     return jsonError(405, `Method ${request.method} not allowed`, { Allow: ALLOWED_METHODS });
   }
@@ -544,6 +555,72 @@ function handleStudioWebSocket(
 }
 
 /** Run `use` only once the registry confirms the actor exists; never contacts the actor DO otherwise. */
+// --- Actions (mutate scope) ---
+
+const ACTIONS_ROUTE = /^\/api\/actors\/([^/]+)\/([^/]+)\/actions$/;
+const MAX_ACTION_BODY = 4096;
+
+/** Every Studio action, by name: the actor RPC it calls and its arguments. */
+const ActionBody = z.discriminatedUnion("action", [
+  z.object({ action: z.literal("redrive"), effectId: z.string().min(1).max(64) }).strict(),
+]);
+type ActionBody = z.infer<typeof ActionBody>;
+
+const ActionReply = z.union([z.object({ ok: z.literal(true) }), z.object({ ok: z.literal(false), error: z.string() })]);
+
+function actionRpc(body: ActionBody): { method: string; args: unknown } {
+  switch (body.action) {
+    case "redrive":
+      return { method: "__redrive", args: { effectId: body.effectId } };
+  }
+}
+
+async function readActionBody(
+  request: Request,
+): Promise<{ ok: true; value: ActionBody } | { ok: false; response: Response }> {
+  const text = await request.text();
+  if (text.length > MAX_ACTION_BODY) return { ok: false, response: jsonError(413, "Action body too large") };
+  let json: unknown;
+  try {
+    json = JSON.parse(text);
+  } catch {
+    return { ok: false, response: jsonError(400, "Action body must be JSON") };
+  }
+  const parsed = ActionBody.safeParse(json);
+  if (!parsed.success) {
+    return { ok: false, response: jsonError(400, `Invalid action: ${describeIssues(parsed.error)}`) };
+  }
+  return { ok: true, value: parsed.data };
+}
+
+async function handleAction(
+  request: Request,
+  rawType: string,
+  rawId: string,
+  env: Record<string, unknown>,
+  principal: StudioPrincipal,
+): Promise<Response> {
+  if (!hasScope(principal, "mutate")) {
+    return jsonError(403, "Studio actions need the mutate scope (an admin, or dev on localhost)");
+  }
+  const params = parseActorParams(rawType, rawId);
+  if (!params.ok) return params.response;
+  const body = await readActionBody(request);
+  if (!body.ok) return body.response;
+  const actor = resolveActor(env, params.value);
+  if (actor instanceof Response) return actor;
+
+  const { method, args } = actionRpc(body.value);
+  return withExistingActor(env, actor, params.value, async () => {
+    try {
+      const reply = ActionReply.parse(await callRpc(actor.stub, method, args));
+      return reply.ok ? Response.json({ ok: true }) : jsonError(409, reply.error);
+    } catch (err) {
+      return jsonError(500, err instanceof Error ? err.message : "Unknown error");
+    }
+  });
+}
+
 async function withExistingActor(
   env: Record<string, unknown>,
   actor: ResolvedActor,

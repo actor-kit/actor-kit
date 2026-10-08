@@ -17,6 +17,9 @@ export { createRef } from "./ref";
 // CDC
 export type { ChangeEntry } from "./runtime/cdc";
 export { createChangeEntry } from "./runtime/cdc";
+// Effect ids, retries, outbox store (ADR-015 D1)
+export type { EffectIdParts } from "./runtime/effect-id";
+export { compareEffectIds, formatEffectId, parseEffectId } from "./runtime/effect-id";
 export { getTokenFromRequest } from "./runtime/get-token";
 // Actor journal (ADR-013): facts, events, replay
 export type {
@@ -42,6 +45,8 @@ export {
   foldJournal,
   JournalDivergenceError,
   JournalNondeterminismError,
+  journalHighWater,
+  nextTransitionSeq,
   readJournal,
   resolveJournalConfig,
 } from "./runtime/journal";
@@ -56,11 +61,26 @@ export {
 // Message router
 export type { RouteResult } from "./runtime/message-router";
 export { routeMessage } from "./runtime/message-router";
+export { ACTOR_KIT_MIGRATIONS } from "./runtime/migrations";
 // Outbox
 export type { ExecutionEntry, ForwardCall, ForwardEntry, LinkCall, UnlinkCall } from "./runtime/outbox";
 export { createOutbox } from "./runtime/outbox";
+export type { DueExecution, NewExecution, OutboxFailedEvent, OutboxRow } from "./runtime/outbox-store";
+export {
+  dueExecutions,
+  finishAttempt,
+  insertExecutions,
+  nextRetryAt,
+  outboxFailedEvent,
+  readOutboxRows,
+  redriveExecution,
+  requeueInterrupted,
+  startAttempt,
+} from "./runtime/outbox-store";
 // Namespace resolution
 export { resolveNamespace } from "./runtime/resolve-namespace";
+export type { AttemptSettlement, RetryOption, RetryPolicy } from "./runtime/retry";
+export { DEFAULT_RETRY_POLICY, resolveRetryPolicy, retryDelay, settleAttempt } from "./runtime/retry";
 // Role resolution
 export type { RolePredicate } from "./runtime/roles";
 export { resolveRole } from "./runtime/roles";

@@ -2,12 +2,14 @@
 
 import type { z } from "zod";
 import {
+  ActionOkSchema,
   ActorTypesResponseSchema,
   ActorsResponseSchema,
   type ActorEntry,
   ErrorBodySchema,
   type InspectResult,
   InspectSchema,
+  type StudioAction,
   TimelineResponseSchema,
   type TimelineItem,
   formatIssues,
@@ -68,11 +70,16 @@ function errorMessage(status: number, text: string): string {
   return message;
 }
 
-async function request<S extends z.ZodType>(url: string, schema: S, signal?: AbortSignal): Promise<z.output<S>> {
+async function request<S extends z.ZodType>(
+  url: string,
+  schema: S,
+  signal?: AbortSignal,
+  init: RequestInit = {},
+): Promise<z.output<S>> {
   let res: Response;
   try {
     // Production auth is the Cloudflare Access cookie (ADR-014), sent automatically on same-origin requests.
-    res = await fetch(url, signal === undefined ? {} : { signal });
+    res = await fetch(url, signal === undefined ? init : { ...init, signal });
   } catch (err) {
     if (err instanceof DOMException && err.name === "AbortError") throw err;
     throw new StudioApiError("network", "Network error: could not reach the Studio API", null);
@@ -138,4 +145,13 @@ export function fetchTimeline(
   if (opts?.before) params.set("before", String(opts.before));
   const query = params.toString();
   return request(`${actorPath(actorType, actorId)}/timeline${query ? `?${query}` : ""}`, TimelineResponseSchema, signal);
+}
+
+/** Run a Studio action (needs the mutate scope). Rejects with the server's reason when refused. */
+export async function postAction(actorType: string, actorId: string, action: StudioAction): Promise<void> {
+  await request(`${actorPath(actorType, actorId)}/actions`, ActionOkSchema, undefined, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(action),
+  });
 }

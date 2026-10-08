@@ -41,13 +41,19 @@ export const ConnectionSchema = z.object({
 export type StudioConnectionInfo = z.infer<typeof ConnectionSchema>;
 
 const OutboxEntrySchema = z.object({
+  /** Effect id, `seq:index` (ADR-015 D1). */
   id: z.string(),
   service: z.string(),
   payload: z.string(),
+  /** pending, running, retrying, done or failed (failed rows are dead letters). */
   status: z.string(),
   attempts: z.number(),
   createdAt: z.number(),
+  /** When a `retrying` row tries next. Absent from actors older than ADR-015. */
+  nextAttemptAt: z.number().nullable().optional(),
+  lastError: z.string().nullable().optional(),
 });
+export type OutboxEntry = z.infer<typeof OutboxEntrySchema>;
 
 const ActiveLinkSchema = z.object({
   targetType: z.string(),
@@ -99,6 +105,12 @@ export const TimelineResponseSchema = z.object({
   hasMore: z.boolean(),
 });
 export const ErrorBodySchema = z.object({ error: z.string() });
+
+/** A Studio action the actor accepted (refusals arrive as an error body). */
+export const ActionOkSchema = z.object({ ok: z.literal(true) });
+
+/** Actions an admin can take from Studio (POST .../actions, mutate scope). */
+export type StudioAction = { action: "redrive"; effectId: string };
 
 // --- WebSocket frames ---
 

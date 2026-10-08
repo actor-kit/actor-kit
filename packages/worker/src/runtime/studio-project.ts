@@ -7,6 +7,7 @@
  */
 
 import type { LiveConnection } from "./live-connections";
+import type { OutboxRow } from "./outbox-store";
 import type { StudioTimelineEntry } from "./studio-protocol";
 import { REDACTED, type Redactor } from "./studio-redact";
 
@@ -92,16 +93,9 @@ export async function projectTimelineEntry(
   };
 }
 
-export interface StudioOutboxRow {
-  id: string;
-  service: string;
-  payload: string;
-  status: string;
-  attempts: number;
-  createdAt: number;
-}
+export type { OutboxRow as StudioOutboxRow } from "./outbox-store";
 
-export function projectOutboxRow(row: StudioOutboxRow, projection: StudioProjection): StudioOutboxRow {
+export function projectOutboxRow(row: OutboxRow, projection: StudioProjection): OutboxRow {
   return { ...row, payload: projectJson(row.payload, projection) };
 }
 

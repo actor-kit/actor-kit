@@ -112,3 +112,15 @@ class_name = "ExampleTodoList"
 [[migrations]]
 tag = "v9"
 new_sqlite_classes = ["ExampleAuction", "ExampleChatRoom", "ExampleCounter", "ExampleTodoList"]
+
+[[durable_objects.bindings]]
+name = "RETRIER"
+class_name = "Retrier"
+
+[[durable_objects.bindings]]
+name = "RETRIER_NO_JOURNAL"
+class_name = "RetrierNoJournal"
+
+[[migrations]]
+tag = "v10"
+new_sqlite_classes = ["Retrier", "RetrierNoJournal"]

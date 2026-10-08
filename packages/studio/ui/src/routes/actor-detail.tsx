@@ -3,6 +3,7 @@ import { useState } from "react";
 import { formatCauseSummary } from "../cause-summary";
 import { JsonDiff } from "../components/json-diff";
 import { JsonTree } from "../components/json-tree";
+import { OutboxPanel } from "../components/outbox-panel";
 import { useStudioWs } from "../hooks/use-studio-ws";
 import type { TimelineItem } from "../protocol";
 import type { StudioStatus } from "../studio-state";
@@ -266,47 +267,7 @@ function ActorDetail({ actorType, actorId }: { actorType: string; actorId: strin
         </div>
       )}
 
-      {activeTab === "outbox" && (
-        <div data-testid="outbox-panel">
-          {inspect.outbox.length === 0 ? (
-            <p className="text-zinc-500">No executions.</p>
-          ) : (
-            <table className="w-full text-sm border border-zinc-800 rounded">
-              <thead>
-                <tr className="border-b border-zinc-800 text-zinc-400">
-                  <th className="text-left px-4 py-2">Service</th>
-                  <th className="text-left px-4 py-2">Status</th>
-                  <th className="text-right px-4 py-2">Attempts</th>
-                </tr>
-              </thead>
-              <tbody>
-                {inspect.outbox.map((exec) => {
-                  const statusColor =
-                    exec.status === "done"
-                      ? "text-emerald-400"
-                      : exec.status === "failed"
-                        ? "text-red-400"
-                        : exec.status === "pending"
-                          ? "text-amber-400"
-                          : "text-zinc-400";
-                  return (
-                    <tr
-                      key={exec.id}
-                      className="border-b border-zinc-800/50"
-                      data-testid="outbox-row"
-                      data-status={exec.status}
-                    >
-                      <td className="px-4 py-2">{exec.service}</td>
-                      <td className={`px-4 py-2 ${statusColor}`}>{exec.status}</td>
-                      <td className="px-4 py-2 text-right text-zinc-400">{exec.attempts}</td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          )}
-        </div>
-      )}
+      {activeTab === "outbox" && <OutboxPanel actorType={actorType} actorId={actorId} outbox={inspect.outbox} />}
 
       {activeTab === "links" && (
         <div data-testid="links-panel" className="space-y-4">
