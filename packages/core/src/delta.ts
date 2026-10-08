@@ -1,390 +1,79 @@
 /**
  * Delta encoding — bitmask-based field-level changes.
  *
- * A bitmask (ceil(fieldCount / 8) bytes) indicates which fields changed.
- * Only changed fields' data follows the bitmask.
+ * Layout: change bitmask (one bit per top-level field), null bitmask (one bit
+ * per nullable field, set when its next value is null), then each changed,
+ * non-null field's value encoded exactly as in a snapshot (codec.ts).
  *
  * encodeDelta(schema, prev, next) → Uint8Array | null (null = no changes)
  * applyDelta(schema, current, deltaBytes) → new object with changes applied
  */
 
-import type { FieldDescriptor, Infer, SchemaDefinition } from "./schema";
+import {
+  bitmaskBytes,
+  cursorOver,
+  hasBit,
+  isNullField,
+  nullableCount,
+  packBits,
+  readValue,
+  valueSize,
+  writeValue,
+} from "./codec";
+import type { FieldDescriptor, Infer, SchemaDefinition, ValueMeta } from "./schema";
+import { valueMetaOf } from "./schema";
 
-const textEncoder = new TextEncoder();
-const textDecoder = new TextDecoder();
-
-// --- Compare two values for equality ---
-
+/** Numbers within 1e-6 are equal (float32 precision loss); objects and arrays compare as JSON. */
 function valuesEqual(a: unknown, b: unknown): boolean {
   if (a === b) return true;
-  if (typeof a !== typeof b) return false;
-  if (typeof a === "number" && typeof b === "number") {
-    // Float comparison with epsilon for float32 precision loss
-    return Math.abs(a - b) < 1e-6;
-  }
-  if (typeof a === "string" || typeof a === "boolean") return a === b;
-  // For objects/arrays, use JSON comparison (Phase 1 simple approach)
+  if (typeof a === "number" && typeof b === "number") return Math.abs(a - b) < 1e-6;
   return JSON.stringify(a) === JSON.stringify(b);
 }
-
-// --- Encode delta ---
 
 export function encodeDelta<TShape extends Record<string, FieldDescriptor>>(
   schemaDef: SchemaDefinition<TShape>,
   prev: Infer<SchemaDefinition<TShape>>,
   next: Infer<SchemaDefinition<TShape>>,
 ): Uint8Array | null {
-  const prevObj = prev as Record<string, unknown>;
-  const nextObj = next as Record<string, unknown>;
   const fields = schemaDef.fields;
+  const changed = fields.map((f) => !valuesEqual(prev[f.name], next[f.name]));
+  if (!changed.includes(true)) return null;
 
-  // Build change bitmask — which fields changed?
-  const bitmaskBytes = Math.ceil(fields.length / 8);
-  const bitmask = new Uint8Array(bitmaskBytes);
-  let anyChanged = false;
+  const changeMask = packBits(changed);
+  const nullMask = packBits(fields.filter((f) => f.type === "nullable").map((f) => next[f.name] === null));
+  const values: [ValueMeta, unknown][] = [];
+  fields.forEach((field, i) => {
+    const value = next[field.name];
+    if (changed[i] && !isNullField(field, value)) values.push([valueMetaOf(field), value]);
+  });
 
-  for (let i = 0; i < fields.length; i++) {
-    const field = fields[i];
-    if (field === undefined) continue;
-    if (!valuesEqual(prevObj[field.name], nextObj[field.name])) {
-      const byteIndex = Math.floor(i / 8);
-      const bitIndex = i % 8;
-      bitmask[byteIndex] = (bitmask[byteIndex] ?? 0) | (1 << bitIndex);
-      anyChanged = true;
-    }
-  }
-
-  if (!anyChanged) return null;
-
-  // Build null bitmask for nullable fields (only changed nullable fields)
-  const nullableFields = schemaDef.hasNullable ? fields.filter((f) => f.type === "nullable") : [];
-  const nullBitmaskBytes = nullableFields.length > 0 ? Math.ceil(nullableFields.length / 8) : 0;
-  const nullBitmask = new Uint8Array(nullBitmaskBytes);
-
-  if (schemaDef.hasNullable) {
-    let nullIdx = 0;
-    for (const field of fields) {
-      if (field.type === "nullable") {
-        if (nextObj[field.name] === null) {
-          const byteIndex = Math.floor(nullIdx / 8);
-          const bitIndex = nullIdx % 8;
-          nullBitmask[byteIndex] = (nullBitmask[byteIndex] ?? 0) | (1 << bitIndex);
-        }
-        nullIdx++;
-      }
-    }
-  }
-
-  // Calculate size for changed fields
-  let dataSize = bitmaskBytes + nullBitmaskBytes;
-  for (let i = 0; i < fields.length; i++) {
-    const byteIndex = Math.floor(i / 8);
-    const bitIndex = i % 8;
-    if (((bitmask[byteIndex] ?? 0) & (1 << bitIndex)) !== 0) {
-      const field = fields[i];
-      if (field === undefined) continue;
-      // Nullable field that is null: zero value bytes
-      if (field.type === "nullable" && nextObj[field.name] === null) {
-        continue;
-      }
-      dataSize += fieldSize(field, nextObj[field.name]);
-    }
-  }
-
-  // Encode
-  const buffer = new ArrayBuffer(dataSize);
-  const view = new DataView(buffer);
-  const bytes = new Uint8Array(buffer);
-
-  // Write change bitmask
-  bytes.set(bitmask, 0);
-  let offset = bitmaskBytes;
-
-  // Write null bitmask (if applicable)
-  if (nullBitmaskBytes > 0) {
-    bytes.set(nullBitmask, offset);
-    offset += nullBitmaskBytes;
-  }
-
-  // Write changed fields
-  for (let i = 0; i < fields.length; i++) {
-    const byteIndex = Math.floor(i / 8);
-    const bitIndex = i % 8;
-    if (((bitmask[byteIndex] ?? 0) & (1 << bitIndex)) !== 0) {
-      const field = fields[i];
-      if (field === undefined) continue;
-      if (field.type === "nullable") {
-        if (nextObj[field.name] === null) {
-          continue; // Null bit is set, skip value bytes
-        }
-        // Non-null: write inner value
-        const innerField = { type: field.innerType ?? "", element: field.element, schema: field.schema };
-        offset = writeField(innerField, nextObj[field.name], view, bytes, offset);
-      } else {
-        offset = writeField(field, nextObj[field.name], view, bytes, offset);
-      }
-    }
-  }
-
+  const header = changeMask.byteLength + nullMask.byteLength;
+  const bytes = new Uint8Array(values.reduce((size, [meta, value]) => size + valueSize(meta, value), header));
+  bytes.set(changeMask, 0);
+  bytes.set(nullMask, changeMask.byteLength);
+  const cursor = cursorOver(bytes, header);
+  for (const [meta, value] of values) writeValue(meta, value, cursor);
   return bytes;
 }
-
-// --- Apply delta ---
 
 export function applyDelta<TShape extends Record<string, FieldDescriptor>>(
   schemaDef: SchemaDefinition<TShape>,
   current: Infer<SchemaDefinition<TShape>>,
   deltaBytes: Uint8Array,
 ): Infer<SchemaDefinition<TShape>> {
-  const currentObj = current as Record<string, unknown>;
   const fields = schemaDef.fields;
-  const bitmaskBytes = Math.ceil(fields.length / 8);
+  const nullMaskStart = bitmaskBytes(fields.length);
+  const cursor = cursorOver(deltaBytes, nullMaskStart + bitmaskBytes(nullableCount(schemaDef)));
+  const result: Record<string, unknown> = { ...current };
 
-  const view = new DataView(deltaBytes.buffer, deltaBytes.byteOffset, deltaBytes.byteLength);
-  const changeBitmask = deltaBytes.subarray(0, bitmaskBytes);
+  let nullIndex = 0;
+  fields.forEach((field, i) => {
+    const isNull = field.type === "nullable" && hasBit(deltaBytes, nullMaskStart, nullIndex++);
+    if (!hasBit(deltaBytes, 0, i)) return;
+    result[field.name] = isNull ? null : readValue(valueMetaOf(field), cursor);
+  });
 
-  let offset = bitmaskBytes;
-
-  // Read null bitmask if schema has nullable fields
-  let nullBitmask: Uint8Array | undefined;
-  if (schemaDef.hasNullable) {
-    const nullableCount = fields.filter((f) => f.type === "nullable").length;
-    const nullBitmaskBytes = Math.ceil(nullableCount / 8);
-    nullBitmask = deltaBytes.subarray(offset, offset + nullBitmaskBytes);
-    offset += nullBitmaskBytes;
-  }
-
-  const result = { ...currentObj };
-
-  let nullIdx = 0;
-  for (let i = 0; i < fields.length; i++) {
-    const field = fields[i];
-    if (field === undefined) continue;
-
-    const isNullable = field.type === "nullable";
-    const currentNullIdx = isNullable ? nullIdx++ : -1;
-
-    const byteIndex = Math.floor(i / 8);
-    const bitIndex = i % 8;
-    if (((changeBitmask[byteIndex] ?? 0) & (1 << bitIndex)) !== 0) {
-      if (isNullable) {
-        // Check null bitmask
-        const nullByteIndex = Math.floor(currentNullIdx / 8);
-        const nullBitIndex = currentNullIdx % 8;
-        const isNull = nullBitmask !== undefined && ((nullBitmask[nullByteIndex] ?? 0) & (1 << nullBitIndex)) !== 0;
-        if (isNull) {
-          result[field.name] = null;
-        } else {
-          const innerField = { type: field.innerType ?? "", element: field.element, schema: field.schema };
-          const [value, newOffset] = readField(innerField, view, deltaBytes, offset);
-          result[field.name] = value;
-          offset = newOffset;
-        }
-      } else {
-        const [value, newOffset] = readField(field, view, deltaBytes, offset);
-        result[field.name] = value;
-        offset = newOffset;
-      }
-    }
-  }
-
+  // Generic boundary cast: `current` already matches Infer<>, and every replaced entry is read
+  // by that field's own descriptor; the compiler cannot relate the walk over `fields` to TShape.
   return result as Infer<SchemaDefinition<TShape>>;
-}
-
-// --- Field size calculation ---
-
-function fieldSize(
-  field: { type: string; innerType?: string; element?: unknown; schema?: unknown },
-  value: unknown,
-): number {
-  switch (field.type) {
-    case "uint8":
-    case "boolean":
-      return 1;
-    case "uint16":
-      return 2;
-    case "uint32":
-    case "float32":
-      return 4;
-    case "float64":
-      return 8;
-    case "string": {
-      const encoded = textEncoder.encode(String(value ?? ""));
-      return 2 + encoded.byteLength;
-    }
-    case "array": {
-      const arr = Array.isArray(value) ? value : [];
-      let size = 2; // count prefix
-      for (const item of arr) {
-        size += elementSize(field.element, item);
-      }
-      return size;
-    }
-    case "schema": {
-      const nested = field.schema as SchemaDefinition<Record<string, FieldDescriptor>>;
-      let size = 0;
-      for (const f of nested.fields) {
-        size += fieldSize(f, ((value ?? {}) as Record<string, unknown>)[f.name]);
-      }
-      return size;
-    }
-    case "nullable": {
-      // Null values handled by caller. Non-null: delegate to inner type.
-      const innerField = { type: field.innerType ?? "", element: field.element, schema: field.schema };
-      return fieldSize(innerField, value);
-    }
-    default:
-      return 0;
-  }
-}
-
-function elementSize(element: unknown, value: unknown): number {
-  if (typeof element !== "object" || element === null) return 0;
-  const el = element as { type: string; schema?: unknown };
-  if (el.type === "schema" && el.schema) {
-    const nested = el.schema as SchemaDefinition<Record<string, FieldDescriptor>>;
-    let size = 0;
-    for (const f of nested.fields) {
-      size += fieldSize(f, ((value ?? {}) as Record<string, unknown>)[f.name]);
-    }
-    return size;
-  }
-  return fieldSize(el, value);
-}
-
-// --- Field write/read (reuse patterns from binary.ts) ---
-
-function writeField(
-  field: { type: string; element?: unknown; schema?: unknown; name?: string },
-  value: unknown,
-  view: DataView,
-  bytes: Uint8Array,
-  offset: number,
-): number {
-  switch (field.type) {
-    case "uint8":
-      view.setUint8(offset, Number(value ?? 0));
-      return offset + 1;
-    case "uint16":
-      view.setUint16(offset, Number(value ?? 0), false);
-      return offset + 2;
-    case "uint32":
-      view.setUint32(offset, Number(value ?? 0), false);
-      return offset + 4;
-    case "float32":
-      view.setFloat32(offset, Number(value ?? 0), false);
-      return offset + 4;
-    case "float64":
-      view.setFloat64(offset, Number(value ?? 0), false);
-      return offset + 8;
-    case "boolean":
-      view.setUint8(offset, value ? 1 : 0);
-      return offset + 1;
-    case "string": {
-      const encoded = textEncoder.encode(String(value ?? ""));
-      view.setUint16(offset, encoded.byteLength, false);
-      bytes.set(encoded, offset + 2);
-      return offset + 2 + encoded.byteLength;
-    }
-    case "array": {
-      const arr = Array.isArray(value) ? value : [];
-      view.setUint16(offset, arr.length, false);
-      offset += 2;
-      for (const item of arr) {
-        offset = writeElement(field.element, item, view, bytes, offset);
-      }
-      return offset;
-    }
-    case "schema": {
-      const nested = field.schema as SchemaDefinition<Record<string, FieldDescriptor>>;
-      const obj = (value ?? {}) as Record<string, unknown>;
-      for (const f of nested.fields) {
-        offset = writeField(f, obj[f.name], view, bytes, offset);
-      }
-      return offset;
-    }
-    default:
-      return offset;
-  }
-}
-
-function writeElement(element: unknown, value: unknown, view: DataView, bytes: Uint8Array, offset: number): number {
-  if (typeof element !== "object" || element === null) return offset;
-  const el = element as { type: string; schema?: unknown };
-  if (el.type === "schema" && el.schema) {
-    const nested = el.schema as SchemaDefinition<Record<string, FieldDescriptor>>;
-    const obj = (value ?? {}) as Record<string, unknown>;
-    for (const f of nested.fields) {
-      offset = writeField(f, obj[f.name], view, bytes, offset);
-    }
-    return offset;
-  }
-  return writeField(el, value, view, bytes, offset);
-}
-
-function readField(
-  field: { type: string; element?: unknown; schema?: unknown; name?: string },
-  view: DataView,
-  bytes: Uint8Array,
-  offset: number,
-): [unknown, number] {
-  switch (field.type) {
-    case "uint8":
-      return [view.getUint8(offset), offset + 1];
-    case "uint16":
-      return [view.getUint16(offset, false), offset + 2];
-    case "uint32":
-      return [view.getUint32(offset, false), offset + 4];
-    case "float32":
-      return [view.getFloat32(offset, false), offset + 4];
-    case "float64":
-      return [view.getFloat64(offset, false), offset + 8];
-    case "boolean":
-      return [view.getUint8(offset) !== 0, offset + 1];
-    case "string": {
-      const len = view.getUint16(offset, false);
-      offset += 2;
-      const str = textDecoder.decode(bytes.subarray(offset, offset + len));
-      return [str, offset + len];
-    }
-    case "array": {
-      const count = view.getUint16(offset, false);
-      offset += 2;
-      const arr: unknown[] = [];
-      for (let i = 0; i < count; i++) {
-        const [item, newOffset] = readElement(field.element, view, bytes, offset);
-        arr.push(item);
-        offset = newOffset;
-      }
-      return [arr, offset];
-    }
-    case "schema": {
-      const nested = field.schema as SchemaDefinition<Record<string, FieldDescriptor>>;
-      const obj: Record<string, unknown> = {};
-      for (const f of nested.fields) {
-        const [val, newOffset] = readField(f, view, bytes, offset);
-        obj[f.name] = val;
-        offset = newOffset;
-      }
-      return [obj, offset];
-    }
-    default:
-      return [undefined, offset];
-  }
-}
-
-function readElement(element: unknown, view: DataView, bytes: Uint8Array, offset: number): [unknown, number] {
-  if (typeof element !== "object" || element === null) return [undefined, offset];
-  const el = element as { type: string; schema?: unknown };
-  if (el.type === "schema" && el.schema) {
-    const nested = el.schema as SchemaDefinition<Record<string, FieldDescriptor>>;
-    const obj: Record<string, unknown> = {};
-    for (const f of nested.fields) {
-      const [val, newOffset] = readField(f, view, bytes, offset);
-      obj[f.name] = val;
-      offset = newOffset;
-    }
-    return [obj, offset];
-  }
-  return readField(el, view, bytes, offset);
 }

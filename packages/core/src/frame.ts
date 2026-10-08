@@ -58,7 +58,7 @@ export function createControlFrame(controlType: ControlType, payload: Uint8Array
   const frame = new Uint8Array(HEADER_SIZE + 1 + payload.byteLength);
   const view = new DataView(frame.buffer);
 
-  view.setUint8(0, 0); // version 0 for control frames
+  // byte 0 (version) stays 0 for control frames
   view.setUint8(1, FrameType.CONTROL);
   view.setUint32(2, payload.byteLength, false);
   view.setUint8(6, controlType);
@@ -76,6 +76,19 @@ export interface ParsedFrame {
   controlType?: ControlType; // CONTROL only
 }
 
+function frameTypeOf(byte: number): FrameType {
+  const type = Object.values(FrameType).find((t): t is FrameType => t === byte);
+  if (type === undefined) throw new Error(`Unknown frame type: ${byte}`);
+  return type;
+}
+
+function controlTypeOf(byte: number): ControlType {
+  const type = Object.values(ControlType).find((t): t is ControlType => t === byte);
+  if (type === undefined) throw new Error(`Unknown control type: ${byte}`);
+  return type;
+}
+
+/** Parses a frame. Throws on a short header or an unknown frame or control type. */
 export function parseFrame(frame: Uint8Array): ParsedFrame {
   if (frame.byteLength < HEADER_SIZE) {
     throw new Error(`Frame too short: ${frame.byteLength} bytes (minimum ${HEADER_SIZE})`);
@@ -83,23 +96,18 @@ export function parseFrame(frame: Uint8Array): ParsedFrame {
 
   const view = new DataView(frame.buffer, frame.byteOffset, frame.byteLength);
   const version = view.getUint8(0);
-  const type = view.getUint8(1) as FrameType;
+  const type = frameTypeOf(view.getUint8(1));
   const payloadLength = view.getUint32(2, false);
+  const payloadAfter = (start: number) => frame.subarray(start, start + payloadLength);
 
   switch (type) {
-    case FrameType.SNAPSHOT: {
-      const roleIndex = view.getUint8(6);
-      const payload = frame.subarray(HEADER_SIZE + 1, HEADER_SIZE + 1 + payloadLength);
-      return { version, type, payloadLength, payload, roleIndex };
-    }
+    case FrameType.SNAPSHOT:
+      return { version, type, payloadLength, payload: payloadAfter(HEADER_SIZE + 1), roleIndex: view.getUint8(6) };
     case FrameType.CONTROL: {
-      const controlType = view.getUint8(6) as ControlType;
-      const payload = frame.subarray(HEADER_SIZE + 1, HEADER_SIZE + 1 + payloadLength);
-      return { version, type, payloadLength, payload, controlType };
+      const controlType = controlTypeOf(view.getUint8(6));
+      return { version, type, payloadLength, payload: payloadAfter(HEADER_SIZE + 1), controlType };
     }
-    default: {
-      const payload = frame.subarray(HEADER_SIZE, HEADER_SIZE + payloadLength);
-      return { version, type, payloadLength, payload };
-    }
+    default:
+      return { version, type, payloadLength, payload: payloadAfter(HEADER_SIZE) };
   }
 }
