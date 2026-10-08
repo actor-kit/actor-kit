@@ -14,6 +14,8 @@ export {
   FrameType,
   parseFrame,
 } from "./frame";
+// Hashing
+export { xxh64 } from "./hash";
 // Schema builder
 export type { FieldDescriptor, Infer, SchemaDefinition } from "./schema";
 export { array, boolean, float32, float64, nullable, schema, string, uint8, uint16, uint32 } from "./schema";
@@ -21,6 +23,7 @@ export { array, boolean, float32, float64, nullable, schema, string, uint8, uint
 // Shared types
 export type {
   ContractMessages,
+  DeterministicContext,
   ExecuteFn,
   Execution,
   ForwardCall,

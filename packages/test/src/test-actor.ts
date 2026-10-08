@@ -16,8 +16,9 @@ import type {
   SchemaDefinition,
   TimelineEntry,
 } from "@actor-kit/core";
+import { xxh64 } from "@actor-kit/core";
 import type { LifecycleEvent, LinkCall, RolePredicate, UnlinkCall } from "@actor-kit/worker/testing";
-import { resolveRole, routeMessage } from "@actor-kit/worker/testing";
+import { createLiveFacts, resolveRole, routeMessage } from "@actor-kit/worker/testing";
 import type { z } from "zod";
 
 // --- Actor definition shape (minimal for testing) ---
@@ -179,14 +180,6 @@ function isContract(arg: TestableActorDef<unknown, unknown> | ContractShape): ar
 
 // --- Helpers ---
 
-function simpleChecksum(json: string): string {
-  let h = 0;
-  for (let i = 0; i < json.length; i++) {
-    h = ((h << 5) - h + json.charCodeAt(i)) | 0;
-  }
-  return (h >>> 0).toString(16);
-}
-
 // --- Implementation ---
 
 // Overload 1: Contract (from defineActor) — requires roles, messages, views
@@ -240,6 +233,7 @@ export function testActor(
     const forwards: ForwardCall[] = [];
 
     const ctx: Omit<MessageContext, "role"> = {
+      ...createLiveFacts().ctx,
       caller,
       callerType,
       env: {},
@@ -288,7 +282,7 @@ export function testActor(
           payload,
         },
         stateSnapshot: result.state,
-        checksum: simpleChecksum(json),
+        checksum: xxh64(json),
         createdAt: Date.now(),
       },
     ];
@@ -303,6 +297,7 @@ export function testActor(
         throw new Error(`Invalid input: ${parsed.error.message}`);
       }
       return def.init(parsed.data, {
+        ...createLiveFacts().ctx,
         env: {},
         link: async () => {
           throw new Error("link() not available in test harness init — use send() for link testing");

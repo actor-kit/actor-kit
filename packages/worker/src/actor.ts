@@ -14,16 +14,26 @@
 import { DurableObject } from "cloudflare:workers";
 import type {
   ContractMessages,
+  DeterministicContext,
   FieldDescriptor,
   MessageContext,
   MutationCause,
   SchemaDefinition,
 } from "@actor-kit/core";
-import { createDeltaFrame, createSnapshotFrame, encode, encodeDelta } from "@actor-kit/core";
+import { createDeltaFrame, createSnapshotFrame, encode, encodeDelta, xxh64 } from "@actor-kit/core";
 import { DOQB } from "workers-qb";
 import type { z } from "zod";
 import type { LifecycleEvent } from "./define";
 import { BINARY_SUPPORT_HEADER, CALLER_ID_HEADER, CALLER_TYPE_HEADER } from "./identity";
+import {
+  appendJournalEvent,
+  createLiveFacts,
+  JOURNAL_MIGRATION_SQL,
+  type JournalDraft,
+  type JournalOption,
+  type LiveFacts,
+  resolveJournalConfig,
+} from "./runtime/journal";
 import {
   isStudioSocket,
   type LiveConnection,
@@ -116,7 +126,7 @@ interface ActorDef {
   input: z.ZodType;
   init(
     input: unknown,
-    ctx: { env: unknown; link: (name: string, id: string) => Promise<unknown> },
+    ctx: { env: unknown; link: (name: string, id: string) => Promise<unknown> } & DeterministicContext,
   ): unknown | Promise<unknown>; // bivariant — optionally async, receives ctx
   version?: number;
   roles: Record<
@@ -151,22 +161,31 @@ interface ActorDef {
     string,
     {
       fn(input: unknown, env: unknown): Promise<unknown>;
-      onDone?(state: unknown, result: unknown, input: unknown): unknown;
-      onError?(state: unknown, error: { message: string }, input: unknown): unknown;
+      onDone?(state: unknown, result: unknown, input: unknown, ctx: DeterministicContext): unknown;
+      onError?(state: unknown, error: { message: string }, input: unknown, ctx: DeterministicContext): unknown;
     }
   >;
   links?: Record<
     string,
     {
       contract: { readonly name: string };
-      onUpdate(state: unknown, view: unknown, id?: string): unknown;
-      onError?: ((state: unknown, error: { message: string; code: string }, id?: string) => unknown) | undefined;
-      onUnlink?: ((state: unknown, id?: string) => unknown) | undefined;
+      onUpdate(state: unknown, view: unknown, id: string | undefined, ctx: DeterministicContext): unknown;
+      onError?:
+        | ((
+            state: unknown,
+            error: { message: string; code: string },
+            id: string | undefined,
+            ctx: DeterministicContext,
+          ) => unknown)
+        | undefined;
+      onUnlink?: ((state: unknown, id: string | undefined, ctx: DeterministicContext) => unknown) | undefined;
     }
   >;
   migrate?(persisted: unknown, fromVersion: number): unknown;
   serialize?(state: unknown): unknown;
   restore?(serialized: unknown): unknown;
+  /** Event journal (ADR-013). Omitted: on, keep everything. `false`: off. `{ keep }`: prune. */
+  journal?: JournalOption;
   studio?: {
     /**
      * true: force-enable timeline recording regardless of registry detection.
@@ -304,6 +323,11 @@ const ACTOR_KIT_MIGRATIONS = [
     name: "0008_drop_studio_connections",
     sql: "DROP TABLE IF EXISTS studio_connections;",
   },
+  {
+    // Append-only event journal + checkpoints (ADR-013).
+    name: "0009_journal",
+    sql: JOURNAL_MIGRATION_SQL,
+  },
 ];
 
 // --- Helpers ---
@@ -370,6 +394,7 @@ export function actor(
   // Validate studio config at definition time, not on the first mutation.
   const configuredTimelineSize = resolveTimelineSize(def.studio?.timelineSize);
   const studioRedactor = compileRedaction(def.studio?.redact);
+  const journalConfig = resolveJournalConfig(def.journal);
 
   const DOClass = class ActorInstance extends DurableObject {
     state: unknown = undefined;
@@ -485,9 +510,15 @@ export function actor(
       // Persist the migrated state once (stamped with the new version) and record it on the timeline.
       if (migrated) {
         this.pendingCause = { type: "migrate", fromVersion: row.version, toVersion: this.version };
-        this.ctx.storage.transactionSync(() => {
-          this.persistState();
-        });
+        this.commit(this.state, () => ({
+          causeType: "migrate",
+          name: null,
+          payload: { fromVersion: row.version, toVersion: this.version },
+          caller: null,
+          callerType: null,
+          role: null,
+          facts: {},
+        }));
       }
 
       // Drain any pending executions from before crash/restart
@@ -519,16 +550,26 @@ export function actor(
       if (!emptyParsed.success) return;
 
       this.actorId = this.ctx.id.toString();
-      this.state = await def.init(emptyParsed.data, {
+      const live = createLiveFacts();
+      const initialState = await def.init(emptyParsed.data, {
         env: this.env,
         link: async () => {
           throw new Error("link() not available during auto-spawn");
         },
+        ...live.ctx,
       });
-      this.initialized = true;
 
       this.pendingCause = { type: "init" };
-      this.persistState();
+      this.commit(initialState, () => ({
+        causeType: "init",
+        name: null,
+        payload: emptyParsed.data,
+        caller: null,
+        callerType: null,
+        role: null,
+        facts: live.facts(),
+      }));
+      this.initialized = true;
     }
 
     /** Detect StudioRegistry in ctx.exports or env and cache the stub. */
@@ -621,7 +662,29 @@ export function actor(
       }
     }
 
-    persistState(): void {
+    /**
+     * Apply a transition atomically: set the state, run `writes` (outbox, links), then persist the
+     * snapshot and append its journal event, all in one transaction. On failure nothing is written
+     * and the in-memory state is put back. `draft` is read after `writes`, so facts recorded while
+     * processing links are included.
+     */
+    commit(nextState: unknown, draft: () => JournalDraft, writes?: () => void): void {
+      const previous = this.state;
+      this.state = nextState;
+      try {
+        this.ctx.storage.transactionSync(() => {
+          writes?.();
+          this.persistState(draft());
+        });
+      } catch (error) {
+        this.state = previous;
+        this.pendingCause = null;
+        throw error;
+      }
+    }
+
+    /** Write the snapshot (and its journal event). Only call inside commit()'s transaction. */
+    persistState(draft: JournalDraft): void {
       const serialized = def.serialize ? def.serialize(this.state) : this.state;
       const json = JSON.stringify(serialized);
       const checksum = this.computeChecksum(json);
@@ -635,6 +698,15 @@ export function actor(
         checksum,
         now,
       );
+
+      if (journalConfig.enabled) {
+        appendJournalEvent(this.ctx.storage.sql, journalConfig, draft, {
+          stateJson: json,
+          checksum,
+          version: this.version,
+          now,
+        });
+      }
 
       // Timeline instrumentation — write entry if studio is enabled and a cause is pending
       const cause = this.pendingCause;
@@ -680,12 +752,7 @@ export function actor(
     }
 
     computeChecksum(json: string): string {
-      // Simple hash for Phase 1 — replace with xxhash64 in Phase 2
-      let h = 0;
-      for (let i = 0; i < json.length; i++) {
-        h = ((h << 5) - h + json.charCodeAt(i)) | 0;
-      }
-      return (h >>> 0).toString(16);
+      return xxh64(json);
     }
 
     persistExecutions(
@@ -738,43 +805,74 @@ export function actor(
 
         const parsedInput: unknown = JSON.parse(entry.payload);
 
-        try {
-          const result = await serviceDef.fn(parsedInput, this.env);
+        const markDone = () => {
           this.ctx.storage.sql.exec("UPDATE executions SET status = 'done' WHERE id = ?", entry.id);
           this.pushStudioOutbox();
-
-          if (serviceDef.onDone) {
-            const nextState = serviceDef.onDone(this.state, result, parsedInput);
-            if (nextState !== this.state) {
-              this.state = nextState;
-              this.pendingCause = {
-                type: "service.onDone",
-                service: entry.service,
-                input: parsedInput,
-                result,
-              };
-              this.persistState();
-              this.broadcastViews();
-            }
-          }
-        } catch (error) {
+        };
+        const markFailed = () => {
           this.ctx.storage.sql.exec("UPDATE executions SET status = 'failed' WHERE id = ?", entry.id);
           this.pushStudioOutbox();
+        };
 
-          if (serviceDef.onError) {
-            const errorMessage = error instanceof Error ? error.message : String(error);
-            const nextState = serviceDef.onError(this.state, { message: errorMessage }, parsedInput);
-            if (nextState !== this.state) {
-              this.state = nextState;
-              this.pendingCause = {
-                type: "service.onError",
-                service: entry.service,
-                input: parsedInput,
-                error: errorMessage,
-              };
-              this.persistState();
-              this.broadcastViews();
-            }
+        try {
+          const result = await serviceDef.fn(parsedInput, this.env);
+          const live = createLiveFacts();
+          const nextState = serviceDef.onDone
+            ? serviceDef.onDone(this.state, result, parsedInput, live.ctx)
+            : this.state;
+          if (nextState === this.state) {
+            markDone();
+          } else {
+            this.pendingCause = {
+              type: "service.onDone",
+              service: entry.service,
+              input: parsedInput,
+              result,
+            };
+            this.commit(
+              nextState,
+              () => ({
+                causeType: "service.onDone",
+                name: entry.service,
+                payload: { input: parsedInput, result },
+                caller: null,
+                callerType: null,
+                role: null,
+                facts: live.facts(),
+              }),
+              markDone,
+            );
+            this.broadcastViews();
+          }
+        } catch (error) {
+          const errorMessage = error instanceof Error ? error.message : String(error);
+          const live = createLiveFacts();
+          const nextState = serviceDef.onError
+            ? serviceDef.onError(this.state, { message: errorMessage }, parsedInput, live.ctx)
+            : this.state;
+          if (nextState === this.state) {
+            markFailed();
+          } else {
+            this.pendingCause = {
+              type: "service.onError",
+              service: entry.service,
+              input: parsedInput,
+              error: errorMessage,
+            };
+            this.commit(
+              nextState,
+              () => ({
+                causeType: "service.onError",
+                name: entry.service,
+                payload: { input: parsedInput, error: { message: errorMessage } },
+                caller: null,
+                callerType: null,
+                role: null,
+                facts: live.facts(),
+              }),
+              markFailed,
+            );
+            this.broadcastViews();
           }
         }
       }
@@ -886,6 +984,7 @@ export function actor(
     processLinks(
       linkCalls: Array<{ name: string; id: string }>,
       unlinkCalls: Array<{ name: string; id: string | undefined }>,
+      live: LiveFacts,
     ): void {
       // Persist link intents atomically (already inside the send() transaction)
       for (const call of linkCalls) {
@@ -918,10 +1017,7 @@ export function actor(
 
           // Invoke onUnlink handler if defined
           if (linkDef.onUnlink) {
-            const nextState = linkDef.onUnlink(this.state, call.id);
-            if (nextState !== this.state) {
-              this.state = nextState;
-            }
+            this.state = linkDef.onUnlink(this.state, call.id, live.ctx);
           }
         } else {
           // Unlink all for this link name — collect IDs before deleting for onUnlink
@@ -929,12 +1025,10 @@ export function actor(
             const idRows = this.ctx.storage.sql
               .exec("SELECT target_id FROM active_links WHERE link_name = ?", call.name)
               .toArray();
-            for (const row of idRows) {
-              const targetId = row["target_id"] as string;
-              const nextState = linkDef.onUnlink(this.state, targetId);
-              if (nextState !== this.state) {
-                this.state = nextState;
-              }
+            const targetIds = idRows.map((row) => String(row["target_id"]));
+            live.recordUnlinked(call.name, targetIds);
+            for (const targetId of targetIds) {
+              this.state = linkDef.onUnlink(this.state, targetId, live.ctx);
             }
           }
 
@@ -980,9 +1074,10 @@ export function actor(
           const linkDef2 = def.links?.[call.name];
           if (linkDef2?.onError) {
             const errorMessage = error instanceof Error ? error.message : String(error);
-            const nextState = linkDef2.onError(this.state, { message: errorMessage, code: "unreachable" }, call.id);
+            const linkError = { message: errorMessage, code: "unreachable" };
+            const live = createLiveFacts();
+            const nextState = linkDef2.onError(this.state, linkError, call.id, live.ctx);
             if (nextState !== this.state) {
-              this.state = nextState;
               const targetType = linkDef2.contract.name.toUpperCase().replace(/-/g, "_");
               this.pendingCause = {
                 type: "link.onError",
@@ -990,7 +1085,15 @@ export function actor(
                 sourceId: call.id,
                 error: errorMessage,
               };
-              this.persistState();
+              this.commit(nextState, () => ({
+                causeType: "link.onError",
+                name: call.name,
+                payload: { targetId: call.id, error: linkError },
+                caller: null,
+                callerType: null,
+                role: null,
+                facts: live.facts(),
+              }));
               this.broadcastViews();
             }
           }
@@ -1105,27 +1208,37 @@ export function actor(
         const viewWithRole = { ...(viewData as Record<string, unknown>), role };
 
         // Run onUpdate reducer
-        const nextState = linkDef.onUpdate(this.state, viewWithRole, sourceId);
+        const live = createLiveFacts();
+        const nextState = linkDef.onUpdate(this.state, viewWithRole, sourceId, live.ctx);
         if (nextState !== this.state) {
-          this.state = nextState;
-
-          // Update version
-          this.ctx.storage.sql.exec(
-            "UPDATE active_links SET version = ? WHERE target_type = ? AND target_id = ? AND link_name = ?",
-            version,
-            sourceType,
-            sourceId,
-            linkRow.link_name,
-          );
-          this.pushStudioLinks();
-
           this.pendingCause = {
             type: "link.onUpdate",
             sourceType,
             sourceId,
             viewData: viewWithRole,
           };
-          this.persistState();
+          this.commit(
+            nextState,
+            () => ({
+              causeType: "link.onUpdate",
+              name: linkRow.link_name,
+              payload: { sourceId, view: viewWithRole },
+              caller: null,
+              callerType: null,
+              role: null,
+              facts: live.facts(),
+            }),
+            () => {
+              this.ctx.storage.sql.exec(
+                "UPDATE active_links SET version = ? WHERE target_type = ? AND target_id = ? AND link_name = ?",
+                version,
+                sourceType,
+                sourceId,
+                linkRow.link_name,
+              );
+              this.pushStudioLinks();
+            },
+          );
           this.broadcastViews();
         }
       }
@@ -1249,7 +1362,9 @@ export function actor(
 
       // Create initial state with link support
       const initLinks: Array<{ name: string; id: string }> = [];
+      const live = createLiveFacts();
       const initCtx = {
+        ...live.ctx,
         env: this.env,
         link: async (name: string, id: string): Promise<unknown> => {
           const linkDef = def.links?.[name];
@@ -1267,18 +1382,27 @@ export function actor(
           // Record the link for persistence
           initLinks.push({ name, id });
 
-          // Return view with role discriminant
-          return { role: result.role, ...(result.snapshot as Record<string, unknown>) };
+          // Return view with role discriminant (recorded as a fact for replay)
+          const view = { role: result.role, ...(result.snapshot as Record<string, unknown>) };
+          live.recordLinkView(name, id, view);
+          return view;
         },
       };
 
-      this.state = await def.init(parsed.data, initCtx);
-      this.initialized = true;
+      const initialState = await def.init(parsed.data, initCtx);
 
       // Persist state + init links atomically
       this.pendingCause = { type: "init" };
-      this.ctx.storage.transactionSync(() => {
-        this.persistState();
+      const initDraft = (): JournalDraft => ({
+        causeType: "init",
+        name: null,
+        payload: parsed.data,
+        caller: input.caller,
+        callerType: input.callerType,
+        role: null,
+        facts: live.facts(),
+      });
+      this.commit(initialState, initDraft, () => {
         for (const { name, id } of initLinks) {
           const linkDef = def.links?.[name];
           if (linkDef) {
@@ -1293,6 +1417,7 @@ export function actor(
           }
         }
       });
+      this.initialized = true;
 
       // Register subscriptions for init links (fire-and-forget)
       if (initLinks.length > 0) {
@@ -1324,8 +1449,10 @@ export function actor(
 
       // Create outbox collector
       const outbox = createOutbox();
+      const live = createLiveFacts();
 
       const ctx: Omit<MessageContext, "role"> = {
+        ...live.ctx,
         caller,
         callerType,
         env: this.env,
@@ -1349,9 +1476,6 @@ export function actor(
       // Observability hook
       const prevState = this.state;
 
-      // Update state
-      this.state = result.state;
-
       // Timeline: record message cause
       const { type: _msgType, ...msgPayload } = event;
       this.pendingCause = {
@@ -1366,29 +1490,41 @@ export function actor(
       // Fire onTransition if defined
       if (def.observe?.onTransition) {
         try {
-          def.observe.onTransition(prevState, this.state, event, { caller, role });
+          def.observe.onTransition(prevState, result.state, event, { caller, role });
         } catch {
           // Observability hooks must not break the transition
         }
       }
 
-      // Persist state + executions + link intents atomically
+      // Persist state + executions + link intents + journal event atomically.
+      // Links are processed before the snapshot is written: onUnlink may change state.
       const executionEntries = outbox.toExecutionEntries();
       const linkCalls = outbox.getLinks();
       const unlinkCalls = outbox.getUnlinks();
       const forwardEntries = outbox.toForwardEntries();
-      this.ctx.storage.transactionSync(() => {
-        this.persistState();
-        if (executionEntries.length > 0) {
-          this.persistExecutions(executionEntries);
-        }
-        if (linkCalls.length > 0 || unlinkCalls.length > 0) {
-          this.processLinks(linkCalls, unlinkCalls);
-        }
-        if (forwardEntries.length > 0) {
-          this.persistForwards(forwardEntries, caller, callerType);
-        }
-      });
+      this.commit(
+        result.state,
+        () => ({
+          causeType: "message",
+          name: event.type,
+          payload: result.payload,
+          caller,
+          callerType,
+          role,
+          facts: live.facts(),
+        }),
+        () => {
+          if (executionEntries.length > 0) {
+            this.persistExecutions(executionEntries);
+          }
+          if (linkCalls.length > 0 || unlinkCalls.length > 0) {
+            this.processLinks(linkCalls, unlinkCalls, live);
+          }
+          if (forwardEntries.length > 0) {
+            this.persistForwards(forwardEntries, caller, callerType);
+          }
+        },
+      );
 
       // Broadcast views to connected clients and DO subscribers
       this.broadcastViews();
@@ -1677,7 +1813,9 @@ export function actor(
       // Run lifecycle.connect if defined
       if (def.lifecycle?.connect) {
         const connectOutbox = createOutbox();
+        const live = createLiveFacts();
         const connectCtx = {
+          ...live.ctx,
           caller: callerInfo.caller,
           callerType: callerInfo.callerType,
           env: this.env,
@@ -1700,22 +1838,32 @@ export function actor(
         const connectExecutions = connectOutbox.toExecutionEntries();
         const connectForwards = connectOutbox.toForwardEntries();
         if (nextState !== this.state || connectExecutions.length > 0 || connectForwards.length > 0) {
-          this.state = nextState;
           this.pendingCause = {
             type: "lifecycle.connect",
             caller: callerInfo.caller,
             callerType: callerInfo.callerType,
             role,
           };
-          this.ctx.storage.transactionSync(() => {
-            this.persistState();
-            if (connectExecutions.length > 0) {
-              this.persistExecutions(connectExecutions);
-            }
-            if (connectForwards.length > 0) {
-              this.persistForwards(connectForwards, callerInfo.caller, callerInfo.callerType);
-            }
-          });
+          this.commit(
+            nextState,
+            () => ({
+              causeType: "lifecycle.connect",
+              name: null,
+              payload: {},
+              caller: callerInfo.caller,
+              callerType: callerInfo.callerType,
+              role,
+              facts: live.facts(),
+            }),
+            () => {
+              if (connectExecutions.length > 0) {
+                this.persistExecutions(connectExecutions);
+              }
+              if (connectForwards.length > 0) {
+                this.persistForwards(connectForwards, callerInfo.caller, callerInfo.callerType);
+              }
+            },
+          );
           this.broadcastViews();
           if (connectExecutions.length > 0) {
             this.drainExecutions();
@@ -1861,7 +2009,9 @@ export function actor(
       // Run lifecycle.disconnect if defined
       if (def.lifecycle?.disconnect) {
         const disconnectOutbox = createOutbox();
+        const live = createLiveFacts();
         const disconnectCtx = {
+          ...live.ctx,
           caller,
           callerType: info.callerType,
           env: this.env,
@@ -1884,23 +2034,33 @@ export function actor(
         const disconnectExecutions = disconnectOutbox.toExecutionEntries();
         const disconnectForwards = disconnectOutbox.toForwardEntries();
         if (nextState !== this.state || disconnectExecutions.length > 0 || disconnectForwards.length > 0) {
-          this.state = nextState;
-          const disconnectRole = resolveRole(def.roles, this.state, caller, { callerType: info.callerType });
+          const disconnectRole = resolveRole(def.roles, nextState, caller, { callerType: info.callerType });
           this.pendingCause = {
             type: "lifecycle.disconnect",
             caller,
             callerType: info.callerType,
             role: disconnectRole ?? "unknown",
           };
-          this.ctx.storage.transactionSync(() => {
-            this.persistState();
-            if (disconnectExecutions.length > 0) {
-              this.persistExecutions(disconnectExecutions);
-            }
-            if (disconnectForwards.length > 0) {
-              this.persistForwards(disconnectForwards, caller, info.callerType);
-            }
-          });
+          this.commit(
+            nextState,
+            () => ({
+              causeType: "lifecycle.disconnect",
+              name: null,
+              payload: {},
+              caller,
+              callerType: info.callerType,
+              role: disconnectRole,
+              facts: live.facts(),
+            }),
+            () => {
+              if (disconnectExecutions.length > 0) {
+                this.persistExecutions(disconnectExecutions);
+              }
+              if (disconnectForwards.length > 0) {
+                this.persistForwards(disconnectForwards, caller, info.callerType);
+              }
+            },
+          );
           this.broadcastViews();
           if (disconnectForwards.length > 0) {
             this.drainForwards();

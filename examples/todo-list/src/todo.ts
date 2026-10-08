@@ -45,9 +45,9 @@ export const TodoListContract = defineActor("todo-list", {
       {
         guard: (_state: TodoState, _payload: { text: string }, ctx: { role: string }) =>
           ctx.role === "owner" || ctx.role === "member",
-        handler: (state: TodoState, { text }) => ({
+        handler: (state: TodoState, { text }, ctx) => ({
           ...state,
-          todos: [...state.todos, { id: crypto.randomUUID(), text, done: false }],
+          todos: [...state.todos, { id: ctx.id(), text, done: false }],
         }),
       },
     ),

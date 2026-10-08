@@ -72,3 +72,43 @@ new_sqlite_classes = ["Bulletin", "Desk"]
 [[migrations]]
 tag = "v7"
 new_sqlite_classes = ["StudioRedacted"]
+
+[[durable_objects.bindings]]
+name = "JOURNAL_PROBE"
+class_name = "JournalProbe"
+
+[[durable_objects.bindings]]
+name = "JOURNAL_OFF"
+class_name = "JournalOff"
+
+[[durable_objects.bindings]]
+name = "JOURNAL_KEEP"
+class_name = "JournalKeep"
+
+[[durable_objects.bindings]]
+name = "NOT_AN_ACTOR"
+class_name = "NotAnActor"
+
+[[migrations]]
+tag = "v8"
+new_sqlite_classes = ["JournalProbe", "JournalOff", "JournalKeep", "NotAnActor"]
+
+[[durable_objects.bindings]]
+name = "EXAMPLE_AUCTION"
+class_name = "ExampleAuction"
+
+[[durable_objects.bindings]]
+name = "EXAMPLE_CHAT_ROOM"
+class_name = "ExampleChatRoom"
+
+[[durable_objects.bindings]]
+name = "EXAMPLE_COUNTER"
+class_name = "ExampleCounter"
+
+[[durable_objects.bindings]]
+name = "EXAMPLE_TODO_LIST"
+class_name = "ExampleTodoList"
+
+[[migrations]]
+tag = "v9"
+new_sqlite_classes = ["ExampleAuction", "ExampleChatRoom", "ExampleCounter", "ExampleTodoList"]

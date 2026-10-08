@@ -52,9 +52,6 @@ importers:
       husky:
         specifier: ^9.1.7
         version: 9.1.7
-      immer:
-        specifier: ^11.1.18
-        version: 11.1.18
       jose:
         specifier: ^6.2.12
         version: 6.2.12
@@ -546,6 +543,9 @@ importers:
       '@actor-kit/studio':
         specifier: workspace:*
         version: link:../../packages/studio
+      '@actor-kit/test':
+        specifier: workspace:*
+        version: link:../../packages/test
       '@actor-kit/worker':
         specifier: workspace:*
         version: link:../../packages/worker
@@ -4477,9 +4477,6 @@ packages:
   iconv-lite@0.7.3:
     resolution: {integrity: sha512-IKXpvIzjnC9XTAUbVBcMfGS0EPaIXtW6v+zr+RRp+hqULEpo0owZax6wyRwPOJbWbzjYspQwusTsfVr0ifh4uQ==}
     engines: {node: '>=0.10.0'}
-
-  immer@11.1.18:
-    resolution: {integrity: sha512-EQyQtLiYW029lyoczMl/Hh4Xu7cDecSc58JRYpHyL4tIAu3eqd1yJzQX04d2BZHDkzFFvm6qJEJWOtfDSWAXbQ==}
 
   import-meta-resolve@4.2.0:
     resolution: {integrity: sha512-Iqv2fzaTQN28s/FwZAoFq0ZSs/7hMAHJVX+w8PZl3cY19Pxk6jFFalxQoIfW2826i/fDLXv8IiEZRIT0lDuWcg==}
@@ -9718,8 +9715,6 @@ snapshots:
   iconv-lite@0.7.3:
     dependencies:
       safer-buffer: 2.1.2
-
-  immer@11.1.18: {}
 
   import-meta-resolve@4.2.0: {}
 

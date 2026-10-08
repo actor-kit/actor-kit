@@ -37,7 +37,21 @@ export interface ForwardCall {
 /** forward() delivers a message to another actor with the original caller identity preserved. */
 export type ForwardFn = (linkName: string, targetId: string, message: { type: string; [key: string]: unknown }) => void;
 
-export interface MessageContext<TEnv = unknown> {
+/**
+ * Time and randomness for handlers (ADR-013). Live, they read the real clock and RNG
+ * and record what they returned in the journal; on replay they return the recorded values.
+ * Handlers must use these instead of Date.now(), Math.random() or crypto.randomUUID().
+ */
+export interface DeterministicContext {
+  /** Current time in ms. One value per transition: every call in a handler returns the same number. */
+  readonly now: () => number;
+  /** A fresh unique ID (UUID v4 when live). */
+  readonly id: () => string;
+  /** A random number in [0, 1). */
+  readonly random: () => number;
+}
+
+export interface MessageContext<TEnv = unknown> extends DeterministicContext {
   readonly caller: string;
   readonly callerType: "user" | "service";
   readonly role: string;

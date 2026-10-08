@@ -132,7 +132,7 @@ Comparison is by value for primitives, by reference + deep equality for objects/
 
 ## Checksum
 
-The checksum is an xxhash64 of the full SNAPSHOT payload (without the header). It serves two purposes:
+The checksum is the xxHash64 (seed 0, 16 lowercase hex chars) of the view's JSON — `xxh64(JSON.stringify(view))` from `@actor-kit/core`, computed identically by the server and the client. It serves two purposes:
 1. **Deduplication**: if the checksum hasn't changed since the last send, skip the frame entirely
 2. **Reconnection**: client sends its last checksum on reconnect, server uses it to compute a delta
 

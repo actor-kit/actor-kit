@@ -11,14 +11,25 @@
  *       onError: (state, error) => ({ ...state, profileError: error.message }),
  *     }),
  *   }
+ *
+ * Every callback receives a trailing `ctx` with now()/id()/random() (ADR-013).
  */
+
+import type { DeterministicContext } from "@actor-kit/core";
 
 /** Link declaration — returned by link(contract, handlers). */
 export interface LinkDef<TContract, TView, TState = unknown> {
   readonly contract: TContract;
-  readonly onUpdate: (state: TState, view: TView, id?: string) => TState;
-  readonly onError: ((state: TState, error: { message: string; code: string }, id?: string) => TState) | undefined;
-  readonly onUnlink: ((state: TState, id?: string) => TState) | undefined;
+  readonly onUpdate: (state: TState, view: TView, id: string | undefined, ctx: DeterministicContext) => TState;
+  readonly onError:
+    | ((
+        state: TState,
+        error: { message: string; code: string },
+        id: string | undefined,
+        ctx: DeterministicContext,
+      ) => TState)
+    | undefined;
+  readonly onUnlink: ((state: TState, id: string | undefined, ctx: DeterministicContext) => TState) | undefined;
 }
 
 /** Link error codes. */
@@ -32,9 +43,14 @@ export function link<
 >(
   contract: TContract,
   handlers: {
-    onUpdate: (state: TState, view: TView, id?: string) => TState;
-    onError?: (state: TState, error: { message: string; code: string }, id?: string) => TState;
-    onUnlink?: (state: TState, id?: string) => TState;
+    onUpdate: (state: TState, view: TView, id: string | undefined, ctx: DeterministicContext) => TState;
+    onError?: (
+      state: TState,
+      error: { message: string; code: string },
+      id: string | undefined,
+      ctx: DeterministicContext,
+    ) => TState;
+    onUnlink?: (state: TState, id: string | undefined, ctx: DeterministicContext) => TState;
   },
 ): LinkDef<TContract, TView, TState> {
   return {

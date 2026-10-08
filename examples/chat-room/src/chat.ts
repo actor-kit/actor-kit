@@ -28,11 +28,11 @@ export const ChatRoomContract = defineActor("chat-room", {
   messages: {
     SEND_MESSAGE: message(
       z.object({ text: z.string().min(1).max(500) }),
-      (state: ChatState, { text }, { caller }) => ({
+      (state: ChatState, { text }, { caller, id, now }) => ({
         ...state,
         messages: [
           ...state.messages.slice(-49), // Keep last 50 messages
-          { id: crypto.randomUUID(), author: caller, text, timestamp: Date.now() },
+          { id: id(), author: caller, text, timestamp: now() },
         ],
       }),
     ),
