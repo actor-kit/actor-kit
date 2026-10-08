@@ -172,6 +172,28 @@ await replayJournal(ChatRoomContract, journal); // throws if any handler used Da
 
 `tests/integration/examples-replay.test.ts` runs every example actor this way. Add new example actors there.
 
+### Multi-actor simulations (ADR-015 D4)
+
+`simulate()` (`@actor-kit/test`) runs many actors through the runtime's own step core on a virtual clock: services
+wait in `pendingEffects()` until the test resolves or rejects them, forwards are delivered, `advance()` fires timers
+like `alarm()`, ids and randoms are seeded, and `branch()` copies the whole simulation. Every simulated journal
+verifies with `replayJournal()`. Use it for multi-actor and time-dependent logic before reaching for the Workers
+pool (`tests/unit/simulate-examples.test.ts` ports the auction and chat-room scenarios).
+
+### SQL on real SQLite in unit tests
+
+The runtime's SQL lives in pure modules (`runtime/outbox-store.ts`, `timers-store.ts`, `journal.ts`, `migrations.ts`)
+that take the structural `JournalSql` slice of `SqlStorage`. Unit tests run them on Node's `node:sqlite` through
+`tests/unit/helpers/node-sql.ts`, with every migration applied, so they are fast and covered by Stryker
+(`actor.ts`, which imports `cloudflare:workers`, is not).
+
+### Mutation-testing gotchas
+
+- `expect(p).rejects.toThrow("msg")` passes when `p` rejects with `undefined` (Vitest 4). Catch the rejection and
+  check it is an `Error` with the message.
+- A mutant that makes a module throw while loading (an invalid `z.discriminatedUnion`) is reported as survived by
+  Stryker's Vitest runner: prefer constructs that cannot throw at load.
+
 ## TDD workflow
 
 Red-green-refactor for every feature:

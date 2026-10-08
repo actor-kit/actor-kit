@@ -69,7 +69,7 @@ test.describe("Studio — Outbox panel", () => {
     const rows = page.getByTestId("outbox-row");
     await expect(rows).toHaveCount(1);
     await expect(rows.first()).toContainText("NOTIFY_WINNER");
-    await expect(rows.first()).toHaveAttribute("data-status", "pending");
+    await expect(rows.first()).toHaveAttribute("data-status", "running");
     await expect(page.getByTestId("tab-outbox")).toContainText("(1)");
 
     await expect(rows.first()).toHaveAttribute("data-status", "done", { timeout: SERVICE_DELAY_MS + 5_000 });
@@ -94,7 +94,7 @@ test.describe("Studio — Outbox panel", () => {
     });
 
     const row = page.getByTestId("outbox-row").first();
-    await expect(row).toHaveAttribute("data-status", "pending");
+    await expect(row).toHaveAttribute("data-status", "running");
     await expect(row).toHaveAttribute("data-status", "failed", { timeout: SERVICE_DELAY_MS + 5_000 });
 
     await page.getByTestId("tab-state").click();
