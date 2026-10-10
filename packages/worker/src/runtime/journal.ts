@@ -422,9 +422,10 @@ export function readJournal(sql: JournalSql): Journal {
 export type ReplayableDef = StepDef;
 
 const ServicePayload = z.object({ input: z.unknown(), result: z.unknown(), effectId: z.string().optional() });
+/** The error is journaled as the runtime parsed it (ADR-016 §2): replay delivers the same typed value. */
 const ServiceErrorPayload = z.object({
   input: z.unknown(),
-  error: z.object({ message: z.string() }),
+  error: z.record(z.string(), z.unknown()),
   effectId: z.string().optional(),
 });
 const LinkUpdatePayload = z.object({ sourceId: z.string(), view: z.unknown() });

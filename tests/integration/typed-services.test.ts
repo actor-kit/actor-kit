@@ -1,13 +1,17 @@
 /**
  * Typed services in the Durable Object (ADR-016). §1: a service's third argument carries its actor and
  * an idempotency key unique across the deployment; a forward carries the same fields to its target,
- * whose handler reads them as ctx.delivery (journaled, so the actor's journal replays).
+ * whose handler reads them as ctx.delivery (journaled, so the actor's journal replays). §2: services fail
+ * with typed, tagged errors; declared ones are not retried by default, the built-ins are, and onError,
+ * the journal and the outbox see the parsed error.
  */
 
-import { env, runInDurableObject } from "cloudflare:test";
+import { env, runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
+import { replayJournal } from "@actor-kit/test";
 import { readJournal } from "@actor-kit/worker/testing";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
+import { TellerContract } from "./src/typed-services-actors";
 
 let n = 0;
 const unique = (prefix: string) => `${prefix}-${Date.now()}-${++n}`;
@@ -134,5 +138,120 @@ describe("idempotency (ADR-016 §1)", () => {
     expect(refused).toMatchObject({ ok: false, error: "invalid_delivery" });
     const { state } = TillInspect.parse(await target.stub.__inspect());
     expect(state.received).toEqual([{ text: "direct", delivery: null }]);
+  });
+});
+
+const Row = z.object({
+  id: z.string(),
+  service: z.string(),
+  status: z.string(),
+  attempts: z.number(),
+  lastError: z.string().nullable(),
+  lastErrorTag: z.string().optional(),
+});
+const Outbox = z.object({ outbox: z.array(Row) });
+
+/** Make every waiting retry due and run the alarm, until `ok`. */
+async function retryUntil(stub: DurableObjectStub, ok: (i: z.infer<typeof TellerInspect>) => boolean) {
+  return waitFor(async () => {
+    await runInDurableObject(stub, async (_i, s) => {
+      s.storage.sql.exec("UPDATE executions SET next_attempt_at = 0 WHERE status = 'retrying'");
+      await s.storage.setAlarm(Date.now() + 60_000);
+    });
+    await runDurableObjectAlarm(stub);
+    return TellerInspect.parse(await stub.__inspect());
+  }, ok);
+}
+
+async function outboxRow(stub: DurableObjectStub) {
+  const [row] = Outbox.parse(await stub.__inspect()).outbox;
+  return row;
+}
+
+describe("typed service errors (ADR-016 §2)", () => {
+  it("a declared error is not retried: onError gets it parsed, the outbox shows its tag", async () => {
+    const { stub } = await teller();
+    await stub.send("u", "user", { type: "RUN", service: "DECLINE" });
+    const { state } = await waitFor(
+      async () => TellerInspect.parse(await stub.__inspect()),
+      (i) => i.state.errors.length === 1,
+    );
+    expect(state.errors).toEqual([{ _tag: "CardDeclined", reason: "stolen card" }]);
+    expect(await outboxRow(stub)).toMatchObject({
+      status: "failed",
+      attempts: 1,
+      lastErrorTag: "CardDeclined",
+      lastError: '{"_tag":"CardDeclined","reason":"stolen card"}',
+    });
+  });
+
+  it("the journal stores the parsed error, and the journal replays", async () => {
+    const { stub } = await teller();
+    await stub.send("u", "user", { type: "RUN", service: "DECLINE" });
+    await waitFor(
+      async () => TellerInspect.parse(await stub.__inspect()),
+      (i) => i.state.errors.length === 1,
+    );
+    const journal = await runInDurableObject(stub, (_i, s) => readJournal(s.storage.sql));
+    expect(journal.events.at(-1)).toMatchObject({
+      causeType: "service.onError",
+      name: "DECLINE",
+      payload: { error: { _tag: "CardDeclined", reason: "stolen card" } },
+    });
+    expect((await replayJournal(TellerContract, journal)).state).toEqual(
+      TellerInspect.parse(await stub.__inspect()).state,
+    );
+  });
+
+  it("anything else thrown is a Defect, retried until the last try", async () => {
+    const { stub } = await teller();
+    await stub.send("u", "user", { type: "RUN", service: "BROKEN" });
+    const { state } = await retryUntil(stub, (i) => i.state.errors.length === 1);
+    expect(state.errors).toEqual([{ _tag: "Defect", message: "socket hang up" }]);
+    expect(await outboxRow(stub)).toMatchObject({
+      status: "failed",
+      attempts: 2,
+      lastErrorTag: "Defect",
+      lastError: "socket hang up",
+    });
+  });
+
+  it("a fail() value the service's errors do not declare is a Defect", async () => {
+    const { stub } = await teller();
+    await stub.send("u", "user", { type: "RUN", service: "MISFIT" });
+    const { state } = await waitFor(
+      async () => TellerInspect.parse(await stub.__inspect()),
+      (i) => i.state.errors.length === 1,
+    );
+    expect(state.errors).toEqual([
+      {
+        _tag: "Defect",
+        message: expect.stringContaining(`fail({ _tag: "Stolen" }) does not match the service's errors`),
+      },
+    ]);
+  });
+
+  it("retry.while retries a declared error it names", async () => {
+    const { stub } = await teller();
+    await stub.send("u", "user", { type: "RUN", service: "LIMITED" });
+    const { state } = await retryUntil(stub, (i) => i.state.echoes.length === 1);
+    expect(state).toEqual({ echoes: [{ attempt: 2 }], errors: [] });
+    expect(await outboxRow(stub)).toMatchObject({ status: "done", attempts: 2 });
+    expect(await outboxRow(stub)).not.toHaveProperty("lastErrorTag");
+  });
+
+  it("restore redelivers a recorded typed error as it was", async () => {
+    const { stub } = await teller();
+    await stub.send("u", "user", { type: "RUN", service: "DECLINE" });
+    const declared = await lastMessageSeq(stub);
+    await waitFor(
+      async () => TellerInspect.parse(await stub.__inspect()),
+      (i) => i.state.errors.length === 1,
+    );
+    expect(await stub.__restore({ toSeq: declared })).toEqual({ ok: true });
+    const { state } = TellerInspect.parse(await stub.__inspect());
+    expect(state.errors).toEqual([{ _tag: "CardDeclined", reason: "stolen card" }]);
+    const journal = await runInDurableObject(stub, (_i, s) => readJournal(s.storage.sql));
+    expect(journal.events.slice(-2).map((e) => e.causeType)).toEqual(["restore", "service.onError"]);
   });
 });

@@ -126,7 +126,9 @@ await replayJournal(AuctionContract, room.journal);           // every simulated
   `connect(caller)`, which runs `lifecycle.connect` and returns `{ disconnect() }`. `callerConnections` counts the
   caller's open simulated connections, as the runtime counts sockets.
 - **`pendingEffects()`**: service executions as `{ actor, effectId, service, input }`. `resolve` / `reject` take
-  the effect, or its effect id when that is unique across actors.
+  the effect, or its effect id when that is unique across actors. `reject` takes a typed error (ADR-016): a declared
+  one (`{ _tag: "CardDeclined", reason }`, parsed against the service's `errors`, and refused if it doesn't parse),
+  `{ _tag: "Timeout", ms }`, `{ _tag: "Defect", message }`, or a string / Error-like `{ message }` (a Defect).
 - **`advance(duration)`**: moves the clock; each due timer fires on its own deadline (`ctx.lateBy` is 0).
 - **Forwards** are delivered at once with the original caller and the forward's effect as the target's
   `ctx.delivery` (try 1); `failedForwards()` lists those whose target was

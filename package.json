@@ -2,7 +2,7 @@
   "name": "actor-kit-2-root",
   "private": true,
   "scripts": {
-    "typecheck": "pnpm -r run typecheck",
+    "typecheck": "pnpm -r run typecheck && pnpm typecheck:types",
     "test:unit": "vitest run",
     "test:integration": "pnpm build && pnpm --filter @actor-kit/integration-tests test",
     "test": "pnpm test:unit && pnpm test:integration",
@@ -14,7 +14,8 @@
     "build": "pnpm -r run build",
     "prepare": "husky",
     "crap": "vitest run --coverage --coverage.reporter=json --coverage.include='packages/*/src/**' --coverage.include='packages/studio/ui/src/**' --silent > /dev/null && node scripts/crap.mts",
-    "crap:worker": "vitest run --coverage --coverage.reporter=json --coverage.include='packages/*/src/**' --silent > /dev/null && pnpm build > /dev/null && ACTOR_KIT_COVERAGE=1 pnpm --filter @actor-kit/integration-tests exec vitest run --coverage --silent > /dev/null && node scripts/crap.mts --coverage coverage/coverage-final.json --coverage coverage/integration/coverage-final.json packages/worker/src"
+    "crap:worker": "vitest run --coverage --coverage.reporter=json --coverage.include='packages/*/src/**' --silent > /dev/null && pnpm build > /dev/null && ACTOR_KIT_COVERAGE=1 pnpm --filter @actor-kit/integration-tests exec vitest run --coverage --silent > /dev/null && node scripts/crap.mts --coverage coverage/coverage-final.json --coverage coverage/integration/coverage-final.json packages/worker/src",
+    "typecheck:types": "tsc -p tests/unit/tsconfig.types.json"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.5.14",

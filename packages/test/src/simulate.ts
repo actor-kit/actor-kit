@@ -26,7 +26,11 @@ import {
   checksumState,
   createLiveFacts,
   type DeliveryInfo,
+  defectError,
   deliveryInfo,
+  type ErrorsParser,
+  isBuiltInError,
+  isTaggedError,
   type Journal,
   type JournalCheckpoint,
   type JournalEvent,
@@ -38,6 +42,7 @@ import {
   type StepResult,
   step,
   stepInit,
+  type TaggedError,
 } from "@actor-kit/worker/testing";
 import { z } from "zod";
 import type { ContractInput, ContractState } from "./contract-types";
@@ -126,8 +131,12 @@ export interface Simulation {
   pendingEffects(): PendingEffect[];
   /** Settle an execution as succeeded: runs its onDone. A bare effect id must be unique across actors. */
   resolve(effect: PendingEffect | string, result: unknown): void;
-  /** Settle an execution as failed for good: runs its onError. */
-  reject(effect: PendingEffect | string, error: string | { message: string }): void;
+  /**
+   * Settle an execution as failed for good: runs its onError with a typed error (ADR-016 §2). A declared
+   * error (`{ _tag: "CardDeclined", ... }`) is parsed against the service's `errors`; `{ _tag: "Timeout", ms }`
+   * and `{ _tag: "Defect", message }` are the built-ins; a string or an Error-like `{ message }` is a Defect.
+   */
+  reject(effect: PendingEffect | string, error: string | { message: string } | TaggedError): void;
   /** Move the clock forward, firing every timer that comes due on the way. */
   advance(duration: Duration): void;
   /** Forwards whose target actor was never spawned. */
@@ -181,8 +190,29 @@ function isPlainRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function errorOf(error: string | { message: string }): { message: string } {
-  return typeof error === "string" ? { message: error } : { message: error.message };
+const BuiltInErrorSchema = z.discriminatedUnion("_tag", [
+  z.object({ _tag: z.literal("Timeout"), ms: z.number() }),
+  z.object({ _tag: z.literal("Defect"), message: z.string() }),
+]);
+
+/** A rejection as the service's onError receives it: parsed like the runtime parses a failed try. */
+function errorOf(
+  error: string | { message: string } | TaggedError,
+  service: string,
+  errors: ErrorsParser | undefined,
+): Readonly<Record<string, unknown>> {
+  if (typeof error === "string") return defectError(error);
+  if (!isTaggedError(error)) return defectError(error.message);
+  const builtIn = BuiltInErrorSchema.safeParse(error);
+  if (builtIn.success) return builtIn.data;
+  if (isBuiltInError(error)) throw new Error(`simulate: invalid ${error._tag} error: ${builtIn.error.message}`);
+  if (errors === undefined)
+    throw new Error(`simulate: service "${service}" declares no errors to reject with "${error._tag}"`);
+  const parsed = errors.safeParse(error);
+  if (!parsed.success) {
+    throw new Error(`simulate: "${error._tag}" does not match service "${service}"'s errors: ${parsed.error.message}`);
+  }
+  return isTaggedError(parsed.data) ? { ...parsed.data } : defectError(`"${error._tag}" parsed to an untagged value`);
 }
 
 /** Run a simulation of actors on a virtual clock. */
@@ -459,9 +489,11 @@ function createSimulation(
 
   function settle(effect: PendingEffect | string, cause: (p: PendingEffect) => StepCause): void {
     const pending = findPending(effect);
+    // The cause first: a rejection that does not parse throws before the effect is settled.
+    const settled = cause(pending);
     data.pending = data.pending.filter((p) => p !== pending);
     const actor = record(pending.actor);
-    const result = step(defOf(actor.type), actor.state, cause(pending), factsFor(actor), env);
+    const result = step(defOf(actor.type), actor.state, settled, factsFor(actor), env);
     if (result.state !== actor.state) commit(actor, result, null);
   }
 
@@ -672,7 +704,7 @@ function createSimulation(
         type: "service.onError",
         service: p.service,
         input: p.input,
-        error: errorOf(error),
+        error: errorOf(error, p.service, defOf(p.actor.type).services?.[p.service]?.errors),
         effectId: p.effectId,
       })),
     advance,

@@ -77,11 +77,23 @@ import { planRestore } from "./runtime/restore";
 import {
   DEFAULT_RETRY_POLICY,
   linkRetryPolicies,
+  linkRetryRules,
   type RetryPolicy,
   resolveRetryPolicy,
-  settleAttempt,
+  resolveRetryRule,
+  type SettledTry,
+  settleTry,
+  type TryOutcome,
 } from "./runtime/retry";
 import { resolveRole } from "./runtime/roles";
+import {
+  classifyFailure,
+  describeRecordedError,
+  describeServiceError,
+  type ErrorsParser,
+  isBuiltInError,
+  type TaggedError,
+} from "./runtime/service-error";
 import { admitMessage, liveStepFacts, type StepCause, type StepResult, step, stepInit } from "./runtime/step";
 import {
   type CallerHasher,
@@ -208,10 +220,13 @@ interface ActorDef {
        * idempotency key (`${actorType}/${actorId}/${effectId}`), the try number and the try's AbortSignal.
        */
       fn(input: unknown, env: unknown, effect: EffectInfo): Promise<unknown>;
-      /** Tries and backoff (ADR-015 D1). Default: 3 tries, 1s then 5s apart, ±20% jitter. */
+      /** Declared failures (ADR-016 §2): a `z.discriminatedUnion("_tag", ...)` that `fail(...)` values parse against. */
+      errors?: ErrorsParser;
+      /** Tries, backoff and `while` (ADR-015 D1, ADR-016 §2). Default: 3 tries, 1s then 5s apart, ±20% jitter. */
       retry?: unknown;
       onDone?(state: unknown, result: unknown, input: unknown, ctx: DeterministicContext): unknown;
-      onError?(state: unknown, error: { message: string }, input: unknown, ctx: DeterministicContext): unknown;
+      /** `error`: a declared error, `{ _tag: "Timeout", ms }` or `{ _tag: "Defect", message }`. */
+      onError?(state: unknown, error: unknown, input: unknown, ctx: DeterministicContext): unknown;
     }
   >;
   links?: Record<
@@ -270,7 +285,7 @@ const SnapshotSeqSchema = z.object({ version: z.number(), last_seq: z.number() }
 /** A recorded service result to redeliver after a restore (journal payloads carry the effect id). */
 const RecordedResultSchema = z.union([
   z.object({ input: z.unknown(), result: z.unknown(), effectId: z.string() }),
-  z.object({ input: z.unknown(), error: z.object({ message: z.string() }), effectId: z.string() }),
+  z.object({ input: z.unknown(), error: z.record(z.string(), z.unknown()), effectId: z.string() }),
 ]);
 
 // SQL rows and RPC payloads, parsed at the boundary.
@@ -319,19 +334,17 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
 }
 
-type ServiceOutcome = { ok: true; result: unknown } | { ok: false; message: string };
-
-/** One try of a service: its result, or the message it failed with. */
+/** One try of a service: its result, or its typed error (ADR-016 §2: a declared error or a Defect). */
 async function tryService(
-  serviceDef: { fn(input: unknown, env: unknown, effect: EffectInfo): unknown },
+  serviceDef: { fn(input: unknown, env: unknown, effect: EffectInfo): unknown; errors?: ErrorsParser | undefined },
   input: unknown,
   env: unknown,
   effect: EffectInfo,
-): Promise<ServiceOutcome> {
+): Promise<TryOutcome> {
   try {
     return { ok: true, result: await serviceDef.fn(input, env, effect) };
   } catch (error) {
-    return { ok: false, message: error instanceof Error ? error.message : String(error) };
+    return { ok: false, error: classifyFailure(error, serviceDef.errors) };
   }
 }
 
@@ -344,11 +357,11 @@ async function trySend(
   callerType: "user" | "service",
   message: MessageEnvelope,
   delivery: DeliveryInfo,
-): Promise<ServiceOutcome> {
+): Promise<TryOutcome> {
   try {
     return { ok: true, result: await send(caller, callerType, message, delivery) };
   } catch (error) {
-    return { ok: false, message: error instanceof Error ? error.message : String(error) };
+    return { ok: false, error: classifyFailure(error, undefined) };
   }
 }
 
@@ -422,7 +435,11 @@ export function actor(
   const retryPolicies = new Map<string, RetryPolicy>(
     Object.entries(def.services ?? {}).map(([name, service]) => [name, resolveRetryPolicy(service.retry)]),
   );
+  const retryRules = new Map<string, (error: TaggedError) => boolean>(
+    Object.entries(def.services ?? {}).map(([name, service]) => [name, resolveRetryRule(service.retry)]),
+  );
   const forwardPolicies = linkRetryPolicies(def.links);
+  const forwardRules = linkRetryRules(def.links);
 
   const DOClass = class ActorInstance extends DurableObject {
     state: unknown = undefined;
@@ -906,16 +923,17 @@ export function actor(
         return;
       }
 
-      const settlement = settleAttempt(outcome, attempt, policy, Date.now(), Math.random);
+      const rule = retryRules.get(entry.service) ?? isBuiltInError;
+      const settled = settleTry(outcome, attempt, { policy, rule }, Date.now(), Math.random);
       const settle = () => {
-        finishAttempt(sql, entry.id, settlement, outcome.ok ? null : outcome.message);
+        finishAttempt(sql, entry.id, settled.settlement, settled.lastError, "executions", settled.lastErrorTag);
       };
 
-      if (settlement.status === "retrying") {
+      if (settled.settlement.status === "retrying") {
         settle();
         this.syncAlarm();
       } else {
-        this.endExecution(entry, attempt, outcome, settle);
+        this.endExecution(entry, attempt, outcome, settled, settle);
       }
       this.pushStudioOutbox();
     }
@@ -924,10 +942,13 @@ export function actor(
     endExecution(
       entry: { id: string; service: string; input: unknown },
       attempt: number,
-      outcome: ServiceOutcome,
+      outcome: TryOutcome,
+      settled: SettledTry,
       settle: () => void,
     ): void {
-      if (!outcome.ok) this.logDeadLetter("execution", entry.id, entry.service, attempt, outcome.message);
+      if (settled.lastError !== null) {
+        this.logDeadLetter("execution", entry.id, entry.service, attempt, settled.lastError, settled.lastErrorTag);
+      }
       try {
         this.settleExecution(entry.service, entry.id, entry.input, outcome, settle);
       } catch (error) {
@@ -940,16 +961,10 @@ export function actor(
     }
 
     /** Run onDone/onError for a try that ended the row, committing it with the row's final status. */
-    settleExecution(
-      service: string,
-      effectId: string,
-      input: unknown,
-      outcome: { ok: true; result: unknown } | { ok: false; message: string },
-      settle: () => void,
-    ): void {
+    settleExecution(service: string, effectId: string, input: unknown, outcome: TryOutcome, settle: () => void): void {
       const cause: StepCause = outcome.ok
         ? { type: "service.onDone", service, input, result: outcome.result, effectId }
-        : { type: "service.onError", service, input, error: { message: outcome.message }, effectId };
+        : { type: "service.onError", service, input, error: { ...outcome.error }, effectId };
       const result = this.runStep(cause);
       if (result.state === this.state) {
         settle();
@@ -957,7 +972,7 @@ export function actor(
       }
       this.pendingCause = outcome.ok
         ? { type: "service.onDone", service, input, result: outcome.result }
-        : { type: "service.onError", service, input, error: outcome.message };
+        : { type: "service.onError", service, input, error: describeServiceError(outcome.error) };
       this.commit(result.state, result.event, settle);
       this.broadcastViews();
     }
@@ -1112,14 +1127,20 @@ export function actor(
     }
 
     /** Record how a forward's try ended: done, retrying (re-arm the alarm) or a dead letter. */
-    settleForward(entry: DueForward, attempt: number, outcome: ServiceOutcome): void {
+    settleForward(entry: DueForward, attempt: number, outcome: TryOutcome): void {
       const policy = forwardPolicies.get(entry.linkName) ?? DEFAULT_RETRY_POLICY;
-      const settlement = settleAttempt(outcome, attempt, policy, Date.now(), Math.random);
-      const error = outcome.ok ? null : outcome.message;
-      finishAttempt(this.ctx.storage.sql, entry.id, settlement, error, "forwards");
+      const rule = forwardRules.get(entry.linkName) ?? isBuiltInError;
+      const { settlement, lastError, lastErrorTag } = settleTry(
+        outcome,
+        attempt,
+        { policy, rule },
+        Date.now(),
+        Math.random,
+      );
+      finishAttempt(this.ctx.storage.sql, entry.id, settlement, lastError, "forwards", lastErrorTag);
       if (settlement.status === "retrying") this.syncAlarm();
-      if (error !== null && settlement.status === "failed") {
-        this.logDeadLetter("forward", entry.id, entry.linkName, attempt, error);
+      if (lastError !== null && settlement.status === "failed") {
+        this.logDeadLetter("forward", entry.id, entry.linkName, attempt, lastError, lastErrorTag);
       }
     }
 
@@ -1140,9 +1161,17 @@ export function actor(
     }
 
     /** The wide event for an effect that became a dead letter (never its input). */
-    logDeadLetter(kind: "execution" | "forward", effectId: string, service: string, attempts: number, error: string) {
+    logDeadLetter(
+      kind: "execution" | "forward",
+      effectId: string,
+      service: string,
+      attempts: number,
+      error: string,
+      errorTag: string | null = null,
+    ) {
       const actorId = this.actorId ?? this.ctx.id.toString();
-      const event = outboxFailedEvent({ kind, actorType: _actorName, actorId, effectId, service, attempts, error });
+      const fields = { kind, actorType: _actorName, actorId, effectId, service, attempts, error };
+      const event = outboxFailedEvent(errorTag === null ? fields : { ...fields, errorTag });
       console.error(JSON.stringify(event));
     }
 
@@ -1565,6 +1594,18 @@ export function actor(
       const forwarded = DeliveryInfoSchema.optional().safeParse(delivery);
       if (!forwarded.success) return { ok: false, error: "invalid_delivery", detail: forwarded.error.message };
       await this.loadState();
+      const admitted = this.admit(caller, callerType, event);
+      if (!admitted.ok) return admitted;
+      this.applyMessage(event, admitted.role, admitted.payload, { caller, callerType }, forwarded.data);
+      return { ok: true };
+    }
+
+    /** Whether the actor takes this message from this caller: its role, and the parsed payload. */
+    admit(
+      caller: string,
+      callerType: "user" | "service",
+      event: { type: string; [key: string]: unknown },
+    ): { ok: true; role: string; payload: unknown } | { ok: false; error: string; detail?: string } {
       if (!this.initialized) {
         return { ok: false, error: "Actor not initialized" };
       }
@@ -1580,18 +1621,21 @@ export function actor(
         return { ok: false, error: "No messages available" };
       }
 
-      // Admit (validate payload, run guard), then run the transition through the step core.
+      // Admit (validate payload, run guard); the transition runs through the step core in applyMessage().
       const admission = admitMessage(def.messages, role, this.state, event, { caller, callerType, env: this.env });
       if (!admission.ok) return rejected(admission);
-      const result = this.runStep({
-        type: "message",
-        name: event.type,
-        payload: admission.payload,
-        caller,
-        callerType,
-        role,
-        delivery: forwarded.data,
-      });
+      return { ok: true, role, payload: admission.payload };
+    }
+
+    /** Run an admitted message through the step core and commit it with its effects. */
+    applyMessage(
+      event: { type: string; [key: string]: unknown },
+      role: string,
+      payload: unknown,
+      { caller, callerType }: { caller: string; callerType: "user" | "service" },
+      delivery: DeliveryInfo | undefined,
+    ): void {
+      const result = this.runStep({ type: "message", name: event.type, payload, caller, callerType, role, delivery });
 
       // Timeline: record message cause
       const { type: _msgType, ...msgPayload } = event;
@@ -1615,7 +1659,6 @@ export function actor(
         this.pushStudioLinks();
       }
       this.afterEffects(result);
-      return { ok: true };
     }
 
     observeTransition(handlerState: unknown, event: { type: string }, caller: string, role: string): void {
@@ -2414,7 +2457,7 @@ export function actor(
       this.pendingCause =
         cause.type === "service.onDone"
           ? { type: cause.type, service, input: cause.input, result: cause.result }
-          : { type: cause.type, service, input: cause.input, error: cause.error.message };
+          : { type: cause.type, service, input: cause.input, error: describeRecordedError(cause.error) };
       this.commit(result.state, result.event);
     }
 

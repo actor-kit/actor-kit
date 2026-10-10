@@ -95,7 +95,7 @@ Define a service with `onDone` and `onError` callbacks. When you call `execute("
 
 ### What if an executed service fails?
 
-If the service function throws, the execution is marked as failed in SQLite. If the service definition has an `onError` callback, it runs with the error and the original input, letting you update actor state in response to the failure (e.g., set an error flag, revert optimistic changes). There is no automatic retry — design your services to be idempotent and handle failures explicitly via `onError`.
+A failure is a typed, tagged error: a declared one you throw with `fail({ _tag: "CardDeclined", ... })`, `{ _tag: "Timeout", ms }` when a try runs out of time, or `{ _tag: "Defect", message }` for anything else thrown. Timeouts and defects are retried (3 tries by default, with backoff); declared errors are not, unless `retry.while` says so. When the row fails for good it stays in the outbox as a dead letter (an admin can redrive it from Studio), and `onError(state, error, input)` runs with the typed error so you can update state (set an error flag, revert an optimistic change). Delivery is at least once, so pass `effect.idempotencyKey` to anything downstream. See [Side Effects](/concepts/side-effects/).
 
 ### Can I execute services from `lifecycle.connect` or `lifecycle.disconnect`?
 

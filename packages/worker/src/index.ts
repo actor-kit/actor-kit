@@ -24,6 +24,9 @@ export { resolveNamespace } from "./runtime/resolve-namespace";
 export type { ActorRoute } from "./runtime/route-to-actor";
 // Runtime utilities
 export { parseActorRoute } from "./runtime/route-to-actor";
+// Typed service errors (ADR-016 §2): `throw fail({ _tag, ... })` from a service's fn
+export type { BuiltInError, DefectError, ServiceError, TaggedError, TimeoutError } from "./runtime/service-error";
+export { fail, ServiceFailure } from "./runtime/service-error";
 // Typed version chain (ADR-015 D5)
 export type { VersionDef, VersionOptions } from "./runtime/versions";
 export { version } from "./runtime/versions";

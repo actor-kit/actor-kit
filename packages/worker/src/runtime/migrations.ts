@@ -179,4 +179,12 @@ export const ACTOR_KIT_MIGRATIONS: ReadonlyArray<{ readonly name: string; readon
       CREATE INDEX IF NOT EXISTS idx_forwards_due ON forwards(status, next_attempt_at);
     `,
   },
+  {
+    // Typed service errors (ADR-016 §2): the `_tag` of the last error, shown in Studio's outbox.
+    name: "0014_last_error_tag",
+    sql: `
+      ALTER TABLE executions ADD COLUMN last_error_tag TEXT;
+      ALTER TABLE forwards ADD COLUMN last_error_tag TEXT;
+    `,
+  },
 ];

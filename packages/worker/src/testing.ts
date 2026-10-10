@@ -119,13 +119,17 @@ export {
 export { resolveNamespace } from "./runtime/resolve-namespace";
 export type { RestorePlan } from "./runtime/restore";
 export { planRestore } from "./runtime/restore";
-export type { AttemptSettlement, RetryOption, RetryPolicy } from "./runtime/retry";
+export type { AttemptSettlement, RetryOption, RetryPolicy, SettledTry, TryOutcome } from "./runtime/retry";
 export {
   DEFAULT_RETRY_POLICY,
   linkRetryPolicies,
+  linkRetryRules,
   resolveRetryPolicy,
+  resolveRetryRule,
   retryDelay,
   settleAttempt,
+  settleTry,
+  shouldRetry,
 } from "./runtime/retry";
 // Role resolution
 export type { RolePredicate } from "./runtime/roles";
@@ -133,6 +137,26 @@ export { resolveRole } from "./runtime/roles";
 // Route parsing
 export type { ActorRoute } from "./runtime/route-to-actor";
 export { parseActorRoute } from "./runtime/route-to-actor";
+// Typed service errors (ADR-016 §2)
+export type {
+  BuiltInError,
+  DefectError,
+  ErrorsParser,
+  ServiceError,
+  TaggedError,
+  TimeoutError,
+} from "./runtime/service-error";
+export {
+  classifyFailure,
+  defectError,
+  describeRecordedError,
+  describeServiceError,
+  fail,
+  isBuiltInError,
+  isTaggedError,
+  ServiceFailure,
+  timeoutError,
+} from "./runtime/service-error";
 // Step core (ADR-015 D4): one transition as a pure function
 export type {
   Admission,

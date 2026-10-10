@@ -171,7 +171,7 @@ describe("planRestore: recorded results", () => {
     expect(plan.state).toEqual({ n: 1, log: [] });
     expect(plan.redeliver.map((e) => [e.seq, e.causeType, e.payload])).toEqual([
       [5, "service.onDone", { input: { item: "y" }, result: "r-y", effectId: "3:0" }],
-      [6, "service.onError", { input: { item: "x" }, error: { message: "declined" }, effectId: "2:0" }],
+      [6, "service.onError", { input: { item: "x" }, error: { _tag: "Defect", message: "declined" }, effectId: "2:0" }],
     ]);
     expect((await planRestore(ShopDef, journal, 2)).redeliver.map((e) => e.seq)).toEqual([6]);
     expect((await planRestore(ShopDef, journal, 8)).redeliver).toEqual([]);

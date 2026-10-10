@@ -11,7 +11,7 @@ Actor Kit Studio is a built-in debugging tool for actor-kit. Connect to any runn
 - **Timeline** — chronological log of every state mutation with its cause (message, service completion, link update, lifecycle event, timer, restore). Admins can **Restore to here** on an entry: the actor goes back to that point as a new `restore` event (history is kept, timers pending then come back, nothing that already ran runs again, and service results recorded since are delivered again).
 - **Connections** — active WebSocket clients with caller identity and role
 - **Timers** — pending durable timers (name, key, due in, payload); admins can fire one now
-- **Outbox** — service executions by effect id, with status (pending, running, retrying, done, failed), tries, next try and last error. Admins can redrive a failed row.
+- **Outbox** — service executions by effect id, with status (pending, running, retrying, done, failed), tries, next try and last error (with its `_tag`: `Timeout`, `Defect` or a declared error). Admins can redrive a failed row.
 - **Links** — actor-to-actor subscriptions (who this actor links to and who subscribes to it)
 - **Views** — computed view projections per role
 

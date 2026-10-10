@@ -20,6 +20,10 @@
  *   type Messages = keyof typeof Counter.def.messages;
  */
 
+import type { DeterministicContext } from "@actor-kit/core";
+import type { ZodType } from "zod";
+import type { EffectInfo } from "./runtime/effect-info";
+import type { BuiltInError } from "./runtime/service-error";
 import type { ChainIsTyped, CurrentState } from "./runtime/versions";
 
 /**
@@ -40,12 +44,64 @@ export interface ActorContract<TName extends string = string, TDef = unknown> {
 export function defineActor<
   TName extends string,
   TDef extends {
-    input: import("zod").ZodType;
+    input: ZodType;
     init(...args: never[]): unknown;
   },
->(name: TName, def: TDef & VersionsCheck<TDef>): ActorContract<TName, TDef> {
+  TState = unknown,
+  TErrors extends Record<string, unknown> = Record<never, never>,
+>(name: TName, def: TDef & VersionsCheck<TDef> & TypedServices<TState, TErrors>): ActorContract<TName, TDef> {
   return { name, def };
 }
+
+// --- Typed services (ADR-016) ---
+
+/**
+ * What a service's onError and `retry.while` receive: its declared errors (the `errors` schema's output)
+ * plus the built-ins `{ _tag: "Timeout", ms }` and `{ _tag: "Defect", message }`. Only the built-ins when
+ * it declares no `errors`.
+ */
+export type ServiceErrorOf<TDeclared> = unknown extends TDeclared ? BuiltInError : TDeclared | BuiltInError;
+
+/** What a service's onDone / onError get as their last argument. */
+export type ServiceCallbackContext = DeterministicContext;
+
+/** A service's `retry` option, with `while` typed by its error union. */
+export interface ServiceRetry<TError> {
+  /** Total number of tries, including the first (default 3). */
+  readonly attempts?: number;
+  readonly backoff?: {
+    readonly baseMs?: number;
+    readonly factor?: number;
+    readonly maxMs?: number;
+    readonly jitter?: number;
+  };
+  /** Retry a failed try when this returns true. Default: the built-ins (Timeout, Defect) are, declared errors are not. */
+  while?(error: TError): boolean;
+}
+
+/**
+ * A service in the `services` block, as defineActor types it. Methods (not function properties), so a
+ * handler may annotate a narrower input or result.
+ */
+export interface ServiceDef<TState, TDeclared = unknown> {
+  /** Declared failures: a `z.discriminatedUnion("_tag", [...])`. `throw fail(error)` values parse against it. */
+  readonly errors?: ZodType<TDeclared>;
+  /** The async work. `effect`: actor, effect id, idempotency key, try number, AbortSignal. */
+  fn(input: unknown, env: unknown, effect: EffectInfo): Promise<unknown>;
+  readonly retry?: ServiceRetry<ServiceErrorOf<TDeclared>>;
+  onDone?(state: TState, result: unknown, input: unknown, ctx: ServiceCallbackContext): TState;
+  /** Runs once, after the last try failed (or at once for an error `retry.while` does not retry). */
+  onError?(state: TState, error: ServiceErrorOf<TDeclared>, input: unknown, ctx: ServiceCallbackContext): TState;
+}
+
+/**
+ * The typed parts of a definition: the state comes from init, each service's error union from its
+ * `errors` (inferred per service, so every onError sees its own).
+ */
+type TypedServices<TState, TErrors> = {
+  init(...args: never[]): TState | PromiseLike<TState>;
+  services?: { [K in keyof TErrors]: ServiceDef<TState, TErrors[K]> };
+};
 
 type InitState<TDef> = TDef extends { init(...args: never[]): infer S } ? Awaited<S> : never;
 

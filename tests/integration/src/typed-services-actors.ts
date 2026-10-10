@@ -4,11 +4,15 @@
  * - Teller runs services and forwards. ECHO returns what the runtime passed as its third argument
  *   (minus the signal). FORWARD sends DELIVER to a Till through the `till` link.
  * - Till records `ctx.delivery` for every DELIVER it accepts and ignores a delivery it has already seen.
+ * - §2 typed errors: DECLINE fails with a declared CardDeclined (5 tries allowed, never retried);
+ *   BROKEN throws a plain Error (a Defect, retried: 2 tries); MISFIT fails with a tag its `errors` does not
+ *   declare (a Defect); LIMITED fails with RateLimited on its first try and `retry.while` retries it.
+ *   Every onError records the error it gets.
  */
 
 import type { DeliveryInfo } from "@actor-kit/core";
 import { schema, uint32, view } from "@actor-kit/core";
-import { createActorClass, defineActor, type EffectInfo, link, message } from "@actor-kit/worker";
+import { createActorClass, defineActor, type EffectInfo, fail, link, message } from "@actor-kit/worker";
 import { z } from "zod";
 
 type TillState = { received: Array<{ text: string; delivery: DeliveryInfo | null }> };
@@ -38,6 +42,15 @@ const echo = (effect: EffectInfo) => ({
   signalAborted: effect.signal.aborted,
 });
 
+const PayErrors = z.discriminatedUnion("_tag", [
+  z.object({ _tag: z.literal("CardDeclined"), reason: z.string() }),
+  z.object({ _tag: z.literal("RateLimited"), retryAfterMs: z.number() }),
+]);
+
+const fast = (attempts: number) => ({ attempts, backoff: { baseMs: 1, factor: 1, jitter: 0 } });
+const recordError = (s: TellerState, error: unknown): TellerState => ({ ...s, errors: [...s.errors, error] });
+const recordEcho = (s: TellerState, result: unknown): TellerState => ({ ...s, echoes: [...s.echoes, result] });
+
 const TellerContract = defineActor("teller", {
   input: z.object({}),
   init: (): TellerState => ({ echoes: [], errors: [] }),
@@ -46,7 +59,41 @@ const TellerContract = defineActor("teller", {
   services: {
     ECHO: {
       fn: async (_input: unknown, _env: unknown, effect: EffectInfo) => echo(effect),
-      onDone: (s: TellerState, result: unknown) => ({ ...s, echoes: [...s.echoes, result] }),
+      onDone: recordEcho,
+    },
+    DECLINE: {
+      errors: PayErrors,
+      retry: fast(5),
+      fn: async (): Promise<never> => {
+        throw fail({ _tag: "CardDeclined", reason: "stolen card" });
+      },
+      onError: recordError,
+    },
+    BROKEN: {
+      errors: PayErrors,
+      retry: fast(2),
+      fn: async (): Promise<never> => {
+        throw new Error("socket hang up");
+      },
+      onError: recordError,
+    },
+    MISFIT: {
+      errors: PayErrors,
+      retry: fast(1),
+      fn: async (): Promise<never> => {
+        throw fail({ _tag: "Stolen" });
+      },
+      onError: recordError,
+    },
+    LIMITED: {
+      errors: PayErrors,
+      retry: { ...fast(3), while: (error) => error._tag === "RateLimited" },
+      fn: async (_input: unknown, _env: unknown, effect: EffectInfo) => {
+        if (effect.attempt === 1) throw fail({ _tag: "RateLimited", retryAfterMs: 1 });
+        return { attempt: effect.attempt };
+      },
+      onDone: recordEcho,
+      onError: recordError,
     },
   },
   messages: {
@@ -63,5 +110,6 @@ const TellerContract = defineActor("teller", {
   studio: { enabled: true },
 });
 
+export { TellerContract };
 export const Teller = createActorClass(TellerContract);
 export const Till = createActorClass(TillContract);

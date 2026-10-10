@@ -55,10 +55,46 @@ A service has these parts:
 
 - **`fn`** — async function that receives the input, the Worker `env` and the effect: `{ actorType, actorId, effectId, idempotencyKey, attempt, signal }`. Use any library: `fetch`, CF bindings (Queues, KV, R2), third-party SDKs.
 - **`onDone`** — optional. Pure state transition that receives `(state, result, input)`. The result type is inferred from `fn`'s return type.
-- **`onError`** — optional. Pure state transition that receives `(state, error, input)`. It runs once, after the last try has failed.
-- **`retry`** — optional. `{ attempts, backoff: { baseMs, factor, maxMs, jitter } }`. Default: 3 tries, 1s then 5s apart, ±20% jitter. `{ attempts: 1 }` turns retries off.
+- **`errors`** — optional. The service's declared failures, a `z.discriminatedUnion("_tag", [...])`. See [Typed errors](#typed-errors).
+- **`onError`** — optional. Pure state transition that receives `(state, error, input)`, where `error` is a typed, tagged error: one of the declared `errors`, `{ _tag: "Timeout", ms }` or `{ _tag: "Defect", message }`. It runs once, when the row fails for good.
+- **`retry`** — optional. `{ attempts, backoff: { baseMs, factor, maxMs, jitter }, while }`. Default: 3 tries, 1s then 5s apart, ±20% jitter; only `Timeout` and `Defect` are retried. `{ attempts: 1 }` turns retries off.
 
 All three are declared at module level — no closures, fully serializable, crash-safe. The `input` argument is the original value passed to `execute()`, available in all three functions.
+
+## Typed errors
+
+A service fails with a value, not a string. Declare its failures as a tagged union and throw `fail(...)`:
+
+```typescript
+import { defineActor, fail } from "@actor-kit/worker";
+
+services: {
+  charge: {
+    errors: z.discriminatedUnion("_tag", [
+      z.object({ _tag: z.literal("CardDeclined"), reason: z.string() }),
+      z.object({ _tag: z.literal("RateLimited"), retryAfterMs: z.number() }),
+    ]),
+    fn: async (input: { cents: number }, env, effect) => {
+      const res = await env.PAYMENTS.charge(input, { idempotencyKey: effect.idempotencyKey });
+      if (res.status === 402) throw fail({ _tag: "CardDeclined", reason: res.reason });
+      if (res.status === 429) throw fail({ _tag: "RateLimited", retryAfterMs: res.retryAfter });
+      return res.body;
+    },
+    retry: { attempts: 5, while: (e) => e._tag === "RateLimited" || e._tag === "Timeout" },
+    onError: (state, error) => {
+      // error: CardDeclined | RateLimited | Timeout | Defect
+      if (error._tag === "CardDeclined") return { ...state, status: "declined", reason: error.reason };
+      return { ...state, status: "failed" };
+    },
+  },
+},
+```
+
+- `fail(error)` marks a declared failure. The runtime parses it against `errors`; a value that doesn't parse becomes a `Defect`.
+- Every service's error union also has two built-ins: `{ _tag: "Timeout", ms }` (the try ran out of time) and `{ _tag: "Defect", message }` (anything thrown that isn't `fail(...)`). Without `errors`, the union is just these two.
+- **Default retry rule: the built-ins are retried, declared errors are not.** A declared error is a domain answer, not a transient fault: a declined card fails at once and `onError` runs. `retry.while(error)` overrides the rule per error (above, a rate limit is retried too).
+- The journal stores the parsed error, so replay and restore deliver the same typed value to `onError`.
+- Studio's Outbox shows the error's `_tag` in the Last error column. A declared error's fields are application values, redacted by `studio.redact` like payloads.
 
 ## Fire-and-Forget
 
@@ -89,8 +125,8 @@ ITEM_ADDED: message(z.object({ itemId: z.string() }), (state, { itemId }, { exec
 2. State + outbox entry persisted **atomically**: `{ service: "fetchPrice", input: { itemId } }`
 3. Framework runs `services.fetchPrice.fn(input, env)` **after commit**
 4. On success: `onDone(currentState, result, input)` runs, state persisted, views broadcast
-5. On failure with tries left: the row waits as `retrying` and the Durable Object alarm runs it again after the backoff
-6. On failure of the last try: `onError(currentState, error, input)` runs, state persisted, views broadcast; the row stays `failed`
+5. On a failure that is retried (by default `Timeout` and `Defect`) with tries left: the row waits as `retrying` and the Durable Object alarm runs it again after the backoff
+6. On a failure that is not retried (by default a declared error), or of the last try: `onError(currentState, error, input)` runs with the typed error, state persisted, views broadcast; the row stays `failed`
 7. On crash: restart, re-run from outbox (service name + input are serialized)
 
 Outbox rows move through `pending` → `running` → `done`, `retrying` (and back to `running`) or `failed`. A `failed` row is a dead letter: it stays until an admin redrives it from Studio's Outbox panel, which moves it back to `pending` under the same effect id.

@@ -59,6 +59,7 @@ For flat messages, wraps them so every role has access — guards handle authori
 | `views` | Yes | Per-role view definitions |
 | `version` | No | Number for migration |
 | `lifecycle` | No | Connection handlers (`connect`, `disconnect`) |
+| `services` | No | Async work run through the outbox: `{ fn(input, env, effect), errors?, retry?, onDone?, onError? }` per name. `effect` is `{ actorType, actorId, effectId, idempotencyKey, attempt, signal }`; `onError` gets a typed error. See [Side Effects](/concepts/side-effects/) |
 | `observe` | No | `{ onTransition }` hook |
 | `migrate` | No | `(persisted, fromVersion) => newState` |
 | `serialize` | No | Custom state serializer |
@@ -82,6 +83,16 @@ const reset = message(z.object({}), {
 ```
 
 Guard receives `(state, payload, ctx)` where ctx has `{ role, caller, callerType, env }`.
+
+## `fail(error)`
+
+Throw from a service's `fn` to fail with a declared, typed error (ADR-016):
+
+```typescript
+throw fail({ _tag: "CardDeclined", reason: "insufficient funds" });
+```
+
+The runtime parses the value against the service's `errors` schema (a `z.discriminatedUnion("_tag", ...)`); a value that doesn't parse, or anything else thrown, becomes `{ _tag: "Defect", message }`. Declared errors are not retried unless the service's `retry.while(error)` returns true; `Timeout` and `Defect` are.
 
 ## `schema(shape)`
 

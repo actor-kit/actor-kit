@@ -8,6 +8,7 @@
 
 import type { LiveConnection } from "./live-connections";
 import type { OutboxRow } from "./outbox-store";
+import { isBuiltInError } from "./service-error";
 import type { StudioTimelineEntry } from "./studio-protocol";
 import { REDACTED, type Redactor } from "./studio-redact";
 import type { TimerRow } from "./timers-store";
@@ -106,7 +107,16 @@ export async function projectTimelineEntry(
 export type { OutboxRow as StudioOutboxRow } from "./outbox-store";
 
 export function projectOutboxRow(row: OutboxRow, projection: StudioProjection): OutboxRow {
-  return { ...row, payload: projectJson(row.payload, projection) };
+  const projected = { ...row, payload: projectJson(row.payload, projection) };
+  // A declared service error (ADR-016 §2) is stored as its JSON: an application value, redacted like one.
+  if (row.lastError === null || row.lastErrorTag === undefined || isBuiltInErrorTag(row.lastErrorTag)) {
+    return projected;
+  }
+  return { ...projected, lastError: projectJson(row.lastError, projection) };
+}
+
+function isBuiltInErrorTag(tag: string): boolean {
+  return isBuiltInError({ _tag: tag });
 }
 
 /** A pending timer as Studio may see it: the payload is redacted like any application value. */

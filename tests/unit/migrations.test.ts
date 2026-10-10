@@ -33,6 +33,7 @@ describe("ACTOR_KIT_MIGRATIONS", () => {
       "0011_timers",
       "0012_restore",
       "0013_forward_retries",
+      "0014_last_error_tag",
     ]);
   });
 

@@ -318,10 +318,14 @@ drainExecutions(): until no row is due
   due = pending, or retrying with next_attempt_at <= now (ORDER BY seq, idx)
   for each: startAttempt (status running, attempts + 1)
             fn(input, env, { actorType, actorId, effectId, idempotencyKey, attempt, signal })  (ADR-016)
-            settleAttempt(outcome, attempt, policy):
+            a throw is classified (runtime/service-error.ts, ADR-016 §2): fail(e) parsed against `errors`,
+              anything else → { _tag: "Defect", message }
+            settleTry(outcome, attempt, { policy, rule }):
               ok          → done   (+ onDone transition, same transaction as the row update)
-              failed, more tries left → retrying, next_attempt_at = now + backoff; syncAlarm()
-              failed, last try        → failed (+ onError transition); log actor_kit.outbox.failed
+              failed, rule retries it (default: Timeout/Defect), tries left → retrying, next_attempt_at
+                = now + backoff; syncAlarm()
+              failed otherwise, or last try → failed (+ onError(typed error) transition); log
+                actor_kit.outbox.failed (with errorTag); last_error = text, last_error_tag = _tag
 
 alarm(): drain due rows, then syncAlarm() (one alarm: the earliest next_attempt_at, or none)
 wake:    rows left running by a crash go back to pending (at-least-once), then drain

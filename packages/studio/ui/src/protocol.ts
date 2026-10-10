@@ -52,6 +52,8 @@ const OutboxEntrySchema = z.object({
   /** When a `retrying` row tries next. Absent from actors older than ADR-015. */
   nextAttemptAt: z.number().nullable().optional(),
   lastError: z.string().nullable().optional(),
+  /** The last error's `_tag` (ADR-016 §2): Timeout, Defect or a declared error. Absent when untagged. */
+  lastErrorTag: z.string().optional(),
   /** Forwards only (`service` is then the link); rows without it are executions. */
   kind: z.literal("forward").optional(),
   /** Forwards only: the target actor's id. */

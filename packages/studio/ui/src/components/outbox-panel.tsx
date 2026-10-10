@@ -90,7 +90,17 @@ export function OutboxPanel({
                   )}
                 </td>
                 <td className="px-4 py-2 text-right text-zinc-400">{exec.attempts}</td>
-                <td className="px-4 py-2 text-zinc-500 break-all">{exec.lastError ?? ""}</td>
+                <td className="px-4 py-2 text-zinc-500 break-all">
+                  {exec.lastErrorTag !== undefined && (
+                    <span
+                      data-testid="outbox-error-tag"
+                      className="mr-1 rounded bg-zinc-800 px-1.5 py-0.5 font-mono text-xs text-red-300"
+                    >
+                      {exec.lastErrorTag}
+                    </span>
+                  )}
+                  {exec.lastError ?? ""}
+                </td>
                 <td className="px-4 py-2 text-right">
                   {exec.status === "failed" && (
                     <button

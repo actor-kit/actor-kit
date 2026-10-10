@@ -37,6 +37,29 @@ export const Counter = createActorClass(counter);
 export default { fetch: withCallerIdentity(/* ... */) };
 ```
 
+## Services
+
+Async work goes through the outbox (at-least-once, retried, journaled). Pass `effect.idempotencyKey` downstream, and fail with typed errors:
+
+```ts
+import { fail } from "@actor-kit/worker";
+
+services: {
+  charge: {
+    errors: z.discriminatedUnion("_tag", [z.object({ _tag: z.literal("CardDeclined"), reason: z.string() })]),
+    fn: async (input: { cents: number }, env, effect) => {
+      const res = await chargeCard(input, { idempotencyKey: effect.idempotencyKey });
+      if (!res.ok) throw fail({ _tag: "CardDeclined", reason: res.reason });
+      return res.receipt;
+    },
+    // error: CardDeclined | { _tag: "Timeout", ms } | { _tag: "Defect", message }
+    onError: (state, error) => (error._tag === "CardDeclined" ? { ...state, declined: error.reason } : state),
+  },
+},
+```
+
+Declared errors are not retried (a declined card is an answer); timeouts and defects are, unless `retry.while` says otherwise.
+
 ## Docs
 
 Full documentation at [actorkit.dev](https://actorkit.dev).

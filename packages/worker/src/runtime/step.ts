@@ -19,6 +19,7 @@ import { parseDuration } from "./duration";
 import { createReplayFacts, type Facts, type JournalDraft, type LiveFacts } from "./journal";
 import { createOutbox, type UnlinkCall } from "./outbox";
 import { resolveRole } from "./roles";
+import type { ErrorsParser } from "./service-error";
 
 // --- Definition (runtime-shaped: unknown-typed, bivariant methods) ---
 
@@ -42,8 +43,11 @@ export interface StepDef {
   services?: Record<
     string,
     {
+      /** Declared failures (ADR-016 §2); the step core passes errors through, simulate() parses rejections. */
+      readonly errors?: ErrorsParser | undefined;
       onDone?(state: unknown, result: unknown, input: unknown, ctx: DeterministicContext): unknown;
-      onError?(state: unknown, error: { message: string }, input: unknown, ctx: DeterministicContext): unknown;
+      /** `error`: the typed service error (ADR-016 §2): a declared error, a Timeout or a Defect. */
+      onError?(state: unknown, error: unknown, input: unknown, ctx: DeterministicContext): unknown;
     }
   >;
   links?: Record<
@@ -88,6 +92,9 @@ interface LifecycleCallEvent {
 
 // --- Causes ---
 
+/** A service error as the step core carries it: the parsed value, opaque here (ADR-016 §2). */
+export type ServiceErrorValue = Readonly<Record<string, unknown>>;
+
 type Caller = { readonly caller: string; readonly callerType: "user" | "service" };
 
 export type StepCause =
@@ -119,7 +126,8 @@ export type StepCause =
       readonly service: string;
       readonly input: unknown;
       readonly effectId?: string | undefined;
-      readonly error: { readonly message: string };
+      /** The parsed service error (ADR-016 §2), journaled as it is so replay delivers the same value. */
+      readonly error: ServiceErrorValue;
     }
   | { readonly type: "link.onUpdate"; readonly link: string; readonly sourceId: string; readonly view: unknown }
   | {
@@ -403,7 +411,7 @@ function serviceDone(def: StepDef, state: unknown, cause: On<"service.onDone">, 
 function serviceError(def: StepDef, state: unknown, cause: On<"service.onError">, det: DeterministicContext) {
   const onError = def.services?.[cause.service]?.onError;
   return {
-    next: onError === undefined ? state : onError(state, { message: cause.error.message }, cause.input, det),
+    next: onError === undefined ? state : onError(state, cause.error, cause.input, det),
     name: cause.service,
     payload: withEffectId({ input: cause.input, error: cause.error }, cause.effectId),
   };

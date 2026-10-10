@@ -65,6 +65,8 @@ export interface OutboxRow {
   createdAt: number;
   nextAttemptAt: number | null;
   lastError: string | null;
+  /** The last error's `_tag` (ADR-016 §2): `Timeout`, `Defect` or a declared error. Absent when untagged. */
+  lastErrorTag?: string;
   /** Forwards only: rows without `kind` are executions. */
   kind?: "forward";
   /** Forwards only: the target actor's id. */
@@ -167,20 +169,25 @@ export function startAttempt(sql: JournalSql, id: string, table: EffectTable = "
   return AttemptsRow.parse(row).attempts;
 }
 
-/** Record how a try ended. `error` is the try's error message (null on success). */
+/**
+ * Record how a try ended. `error` is the try's error text (null on success); `errorTag` its `_tag`
+ * when it was a typed service error (ADR-016 §2).
+ */
 export function finishAttempt(
   sql: JournalSql,
   id: string,
   settlement: AttemptSettlement,
   error: string | null,
   table: EffectTable = "executions",
+  errorTag: string | null = null,
 ): void {
   const nextAttemptAt = settlement.status === "retrying" ? settlement.nextAttemptAt : null;
   sql.exec(
-    `UPDATE ${table} SET status = ?, next_attempt_at = ?, last_error = ? WHERE id = ?`,
+    `UPDATE ${table} SET status = ?, next_attempt_at = ?, last_error = ?, last_error_tag = ? WHERE id = ?`,
     settlement.status,
     nextAttemptAt,
     error,
+    errorTag,
     id,
   );
 }
@@ -207,7 +214,7 @@ export function nextRetryAt(sql: JournalSql): number | null {
 export function redriveExecution(sql: JournalSql, id: string, table: EffectTable = "executions"): boolean {
   const rows = sql
     .exec(
-      `UPDATE ${table} SET status = 'pending', attempts = 0, next_attempt_at = NULL, last_error = NULL WHERE id = ? AND status = 'failed' RETURNING id`,
+      `UPDATE ${table} SET status = 'pending', attempts = 0, next_attempt_at = NULL, last_error = NULL, last_error_tag = NULL WHERE id = ? AND status = 'failed' RETURNING id`,
       id,
     )
     .toArray();
@@ -225,6 +232,7 @@ const OutboxDbRow = z.object({
   created_at: z.number(),
   next_attempt_at: z.number().nullable(),
   last_error: z.string().nullable(),
+  last_error_tag: z.string().nullable(),
   target: z.string().nullable(),
 });
 
@@ -235,9 +243,9 @@ const OutboxDbRow = z.object({
 export function readOutboxRows(sql: JournalSql): OutboxRow[] {
   return sql
     .exec(
-      `SELECT seq, idx, id, service, payload, status, attempts, created_at, next_attempt_at, last_error, NULL AS target FROM executions
+      `SELECT seq, idx, id, service, payload, status, attempts, created_at, next_attempt_at, last_error, last_error_tag, NULL AS target FROM executions
        UNION ALL
-       SELECT seq, idx, id, link_name, message, status, attempts, created_at, next_attempt_at, last_error, target_id FROM forwards
+       SELECT seq, idx, id, link_name, message, status, attempts, created_at, next_attempt_at, last_error, last_error_tag, target_id FROM forwards
        ORDER BY seq DESC, idx DESC`,
     )
     .toArray()
@@ -255,7 +263,8 @@ function toOutboxRow(row: z.infer<typeof OutboxDbRow>): OutboxRow {
     nextAttemptAt: row.next_attempt_at,
     lastError: row.last_error,
   };
-  return row.target === null ? base : { ...base, kind: "forward", target: row.target };
+  const tagged = row.last_error_tag === null ? base : { ...base, lastErrorTag: row.last_error_tag };
+  return row.target === null ? tagged : { ...tagged, kind: "forward", target: row.target };
 }
 
 /**
@@ -265,12 +274,12 @@ function toOutboxRow(row: z.infer<typeof OutboxDbRow>): OutboxRow {
  */
 export function cancelUndoneEffects(sql: JournalSql, toSeq: number, reason: string): void {
   sql.exec(
-    "UPDATE executions SET status = 'failed', next_attempt_at = NULL, last_error = ? WHERE seq > ? AND status IN ('pending', 'retrying', 'running')",
+    "UPDATE executions SET status = 'failed', next_attempt_at = NULL, last_error = ?, last_error_tag = NULL WHERE seq > ? AND status IN ('pending', 'retrying', 'running')",
     reason,
     toSeq,
   );
   sql.exec(
-    "UPDATE forwards SET status = 'failed', next_attempt_at = NULL, last_error = ? WHERE seq > ? AND status IN ('pending', 'retrying', 'running')",
+    "UPDATE forwards SET status = 'failed', next_attempt_at = NULL, last_error = ?, last_error_tag = NULL WHERE seq > ? AND status IN ('pending', 'retrying', 'running')",
     reason,
     toSeq,
   );
@@ -291,6 +300,8 @@ export interface OutboxFailedEvent {
   readonly effectId: string;
   readonly attempts: number;
   readonly error: string;
+  /** The error's `_tag` when it was a typed service error (ADR-016 §2). */
+  readonly errorTag?: string;
 }
 
 /**
@@ -305,8 +316,9 @@ export function outboxFailedEvent(fields: {
   service: string;
   attempts: number;
   error: string;
+  errorTag?: string | undefined;
 }): OutboxFailedEvent {
-  return {
+  const event: OutboxFailedEvent = {
     event: "actor_kit.outbox.failed",
     actorType: fields.actorType,
     actorId: fields.actorId,
@@ -316,4 +328,5 @@ export function outboxFailedEvent(fields: {
     attempts: fields.attempts,
     error: fields.error,
   };
+  return fields.errorTag === undefined ? event : { ...event, errorTag: fields.errorTag };
 }

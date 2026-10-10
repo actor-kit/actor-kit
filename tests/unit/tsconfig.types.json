@@ -1,0 +1,17 @@
+{
+  "//": "Type tests (*.types.test.ts): checked by `pnpm typecheck:types` against the packages' sources.",
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "rootDir": "../..",
+    "lib": ["ES2022", "DOM"],
+    "types": ["@cloudflare/workers-types"],
+    "paths": {
+      "@actor-kit/core": ["../../packages/core/src/index.ts"],
+      "@actor-kit/worker": ["../../packages/worker/src/index.ts"],
+      "@actor-kit/worker/testing": ["../../packages/worker/src/testing.ts"],
+      "@actor-kit/test": ["../../packages/test/src/index.ts"]
+    }
+  },
+  "include": ["./*.types.test.ts"]
+}
