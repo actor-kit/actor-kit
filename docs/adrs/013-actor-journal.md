@@ -60,7 +60,8 @@ CREATE TABLE events (
   state_checksum TEXT NOT NULL,     -- xxh64 of the serialized after-state
   created_at     INTEGER NOT NULL,
   correlation_id TEXT,              -- ADR-017 §4: the flow (`type/id/seq` of the event that started it)
-  causation_id   TEXT               -- ADR-017 §4: the event or effect that caused this one (NULL: starts a flow)
+  causation_id   TEXT,              -- ADR-017 §4: the event or effect that caused this one (NULL: starts a flow)
+  emitted        TEXT               -- ADR-017 §2: JSON array of { name, payload } (NULL: none)
 );
 
 CREATE TABLE journal_checkpoints (

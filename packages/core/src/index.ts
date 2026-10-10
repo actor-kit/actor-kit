@@ -26,6 +26,7 @@ export type {
   ContractMessages,
   DeterministicContext,
   Duration,
+  EmitFn,
   ExecuteFn,
   Execution,
   ForwardCall,

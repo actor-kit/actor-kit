@@ -28,6 +28,7 @@ export { formatEffectId, parseEffectId } from "./runtime/effect-id";
 export { getTokenFromRequest } from "./runtime/get-token";
 // Actor journal (ADR-013): facts, events, replay
 export type {
+  EmittedEvent,
   FactSources,
   Facts,
   FoldOptions,
@@ -57,6 +58,7 @@ export {
   foldEvents,
   foldJournal,
   JournalDivergenceError,
+  JournalEmittedDivergenceError,
   JournalNondeterminismError,
   JournalVersionError,
   journalHighWater,
@@ -181,5 +183,15 @@ export { isWebSocketUpgrade } from "./runtime/upgrade";
 // Typed version chain (ADR-015 D5)
 export type { CompiledVersions, RuntimeVersioning, VersionDef, VersionOptions } from "./runtime/versions";
 export { compileVersions, toRuntimeDef, version } from "./runtime/versions";
+// Typed declarations: setup({ events }) (ADR-017)
+export type {
+  EmittingMessageContext,
+  EmittingTimerContext,
+  EventPayloads,
+  EventSchemas,
+  Setup,
+  TypedEmit,
+} from "./setup";
+export { setup } from "./setup";
 // Timer helper (ADR-015 D2)
 export { timer } from "./timer";

@@ -205,6 +205,13 @@ export interface JournalDraft {
   readonly facts: Facts;
   /** The flow this transition continues (ADR-017 §4); absent when it starts one. */
   readonly trace?: Trace;
+  /** Domain events the transition emitted, in order (ADR-017 §2); absent when none. */
+  readonly emitted?: readonly EmittedEvent[];
+}
+
+export interface EmittedEvent {
+  readonly name: string;
+  readonly payload: unknown;
 }
 
 export interface JournalEvent extends JournalDraft {
@@ -289,7 +296,7 @@ export function appendJournalEvent(
 ): number {
   const row = sql
     .exec(
-      "INSERT INTO events (seq, cause_type, name, payload, caller, caller_type, role, facts, code_version, state_checksum, created_at, correlation_id, causation_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING seq",
+      "INSERT INTO events (seq, cause_type, name, payload, caller, caller_type, role, facts, code_version, state_checksum, created_at, correlation_id, causation_id, emitted) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING seq",
       persisted.seq,
       draft.causeType,
       draft.name,
@@ -303,6 +310,7 @@ export function appendJournalEvent(
       persisted.now,
       persisted.correlationId ?? null,
       persisted.causationId ?? null,
+      draft.emitted === undefined ? null : JSON.stringify(draft.emitted),
     )
     .toArray()[0];
   const seq = z.object({ seq: z.number() }).parse(row).seq;
@@ -390,7 +398,10 @@ const EventRowSchema = z.object({
   // Absent from rows selected by readers that predate ADR-017, NULL on rows written before it.
   correlation_id: z.string().nullish(),
   causation_id: z.string().nullish(),
+  emitted: z.string().nullish(),
 });
+
+const EmittedSchema = z.array(z.object({ name: z.string(), payload: z.unknown() }));
 
 const CheckpointRowSchema = z.object({
   seq: z.number(),
@@ -402,7 +413,7 @@ const CheckpointRowSchema = z.object({
 
 /** The `events` columns, in the order every reader selects them. */
 export const JOURNAL_EVENT_COLUMNS =
-  "seq, cause_type, name, payload, caller, caller_type, role, facts, code_version, state_checksum, created_at, correlation_id, causation_id";
+  "seq, cause_type, name, payload, caller, caller_type, role, facts, code_version, state_checksum, created_at, correlation_id, causation_id, emitted";
 
 /** Parse one `events` row (selected with JOURNAL_EVENT_COLUMNS) at the storage boundary. */
 export function parseJournalEventRow(raw: unknown): JournalEvent {
@@ -421,7 +432,9 @@ export function parseJournalEventRow(raw: unknown): JournalEvent {
     stateChecksum: row.state_checksum,
     createdAt: row.created_at,
   };
-  return withIds(event, row.correlation_id ?? null, row.causation_id ?? null);
+  const traced = withIds(event, row.correlation_id ?? null, row.causation_id ?? null);
+  const emitted = row.emitted ?? null;
+  return emitted === null ? traced : { ...traced, emitted: EmittedSchema.parse(JSON.parse(emitted)) };
 }
 
 /** The event with the ids that were recorded (none for rows written before ADR-017). */
@@ -560,20 +573,24 @@ async function replayEvent(
   state: unknown,
   event: JournalEvent,
   options: { env?: unknown },
-): Promise<{ state: unknown; timerOps: TimerOp[] }> {
+): Promise<{ state: unknown; timerOps: TimerOp[]; emitted: readonly EmittedEvent[] }> {
   const env = options.env ?? {};
   const facts = replayStepFacts(event.facts);
   if (event.causeType === "init") {
     required(def.init, "init");
     const io = { env, link: async (name: string, id: string) => facts.takeLinkView(name, id) };
     const cause = { input: event.payload, caller: event.caller, callerType: event.callerType };
-    return { state: (await stepInit(def, cause, facts, io)).state, timerOps: [] };
+    return { state: (await stepInit(def, cause, facts, io)).state, timerOps: [], emitted: [] };
   }
   if (event.causeType === "restore") {
     throw new Error("Journal replay: a restore event replays only within its journal (use foldJournal)");
   }
   const result = step(def, state, REPLAY_CAUSES[event.causeType](def, state, event), facts, env);
-  return { state: result.state, timerOps: result.effects.toTimerOps(event.seq) };
+  return {
+    state: result.state,
+    timerOps: result.effects.toTimerOps(event.seq),
+    emitted: result.event.emitted ?? [],
+  };
 }
 
 /** Fold one journal event through the definition's current handlers (the step core, guards never run). */
@@ -600,6 +617,44 @@ export class JournalDivergenceError extends Error {
     super(
       `Journal replay diverged at seq ${seq} (${causeType}${causeName === null ? "" : ` ${causeName}`}): expected checksum ${expected}, got ${actual}`,
     );
+  }
+}
+
+/** Thrown when replay emits different domain events than the journal recorded (ADR-017 §2). */
+export class JournalEmittedDivergenceError extends Error {
+  override name = "JournalEmittedDivergenceError";
+  constructor(
+    readonly seq: number,
+    readonly causeType: string,
+    /** Position of the first differing event in the transition's emitted list. */
+    readonly index: number,
+    readonly expected: EmittedEvent | undefined,
+    readonly actual: EmittedEvent | undefined,
+  ) {
+    super(
+      `Journal replay emitted different events at seq ${seq} (${causeType}), event ${index}: expected ${describeEmitted(expected)}, got ${describeEmitted(actual)}`,
+    );
+  }
+}
+
+function describeEmitted(event: EmittedEvent | undefined): string {
+  return event === undefined ? "nothing" : `${event.name} ${JSON.stringify(event.payload)}`;
+}
+
+/** The first position where two emitted lists differ (by name and JSON payload), or -1. */
+function firstEmittedDifference(expected: readonly EmittedEvent[], actual: readonly EmittedEvent[]): number {
+  const length = Math.max(expected.length, actual.length);
+  for (let i = 0; i < length; i++) {
+    if (describeEmitted(expected[i]) !== describeEmitted(actual[i])) return i;
+  }
+  return -1;
+}
+
+function verifyEmitted(event: JournalEvent, actual: readonly EmittedEvent[]): void {
+  const expected = event.emitted ?? [];
+  const index = firstEmittedDifference(expected, actual);
+  if (index !== -1) {
+    throw new JournalEmittedDivergenceError(event.seq, event.causeType, index, expected[index], actual[index]);
   }
 }
 
@@ -698,8 +753,12 @@ async function foldToEnd(
     if (event.seq !== expectedSeq) {
       throw new Error(`Journal replay: expected seq ${expectedSeq}, found ${event.seq}`);
     }
-    point = await foldEvent(def, point, event, points, options);
-    if (options.rebuild !== true) verifyChecksum(def, point, event);
+    const folded = await foldEventEmitting(def, point, event, points, options);
+    point = folded.point;
+    if (options.rebuild !== true) {
+      verifyChecksum(def, point, event);
+      verifyEmitted(event, folded.emitted);
+    }
     points.set(event.seq, point);
     expectedSeq += 1;
   }
@@ -739,9 +798,20 @@ export async function foldEvent(
   points: ReadonlyMap<number, FoldPoint>,
   options: FoldOptions,
 ): Promise<FoldPoint> {
+  return (await foldEventEmitting(def, point, event, points, options)).point;
+}
+
+/** foldEvent, plus the domain events the replayed transition emitted. */
+async function foldEventEmitting(
+  def: ReplayableDef,
+  point: FoldPoint,
+  event: JournalEvent,
+  points: ReadonlyMap<number, FoldPoint>,
+  options: FoldOptions,
+): Promise<{ point: FoldPoint; emitted: readonly EmittedEvent[] }> {
   if (options.rebuild === true) {
-    if (event.causeType === "migrate") return point;
-    return foldEvent(def, point, upcastEvent(def, event), points, { ...options, rebuild: false });
+    if (event.causeType === "migrate") return { point, emitted: [] };
+    return foldEventEmitting(def, point, upcastEvent(def, event), points, { ...options, rebuild: false });
   }
   if (event.causeType === "restore") {
     const { toSeq } = RestorePayload.parse(event.payload);
@@ -749,14 +819,17 @@ export async function foldEvent(
     if (target === undefined) {
       throw new Error(`Journal replay: event ${event.seq} restores to seq ${toSeq}, which this journal does not cover`);
     }
-    return target;
+    return { point: target, emitted: [] };
   }
   const replayed = await replayEvent(def, point.state, event, options);
   const remaining =
     event.causeType === "timer"
       ? point.timers.filter((t) => t.id !== FiredTimerPayload.parse(event.payload).id)
       : point.timers;
-  return { state: replayed.state, timers: applyScheduleOps(remaining, replayed.timerOps) };
+  return {
+    point: { state: replayed.state, timers: applyScheduleOps(remaining, replayed.timerOps) },
+    emitted: replayed.emitted,
+  };
 }
 
 /** Thrown when a journal event was written by a version with no path to the current one. */

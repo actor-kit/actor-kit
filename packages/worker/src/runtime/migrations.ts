@@ -192,4 +192,9 @@ export const ACTOR_KIT_MIGRATIONS: ReadonlyArray<{ readonly name: string; readon
       ALTER TABLE events ADD COLUMN causation_id TEXT;
     `,
   },
+  {
+    // Domain events a transition emitted (ADR-017 §2): a JSON array, NULL when none.
+    name: "0016_emitted",
+    sql: "ALTER TABLE events ADD COLUMN emitted TEXT;",
+  },
 ];

@@ -66,6 +66,8 @@ export interface StepDef {
     string,
     { readonly schema: SafeParser; handler(state: unknown, payload: unknown, ctx: unknown): unknown }
   >;
+  /** Domain events (ADR-017 §2): payload schemas by name. */
+  events?: Record<string, SafeParser>;
   migrate?(persisted: unknown, fromVersion: number): unknown;
   serialize?(state: unknown): unknown;
   restore?(serialized: unknown): unknown;
@@ -283,6 +285,17 @@ function fireAtOf(options: ScheduleOptions, det: DeterministicContext): number {
   return det.now() + parseDuration(options.in);
 }
 
+/** ctx.emit for a transition: the event must be declared and its payload must parse (ADR-017 §2). */
+function emitVerb(def: StepDef, effects: StepEffects): (name: string, payload: unknown) => void {
+  return (name, payload) => {
+    const schema = def.events?.[name];
+    if (schema === undefined) throw new Error(`Event "${name}" is not declared on this actor`);
+    const parsed = schema.safeParse(payload);
+    if (!parsed.success) throw new Error(`Event "${name}": invalid payload: ${parsed.error.message}`);
+    effects.emit(name, parsed.data);
+  };
+}
+
 /** ctx.schedule / ctx.cancel for a transition: the timer must be declared and its payload must parse. */
 function timerVerbs(def: StepDef, effects: StepEffects, det: DeterministicContext) {
   return {
@@ -322,6 +335,7 @@ function stepMessage(
     link: effects.link,
     unlink: effects.unlink,
     forward: effects.forward,
+    emit: emitVerb(def, effects),
     ...timerVerbs(def, effects, facts.ctx),
   });
   assertSync(
@@ -482,6 +496,7 @@ function stepTimer(
           lateBy: cause.lateBy,
           execute: effects.execute,
           forward: effects.forward,
+          emit: emitVerb(def, effects),
           ...timerVerbs(def, effects, facts.ctx),
         });
   assertSync(
@@ -504,7 +519,9 @@ function stepTimer(
 /** One synchronous transition. Init is `stepInit()` (init may be async). */
 export function step(def: StepDef, state: unknown, cause: StepCause, facts: StepFacts, env: unknown): StepResult {
   const result = stepCause(def, state, cause, facts, env);
-  return cause.trace === undefined ? result : { ...result, event: { ...result.event, trace: cause.trace } };
+  const emitted = result.effects.getEmitted().map(({ name, payload }) => ({ name, payload }));
+  const event = emitted.length === 0 ? result.event : { ...result.event, emitted };
+  return { ...result, event: cause.trace === undefined ? event : { ...event, trace: cause.trace } };
 }
 
 function stepCause(def: StepDef, state: unknown, cause: StepCause, facts: StepFacts, env: unknown): StepResult {

@@ -120,6 +120,8 @@ export interface TimelineItem {
   correlationId: string | null | undefined;
   /** The event or effect that caused it (`type/id/seq[:index]`); null when it started its flow. */
   causationId: string | null | undefined;
+  /** Domain events the transition emitted (ADR-017 §2); undefined when none or before ADR-017. */
+  emitted: Array<{ name: string; payload: unknown }> | undefined;
   /** Set when the journal could not rebuild the after-state. */
   stateUnavailable?: true;
 }
@@ -138,6 +140,9 @@ export const TimelineEntrySchema = z
     seq: z.number().int().optional(),
     correlationId: z.string().nullable().optional(),
     causationId: z.string().nullable().optional(),
+    emitted: JsonText.pipe(z.array(z.object({ name: z.string(), payload: z.unknown() })))
+      .nullable()
+      .optional(),
   })
   .transform((entry): TimelineItem => {
     const item = {
@@ -148,7 +153,13 @@ export const TimelineEntrySchema = z
       checksum: entry.checksum,
       createdAt: entry.createdAt,
     };
-    const withSeq = { ...item, seq: entry.seq, correlationId: entry.correlationId, causationId: entry.causationId };
+    const withSeq = {
+      ...item,
+      seq: entry.seq,
+      correlationId: entry.correlationId,
+      causationId: entry.causationId,
+      emitted: entry.emitted ?? undefined,
+    };
     return entry.stateSnapshot.known ? withSeq : { ...withSeq, stateUnavailable: true };
   });
 

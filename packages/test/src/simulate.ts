@@ -82,6 +82,14 @@ export interface FailedForward {
   readonly message: { type: string; [key: string]: unknown };
 }
 
+/** A domain event an actor emitted, with the journal seq of the transition that emitted it. */
+export interface SimEvent {
+  readonly actor: ActorAddress;
+  readonly seq: number;
+  readonly name: string;
+  readonly payload: unknown;
+}
+
 export type SendOutcome = { ok: true } | { ok: false; error: string; detail?: string };
 
 export interface CallerOptions {
@@ -135,6 +143,8 @@ export interface Simulation {
   advance(duration: Duration): void;
   /** Forwards whose target actor was never spawned. */
   failedForwards(): FailedForward[];
+  /** Every domain event any actor emitted (ADR-017 §2), in the order they were committed. */
+  events(): SimEvent[];
   /** An independent copy of the whole simulation. */
   branch(): Simulation;
 }
@@ -169,6 +179,7 @@ interface SimData {
   actors: Record<string, ActorData>;
   pending: PendingEffect[];
   failedForwards: FailedForward[];
+  events: SimEvent[];
 }
 
 const MAX_TIMER_FIRINGS = 10_000;
@@ -194,7 +205,7 @@ export function simulate(options: SimulateOptions = {}): Simulation {
   for (const contract of options.contracts ?? []) contracts.set(contract.name, { contract, def: toSimDef(contract) });
   return createSimulation(
     contracts,
-    { clock: options.now ?? 0, rng: options.seed ?? 1, actors: {}, pending: [], failedForwards: [] },
+    { clock: options.now ?? 0, rng: options.seed ?? 1, actors: {}, pending: [], failedForwards: [], events: [] },
     options.env ?? {},
   );
 }
@@ -387,6 +398,9 @@ function createSimulation(
     const added = applyLinks(actor, def, result);
     applyTimers(actor, result);
     appendJournal(actor, def, result.event);
+    for (const { name, payload } of result.event.emitted ?? []) {
+      data.events.push({ actor: { type: actor.type, id: actor.id }, seq: actor.seq, name, payload });
+    }
     for (const forward of result.effects.toForwardEntries(actor.seq)) {
       if (from !== null) {
         const trace = effectTrace(actor, forward.id);
@@ -713,6 +727,7 @@ function createSimulation(
       })),
     advance,
     failedForwards: () => [...data.failedForwards],
+    events: () => [...data.events],
     branch: () => createSimulation(new Map(contracts), structuredClone(data), env),
   };
   return simulation;

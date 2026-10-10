@@ -73,6 +73,13 @@ export type ScheduleFn = (timer: string, options: ScheduleOptions) => void;
 /** cancel() removes a pending timer by key. Cancelling a key that is not pending does nothing. */
 export type CancelFn = (key: string) => void;
 
+/**
+ * emit() records a domain event declared in the actor's `events` (ADR-017 §2). The payload is
+ * parsed by the event's schema; an undeclared name or an invalid payload fails the transition.
+ * `setup({ events })` gives handlers an emit typed by the declared events.
+ */
+export type EmitFn = (name: string, payload: unknown) => void;
+
 export interface MessageContext<TEnv = unknown> extends DeterministicContext {
   readonly caller: string;
   readonly callerType: "user" | "service";
@@ -84,6 +91,7 @@ export interface MessageContext<TEnv = unknown> extends DeterministicContext {
   readonly forward: ForwardFn;
   readonly schedule: ScheduleFn;
   readonly cancel: CancelFn;
+  readonly emit: EmitFn;
 }
 
 /** What a timer's handler gets. A timer has no caller and no role. */
@@ -97,6 +105,7 @@ export interface TimerContext<TEnv = unknown> extends DeterministicContext {
   readonly forward: ForwardFn;
   readonly schedule: ScheduleFn;
   readonly cancel: CancelFn;
+  readonly emit: EmitFn;
 }
 
 export interface TimerDef<TState = unknown, TPayload = unknown, TEnv = unknown> {

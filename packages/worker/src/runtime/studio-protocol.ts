@@ -94,6 +94,8 @@ export interface StudioTimelineEntry {
   correlationId: string | null;
   /** The event or effect that caused it (`type/id/seq[:index]`); null when it started its flow. */
   causationId: string | null;
+  /** Domain events the transition emitted (ADR-017 §2), as a JSON array of `{ name, payload }`; null when none. */
+  emitted: string | null;
 }
 
 // --- Outbox and links (shared by __inspect, the snapshot and live pushes) ---

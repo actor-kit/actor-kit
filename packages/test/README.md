@@ -28,6 +28,11 @@ const { state } = t.send("increment", {});
 expect(state.count).toBe(2);
 ```
 
+## Domain events
+
+`testActor(...).send()` returns `emitted`; `simulate()` exposes `sim.events()`; `replayJournal()`
+fails at the first emitted event that differs from the journal.
+
 ## Docs
 
 Full documentation at [actorkit.dev](https://actorkit.dev).

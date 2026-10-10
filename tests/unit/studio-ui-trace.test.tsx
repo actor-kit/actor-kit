@@ -53,7 +53,7 @@ describe("timeline panel: flow and cause", () => {
     vi.unstubAllGlobals();
   });
 
-  async function open(path: string, entries: ReturnType<typeof traced>[], clickTab = true) {
+  async function open(path: string, entries: Array<ReturnType<typeof traced> & { emitted?: string }>, clickTab = true) {
     renderAt(path);
     await waitFor(() => expect(FakeWebSocket.instances.length).toBeGreaterThan(0));
     const ws = FakeWebSocket.latest();
@@ -103,5 +103,20 @@ describe("timeline panel: flow and cause", () => {
   it("a malformed ?entry is ignored", async () => {
     await open("/actors/counter/a1?entry=abc", [traced(2, "c", null)], false);
     expect(screen.getByTestId("state-panel")).toBeTruthy();
+  });
+
+  it("shows the events an entry emitted", async () => {
+    const entry = { ...traced(7, "c", null), emitted: JSON.stringify([{ name: "BidPlaced", payload: { amount: 5 } }]) };
+    await open("/actors/counter/a1", [entry]);
+    expect(screen.getByTestId("timeline-emitted-7").textContent).toBe("BidPlaced");
+    fireEvent.click(screen.getByTestId("timeline-entry-7"));
+    expect(screen.getByText("Emitted:")).toBeTruthy();
+  });
+
+  it("an entry that emitted nothing shows neither", async () => {
+    await open("/actors/counter/a1", [{ ...traced(8, "c", null), emitted: "[]" }]);
+    expect(screen.queryByTestId("timeline-emitted-8")).toBeNull();
+    fireEvent.click(screen.getByTestId("timeline-entry-8"));
+    expect(screen.queryByText("Emitted:")).toBeNull();
   });
 });

@@ -147,7 +147,7 @@ describe("step: message", () => {
 
   it("gives the handler caller, callerType, role, env, the effect verbs and now/id/random", () => {
     expect(step(def, { log: [] }, msg("CTX"), facts(), {}).state).toEqual({
-      log: ["caller,callerType,cancel,env,execute,forward,id,link,now,random,role,schedule,unlink"],
+      log: ["caller,callerType,cancel,emit,env,execute,forward,id,link,now,random,role,schedule,unlink"],
     });
   });
 

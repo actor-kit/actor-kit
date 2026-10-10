@@ -37,6 +37,11 @@ export const Counter = createActorClass(counter);
 export default { fetch: withCallerIdentity(/* ... */) };
 ```
 
+## Domain events
+
+Declare `events` and emit them with `setup({ events })` helpers (typed `ctx.emit`); they are
+journaled with the transition that emitted them. See the Domain events concept page.
+
 ## Docs
 
 Full documentation at [actorkit.dev](https://actorkit.dev).

@@ -85,6 +85,11 @@ function TimelineRow({ actor, entry, previous, expanded, onToggle, onOpen }: Tim
       >
         <span className={`${cause.color} text-white text-xs px-1.5 py-0.5 rounded`}>{cause.label}</span>
         <span className="flex-1 text-zinc-300 break-all">{formatCauseSummary(entry.causeType, entry.cause)}</span>
+        {entry.emitted !== undefined && entry.emitted.length > 0 && (
+          <span className="text-xs text-teal-300" data-testid={`timeline-emitted-${entry.id}`}>
+            {entry.emitted.map((e) => e.name).join(", ")}
+          </span>
+        )}
         <span className="text-zinc-600 text-xs" title={new Date(entry.createdAt).toISOString()}>
           {recentTime(entry.createdAt)}
         </span>
@@ -121,6 +126,11 @@ function EntryDetails({
       <Section title="Cause data:">
         <JsonTree data={entry.cause} />
       </Section>
+      {entry.emitted !== undefined && entry.emitted.length > 0 && (
+        <Section title="Emitted:">
+          <JsonTree data={entry.emitted} />
+        </Section>
+      )}
       <Section title="State after:">
         {entry.stateUnavailable === true ? (
           <p className="text-zinc-500">State not available: it could not be rebuilt from the journal.</p>

@@ -57,6 +57,8 @@ interface TestableActorDef<TState, TInput> {
       ctx: { caller: string; role: string },
     ): void;
   };
+  /** Domain events (ADR-017 §2): emit() parses payloads by these schemas. */
+  events?: Record<string, z.ZodType>;
 }
 
 // --- Contract type inference helpers ---
@@ -107,6 +109,8 @@ interface SendResult<TState> {
   schedules: Array<{ timer: string; options: ScheduleOptions }>;
   /** ctx.cancel() keys. */
   cancels: string[];
+  /** ctx.emit() calls, payloads parsed by the declared events (ADR-017 §2). */
+  emitted: Array<{ name: string; payload: unknown }>;
   timeline: TimelineEntry[];
 }
 
@@ -179,6 +183,7 @@ interface ContractShape {
     roles: Record<string, RolePredicate<unknown>>;
     messages: Record<string, unknown>;
     views: Record<string, { readonly fn: (state: unknown, caller: string) => unknown }>;
+    events?: Record<string, z.ZodType>;
     lifecycle?: {
       connect?(state: unknown, event: LifecycleEvent, ctx: unknown): unknown;
       disconnect?(state: unknown, event: LifecycleEvent, ctx: unknown): unknown;
@@ -208,10 +213,10 @@ const ROUTE_ERRORS = {
 } as const;
 
 /** Effect hooks for a message context, recording every call instead of performing it. */
-function recordEffects() {
+function recordEffects(events: Record<string, z.ZodType> | undefined) {
   const captured: Pick<
     SendResult<unknown>,
-    "executions" | "links" | "unlinks" | "forwards" | "schedules" | "cancels"
+    "executions" | "links" | "unlinks" | "forwards" | "schedules" | "cancels" | "emitted"
   > = {
     executions: [],
     links: [],
@@ -219,8 +224,16 @@ function recordEffects() {
     forwards: [],
     schedules: [],
     cancels: [],
+    emitted: [],
   };
-  const ctx: Pick<MessageContext, "execute" | "link" | "unlink" | "forward" | "schedule" | "cancel"> = {
+  const ctx: Pick<MessageContext, "execute" | "link" | "unlink" | "forward" | "schedule" | "cancel" | "emit"> = {
+    emit: (name, payload) => {
+      const schema = events?.[name];
+      if (schema === undefined) throw new Error(`Event "${name}" is not declared on this actor`);
+      const parsed = schema.safeParse(payload);
+      if (!parsed.success) throw new Error(`Event "${name}": invalid payload: ${parsed.error.message}`);
+      captured.emitted.push({ name, payload: parsed.data });
+    },
     execute: (service, input) => {
       captured.executions.push({ service, input });
     },
@@ -287,7 +300,7 @@ export function testActor(
     const role = resolveRole(def.roles, state, caller, { callerType });
     if (role === null) throw new Error(`No role matched for caller "${caller}"`);
 
-    const effects = recordEffects();
+    const effects = recordEffects(def.events);
     const result = routeMessage(def.messages, role, state, event, {
       ...createLiveFacts().ctx,
       caller,
@@ -370,5 +383,6 @@ function extractDef(contract: ContractShape): TestableActorDef<unknown, unknown>
   };
   // The harness never runs lifecycle handlers, so only observe is carried over.
   if (def.observe) result.observe = def.observe;
+  if (def.events) result.events = def.events;
   return result;
 }

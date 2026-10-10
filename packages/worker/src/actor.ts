@@ -184,6 +184,8 @@ interface ActorDef {
       ctx: { caller: string; role: string },
     ): void;
   };
+  /** Domain events (ADR-017 §2): payload schemas by name; `ctx.emit` parses by them. */
+  events?: Record<string, z.ZodType>;
   /** Durable timers (ADR-015 D2): `timer(schema, handler)` per name. */
   timers?: Record<
     string,
@@ -2511,6 +2513,7 @@ export interface TypedActorClass<TContract> {
         seq: number;
         correlationId: string | null;
         causationId: string | null;
+        emitted: string | null;
       }>;
       hasMore: boolean;
     }>;
