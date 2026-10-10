@@ -39,6 +39,7 @@ function JsonString({ value }: { value: string }) {
           type="button"
           onClick={() => setExpanded(true)}
           className="ml-1 text-xs text-zinc-500 hover:text-zinc-300 cursor-pointer"
+          data-json-toggle
         >
           show all {value.length} characters
         </button>
@@ -99,7 +100,13 @@ function Collapsible({ level, size, brackets, summary, children }: CollapsiblePr
 
   if (!open) {
     return (
-      <button type="button" aria-expanded={false} onClick={() => setOpen(true)} className={TOGGLE_CLASS}>
+      <button
+        type="button"
+        aria-expanded={false}
+        onClick={() => setOpen(true)}
+        className={TOGGLE_CLASS}
+        data-json-toggle
+      >
         {summary}
       </button>
     );
@@ -108,7 +115,13 @@ function Collapsible({ level, size, brackets, summary, children }: CollapsiblePr
   const hidden = size - visible;
   return (
     <div>
-      <button type="button" aria-expanded={true} onClick={() => setOpen(false)} className={TOGGLE_CLASS}>
+      <button
+        type="button"
+        aria-expanded={true}
+        onClick={() => setOpen(false)}
+        className={TOGGLE_CLASS}
+        data-json-toggle
+      >
         {brackets[0]}
       </button>
       <div className="pl-4 border-l border-zinc-800">

@@ -1,4 +1,5 @@
 import type { InspectResult } from "../../protocol";
+import { SCROLL_X, TAP } from "../phone";
 
 export type Tab = "state" | "timeline" | "connections" | "outbox" | "timers" | "links";
 
@@ -28,13 +29,13 @@ interface TabBarProps {
 
 export function TabBar({ tabs, active, onSelect }: TabBarProps) {
   return (
-    <div className="flex gap-1 border-b border-zinc-800 mb-4" data-testid="tab-bar">
+    <div className={`flex gap-1 border-b border-zinc-800 mb-4 ${SCROLL_X}`} data-testid="tab-bar">
       {tabs.map((tab) => (
         <button
           type="button"
           key={tab.key}
           onClick={() => onSelect(tab.key)}
-          className={`px-3 py-2 text-sm cursor-pointer border-b-2 ${
+          className={`shrink-0 whitespace-nowrap px-3 py-2 text-sm cursor-pointer border-b-2 ${TAP} ${
             active === tab.key ? "border-sky-400 text-white" : "border-transparent text-zinc-500 hover:text-zinc-300"
           }`}
           data-testid={`tab-${tab.key}`}

@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import type { InspectResult } from "../../protocol";
 import { recentTime } from "../../relative-time";
+import { SCROLL_X } from "../phone";
 
 const TABLE_CLASS = "w-full text-sm border border-zinc-800 rounded";
 const ROW_CLASS = "border-b border-zinc-800/50";
@@ -20,18 +21,20 @@ function Table({
 }) {
   if (rows.length === 0) return <p className={emptyClass}>{empty}</p>;
   return (
-    <table className={TABLE_CLASS}>
-      <thead>
-        <tr className="border-b border-zinc-800 text-zinc-400">
-          {headers.map(([label, align]) => (
-            <th key={label} className={`${align} ${CELL}`}>
-              {label}
-            </th>
-          ))}
-        </tr>
-      </thead>
-      <tbody>{rows}</tbody>
-    </table>
+    <div className={SCROLL_X}>
+      <table className={TABLE_CLASS}>
+        <thead>
+          <tr className="border-b border-zinc-800 text-zinc-400">
+            {headers.map(([label, align]) => (
+              <th key={label} className={`${align} ${CELL}`}>
+                {label}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>{rows}</tbody>
+      </table>
+    </div>
   );
 }
 

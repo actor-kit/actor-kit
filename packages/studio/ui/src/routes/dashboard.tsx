@@ -2,11 +2,12 @@ import { useState } from "react";
 import { ActorTable } from "../components/dashboard/actor-table";
 import { ManualConnect } from "../components/dashboard/manual-connect";
 import { Pager } from "../components/dashboard/pager";
+import { TAP } from "../components/phone";
 import { type ListState, PAGE_SIZE, useActorList, useActorTypes } from "../hooks/use-actor-list";
 
 export { PAGE_SIZE } from "../hooks/use-actor-list";
 
-const FILTER_CLASS = "bg-zinc-900 border border-zinc-700 rounded px-3 py-1.5 text-sm";
+const FILTER_CLASS = `bg-zinc-900 border border-zinc-700 rounded px-3 py-1.5 text-sm ${TAP}`;
 
 export function DashboardPage() {
   const types = useActorTypes();
@@ -20,7 +21,7 @@ export function DashboardPage() {
       <h1 className="text-2xl font-bold mb-6">Actors</h1>
 
       {/* Filters: any change goes back to the first page. */}
-      <div className="flex gap-3 mb-4">
+      <div className="flex max-sm:flex-wrap gap-3 mb-4">
         <select
           value={typeFilter}
           onChange={(e) => {
@@ -45,7 +46,7 @@ export function DashboardPage() {
             setSearch(e.target.value);
             setOffset(0);
           }}
-          className={`${FILTER_CLASS} flex-1`}
+          className={`${FILTER_CLASS} flex-1 max-sm:basis-40 max-sm:min-w-0`}
           data-testid="search-input"
         />
       </div>
