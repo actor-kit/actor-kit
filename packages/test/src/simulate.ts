@@ -25,17 +25,22 @@ import {
   admitMessage,
   checksumState,
   createLiveFacts,
+  effectCauseId,
+  eventId,
   type Journal,
   type JournalCheckpoint,
   type JournalEvent,
+  journalTrace,
   liveStepFacts,
   parseDuration,
+  parseEffectId,
   resolveJournalConfig,
   resolveRole,
   type StepCause,
   type StepResult,
   step,
   stepInit,
+  type Trace,
 } from "@actor-kit/worker/testing";
 import { z } from "zod";
 import type { ContractInput, ContractState } from "./contract-types";
@@ -235,8 +240,13 @@ function createSimulation(
     const config = resolveJournalConfig(def.journal);
     if (!config.enabled) return;
     const checksum = checksumState(def, actor.state);
+    // As the Durable Object stores it: the trace becomes the event's ids (ADR-017 §4).
+    const { trace, ...draft } = event;
+    const ids = journalTrace(trace, eventId(actor.type, actor.id, actor.seq));
     actor.journal.events.push({
-      ...event,
+      ...draft,
+      correlationId: ids.correlationId,
+      ...(ids.causationId === null ? {} : { causationId: ids.causationId }),
       seq: actor.seq,
       codeVersion: def.version ?? 1,
       stateChecksum: checksum,
@@ -247,6 +257,23 @@ function createSimulation(
       const timers = JSON.stringify(actor.timers);
       actor.journal.checkpoints.push({ seq: actor.seq, version: def.version ?? 1, state, checksum, timers });
     }
+  }
+
+  /** The flow an effect continues: its declaring event's correlation id, caused by the effect (ADR-017 §4). */
+  function effectTrace(actor: ActorData, effectId: string): Trace {
+    const seq = parseEffectId(effectId)?.seq ?? 0;
+    const declared = actor.journal.events.find((e) => e.seq === seq)?.correlationId;
+    return {
+      correlationId: declared ?? eventId(actor.type, actor.id, seq),
+      causationId: effectCauseId(actor.type, actor.id, effectId),
+    };
+  }
+
+  /** The flow a view push continues: the source's newest event (ADR-017 §4). */
+  function sourceTrace(source: ActorData): Trace {
+    const id = eventId(source.type, source.id, source.seq);
+    const last = source.journal.events.at(-1);
+    return { correlationId: last?.seq === source.seq ? (last.correlationId ?? id) : id, causationId: id };
   }
 
   /** Record links and unlinks; returns the links this transition added (they get the current view). */
@@ -310,11 +337,18 @@ function createSimulation(
     if (source.pushed[keyOf(subscriber)] === dedupeKey) return;
     source.pushed[keyOf(subscriber)] = dedupeKey;
     const viewWithRole = { ...(isPlainRecord(view) ? view : {}), role };
-    for (const name of names) receive(subscriber, name, source.id, viewWithRole);
+    const trace = sourceTrace(source);
+    for (const name of names) receive(subscriber, name, source.id, viewWithRole, trace);
   }
 
-  function receive(subscriber: ActorData, link: string, sourceId: string, view: Record<string, unknown>): void {
-    const cause: StepCause = { type: "link.onUpdate", link, sourceId, view };
+  function receive(
+    subscriber: ActorData,
+    link: string,
+    sourceId: string,
+    view: Record<string, unknown>,
+    trace: Trace,
+  ): void {
+    const cause: StepCause = { type: "link.onUpdate", link, sourceId, view, trace };
     const result = step(defOf(subscriber.type), subscriber.state, cause, factsFor(subscriber), env);
     if (result.state !== subscriber.state) commit(subscriber, result, null);
   }
@@ -354,7 +388,10 @@ function createSimulation(
     applyTimers(actor, result);
     appendJournal(actor, def, result.event);
     for (const forward of result.effects.toForwardEntries(actor.seq)) {
-      if (from !== null) deliver(actor, def, forward.linkName, forward.targetId, forward.message, from);
+      if (from !== null) {
+        const trace = effectTrace(actor, forward.id);
+        deliver(actor, def, { linkName: forward.linkName, targetId: forward.targetId }, forward.message, from, trace);
+      }
     }
     pushViews(actor);
     for (const link of added) subscribe(actor, def, link);
@@ -363,10 +400,10 @@ function createSimulation(
   function deliver(
     source: ActorData,
     def: SimDef,
-    linkName: string,
-    targetId: string,
+    { linkName, targetId }: { linkName: string; targetId: string },
     message: { type: string; [key: string]: unknown },
     as: Caller,
+    trace: Trace,
   ): void {
     const type = def.links?.[linkName]?.contract.name ?? linkName.toLowerCase().replace(/_/g, "-");
     const to = { type, id: targetId };
@@ -374,7 +411,7 @@ function createSimulation(
       data.failedForwards.push({ from: { type: source.type, id: source.id }, to, message });
       return;
     }
-    sendTo(to, as.caller, message, { callerType: as.callerType });
+    sendTo(to, as.caller, message, { callerType: as.callerType }, trace);
   }
 
   /** Commit a transition only when it changed something (lifecycle, service, link callbacks). */
@@ -391,6 +428,7 @@ function createSimulation(
     caller: string,
     message: { type: string; [key: string]: unknown },
     options: CallerOptions = {},
+    trace?: Trace,
   ): SendOutcome {
     const actor = record(address);
     const def = defOf(actor.type);
@@ -406,6 +444,7 @@ function createSimulation(
       caller,
       callerType,
       role,
+      trace,
     };
     const result = step(def, actor.state, cause, factsFor(actor), env);
     def.observe?.onTransition?.(actor.state, result.handlerState, message, { caller, role });
@@ -456,7 +495,8 @@ function createSimulation(
     const pending = findPending(effect);
     data.pending = data.pending.filter((p) => p !== pending);
     const actor = record(pending.actor);
-    const result = step(defOf(actor.type), actor.state, cause(pending), factsFor(actor), env);
+    const traced = { ...cause(pending), trace: effectTrace(actor, pending.effectId) };
+    const result = step(defOf(actor.type), actor.state, traced, factsFor(actor), env);
     if (result.state !== actor.state) commit(actor, result, null);
   }
 
@@ -475,7 +515,8 @@ function createSimulation(
     data.clock = Math.max(data.clock, timer.fireAt);
     actor.timers = actor.timers.filter((t) => t !== timer);
     const { id, name, key, payload, fireAt } = timer;
-    const cause: StepCause = { type: "timer", id, name, key, payload, fireAt, lateBy: data.clock - fireAt };
+    const trace = effectTrace(actor, id);
+    const cause: StepCause = { type: "timer", id, name, key, payload, fireAt, lateBy: data.clock - fireAt, trace };
     commit(actor, step(defOf(actor.type), actor.state, cause, factsFor(actor), env), {
       caller: `timer:${name}`,
       callerType: "service",

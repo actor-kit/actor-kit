@@ -1,0 +1,107 @@
+/**
+ * @vitest-environment jsdom
+ *
+ * Causation and correlation ids in Studio (ADR-017 §4): an expanded timeline entry shows its flow
+ * and what caused it, with a link to the causing event: the entry itself when it is this actor's,
+ * the other actor's timeline (opened at that entry) otherwise.
+ */
+import { act, cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { parseCauseRef } from "../../packages/studio/ui/src/cause-ref";
+import { TimelineEntrySchema } from "../../packages/studio/ui/src/protocol";
+import { FakeWebSocket, installFakes, renderAt, snapshotFrame, timelineEntry } from "./studio-ui-pages.helpers";
+
+const traced = (id: number, correlationId: string | null, causationId: string | null) => ({
+  ...timelineEntry(id, { count: id }),
+  seq: id,
+  correlationId,
+  causationId,
+});
+
+describe("parseCauseRef", () => {
+  it("parses event and effect ids (actor ids may contain slashes)", () => {
+    expect(parseCauseRef("counter/a1/3")).toEqual({ actorType: "counter", actorId: "a1", seq: 3 });
+    expect(parseCauseRef("desk/x/y/7:2")).toEqual({ actorType: "desk", actorId: "x/y", seq: 7, index: 2 });
+  });
+  it.each(["", "counter", "counter/3", "/a/3", "a//3", "a/b/x", "a/b/3:", "a/b/03"])("refuses %j", (id) => {
+    expect(parseCauseRef(id)).toBeNull();
+  });
+});
+
+describe("protocol: ids", () => {
+  it("are parsed when present and absent from older entries", () => {
+    expect(TimelineEntrySchema.parse(traced(2, "a/1/1", "a/1/1:0"))).toMatchObject({
+      correlationId: "a/1/1",
+      causationId: "a/1/1:0",
+    });
+    const old = TimelineEntrySchema.parse(timelineEntry(1, {}));
+    expect(old.correlationId).toBeUndefined();
+    expect(old.causationId).toBeUndefined();
+  });
+});
+
+describe("timeline panel: flow and cause", () => {
+  beforeEach(() => {
+    installFakes((url) => {
+      if (url.pathname === "/__studio/api/actors") return Response.json({ actors: [] });
+      if (url.pathname === "/__studio/api/actors/types") return Response.json({ types: [] });
+      throw new TypeError("Failed to fetch");
+    });
+  });
+  afterEach(() => {
+    cleanup();
+    vi.unstubAllGlobals();
+  });
+
+  async function open(path: string, entries: ReturnType<typeof traced>[], clickTab = true) {
+    renderAt(path);
+    await waitFor(() => expect(FakeWebSocket.instances.length).toBeGreaterThan(0));
+    const ws = FakeWebSocket.latest();
+    act(() => {
+      ws.serverOpen();
+      ws.serverSend({ ...snapshotFrame({ count: 3 }, []), timeline: entries });
+    });
+    if (clickTab) fireEvent.click(screen.getByTestId("tab-timeline"));
+  }
+
+  it("a cause in this actor's timeline opens that entry", async () => {
+    await open("/actors/counter/a1", [traced(3, "counter/a1/2", "counter/a1/2:0"), traced(2, "counter/a1/2", null)]);
+    fireEvent.click(screen.getByTestId("timeline-entry-3"));
+    expect(screen.getByTestId("entry-correlation").textContent).toBe("counter/a1/2");
+    fireEvent.click(screen.getByRole("button", { name: "counter/a1/2:0" }));
+    expect(screen.getByTestId("timeline-entry-2").getAttribute("aria-expanded")).toBe("true");
+    expect(screen.getByText("Started this flow")).toBeTruthy();
+  });
+
+  it("a cause in another actor links to its timeline at that entry", async () => {
+    await open("/actors/counter/a1", [traced(4, "desk/d 1/2", "desk/d 1/2:1")]);
+    fireEvent.click(screen.getByTestId("timeline-entry-4"));
+    const link = screen.getByRole("link", { name: "desk/d 1/2:1" });
+    expect(link.getAttribute("href")).toBe("/__studio/actors/desk/d%201?entry=2");
+  });
+
+  it("a cause that is not an id is shown as text", async () => {
+    await open("/actors/counter/a1", [traced(5, "x", "not-an-id")]);
+    fireEvent.click(screen.getByTestId("timeline-entry-5"));
+    expect(screen.getByTestId("entry-causation").textContent).toBe("not-an-id");
+    expect(screen.queryByRole("link", { name: "not-an-id" })).toBeNull();
+  });
+
+  it("entries written before ids show neither", async () => {
+    await open("/actors/counter/a1", [{ ...traced(6, null, null) }]);
+    fireEvent.click(screen.getByTestId("timeline-entry-6"));
+    expect(screen.queryByTestId("entry-correlation")).toBeNull();
+    expect(screen.queryByText("Started this flow")).toBeNull();
+  });
+
+  it("?entry=N opens the timeline with that entry expanded", async () => {
+    await open("/actors/counter/a1?entry=2", [traced(3, "c", null), traced(2, "c", null)], false);
+    expect(screen.getByTestId("timeline-entry-2").getAttribute("aria-expanded")).toBe("true");
+    expect(screen.getByTestId("timeline-entry-3").getAttribute("aria-expanded")).toBe("false");
+  });
+
+  it("a malformed ?entry is ignored", async () => {
+    await open("/actors/counter/a1?entry=abc", [traced(2, "c", null)], false);
+    expect(screen.getByTestId("state-panel")).toBeTruthy();
+  });
+});

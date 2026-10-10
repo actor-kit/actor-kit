@@ -70,6 +70,11 @@ export const DeskContract = defineActor("desk", {
       ctx.link("bulletin", id);
       return state;
     }),
+    // Forwards an EDIT to a bulletin (ADR-017 §4: the bulletin's event continues this flow).
+    SHOUT: message(z.object({ id: z.string(), headline: z.string() }), (state: DeskState, { id, headline }, ctx) => {
+      ctx.forward("bulletin", id, { type: "EDIT", headline });
+      return state;
+    }),
     UNFOLLOW: message(z.object({ id: z.string() }), (state: DeskState, { id }, ctx) => {
       ctx.unlink("bulletin", id);
       return state;

@@ -34,6 +34,7 @@ describe("ACTOR_KIT_MIGRATIONS", () => {
       "0012_restore",
       "0013_forward_retries",
       "0014_drop_timeline",
+      "0015_trace_ids",
     ]);
   });
 

@@ -174,6 +174,9 @@ export {
   timerByKey,
   timerFailedEvent,
 } from "./runtime/timers-store";
+// Causation and correlation ids (ADR-017 §4)
+export type { CauseRef, Trace } from "./runtime/trace";
+export { effectCauseId, eventId, journalTrace, parseCauseId } from "./runtime/trace";
 export { isWebSocketUpgrade } from "./runtime/upgrade";
 // Typed version chain (ADR-015 D5)
 export type { CompiledVersions, RuntimeVersioning, VersionDef, VersionOptions } from "./runtime/versions";

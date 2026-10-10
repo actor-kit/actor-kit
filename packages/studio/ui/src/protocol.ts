@@ -116,6 +116,10 @@ export interface TimelineItem {
   checksum: string;
   createdAt: number;
   seq: number | undefined;
+  /** The flow the event belongs to (ADR-017 §4); absent or null for events written before ids. */
+  correlationId: string | null | undefined;
+  /** The event or effect that caused it (`type/id/seq[:index]`); null when it started its flow. */
+  causationId: string | null | undefined;
   /** Set when the journal could not rebuild the after-state. */
   stateUnavailable?: true;
 }
@@ -132,6 +136,8 @@ export const TimelineEntrySchema = z
     createdAt: z.number(),
     /** The journal seq the entry recorded (ADR-015 D3). Absent from older rows. */
     seq: z.number().int().optional(),
+    correlationId: z.string().nullable().optional(),
+    causationId: z.string().nullable().optional(),
   })
   .transform((entry): TimelineItem => {
     const item = {
@@ -142,7 +148,7 @@ export const TimelineEntrySchema = z
       checksum: entry.checksum,
       createdAt: entry.createdAt,
     };
-    const withSeq = { ...item, seq: entry.seq };
+    const withSeq = { ...item, seq: entry.seq, correlationId: entry.correlationId, causationId: entry.causationId };
     return entry.stateSnapshot.known ? withSeq : { ...withSeq, stateUnavailable: true };
   });
 

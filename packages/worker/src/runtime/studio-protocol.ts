@@ -90,6 +90,10 @@ export interface StudioTimelineEntry {
   stateSnapshot: string | null;
   checksum: string;
   createdAt: number;
+  /** The flow the event belongs to (ADR-017 §4); null for events written before ADR-017. */
+  correlationId: string | null;
+  /** The event or effect that caused it (`type/id/seq[:index]`); null when it started its flow. */
+  causationId: string | null;
 }
 
 // --- Outbox and links (shared by __inspect, the snapshot and live pushes) ---

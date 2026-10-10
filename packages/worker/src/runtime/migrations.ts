@@ -184,4 +184,12 @@ export const ACTOR_KIT_MIGRATIONS: ReadonlyArray<{ readonly name: string; readon
     name: "0014_drop_timeline",
     sql: "DROP TABLE IF EXISTS timeline;",
   },
+  {
+    // Causation and correlation ids on every journal event (ADR-017 §4). NULL for older rows.
+    name: "0015_trace_ids",
+    sql: `
+      ALTER TABLE events ADD COLUMN correlation_id TEXT;
+      ALTER TABLE events ADD COLUMN causation_id TEXT;
+    `,
+  },
 ];

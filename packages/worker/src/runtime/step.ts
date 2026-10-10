@@ -19,6 +19,7 @@ import { parseDuration } from "./duration";
 import { createReplayFacts, type Facts, type JournalDraft, type LiveFacts } from "./journal";
 import { createOutbox, type UnlinkCall } from "./outbox";
 import { resolveRole } from "./roles";
+import type { Trace } from "./trace";
 
 // --- Definition (runtime-shaped: unknown-typed, bivariant methods) ---
 
@@ -90,48 +91,58 @@ interface LifecycleCallEvent {
 
 type Caller = { readonly caller: string; readonly callerType: "user" | "service" };
 
-export type StepCause =
-  | ({ readonly type: "message"; readonly name: string; readonly payload: unknown; readonly role: string } & Caller)
-  | ({
-      readonly type: "lifecycle.connect" | "lifecycle.disconnect";
-      /** Live only: how many sockets the caller holds after the event. Not journaled. */
-      readonly callerConnections?: number;
-      /** The caller's role for connect; ignored for disconnect (resolved on the next state). */
-      readonly role: string | null;
-    } & Caller)
-  | {
-      readonly type: "service.onDone";
-      readonly service: string;
-      readonly input: unknown;
-      readonly result: unknown;
-      /** The execution's effect id (journaled, so restore can match results to effects). */
-      readonly effectId?: string | undefined;
-    }
-  | {
-      readonly type: "service.onError";
-      readonly service: string;
-      readonly input: unknown;
-      readonly effectId?: string | undefined;
-      readonly error: { readonly message: string };
-    }
-  | { readonly type: "link.onUpdate"; readonly link: string; readonly sourceId: string; readonly view: unknown }
-  | {
-      readonly type: "link.onError";
-      readonly link: string;
-      readonly targetId: string;
-      readonly error: { readonly message: string; readonly code: string };
-    }
-  | { readonly type: "migrate"; readonly fromVersion: number; readonly toVersion: number; readonly persisted: unknown }
-  | {
-      readonly type: "timer";
-      readonly name: string;
-      /** The timer's effect id (`seq:index` of the transition that scheduled it). */
-      readonly id: string;
-      readonly key: string;
-      readonly payload: unknown;
-      readonly fireAt: number;
-      readonly lateBy: number;
-    };
+/** A cause that continues a flow carries its trace (ADR-017 §4); it is journaled with the event. */
+type Traced = { readonly trace?: Trace | undefined };
+
+export type StepCause = Traced &
+  (
+    | ({ readonly type: "message"; readonly name: string; readonly payload: unknown; readonly role: string } & Caller)
+    | ({
+        readonly type: "lifecycle.connect" | "lifecycle.disconnect";
+        /** Live only: how many sockets the caller holds after the event. Not journaled. */
+        readonly callerConnections?: number;
+        /** The caller's role for connect; ignored for disconnect (resolved on the next state). */
+        readonly role: string | null;
+      } & Caller)
+    | {
+        readonly type: "service.onDone";
+        readonly service: string;
+        readonly input: unknown;
+        readonly result: unknown;
+        /** The execution's effect id (journaled, so restore can match results to effects). */
+        readonly effectId?: string | undefined;
+      }
+    | {
+        readonly type: "service.onError";
+        readonly service: string;
+        readonly input: unknown;
+        readonly effectId?: string | undefined;
+        readonly error: { readonly message: string };
+      }
+    | { readonly type: "link.onUpdate"; readonly link: string; readonly sourceId: string; readonly view: unknown }
+    | {
+        readonly type: "link.onError";
+        readonly link: string;
+        readonly targetId: string;
+        readonly error: { readonly message: string; readonly code: string };
+      }
+    | {
+        readonly type: "migrate";
+        readonly fromVersion: number;
+        readonly toVersion: number;
+        readonly persisted: unknown;
+      }
+    | {
+        readonly type: "timer";
+        readonly name: string;
+        /** The timer's effect id (`seq:index` of the transition that scheduled it). */
+        readonly id: string;
+        readonly key: string;
+        readonly payload: unknown;
+        readonly fireAt: number;
+        readonly lateBy: number;
+      }
+  );
 
 // --- Facts ---
 
@@ -492,6 +503,11 @@ function stepTimer(
 
 /** One synchronous transition. Init is `stepInit()` (init may be async). */
 export function step(def: StepDef, state: unknown, cause: StepCause, facts: StepFacts, env: unknown): StepResult {
+  const result = stepCause(def, state, cause, facts, env);
+  return cause.trace === undefined ? result : { ...result, event: { ...result.event, trace: cause.trace } };
+}
+
+function stepCause(def: StepDef, state: unknown, cause: StepCause, facts: StepFacts, env: unknown): StepResult {
   switch (cause.type) {
     case "message":
       return stepMessage(def, state, cause, facts, env);

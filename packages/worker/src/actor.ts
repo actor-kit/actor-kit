@@ -20,6 +20,7 @@ import type { LifecycleEvent } from "./define";
 import { hasActorDefShape } from "./runtime/actor-def";
 import { closeCodeToSend } from "./runtime/close-code";
 import { type ConnectRequest, parseConnectRequest } from "./runtime/connect-request";
+import { parseEffectId } from "./runtime/effect-id";
 import {
   appendJournalEvent,
   clockedSources,
@@ -113,6 +114,7 @@ import {
   timerByKey,
   timerFailedEvent,
 } from "./runtime/timers-store";
+import { effectCauseId, eventId, journalTrace, type Trace } from "./runtime/trace";
 import { toRuntimeDef } from "./runtime/versions";
 
 /** Reserved caller ID for studio WebSocket connections (stamped by the studio middleware). */
@@ -250,6 +252,11 @@ const RedriveOptionsSchema = z.object({ effectId: z.string().min(1) });
 const FireTimerOptionsSchema = z.object({ key: z.string().min(1) });
 const RestoreOptionsSchema = z.object({ toSeq: z.number().int().positive() });
 const SnapshotSeqSchema = z.object({ version: z.number(), last_seq: z.number() });
+/** A flow carried across actors in forward and link-push metadata (ADR-017 §4), parsed at the RPC boundary. */
+const TraceSchema = z.object({ correlationId: z.string().min(1), causationId: z.string().min(1) });
+const CorrelationRowSchema = z.object({ correlation_id: z.string().nullable() });
+const LastEventRowSchema = z.object({ seq: z.number(), correlation_id: z.string().nullable() });
+const LastSeqRowSchema = z.object({ last_seq: z.number() });
 /** A recorded service result to redeliver after a restore (journal payloads carry the effect id). */
 const RecordedResultSchema = z.union([
   z.object({ input: z.unknown(), result: z.unknown(), effectId: z.string() }),
@@ -326,9 +333,10 @@ async function trySend(
   caller: string,
   callerType: "user" | "service",
   message: MessageEnvelope,
+  trace: Trace,
 ): Promise<ServiceOutcome> {
   try {
-    return { ok: true, result: await send(caller, callerType, message) };
+    return { ok: true, result: await send(caller, callerType, message, trace) };
   } catch (error) {
     return { ok: false, message: error instanceof Error ? error.message : String(error) };
   }
@@ -704,6 +712,7 @@ export function actor(
         seq,
       );
 
+      const ids = journalTrace(draft.trace, eventId(_actorName, this.subscriberId(), seq));
       if (journalConfig.enabled) {
         appendJournalEvent(this.ctx.storage.sql, journalConfig, draft, {
           seq,
@@ -711,6 +720,7 @@ export function actor(
           checksum,
           version: this.version,
           now,
+          ...ids,
         });
       }
 
@@ -721,7 +731,16 @@ export function actor(
         if (journalConfig.enabled && this.hasStudioWs()) {
           // As the journal stores it: an undefined payload is null.
           const payload = draft.payload ?? null;
-          const event = { ...draft, payload, seq, codeVersion: this.version, stateChecksum: checksum, createdAt: now };
+          const event = {
+            ...draft,
+            payload,
+            seq,
+            codeVersion: this.version,
+            stateChecksum: checksum,
+            createdAt: now,
+            correlationId: ids.correlationId,
+            ...(ids.causationId === null ? {} : { causationId: ids.causationId }),
+          };
           const entry = timelineEntry(event, json, linkSourceType);
           this.broadcastToStudio(async (projection) => ({
             type: "studio.timeline",
@@ -782,7 +801,7 @@ export function actor(
       try {
         if (parsed !== undefined && !parsed.success) throw new Error(`invalid payload: ${parsed.error.message}`);
         const payload = parsed?.success ? parsed.data : due.payload;
-        const result = this.runStep({ type: "timer", ...due, payload, lateBy }, now);
+        const result = this.runStep({ type: "timer", ...due, payload, lateBy, trace: this.effectTrace(due.id) }, now);
         this.commit(result.state, result.event, (seq) => {
           deleteTimer(sql, due.id);
           this.writeEffects(result, seq, `timer:${due.name}`, "service");
@@ -893,13 +912,48 @@ export function actor(
       const cause: StepCause = outcome.ok
         ? { type: "service.onDone", service, input, result: outcome.result, effectId }
         : { type: "service.onError", service, input, error: { message: outcome.message }, effectId };
-      const result = this.runStep(cause);
+      const result = this.runStep({ ...cause, trace: this.effectTrace(effectId) });
       if (result.state === this.state) {
         settle();
         return;
       }
       this.commit(result.state, result.event, settle);
       this.broadcastViews();
+    }
+
+    /** The id of an event of this actor (`type/id/seq`, ADR-017 §4). */
+    eventIdOf(seq: number): string {
+      return eventId(_actorName, this.subscriberId(), seq);
+    }
+
+    /**
+     * The flow an effect continues: the correlation id of the event that declared it (read from the
+     * journal; the event's own id when the journal no longer has it), caused by the effect itself.
+     */
+    effectTrace(effectId: string): Trace {
+      const seq = parseEffectId(effectId)?.seq ?? 0;
+      const [row] = this.ctx.storage.sql.exec("SELECT correlation_id FROM events WHERE seq = ?", seq).toArray();
+      const recorded = row === undefined ? null : CorrelationRowSchema.parse(row).correlation_id;
+      return {
+        correlationId: recorded ?? this.eventIdOf(seq),
+        causationId: effectCauseId(_actorName, this.subscriberId(), effectId),
+      };
+    }
+
+    /** The flow a view push continues: the newest event, which made the view what it is. */
+    sourceTrace(): Trace {
+      const sql = this.ctx.storage.sql;
+      const [row] = sql.exec("SELECT seq, correlation_id FROM events ORDER BY seq DESC LIMIT 1").toArray();
+      if (row !== undefined) {
+        const last = LastEventRowSchema.parse(row);
+        const id = this.eventIdOf(last.seq);
+        return { correlationId: last.correlation_id ?? id, causationId: id };
+      }
+      // journal: false — the snapshot's transition counter still numbers the event.
+      const id = this.eventIdOf(
+        LastSeqRowSchema.parse(sql.exec("SELECT last_seq FROM snapshots WHERE id = 1").one()).last_seq,
+      );
+      return { correlationId: id, causationId: id };
     }
 
     /** Run one transition through the step core with live facts (now/id/random, stored link targets). */
@@ -1037,7 +1091,7 @@ export function actor(
       const attempt = startAttempt(sql, entry.id, "forwards");
       this.pushStudioOutbox();
       const callerType: "user" | "service" = entry.callerType === "service" ? "service" : "user";
-      const outcome = await trySend(target.send, entry.caller, callerType, target.message);
+      const outcome = await trySend(target.send, entry.caller, callerType, target.message, this.effectTrace(entry.id));
 
       // A restore may have cancelled this try while it ran: its transition is undone, settle nothing.
       if (isRunning(sql, entry.id, "forwards")) this.settleForward(entry, attempt, outcome);
@@ -1271,9 +1325,13 @@ export function actor(
       viewData: unknown,
       role: string,
       version: number,
+      meta?: unknown,
     ): Promise<void> {
       await this.loadState();
       if (!this.initialized) return;
+      // The source's flow (ADR-017 §4); a push without (or with malformed) metadata starts a new one.
+      const traced = TraceSchema.safeParse(meta);
+      const trace = traced.success ? traced.data : undefined;
 
       // Find the link handler for this source
       const rows = this.ctx.storage.sql
@@ -1287,7 +1345,9 @@ export function actor(
       for (const row of rows) {
         const link = LinkVersionRowSchema.parse(row);
         // Monotonic version check
-        if (version > link.version) this.applyLinkUpdate(link.link_name, sourceType, sourceId, viewData, role, version);
+        if (version > link.version) {
+          this.applyLinkUpdate(link.link_name, sourceType, sourceId, viewData, role, version, trace);
+        }
       }
     }
 
@@ -1299,6 +1359,7 @@ export function actor(
       viewData: unknown,
       role: string,
       version: number,
+      trace: Trace | undefined,
     ): void {
       if (!def.links?.[linkName]) return;
 
@@ -1307,7 +1368,7 @@ export function actor(
       const viewWithRole = { ...(fields.success ? fields.data : {}), role };
 
       // Run onUpdate reducer
-      const result = this.runStep({ type: "link.onUpdate", link: linkName, sourceId, view: viewWithRole });
+      const result = this.runStep({ type: "link.onUpdate", link: linkName, sourceId, view: viewWithRole, trace });
       if (result.state === this.state) return;
       this.commit(result.state, result.event, () => {
         this.ctx.storage.sql.exec(
@@ -1372,7 +1433,7 @@ export function actor(
         );
         if (receive !== null) {
           // Fire and forget
-          void receive(sourceType, sourceId, viewData, role, version);
+          void receive(sourceType, sourceId, viewData, role, version, this.sourceTrace());
         }
       } catch {
         // Subscriber unreachable — skip
@@ -1481,6 +1542,8 @@ export function actor(
       caller: string,
       callerType: "user" | "service",
       event: { type: string; [key: string]: unknown },
+      /** A forwarded message's flow (ADR-017 §4). Without it, the message starts a new flow. */
+      meta?: unknown,
     ): Promise<{ ok: boolean; error?: string; detail?: string }> {
       await this.loadState();
       if (!this.initialized) {
@@ -1501,6 +1564,7 @@ export function actor(
       // Admit (validate payload, run guard), then run the transition through the step core.
       const admission = admitMessage(def.messages, role, this.state, event, { caller, callerType, env: this.env });
       if (!admission.ok) return rejected(admission);
+      const traced = TraceSchema.safeParse(meta);
       const result = this.runStep({
         type: "message",
         name: event.type,
@@ -1508,6 +1572,7 @@ export function actor(
         caller,
         callerType,
         role,
+        trace: traced.success ? traced.data : undefined,
       });
 
       // onTransition sees the handler's state, before onUnlink
@@ -2293,7 +2358,7 @@ export function actor(
               error: payload.error,
               effectId: payload.effectId,
             };
-      const result = this.runStep(cause);
+      const result = this.runStep({ ...cause, trace: this.effectTrace(payload.effectId) });
       if (result.state === this.state) return;
       this.commit(result.state, result.event);
     }
@@ -2398,6 +2463,8 @@ export interface TypedActorClass<TContract> {
       caller: string,
       callerType: "user" | "service",
       event: ContractMessages<TContract>,
+      /** The flow this message continues (forwards carry it; ADR-017 §4). */
+      meta?: { correlationId: string; causationId: string },
     ): Promise<{ ok: boolean; error?: string }>;
     getSnapshot(
       caller: string,
@@ -2442,6 +2509,8 @@ export interface TypedActorClass<TContract> {
         checksum: string;
         createdAt: number;
         seq: number;
+        correlationId: string | null;
+        causationId: string | null;
       }>;
       hasMore: boolean;
     }>;

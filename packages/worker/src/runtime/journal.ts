@@ -13,6 +13,7 @@ import { xxh64 } from "@actor-kit/core";
 import { z } from "zod";
 import type { TimerOp } from "./outbox";
 import { replayStepFacts, type StepCause, type StepDef, step, stepInit } from "./step";
+import type { Trace } from "./trace";
 
 // --- Facts ---
 
@@ -202,6 +203,8 @@ export interface JournalDraft {
   readonly callerType: "user" | "service" | null;
   readonly role: string | null;
   readonly facts: Facts;
+  /** The flow this transition continues (ADR-017 §4); absent when it starts one. */
+  readonly trace?: Trace;
 }
 
 export interface JournalEvent extends JournalDraft {
@@ -209,6 +212,10 @@ export interface JournalEvent extends JournalDraft {
   readonly codeVersion: number;
   readonly stateChecksum: string;
   readonly createdAt: number;
+  /** The flow's id (ADR-017 §4). Absent from events written before ADR-017. */
+  readonly correlationId?: string;
+  /** The event or effect that caused this one; absent when the event started its flow. */
+  readonly causationId?: string;
 }
 
 export interface JournalCheckpoint {
@@ -269,11 +276,20 @@ export function appendJournalEvent(
   sql: JournalSql,
   config: JournalConfig,
   draft: JournalDraft,
-  persisted: { seq: number; stateJson: string; checksum: string; version: number; now: number },
+  persisted: {
+    seq: number;
+    stateJson: string;
+    checksum: string;
+    version: number;
+    now: number;
+    /** ADR-017 §4: the flow's id and what caused the event (null when it starts the flow). */
+    correlationId?: string;
+    causationId?: string | null;
+  },
 ): number {
   const row = sql
     .exec(
-      "INSERT INTO events (seq, cause_type, name, payload, caller, caller_type, role, facts, code_version, state_checksum, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING seq",
+      "INSERT INTO events (seq, cause_type, name, payload, caller, caller_type, role, facts, code_version, state_checksum, created_at, correlation_id, causation_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING seq",
       persisted.seq,
       draft.causeType,
       draft.name,
@@ -285,6 +301,8 @@ export function appendJournalEvent(
       persisted.version,
       persisted.checksum,
       persisted.now,
+      persisted.correlationId ?? null,
+      persisted.causationId ?? null,
     )
     .toArray()[0];
   const seq = z.object({ seq: z.number() }).parse(row).seq;
@@ -369,6 +387,9 @@ const EventRowSchema = z.object({
   code_version: z.number(),
   state_checksum: z.string(),
   created_at: z.number(),
+  // Absent from rows selected by readers that predate ADR-017, NULL on rows written before it.
+  correlation_id: z.string().nullish(),
+  causation_id: z.string().nullish(),
 });
 
 const CheckpointRowSchema = z.object({
@@ -381,13 +402,13 @@ const CheckpointRowSchema = z.object({
 
 /** The `events` columns, in the order every reader selects them. */
 export const JOURNAL_EVENT_COLUMNS =
-  "seq, cause_type, name, payload, caller, caller_type, role, facts, code_version, state_checksum, created_at";
+  "seq, cause_type, name, payload, caller, caller_type, role, facts, code_version, state_checksum, created_at, correlation_id, causation_id";
 
 /** Parse one `events` row (selected with JOURNAL_EVENT_COLUMNS) at the storage boundary. */
 export function parseJournalEventRow(raw: unknown): JournalEvent {
   const row = EventRowSchema.parse(raw);
   const payload: unknown = JSON.parse(row.payload);
-  return {
+  const event: JournalEvent = {
     seq: row.seq,
     causeType: row.cause_type,
     name: row.name,
@@ -400,6 +421,13 @@ export function parseJournalEventRow(raw: unknown): JournalEvent {
     stateChecksum: row.state_checksum,
     createdAt: row.created_at,
   };
+  return withIds(event, row.correlation_id ?? null, row.causation_id ?? null);
+}
+
+/** The event with the ids that were recorded (none for rows written before ADR-017). */
+function withIds(event: JournalEvent, correlationId: string | null, causationId: string | null): JournalEvent {
+  const correlated = correlationId === null ? event : { ...event, correlationId };
+  return causationId === null ? correlated : { ...correlated, causationId };
 }
 
 /** Parse one `journal_checkpoints` row at the storage boundary. */

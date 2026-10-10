@@ -1,4 +1,4 @@
-import { Link, useParams } from "@tanstack/react-router";
+import { Link, useParams, useSearch } from "@tanstack/react-router";
 import { type ReactNode, useState } from "react";
 import { ConnectionsPanel, LinksPanel } from "../components/actor-detail/inspect-panels";
 import { StatusBadge } from "../components/actor-detail/status-badge";
@@ -13,8 +13,16 @@ import type { StudioStatus } from "../studio-state";
 
 export function ActorDetailPage() {
   const { actorType, actorId } = useParams({ from: "/actors/$actorType/$actorId" });
-  // Keyed so switching actors starts from a clean slate (tabs, expanded rows).
-  return <ActorDetail key={`${actorType}\u0000${actorId}`} actorType={actorType} actorId={actorId} />;
+  const { entry } = useSearch({ from: "/actors/$actorType/$actorId" });
+  // Keyed so switching actors (or the entry to open) starts from a clean slate (tabs, expanded rows).
+  return (
+    <ActorDetail
+      key={`${actorType}\u0000${actorId}\u0000${entry ?? ""}`}
+      actorType={actorType}
+      actorId={actorId}
+      entry={entry ?? null}
+    />
+  );
 }
 
 function ErrorBanner({ error }: { error: string | null }) {
@@ -26,7 +34,7 @@ function ErrorBanner({ error }: { error: string | null }) {
   );
 }
 
-function ActorDetail({ actorType, actorId }: { actorType: string; actorId: string }) {
+function ActorDetail({ actorType, actorId, entry }: { actorType: string; actorId: string; entry: number | null }) {
   const { inspect, timeline, status, error } = useStudioWs(actorType, actorId);
 
   if (!inspect) return <Waiting status={status} error={error} />;
@@ -47,7 +55,7 @@ function ActorDetail({ actorType, actorId }: { actorType: string; actorId: strin
         </p>
       </div>
       <ErrorBanner error={error} />
-      <ActorTabs actorType={actorType} actorId={actorId} inspect={inspect} timeline={timeline} />
+      <ActorTabs actorType={actorType} actorId={actorId} inspect={inspect} timeline={timeline} entry={entry} />
     </div>
   );
 }
@@ -75,14 +83,17 @@ function ActorTabs({
   actorId,
   inspect,
   timeline,
+  entry,
 }: {
   actorType: string;
   actorId: string;
   inspect: InspectResult;
   timeline: TimelineItem[];
+  /** Open the timeline at this entry (from `?entry=`). */
+  entry: number | null;
 }) {
-  const [activeTab, setActiveTab] = useState<Tab>("state");
-  const [expandedEntry, setExpandedEntry] = useState<number | null>(null);
+  const [activeTab, setActiveTab] = useState<Tab>(entry === null ? "state" : "timeline");
+  const [expandedEntry, setExpandedEntry] = useState<number | null>(entry);
   const toggleEntry = (id: number) => setExpandedEntry((current) => (current === id ? null : id));
 
   // One renderer per tab: only the active one is called.
@@ -98,6 +109,7 @@ function ActorTabs({
         timeline={timeline}
         expandedEntry={expandedEntry}
         onToggle={toggleEntry}
+        onOpen={setExpandedEntry}
       />
     ),
     connections: () => <ConnectionsPanel connections={inspect.connections} />,
