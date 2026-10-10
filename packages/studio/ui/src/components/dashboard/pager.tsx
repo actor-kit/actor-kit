@@ -1,4 +1,6 @@
-const BUTTON_CLASS = "px-2 py-1 rounded bg-zinc-800 disabled:opacity-40 cursor-pointer disabled:cursor-default";
+import { TAP } from "../phone";
+
+const BUTTON_CLASS = `px-2 py-1 rounded bg-zinc-800 disabled:opacity-40 cursor-pointer disabled:cursor-default ${TAP}`;
 
 interface PagerProps {
   offset: number;

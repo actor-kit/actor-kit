@@ -98,9 +98,9 @@ Surviving mutants that no test can kill, because the mutated program behaves ide
 | studio-cli | cli.ts:50 | `actorType === undefined` → `false` | `actorId` is `undefined` whenever `actorType` is, so the same error is thrown. |
 | studio-cli | client.ts:78 | `{ state: z.unknown() }` → `{}` | `z.unknown()` accepts a missing key; only the static type differs. |
 | studio-cli | shape.ts:43 | `catch { return undefined }` → `{}` | Returns `undefined` either way. |
-| studio UI | all components | ~70 className literals, colour tables (OUTBOX_STATUS_CLASS, SCALAR_CLASS, CAUSE_LABELS colours), status-badge pulse dot, active-tab class | Styling only; each state is also rendered as text or `data-status`. |
-| studio UI | timeline-panel.tsx:9-11 | cause label entries → `[]` | The fallback label equals the cause type; only the colour differs. |
-| studio UI | inspect-panels.tsx:116,142; actor-table.tsx:19; json-diff.tsx:41 | React key template → `""` | Keys only; no visible difference for distinct rows. |
+| studio UI | all components | ~70 className literals, colour tables (OUTBOX_STATUS_CLASS, SCALAR_CLASS, CAUSE_LABELS colours), status-badge pulse dot, active-tab class, table header alignments, `TABLE_CLASS` / `ROW_CLASS` / `CELL`, JSON tree `TOGGLE_CLASS` | Styling only; each state is also rendered as text or `data-status`. The phone rules (`components/phone.ts`: `TAP`, `SCROLL_X`) are not in this group: `studio-ui-phone.test.tsx` pins them and `tests/e2e-studio/studio-mobile.spec.ts` measures them. |
+| studio UI | timeline-panel.tsx:14-16, 24-25 | cause label entries (init, migrate, message, timer, restore) → `[]` or key `""` | The fallback label equals the cause type; only the colour differs. |
+| studio UI | inspect-panels.tsx:91,117; actor-table.tsx:19; json-diff.tsx:41 | React key template → `""` | Keys only; no visible difference for distinct rows. |
 | studio UI | actor-detail.tsx:13 | useParams `{ from }` → `{}` | Same params from the single matching route. |
 | studio UI | actor-detail.tsx:15 | remount key → `""` | ActorTabs already unmounts on an actor switch because the hook resets `inspect` to null. |
 | studio UI | compute-diff.ts:107,109 (×2) | prefix bound `Math.max` / `<=` / `true` | Reading past the end gives `undefined`, which never equals a JSON primitive, so the loop stops anyway. |
@@ -108,6 +108,7 @@ Surviving mutants that no test can kill, because the mutated program behaves ide
 | studio UI | api.ts:65 | `catch { return undefined }` → `{}` | Returns `undefined` either way. |
 | studio UI | protocol.ts:17 | addIssue code `"custom"` → `""` | Same message. |
 | studio UI | use-actor-list.ts:37,38,44 | empty catch, `[]` deps, initial `{ kind: "loading" }` | The effect sets loading before first paint; same behaviour. |
+| studio UI | timers-panel.tsx:21 | `useNow` effect deps `[]` → `["Stryker was here"]` | A constant dependency never changes, so the interval starts once either way. |
 | worker | identity.ts:32, 33 | `headers.delete(CALLER_ID_HEADER / CALLER_TYPE_HEADER)` → removed | `headers.set()` just after replaces every inbound value of the name; the explicit scrub is kept on purpose (security code reads as intended). |
 | worker | close-code.ts:7 | `code !== undefined && …` → `true && …` | `isSendable(undefined)` is false (every comparison with `undefined` is false); the check is for the type checker. |
 | worker | route-to-actor.ts:23 | `actorType === undefined \|\| …` → `false \|\| …` | Parts come from `filter(Boolean)`, so `actorId` (`parts[2]`) is undefined whenever `actorType` (`parts[1]`) is. |
@@ -155,3 +156,16 @@ Surviving mutants that no test can kill, because the mutated program behaves ide
 | studio UI | Malformed known frames lost the failing field path in the error | `studio-ui-state.mutation.test.ts` |
 | worker | `actor.ts` compared `Upgrade` case-sensitively, same as the studio bug (fixed on the ADR-015 branch) | `websocket-upgrade.test.ts` (unit, red before); `websocket.test.ts` (workerd lowercases it, so the integration test passed either way) |
 | worker | A lifecycle connect/disconnect that only scheduled or cancelled a timer was not committed | `timers.test.ts` "lifecycle handlers" (red before) |
+
+## Studio on phones (2026-10-10)
+
+Bug bash: every Studio page scrolled sideways at phone widths and most controls were under 40px.
+Fix: `packages/studio/ui/src/components/phone.ts` (`TAP` = `max-sm:min-h-10`, `SCROLL_X` = `overflow-x-auto`),
+16px side gutter below `sm`, wide tables and the tab bar scroll in their own box, phone-only wrapping of the
+dashboard forms. Desktop screenshots at 1280px are pixel-identical before and after (apart from live data).
+
+| Gate | Result |
+|---|---|
+| `tests/e2e-studio/studio-mobile.spec.ts` (375×667, 280×653) | 6 red before (dashboard +132/+227px, actor pages +236/+331px, tap targets 20-38px), 6 green after |
+| Stryker, the 13 changed UI files (whole files, 608 mutants) | 91.26% (489 killed, 54 timeout, 52 survived, 13 errors); `studio-ui-panels.mutation.test.tsx` then killed 5 real survivors (timer and restore labels, emitted-name separator, timers clock cleanup), confirmed by a scoped re-run: 92.10% (548/595). The other 47 are equivalent: 37 class strings and colour tables, 2 React keys, 7 cause-label fallbacks, 1 effect deps (table above) |
+| CRAP `packages/studio/ui/src` | max 7.0, 0 functions ≥ 8 (`EntryDetails` was 8.0 before: its two compound conditions became `hasEmitted` / `bothHaveState`) |

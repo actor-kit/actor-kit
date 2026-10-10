@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { postAction } from "../api";
+import { TAP } from "./phone";
 
 /**
  * "Restore to here" for one timeline entry (ADR-015 D3, mutate scope): asks first, then restores
@@ -30,14 +31,14 @@ export function RestoreButton({ actorType, actorId, seq }: { actorType: string; 
             type="button"
             disabled={busy}
             onClick={restore}
-            className="px-2 py-0.5 rounded border border-amber-700 text-amber-200 hover:bg-amber-950 disabled:opacity-50"
+            className={`px-2 py-0.5 rounded border border-amber-700 text-amber-200 hover:bg-amber-950 disabled:opacity-50 ${TAP}`}
           >
             Confirm restore
           </button>
           <button
             type="button"
             onClick={() => setConfirming(false)}
-            className="px-2 py-0.5 rounded border border-zinc-700 text-zinc-300 hover:bg-zinc-800"
+            className={`px-2 py-0.5 rounded border border-zinc-700 text-zinc-300 hover:bg-zinc-800 ${TAP}`}
           >
             Cancel
           </button>
@@ -46,7 +47,7 @@ export function RestoreButton({ actorType, actorId, seq }: { actorType: string; 
         <button
           type="button"
           onClick={() => setConfirming(true)}
-          className="px-2 py-0.5 rounded border border-zinc-700 text-zinc-300 hover:bg-zinc-800"
+          className={`px-2 py-0.5 rounded border border-zinc-700 text-zinc-300 hover:bg-zinc-800 ${TAP}`}
         >
           Restore to here
         </button>

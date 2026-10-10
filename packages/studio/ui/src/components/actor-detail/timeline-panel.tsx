@@ -7,6 +7,7 @@ import type { TimelineItem } from "../../protocol";
 import { recentTime } from "../../relative-time";
 import { JsonDiff } from "../json-diff";
 import { JsonTree } from "../json-tree";
+import { SCROLL_X, TAP } from "../phone";
 import { RestoreButton } from "../restore-button";
 
 const CAUSE_LABELS = new Map<string, { label: string; color: string }>([
@@ -81,7 +82,7 @@ function TimelineRow({ actor, entry, previous, expanded, onToggle, onOpen }: Tim
         type="button"
         onClick={onToggle}
         aria-expanded={expanded}
-        className="w-full flex items-center gap-2 px-3 py-2 text-sm text-left hover:bg-zinc-900/50 cursor-pointer"
+        className={`w-full flex items-center gap-2 px-3 py-2 text-sm text-left hover:bg-zinc-900/50 cursor-pointer ${TAP}`}
         data-testid={`timeline-entry-${entry.id}`}
       >
         <span className={`${cause.color} text-white text-xs px-1.5 py-0.5 rounded`}>{cause.label}</span>
@@ -105,6 +106,16 @@ function TimelineRow({ actor, entry, previous, expanded, onToggle, onOpen }: Tim
   );
 }
 
+/** The entry emitted domain events (ADR-017 §2). */
+function hasEmitted(entry: TimelineItem): boolean {
+  return entry.emitted !== undefined && entry.emitted.length > 0;
+}
+
+/** Both states could be rebuilt from the journal, so there is something to diff. */
+function bothHaveState(previous: TimelineItem, entry: TimelineItem): boolean {
+  return previous.stateUnavailable !== true && entry.stateUnavailable !== true;
+}
+
 function EntryDetails({
   actor,
   entry,
@@ -124,7 +135,7 @@ function EntryDetails({
           <RestoreButton actorType={actor.actorType} actorId={actor.actorId} seq={entry.seq} />
         </div>
       )}
-      {previous !== undefined && previous.stateUnavailable !== true && entry.stateUnavailable !== true && (
+      {previous !== undefined && bothHaveState(previous, entry) && (
         <Section title="Changes:">
           <JsonDiff before={previous.state} after={entry.state} />
         </Section>
@@ -132,7 +143,7 @@ function EntryDetails({
       <Section title="Cause data:">
         <JsonTree data={entry.cause} />
       </Section>
-      {entry.emitted !== undefined && entry.emitted.length > 0 && (
+      {hasEmitted(entry) && (
         <Section title="Emitted:">
           <JsonTree data={entry.emitted} />
         </Section>
@@ -193,7 +204,7 @@ function CauseLink({
       <button
         type="button"
         onClick={() => onOpen(ref.seq)}
-        className="text-sky-400 hover:underline"
+        className={`text-sky-400 hover:underline break-all text-left ${TAP}`}
         data-testid="entry-causation"
       >
         {causationId}
@@ -217,7 +228,7 @@ function Section({ title, children }: { title: string; children: ReactNode }) {
   return (
     <div>
       <p className="text-xs text-zinc-500 mb-1">{title}</p>
-      <div className="bg-zinc-950 rounded p-2 text-xs">{children}</div>
+      <div className={`bg-zinc-950 rounded p-2 text-xs ${SCROLL_X}`}>{children}</div>
     </div>
   );
 }

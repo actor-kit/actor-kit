@@ -1,7 +1,8 @@
 import { useNavigate } from "@tanstack/react-router";
 import { type FormEvent, useState } from "react";
+import { TAP } from "../phone";
 
-const INPUT_CLASS = "bg-zinc-900 border border-zinc-700 rounded px-2 py-1 text-sm flex-1";
+const INPUT_CLASS = `bg-zinc-900 border border-zinc-700 rounded px-2 py-1 text-sm flex-1 max-sm:basis-32 max-sm:min-w-0 ${TAP}`;
 
 /** Open an actor by type and id, even one the registry does not list yet. */
 export function ManualConnect() {
@@ -21,7 +22,7 @@ export function ManualConnect() {
   return (
     <form className="mb-6 max-w-md" onSubmit={onSubmit}>
       <p className="text-zinc-400 text-sm mb-2">Connect manually:</p>
-      <div className="flex gap-2">
+      <div className="flex max-sm:flex-wrap gap-2">
         <input
           type="text"
           placeholder="Actor type"
@@ -43,7 +44,7 @@ export function ManualConnect() {
         <button
           type="submit"
           disabled={!ready}
-          className="bg-zinc-700 hover:bg-zinc-600 px-3 py-1 rounded text-sm cursor-pointer disabled:opacity-40 disabled:cursor-default"
+          className={`bg-zinc-700 hover:bg-zinc-600 px-3 py-1 rounded text-sm cursor-pointer disabled:opacity-40 disabled:cursor-default ${TAP}`}
           data-testid="manual-connect"
         >
           Connect
