@@ -20,7 +20,14 @@ import type {
 } from "@actor-kit/core";
 import { xxh64 } from "@actor-kit/core";
 import type { EnvParser, LifecycleEvent, LinkCall, RolePredicate, UnlinkCall } from "@actor-kit/worker/testing";
-import { createLiveFacts, envErrorMessage, parseActorEnv, resolveRole, routeMessage } from "@actor-kit/worker/testing";
+import {
+  createLiveFacts,
+  envErrorMessage,
+  parseActorEnv,
+  resolveRole,
+  routeMessage,
+  withDeterminismGuard,
+} from "@actor-kit/worker/testing";
 import type { z } from "zod";
 
 // --- Actor definition shape (minimal for testing) ---
@@ -177,6 +184,8 @@ interface ContractShape {
   readonly name: string;
   readonly def: {
     input: z.ZodType;
+    /** The typed env schema (ADR-016 §4). */
+    env?: EnvParser;
     init: (input: unknown, ctx?: { env: unknown; link: (name: string, id: string) => Promise<unknown> }) => unknown;
     roles: Record<string, RolePredicate<unknown>>;
     messages: Record<string, unknown>;
@@ -245,6 +254,29 @@ function recordEffects() {
   return { captured, ctx };
 }
 
+// --- Determinism guard (ADR-016 §5) ---
+
+/** The same messages, each handler run under withDeterminismGuard (schemas and guards unchanged). */
+function guardHandlers(
+  messages: TestableActorDef<unknown, unknown>["messages"],
+): TestableActorDef<unknown, unknown>["messages"] {
+  return Object.fromEntries(
+    Object.entries(messages).map(([role, slots]) => [
+      role,
+      Object.fromEntries(
+        Object.entries(slots).map(([name, slot]) => [
+          name,
+          {
+            ...slot,
+            handler: (state: unknown, payload: unknown, ctx: unknown) =>
+              withDeterminismGuard(() => slot.handler(state, payload, ctx)),
+          },
+        ]),
+      ),
+    ]),
+  );
+}
+
 // --- Typed env (ADR-016 §4) ---
 
 /** The env a contract's handlers see: its `env` schema's output, or `unknown` without one. */
@@ -255,19 +287,11 @@ export interface TestActorOptions<TContract> {
   env?: ContractEnv<TContract>;
 }
 
-function hasEnvSchema(arg: unknown): arg is { name: string; def: { env: EnvParser } } {
-  if (typeof arg !== "object" || arg === null || !("def" in arg) || !("name" in arg)) return false;
-  const def = arg.def;
-  if (typeof def !== "object" || def === null || !("env" in def)) return false;
-  const env = def.env;
-  return typeof env === "object" && env !== null && "safeParse" in env && typeof env.safeParse === "function";
-}
-
 /** Fakes are parsed like the runtime parses the Worker env; one that doesn't match throws, naming each binding. */
-function harnessEnv(arg: unknown, env: unknown): unknown {
-  if (!hasEnvSchema(arg)) return env ?? {};
-  const parsed = parseActorEnv(arg.def.env, env);
-  if (!parsed.ok) throw new Error(`testActor: ${envErrorMessage(arg.name, parsed.issues)}`);
+function harnessEnv(name: string, schema: EnvParser | undefined, env: unknown): unknown {
+  if (schema === undefined) return env ?? {};
+  const parsed = parseActorEnv(schema, env);
+  if (!parsed.ok) throw new Error(`testActor: ${envErrorMessage(name, parsed.issues)}`);
   return parsed.env;
 }
 
@@ -307,8 +331,10 @@ export function testActor(
   options: { env?: unknown } = {},
 ): TestHarness<unknown, unknown> | ContractTestHarness<unknown, unknown, unknown, unknown> {
   // Extract def from contract or use directly
-  const def = isContract(arg) ? extractDef(arg) : arg;
-  const env = harnessEnv(arg, options.env);
+  const unguarded = isContract(arg) ? extractDef(arg) : arg;
+  // Message handlers and init run under the determinism guard (ADR-016 §5).
+  const def = { ...unguarded, messages: guardHandlers(unguarded.messages) };
+  const env = isContract(arg) ? harnessEnv(arg.name, arg.def.env, options.env) : (options.env ?? {});
 
   // sendWithEffects as standalone function for safe destructuring
   async function sendWithEffectsImpl(
@@ -353,13 +379,15 @@ export function testActor(
       if (!parsed.success) {
         throw new Error(`Invalid input: ${parsed.error.message}`);
       }
-      return def.init(parsed.data, {
-        ...createLiveFacts().ctx,
-        env,
-        link: async () => {
-          throw new Error("link() not available in test harness init — use send() for link testing");
-        },
-      });
+      return withDeterminismGuard(() =>
+        def.init(parsed.data, {
+          ...createLiveFacts().ctx,
+          env,
+          link: async () => {
+            throw new Error("link() not available in test harness init — use send() for link testing");
+          },
+        }),
+      );
     },
 
     role(state: unknown, caller: string, opts?: { callerType?: "user" | "service" }): string | null {

@@ -1,4 +1,4 @@
-import { JournalDivergenceError, replayJournal } from "@actor-kit/test";
+import { JournalDivergenceError, NondeterminismError, replayJournal } from "@actor-kit/test";
 import {
   checksumState,
   defineActor,
@@ -112,7 +112,7 @@ describe("replayJournal()", () => {
       { event: init, after: s0 },
       { event: leaky, after: { owner: "olive", notes: [{ id: "x", text: "t", at: 1 }] } },
     ]);
-    await expect(replayJournal(Notes, journal)).rejects.toThrow(JournalDivergenceError);
+    await expect(replayJournal(Notes, journal)).rejects.toThrow(NondeterminismError);
   });
 
   it("surfaces a handler that reads more facts than were recorded", async () => {

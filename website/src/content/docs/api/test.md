@@ -137,3 +137,7 @@ await replayJournal(AuctionContract, room.journal);           // every simulated
   `ctx.delivery` (try 1); `failedForwards()` lists those whose target was
   never spawned.
 - Link views are pushed as the runtime pushes them: after every committed transition a source sends each actor linked to it its view (projected for the caller `<source type>:<subscriber id>`, a service), only when it changed; the subscriber runs `link.onUpdate` with the role added. A new link, also one made in `init`, gets the current view at once.
+
+## Determinism guards
+
+While a handler runs under `testActor()`, `simulate()` or `replayJournal()` (message handlers, lifecycle, timers, `init`, `onDone`, `onError` and link callbacks), `Date.now()`, `new Date()` without arguments, `performance.now()`, `Math.random()`, `crypto.randomUUID()` and `crypto.getRandomValues()` throw `NondeterminismError` (exported from `@actor-kit/test`), telling you to use `ctx.now()`, `ctx.random()` or `ctx.id()`. A handler that reads the clock fails its first unit test instead of only failing replay. The globals are restored afterwards, also when the handler throws. A service's `fn` is exempt, and the Workers runtime never patches globals.

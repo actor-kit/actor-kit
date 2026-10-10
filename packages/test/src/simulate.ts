@@ -43,6 +43,7 @@ import {
   step,
   stepInit,
   type TaggedError,
+  withDeterminismGuard,
 } from "@actor-kit/worker/testing";
 import { z } from "zod";
 import type { ContractInput, ContractState } from "./contract-types";
@@ -269,7 +270,9 @@ function createSimulation(
 
   function factsFor(actor: ActorData) {
     const live = createLiveFacts(sources);
-    return liveStepFacts(live, (name) => actor.links.filter((l) => l.name === name).map((l) => l.id));
+    const facts = liveStepFacts(live, (name) => actor.links.filter((l) => l.name === name).map((l) => l.id));
+    // Every handler runs under the determinism guard (ADR-016 §5).
+    return { ...facts, guard: withDeterminismGuard };
   }
 
   // --- Commit: the simulated counterpart of actor.ts commit() + writeEffects() ---
@@ -614,7 +617,7 @@ function createSimulation(
       if (!parsed.success) throw new Error(`Invalid input: ${parsed.error.message}`);
       const links: Array<{ name: string; id: string }> = [];
       const live = createLiveFacts(sources);
-      const facts = liveStepFacts(live, () => []);
+      const facts = { ...liveStepFacts(live, () => []), guard: withDeterminismGuard };
       const link = async (name: string, targetId: string) => {
         const view = await initLink(name, targetId, def);
         live.recordLinkView(name, targetId, view);

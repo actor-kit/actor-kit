@@ -1,6 +1,11 @@
 // @actor-kit/test — test harness for actor definitions (no CF deps)
 
-export { JournalDivergenceError, JournalNondeterminismError, replayJournal } from "./replay-journal";
+export {
+  JournalDivergenceError,
+  JournalNondeterminismError,
+  NondeterminismError,
+  replayJournal,
+} from "./replay-journal";
 export type {
   ActorAddress,
   AnyContract,

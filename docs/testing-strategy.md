@@ -172,6 +172,17 @@ await replayJournal(ChatRoomContract, journal); // throws if any handler used Da
 
 `tests/integration/examples-replay.test.ts` runs every example actor this way. Add new example actors there.
 
+### Determinism guards (ADR-016 §5)
+
+While a handler (message, lifecycle, timer, `init`, `onDone`, `onError`, link callbacks) runs under `testActor()`,
+`simulate()` or `replayJournal()`, `Date.now()`, `new Date()` / `Date()` without arguments, `performance.now()`,
+`Math.random()`, `crypto.randomUUID()` and `crypto.getRandomValues()` throw `NondeterminismError` (the message names
+`ctx.now()`, `ctx.random()` or `ctx.id()`). The step core runs every handler through `StepFacts.guard`; the harness
+passes `withDeterminismGuard` (`runtime/determinism.ts`), the Workers runtime passes nothing and never patches
+globals. Globals are restored from their own property descriptors when the handler returns or throws; guards nest.
+A service's `fn` is exempt, and an async `init` is guarded until its first `await`. `ctx.now()`/`id()`/`random()` read
+the guard's saved originals, so they keep working (fake timers included).
+
 ### Multi-actor simulations (ADR-015 D4)
 
 `simulate()` (`@actor-kit/test`) runs many actors through the runtime's own step core on a virtual clock: services

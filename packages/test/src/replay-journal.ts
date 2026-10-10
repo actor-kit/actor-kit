@@ -5,9 +5,9 @@
  */
 
 import type { Journal, ReplayableDef } from "@actor-kit/worker/testing";
-import { foldJournal, toRuntimeDef } from "@actor-kit/worker/testing";
+import { foldJournal, toRuntimeDef, withDeterminismGuard } from "@actor-kit/worker/testing";
 
-export { JournalDivergenceError, JournalNondeterminismError } from "@actor-kit/worker/testing";
+export { JournalDivergenceError, JournalNondeterminismError, NondeterminismError } from "@actor-kit/worker/testing";
 
 type MessageSlot = { handler(state: unknown, payload: unknown, ctx: unknown): unknown };
 
@@ -52,5 +52,6 @@ export async function replayJournal(
   // The version chain (ADR-015 D5): events from versions with no path are refused, replay starts at the last bump.
   const versioned = toRuntimeDef(def);
   const replayable: ReplayableDef = flat === undefined ? versioned : { ...versioned, messages: flat };
-  return foldJournal(replayable, journal, options);
+  // Every handler replays under the determinism guard (ADR-016 §5).
+  return foldJournal(replayable, journal, { ...options, guard: withDeterminismGuard });
 }

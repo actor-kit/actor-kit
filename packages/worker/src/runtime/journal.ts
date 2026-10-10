@@ -11,6 +11,7 @@
 import type { DeterministicContext } from "@actor-kit/core";
 import { xxh64 } from "@actor-kit/core";
 import { z } from "zod";
+import { realSources as guardedRealSources } from "./determinism";
 import { DeliveryInfoSchema } from "./effect-info";
 import type { TimerOp } from "./outbox";
 import { replayStepFacts, type StepCause, type StepDef, step, stepInit } from "./step";
@@ -40,10 +41,12 @@ export interface FactSources {
   random(): number;
 }
 
+// The real clock and randomness, read through the determinism guard's saved originals while a guarded
+// handler runs (ADR-016 §5), so ctx.now()/id()/random() keep working inside it.
 const realSources: FactSources = {
-  now: () => Date.now(),
-  id: () => crypto.randomUUID(),
-  random: () => Math.random(),
+  now: () => guardedRealSources.now(),
+  id: () => guardedRealSources.randomUUID(),
+  random: () => guardedRealSources.random(),
 };
 
 /** The real sources with the clock pinned to `now` (a timer runs on its alarm's clock). */
@@ -528,10 +531,10 @@ async function replayEvent(
   def: ReplayableDef,
   state: unknown,
   event: JournalEvent,
-  options: { env?: unknown },
+  options: FoldOptions,
 ): Promise<{ state: unknown; timerOps: TimerOp[] }> {
   const env = options.env ?? {};
-  const facts = replayStepFacts(event.facts);
+  const facts = replayStepFacts(event.facts, options.guard);
   if (event.causeType === "init") {
     required(def.init, "init");
     const io = { env, link: async (name: string, id: string) => facts.takeLinkView(name, id) };
@@ -682,6 +685,8 @@ export interface FoldOptions {
    * journaled by older versions, skipping version bumps, and without comparing checksums.
    */
   readonly rebuild?: boolean;
+  /** Runs every handler (ADR-016 §5): replayJournal() passes withDeterminismGuard. */
+  readonly guard?: <T>(handler: () => T) => T;
 }
 
 function verifyChecksum(def: ReplayableDef, point: FoldPoint, event: JournalEvent): void {
@@ -810,7 +815,7 @@ export async function rebuildFromJournal(
 export async function foldJournal(
   def: ReplayableDef,
   journal: Journal,
-  options: { env?: unknown } = {},
+  options: Pick<FoldOptions, "env" | "guard"> = {},
 ): Promise<{ state: unknown; replayed: number }> {
   const [first, ...rest] = [...journal.events].sort((a, b) => a.seq - b.seq);
   if (first === undefined) return { state: undefined, replayed: 0 };

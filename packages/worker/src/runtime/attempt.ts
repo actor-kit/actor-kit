@@ -48,7 +48,7 @@ export function runAttempt(
       finish({ ok: false, error: timeoutError(ms) });
       controller.abort(timeoutError(ms));
     }, ms);
-    controller.signal.addEventListener("abort", onAbort, { once: true });
+    controller.signal.addEventListener("abort", onAbort);
     run(controller.signal).then(finish, (error: unknown) =>
       finish({ ok: false, error: classifyFailure(error, undefined) }),
     );

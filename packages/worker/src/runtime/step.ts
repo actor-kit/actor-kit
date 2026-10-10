@@ -164,6 +164,16 @@ export interface StepFacts {
   unlinkTargets(name: string, pending: PendingLinks): string[];
   /** The facts read so far, for the journal event. */
   recorded(): Facts;
+  /**
+   * Runs every handler call (ADR-016 §5). The test harness passes withDeterminismGuard; the Workers
+   * runtime passes nothing, so handlers run as they are.
+   */
+  readonly guard?: (<T>(handler: () => T) => T) | undefined;
+}
+
+/** Call a handler through the facts' guard, if any. */
+function guarded<T>(facts: StepFacts, handler: () => T): T {
+  return facts.guard === undefined ? handler() : facts.guard(handler);
 }
 
 /**
@@ -192,9 +202,13 @@ export function liveStepFacts(live: LiveFacts, read: (name: string) => string[])
 }
 
 /** Step facts for replay: the event's recorded facts, handed back in order. */
-export function replayStepFacts(facts: Facts): StepFacts & { takeLinkView(name: string, id: string): unknown } {
+export function replayStepFacts(
+  facts: Facts,
+  guard?: <T>(handler: () => T) => T,
+): StepFacts & { takeLinkView(name: string, id: string): unknown } {
   const replay = createReplayFacts(facts);
   return {
+    guard,
     ctx: replay.ctx,
     unlinkTargets: (name) => replay.takeUnlinked(name),
     recorded: () => facts,
@@ -270,7 +284,7 @@ function applyUnlinks(def: StepDef, state: unknown, effects: StepEffects, facts:
             linked: links.filter((l) => l.name === call.name).map((l) => l.id),
             earlier: unlinks.slice(0, position),
           });
-    for (const id of ids) next = onUnlink(next, id, facts.ctx);
+    for (const id of ids) next = guarded(facts, () => onUnlink(next, id, facts.ctx));
   });
   return next;
 }
@@ -316,19 +330,21 @@ function stepMessage(
   const slot = def.messages?.[cause.role]?.[cause.name];
   if (slot === undefined) throw new Error(`Message "${cause.name}" is not defined for role "${cause.role}"`);
   const effects = createOutbox();
-  const handlerState = slot.handler(state, cause.payload, {
-    ...facts.ctx,
-    caller: cause.caller,
-    callerType: cause.callerType,
-    role: cause.role,
-    env,
-    ...(cause.delivery === undefined ? {} : { delivery: cause.delivery }),
-    execute: effects.execute,
-    link: effects.link,
-    unlink: effects.unlink,
-    forward: effects.forward,
-    ...timerVerbs(def, effects, facts.ctx),
-  });
+  const handlerState = guarded(facts, () =>
+    slot.handler(state, cause.payload, {
+      ...facts.ctx,
+      caller: cause.caller,
+      callerType: cause.callerType,
+      role: cause.role,
+      env,
+      ...(cause.delivery === undefined ? {} : { delivery: cause.delivery }),
+      execute: effects.execute,
+      link: effects.link,
+      unlink: effects.unlink,
+      forward: effects.forward,
+      ...timerVerbs(def, effects, facts.ctx),
+    }),
+  );
   assertSync(
     handlerState,
     `Message handler for "${cause.name}" returned a Promise. Handlers must be synchronous — use execute() for async side effects.`,
@@ -367,14 +383,16 @@ function stepLifecycle(
   const next =
     handler === undefined
       ? state
-      : handler(state, event, {
-          ...facts.ctx,
-          ...who,
-          env,
-          execute: effects.execute,
-          forward: effects.forward,
-          ...timerVerbs(def, effects, facts.ctx),
-        });
+      : guarded(facts, () =>
+          handler(state, event, {
+            ...facts.ctx,
+            ...who,
+            env,
+            execute: effects.execute,
+            forward: effects.forward,
+            ...timerVerbs(def, effects, facts.ctx),
+          }),
+        );
   assertSync(next, `lifecycle.${which} returned a Promise. Handlers must be synchronous.`);
   const role =
     which === "connect"
@@ -469,7 +487,7 @@ function runCallback(
 }
 
 function stepCallback(def: StepDef, state: unknown, cause: CallbackCause, facts: StepFacts, env: unknown): StepResult {
-  const { next, name, payload } = runCallback(def, state, cause, facts.ctx, env);
+  const { next, name, payload } = guarded(facts, () => runCallback(def, state, cause, facts.ctx, env));
   return {
     state: next,
     handlerState: next,
@@ -491,15 +509,17 @@ function stepTimer(
   const next =
     timer === undefined
       ? state
-      : timer.handler(state, cause.payload, {
-          ...facts.ctx,
-          env,
-          key: cause.key,
-          lateBy: cause.lateBy,
-          execute: effects.execute,
-          forward: effects.forward,
-          ...timerVerbs(def, effects, facts.ctx),
-        });
+      : guarded(facts, () =>
+          timer.handler(state, cause.payload, {
+            ...facts.ctx,
+            env,
+            key: cause.key,
+            lateBy: cause.lateBy,
+            execute: effects.execute,
+            forward: effects.forward,
+            ...timerVerbs(def, effects, facts.ctx),
+          }),
+        );
   assertSync(
     next,
     `Timer "${cause.name}" returned a Promise. Handlers must be synchronous — use execute() for async side effects.`,
@@ -547,8 +567,10 @@ export async function stepInit(
   facts: StepFacts,
   io: { env: unknown; link: (name: string, id: string) => Promise<unknown> },
 ): Promise<{ state: unknown; event: JournalDraft }> {
-  if (def.init === undefined) throw new Error("This actor has no init");
-  const state = await def.init(cause.input, { env: io.env, link: io.link, ...facts.ctx });
+  const init = def.init;
+  if (init === undefined) throw new Error("This actor has no init");
+  // Guarded until init's first await (an async init's later part runs outside the guard).
+  const state = await guarded(facts, () => init(cause.input, { env: io.env, link: io.link, ...facts.ctx }));
   return {
     state,
     event: draft(
