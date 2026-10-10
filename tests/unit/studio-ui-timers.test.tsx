@@ -54,7 +54,7 @@ const rows = () => screen.queryAllByTestId("timer-row");
 
 describe("Timers panel", () => {
   it("lists pending timers soonest first with name, key, due-in and payload, and counts them on the tab", async () => {
-    await open([timerRow("round-1", Date.now() + 30_000), timerRow("tick", Date.now() + 90_000, { n: 2 }, "tick")]);
+    await open([timerRow("round-1", Date.now() + 30_000), timerRow("tick", Date.now() + 120_000, { n: 2 }, "tick")]);
     expect(screen.getByTestId("tab-timers").textContent).toContain("(2)");
     const [first, second] = rows();
     expect(first?.textContent).toContain("roundEnd");
