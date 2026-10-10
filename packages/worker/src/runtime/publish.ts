@@ -33,15 +33,18 @@ export function resolvePublish(
 ): PublishConfig | null {
   if (option === undefined) return null;
   if (option.queue === "") throw new Error("publish.queue must name a Queue binding");
-  for (const name of option.events) {
-    if (events === undefined || !Object.hasOwn(events, name)) {
-      throw new Error(`publish: event "${name}" is not declared in events`);
-    }
-  }
+  checkDeclared(option.events, events ?? {});
   if (services !== undefined && Object.hasOwn(services, PUBLISH_SERVICE)) {
     throw new Error(`The service name "${PUBLISH_SERVICE}" is reserved for publish`);
   }
   return { queue: option.queue, events: new Set(option.events) };
+}
+
+/** Every published name must be a declared event. */
+function checkDeclared(names: readonly string[], events: Record<string, unknown>): void {
+  for (const name of names) {
+    if (!Object.hasOwn(events, name)) throw new Error(`publish: event "${name}" is not declared in events`);
+  }
 }
 
 /** What a consumer receives. */

@@ -105,6 +105,15 @@ function TimelineRow({ actor, entry, previous, expanded, onToggle, onOpen }: Tim
   );
 }
 
+/** A diff needs the state before and after the entry. */
+function bothStatesAvailable(previous: TimelineItem, entry: TimelineItem): boolean {
+  return previous.stateUnavailable !== true && entry.stateUnavailable !== true;
+}
+
+function hasEmitted(entry: TimelineItem): boolean {
+  return (entry.emitted?.length ?? 0) > 0;
+}
+
 function EntryDetails({
   actor,
   entry,
@@ -124,7 +133,7 @@ function EntryDetails({
           <RestoreButton actorType={actor.actorType} actorId={actor.actorId} seq={entry.seq} />
         </div>
       )}
-      {previous !== undefined && previous.stateUnavailable !== true && entry.stateUnavailable !== true && (
+      {previous !== undefined && bothStatesAvailable(previous, entry) && (
         <Section title="Changes:">
           <JsonDiff before={previous.state} after={entry.state} />
         </Section>
@@ -132,7 +141,7 @@ function EntryDetails({
       <Section title="Cause data:">
         <JsonTree data={entry.cause} />
       </Section>
-      {entry.emitted !== undefined && entry.emitted.length > 0 && (
+      {hasEmitted(entry) && (
         <Section title="Emitted:">
           <JsonTree data={entry.emitted} />
         </Section>

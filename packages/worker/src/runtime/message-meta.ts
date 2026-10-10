@@ -29,13 +29,17 @@ export function forwardMeta(delivery: DeliveryInfo, trace: Trace): MessageMeta {
   return { ...delivery, ...trace };
 }
 
+const isRecord = (meta: unknown): meta is object => typeof meta === "object" && meta !== null && !Array.isArray(meta);
+
 export function parseMessageMeta(meta: unknown): ParsedMessageMeta {
   if (meta === undefined) return { ok: true, delivery: undefined, trace: undefined };
-  if (typeof meta !== "object" || meta === null || Array.isArray(meta)) {
-    return { ok: false, error: "invalid_delivery", detail: "message metadata must be an object" };
-  }
+  if (!isRecord(meta)) return { ok: false, error: "invalid_delivery", detail: "message metadata must be an object" };
   const traced = TraceSchema.safeParse(meta);
-  const trace = traced.success ? traced.data : undefined;
+  return parseDelivery(meta, traced.success ? traced.data : undefined);
+}
+
+/** The delivery part: absent when no delivery field is named, else it must be a whole delivery. */
+function parseDelivery(meta: object, trace: Trace | undefined): ParsedMessageMeta {
   if (!DELIVERY_KEYS.some((key) => Object.hasOwn(meta, key))) return { ok: true, delivery: undefined, trace };
   const delivery = DeliveryInfoSchema.safeParse(meta);
   if (!delivery.success) return { ok: false, error: "invalid_delivery", detail: delivery.error.message };

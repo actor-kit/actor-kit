@@ -67,11 +67,15 @@ export const guarded = playing.message(z.object({}), {
 });
 
 type Snapshot = PhasedStateOf<typeof kit, S>;
-export function describe(state: Snapshot): string {
-  if (state.phase === "playing") return state.local.moves.join(",");
-  if (state.phase === "done") return state.local.winner;
-  const nothing: null = state.local;
-  return String(nothing);
+// Narrowing by phase types the local (one check per function: these are compiled, never run).
+export function playingMoves(state: Snapshot): string | null {
+  return state.phase === "playing" ? state.local.moves.join(",") : null;
+}
+export function doneWinner(state: Snapshot): string | null {
+  return state.phase === "done" ? state.local.winner : null;
+}
+export function idleLocal(state: Extract<Snapshot, { phase: "idle" }>): null {
+  return state.local;
 }
 
 export const Game = defineActor("game", {

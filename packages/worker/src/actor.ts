@@ -463,6 +463,9 @@ export function actor(
       ? null
       : { fn: (body: unknown, env: unknown, _effect: EffectInfo) => sendToQueue(env, publishConfig.queue, body) };
   if (publishConfig !== null) retryPolicies.set(PUBLISH_SERVICE, DEFAULT_RETRY_POLICY);
+  /** The service an outbox row runs: a declared one, or the publish service for published events. */
+  const serviceFor = (name: string) =>
+    name === PUBLISH_SERVICE ? (publishService ?? undefined) : def.services?.[name];
   /** What Studio shows as a link's source type: the linked contract's binding name. */
   const linkSourceType = (link: string): string => bindingName(def.links?.[link]?.contract.name ?? link);
 
@@ -799,26 +802,38 @@ export function actor(
         // Touch registry (debounced)
         this.touchRegistry();
         // The timeline is the journal (ADR-017 §5): push the event just appended to studio sockets.
-        if (journalConfig.enabled && this.hasStudioWs()) {
-          // As the journal stores it: an undefined payload is null.
-          const payload = draft.payload ?? null;
-          const event = {
-            ...draft,
-            payload,
-            seq,
-            codeVersion: this.version,
-            stateChecksum: checksum,
-            createdAt: now,
-            correlationId: ids.correlationId,
-            ...(ids.causationId === null ? {} : { causationId: ids.causationId }),
-          };
-          const entry = timelineEntry(event, json, linkSourceType);
-          this.broadcastToStudio(async (projection) => ({
-            type: "studio.timeline",
-            entry: await projectTimelineEntry(entry, projection),
-          }));
-        }
+        if (journalConfig.enabled && this.hasStudioWs()) this.pushStudioEvent(draft, { seq, json, checksum, now, ids });
       }
+    }
+
+    /** Push a journal event just appended to Studio sockets, as a timeline entry. */
+    pushStudioEvent(
+      draft: JournalDraft,
+      written: {
+        seq: number;
+        json: string;
+        checksum: string;
+        now: number;
+        ids: { correlationId: string; causationId: string | null };
+      },
+    ): void {
+      const { seq, json, checksum, now, ids } = written;
+      const event = {
+        ...draft,
+        // As the journal stores it: an undefined payload is null.
+        payload: draft.payload ?? null,
+        seq,
+        codeVersion: this.version,
+        stateChecksum: checksum,
+        createdAt: now,
+        correlationId: ids.correlationId,
+        ...(ids.causationId === null ? {} : { causationId: ids.causationId }),
+      };
+      const entry = timelineEntry(event, json, linkSourceType);
+      this.broadcastToStudio(async (projection) => ({
+        type: "studio.timeline",
+        entry: await projectTimelineEntry(entry, projection),
+      }));
     }
 
     computeChecksum(json: string): string {
@@ -922,8 +937,7 @@ export function actor(
     /** One try of one execution: settle the row and, on the outcome that ends it, run onDone/onError. */
     async runExecution(entry: { id: string; service: string; input: unknown }): Promise<void> {
       const sql = this.ctx.storage.sql;
-      const serviceDef =
-        entry.service === PUBLISH_SERVICE ? (publishService ?? undefined) : def.services?.[entry.service];
+      const serviceDef = serviceFor(entry.service);
       const policy = retryPolicies.get(entry.service);
       if (serviceDef === undefined || policy === undefined) {
         finishAttempt(sql, entry.id, { status: "failed" }, `Service "${entry.service}" is not defined`);

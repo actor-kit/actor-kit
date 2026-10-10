@@ -289,17 +289,39 @@ export function appendJournalEvent(
   sql: JournalSql,
   config: JournalConfig,
   draft: JournalDraft,
-  persisted: {
-    seq: number;
-    stateJson: string;
-    checksum: string;
-    version: number;
-    now: number;
-    /** ADR-017 §4: the flow's id and what caused the event (null when it starts the flow). */
-    correlationId?: string;
-    causationId?: string | null;
-  },
+  persisted: PersistedEvent,
 ): number {
+  const seq = insertEvent(sql, draft, persisted);
+
+  // A version bump always checkpoints: replay across it starts there (ADR-015 D5).
+  if (seq % config.checkpointEvery === 0 || draft.causeType === "migrate") {
+    sql.exec(
+      "INSERT OR REPLACE INTO journal_checkpoints (seq, version, state, checksum, timers) VALUES (?, ?, ?, ?, ?)",
+      seq,
+      persisted.version,
+      persisted.stateJson,
+      persisted.checksum,
+      JSON.stringify(pendingTimers(sql)),
+    );
+  }
+
+  if (config.keep !== null) pruneJournal(sql, seq - config.keep);
+  return seq;
+}
+
+/** What the transaction knows about the event besides its cause: its seq, state, version and ids. */
+interface PersistedEvent {
+  seq: number;
+  stateJson: string;
+  checksum: string;
+  version: number;
+  now: number;
+  /** ADR-017 §4: the flow's id and what caused the event (null when it starts the flow). */
+  correlationId?: string;
+  causationId?: string | null;
+}
+
+function insertEvent(sql: JournalSql, draft: JournalDraft, persisted: PersistedEvent): number {
   const row = sql
     .exec(
       "INSERT INTO events (seq, cause_type, name, payload, caller, caller_type, role, facts, code_version, state_checksum, created_at, correlation_id, causation_id, emitted) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING seq",
@@ -319,32 +341,18 @@ export function appendJournalEvent(
       draft.emitted === undefined ? null : JSON.stringify(draft.emitted),
     )
     .toArray()[0];
-  const seq = z.object({ seq: z.number() }).parse(row).seq;
+  return z.object({ seq: z.number() }).parse(row).seq;
+}
 
-  // A version bump always checkpoints: replay across it starts there (ADR-015 D5).
-  if (seq % config.checkpointEvery === 0 || draft.causeType === "migrate") {
-    sql.exec(
-      "INSERT OR REPLACE INTO journal_checkpoints (seq, version, state, checksum, timers) VALUES (?, ?, ?, ?, ?)",
-      seq,
-      persisted.version,
-      persisted.stateJson,
-      persisted.checksum,
-      JSON.stringify(pendingTimers(sql)),
-    );
+/** Keep the newest checkpoint at or before `upTo` and everything after it. */
+function pruneJournal(sql: JournalSql, upTo: number): void {
+  const base = z
+    .object({ base: z.number().nullable() })
+    .parse(sql.exec("SELECT MAX(seq) AS base FROM journal_checkpoints WHERE seq <= ?", upTo).toArray()[0]).base;
+  if (base !== null) {
+    sql.exec("DELETE FROM events WHERE seq <= ?", base);
+    sql.exec("DELETE FROM journal_checkpoints WHERE seq < ?", base);
   }
-
-  if (config.keep !== null) {
-    const base = z
-      .object({ base: z.number().nullable() })
-      .parse(
-        sql.exec("SELECT MAX(seq) AS base FROM journal_checkpoints WHERE seq <= ?", seq - config.keep).toArray()[0],
-      ).base;
-    if (base !== null) {
-      sql.exec("DELETE FROM events WHERE seq <= ?", base);
-      sql.exec("DELETE FROM journal_checkpoints WHERE seq < ?", base);
-    }
-  }
-  return seq;
 }
 
 const TimerTableRow = z.object({
