@@ -46,7 +46,11 @@ describe("ids", () => {
     expect(parseCauseId("room/a/b/12")).toEqual({ actorType: "room", actorId: "a/b", seq: 12 });
   });
 
-  it.each(["", "room", "room/4", "/r1/4", "room//4", "room/r1/x", "room/r1/4:", "room/r1/04", "room/r1/4:x"])(
+  it("parses multi-digit effect indexes", () => {
+    expect(parseCauseId("room/r1/4:12")).toEqual({ actorType: "room", actorId: "r1", seq: 4, index: 12 });
+  });
+
+  it.each(["/x/y/3", "", "room", "room/4", "/r1/4", "room//4", "room/r1/x", "room/r1/4:", "room/r1/04", "room/r1/4:x"])(
     "refuses %j",
     (id) => {
       expect(parseCauseId(id)).toBeNull();
@@ -210,5 +214,50 @@ describe("simulate: ids across a flow", () => {
       [3, "link.onUpdate", "room/r1/1", "room/r1/1"],
       [4, "link.onUpdate", "room/r1/2", "room/r1/2"],
     ]);
+  });
+});
+
+describe("simulate: ids when the declaring actor keeps no journal", () => {
+  const Quiet = defineActor("quiet", {
+    input: z.object({}),
+    init: (): Desk => ({ log: [] }),
+    roles: { any: () => true },
+    messages: {
+      POKE: message(z.object({ id: z.string() }), (s: Desk, { id }, ctx) => {
+        ctx.forward("room", id, { type: "PING" });
+        return { log: [...s.log, "poked"] };
+      }),
+    },
+    links: { room: link(RoomContract, { onUpdate: (s: Desk) => s }) },
+    views: {},
+    journal: false,
+  });
+
+  it("a forward from it starts the target's flow at the forwarding event's id", async () => {
+    const sim = simulate({ contracts: [RoomContract, Quiet] });
+    const room = await sim.spawn(RoomContract, "r1", {});
+    const quiet = await sim.spawn(Quiet, "q1", {});
+    quiet.send("u", { type: "POKE", id: "r1" });
+    expect(ids(room.journal.events).at(-1)).toEqual([2, "message", "quiet/q1/2", "quiet/q1/2:0"]);
+  });
+
+  it("a push from it carries its newest event's id", async () => {
+    const QuietRoom = defineActor("room", { ...RoomContract.def, journal: false });
+    const sim = simulate({ contracts: [QuietRoom, DeskContract] });
+    const room = await sim.spawn(QuietRoom, "r1", {});
+    const desk = await sim.spawn(DeskContract, "d1", {});
+    room.send("v", { type: "PING" });
+    desk.send("u", { type: "WATCH", id: "r1" });
+    expect(ids(desk.journal.events).at(-1)).toEqual([3, "link.onUpdate", "room/r1/2", "room/r1/2"]);
+  });
+
+  it("a push after a forwarded event carries the forwarder's flow (not an older event's)", async () => {
+    const sim = simulate({ contracts: [RoomContract, DeskContract] });
+    const room = await sim.spawn(RoomContract, "r1", {});
+    const desk = await sim.spawn(DeskContract, "d1", {});
+    room.send("v", { type: "PING" }); // room seq 2
+    desk.send("u", { type: "WATCH", id: "r1" }); // desk seq 2, push → desk seq 3
+    desk.send("u", { type: "POKE", id: "r1" }); // desk seq 4 → room seq 3 → push → desk seq 5
+    expect(ids(desk.journal.events).at(-1)).toEqual([5, "link.onUpdate", "desk/d1/4", "room/r1/3"]);
   });
 });

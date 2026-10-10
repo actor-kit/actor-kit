@@ -23,7 +23,10 @@ describe("parseCauseRef", () => {
     expect(parseCauseRef("counter/a1/3")).toEqual({ actorType: "counter", actorId: "a1", seq: 3 });
     expect(parseCauseRef("desk/x/y/7:2")).toEqual({ actorType: "desk", actorId: "x/y", seq: 7, index: 2 });
   });
-  it.each(["", "counter", "counter/3", "/a/3", "a//3", "a/b/x", "a/b/3:", "a/b/03"])("refuses %j", (id) => {
+  it("parses multi-digit indexes", () => {
+    expect(parseCauseRef("a/b/3:12")).toEqual({ actorType: "a", actorId: "b", seq: 3, index: 12 });
+  });
+  it.each(["/x/y/3", "", "counter", "counter/3", "/a/3", "a//3", "a/b/x", "a/b/3:", "a/b/03"])("refuses %j", (id) => {
     expect(parseCauseRef(id)).toBeNull();
   });
 });
@@ -100,9 +103,10 @@ describe("timeline panel: flow and cause", () => {
     expect(screen.getByTestId("timeline-entry-3").getAttribute("aria-expanded")).toBe("false");
   });
 
-  it("a malformed ?entry is ignored", async () => {
-    await open("/actors/counter/a1?entry=abc", [traced(2, "c", null)], false);
+  it.each(["abc", "0", "1.5", "-2"])("?entry=%s is ignored", async (entry) => {
+    await open(`/actors/counter/a1?entry=${entry}`, [traced(2, "c", null)], false);
     expect(screen.getByTestId("state-panel")).toBeTruthy();
+    expect(screen.getByText("Actor Kit Studio")).toBeTruthy();
   });
 
   it("shows the events an entry emitted", async () => {
