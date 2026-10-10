@@ -20,6 +20,16 @@ describe("buildUrl", () => {
     expect(buildUrl("/api/counter/abc")).toBe("ws://localhost:3000/api/counter/abc");
   });
 
+  it("follows the page's scheme when host is omitted: an https page on a LAN IP gets wss", () => {
+    (globalThis as { window?: unknown }).window = { location: { host: "192.168.1.10:8787", protocol: "https:" } };
+    expect(buildUrl("/x")).toBe("wss://192.168.1.10:8787/x");
+  });
+
+  it("follows the page's scheme when host is omitted: an http page on a public name gets ws", () => {
+    (globalThis as { window?: unknown }).window = { location: { host: "example.test", protocol: "http:" } };
+    expect(buildUrl("/x")).toBe("ws://example.test/x");
+  });
+
   it("uses explicit host when provided (cross-origin)", () => {
     (globalThis as { window?: unknown }).window = { location: { host: "frontend.example.com" } };
     expect(buildUrl("/api/x", "api.example.com")).toBe("wss://api.example.com/api/x");
