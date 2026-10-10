@@ -192,3 +192,24 @@ class_name = "FlakyInbox"
 [[migrations]]
 tag = "v16"
 new_sqlite_classes = ["Courier", "FlakyInbox"]
+
+[[durable_objects.bindings]]
+name = "LOT"
+class_name = "Lot"
+
+[[durable_objects.bindings]]
+name = "LOT_UNBOUND"
+class_name = "LotUnbound"
+
+[[migrations]]
+tag = "v17"
+new_sqlite_classes = ["Lot", "LotUnbound"]
+
+# Outbound event stream (ADR-017 §3)
+[[queues.producers]]
+binding = "LOT_EVENTS"
+queue = "lot-events"
+
+[[queues.producers]]
+binding = "AUCTION_EVENTS"
+queue = "auction-events"

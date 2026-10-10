@@ -10,5 +10,10 @@ class_name = "Auction"
 tag = "v1"
 new_sqlite_classes = ["Auction"]
 
+# Outbound event stream (ADR-017 §3). Create the queue once: wrangler queues create auction-events
+[[queues.producers]]
+binding = "AUCTION_EVENTS"
+queue = "auction-events"
+
 [env.preview]
 name = "actor-kit-auction-example-preview"

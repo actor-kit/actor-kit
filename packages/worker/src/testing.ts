@@ -84,6 +84,7 @@ export { routeMessage } from "./runtime/message-router";
 export { ACTOR_KIT_MIGRATIONS } from "./runtime/migrations";
 // Outbox
 export type {
+  EmittedEffect,
   ExecutionEntry,
   ForwardCall,
   ForwardEntry,
@@ -117,6 +118,9 @@ export {
   requeueInterrupted,
   startAttempt,
 } from "./runtime/outbox-store";
+// Outbound event stream (ADR-017 §3)
+export type { PublishConfig, PublishedBody, PublishedMessage, PublishOption } from "./runtime/publish";
+export { PUBLISH_SERVICE, publishedMessages, resolvePublish, sendToQueue } from "./runtime/publish";
 // Namespace resolution
 export { resolveNamespace } from "./runtime/resolve-namespace";
 export type { RestorePlan } from "./runtime/restore";

@@ -4,7 +4,7 @@
  * this checks the shape at runtime before simulate() uses it.
  */
 
-import type { JournalOption, RolePredicate, StepDef, StepMessageSlot } from "@actor-kit/worker/testing";
+import type { JournalOption, PublishOption, RolePredicate, StepDef, StepMessageSlot } from "@actor-kit/worker/testing";
 import { toRuntimeDef } from "@actor-kit/worker/testing";
 
 export interface SimDef extends StepDef {
@@ -22,6 +22,7 @@ export interface SimDef extends StepDef {
     onTransition?(prev: unknown, next: unknown, event: { type: string }, ctx: { caller: string; role: string }): void;
   };
   readonly journal?: JournalOption;
+  readonly publish?: PublishOption;
   readonly version?: number;
 }
 

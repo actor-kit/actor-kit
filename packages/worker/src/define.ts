@@ -43,9 +43,16 @@ export function defineActor<
     input: import("zod").ZodType;
     init(...args: never[]): unknown;
   },
->(name: TName, def: TDef & VersionsCheck<TDef>): ActorContract<TName, TDef> {
+>(name: TName, def: TDef & VersionsCheck<TDef> & PublishCheck<TDef>): ActorContract<TName, TDef> {
   return { name, def };
 }
+
+/** ADR-017 §3: `publish.events` may only name events the actor declares in `events`. */
+type PublishCheck<TDef> = TDef extends { publish: unknown }
+  ? TDef extends { events: infer E }
+    ? { publish: { queue: string; events: readonly (keyof E & string)[] } }
+    : { publish: { queue: string; events: readonly never[] } }
+  : unknown;
 
 type InitState<TDef> = TDef extends { init(...args: never[]): infer S } ? Awaited<S> : never;
 

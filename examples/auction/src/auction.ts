@@ -36,6 +36,8 @@ const highestOf = (state: AuctionState) =>
 
 export const AuctionContract = defineActor("auction", {
   events: auction.events,
+  // The outbound stream (ADR-017 §3): bids and results go to the AUCTION_EVENTS queue for read models.
+  publish: { queue: "AUCTION_EVENTS", events: ["BidPlaced", "AuctionClosed"] },
 
   input: z.object({ item: z.string() }),
   init: (input: { item: string }): AuctionState => ({

@@ -61,6 +61,7 @@ import {
   requeueInterrupted,
   startAttempt,
 } from "./runtime/outbox-store";
+import { PUBLISH_SERVICE, type PublishOption, publishedMessages, resolvePublish, sendToQueue } from "./runtime/publish";
 import { resolveNamespace } from "./runtime/resolve-namespace";
 import { planRestore } from "./runtime/restore";
 import {
@@ -186,6 +187,8 @@ interface ActorDef {
   };
   /** Domain events (ADR-017 §2): payload schemas by name; `ctx.emit` parses by them. */
   events?: Record<string, z.ZodType>;
+  /** Outbound stream (ADR-017 §3): emitted events named here are sent to the Queue binding `queue`. */
+  publish?: PublishOption;
   /** Durable timers (ADR-015 D2): `timer(schema, handler)` per name. */
   timers?: Record<
     string,
@@ -414,6 +417,13 @@ export function actor(
     Object.entries(def.services ?? {}).map(([name, service]) => [name, resolveRetryPolicy(service.retry)]),
   );
   const forwardPolicies = linkRetryPolicies(def.links);
+  // Published events go through the outbox as rows of a reserved service that sends to the queue.
+  const publishConfig = resolvePublish(def.publish, def.events, def.services);
+  const publishService =
+    publishConfig === null
+      ? null
+      : { fn: (body: unknown, env: unknown) => sendToQueue(env, publishConfig.queue, body) };
+  if (publishConfig !== null) retryPolicies.set(PUBLISH_SERVICE, DEFAULT_RETRY_POLICY);
   /** What Studio shows as a link's source type: the linked contract's binding name. */
   const linkSourceType = (link: string): string => bindingName(def.links?.[link]?.contract.name ?? link);
 
@@ -819,7 +829,7 @@ export function actor(
     /** After a committed transition: views, Studio, and draining the effects it declared. */
     afterEffects(result: StepResult): void {
       this.broadcastViews();
-      if (result.effects.getExecutions().length > 0) {
+      if (result.effects.getExecutions().length > 0 || this.publishes(result)) {
         this.pushStudioOutbox();
         this.drainExecutions();
       }
@@ -852,7 +862,8 @@ export function actor(
     /** One try of one execution: settle the row and, on the outcome that ends it, run onDone/onError. */
     async runExecution(entry: { id: string; service: string; input: unknown }): Promise<void> {
       const sql = this.ctx.storage.sql;
-      const serviceDef = def.services?.[entry.service];
+      const serviceDef =
+        entry.service === PUBLISH_SERVICE ? (publishService ?? undefined) : def.services?.[entry.service];
       const policy = retryPolicies.get(entry.service);
       if (serviceDef === undefined || policy === undefined) {
         finishAttempt(sql, entry.id, { status: "failed" }, `Service "${entry.service}" is not defined`);
@@ -1138,8 +1149,32 @@ export function actor(
     // --- Link processing (subscriber side) ---
 
     /** Persist a transition's effects under its seq (inside commit()'s transaction). */
+    /** Whether a transition emitted an event `publish` sends (its rows are in the outbox). */
+    publishes(result: StepResult): boolean {
+      return publishConfig !== null && result.effects.getEmitted().some((e) => publishConfig.events.has(e.name));
+    }
+
+    /** Outbox rows for the events a transition publishes (ADR-017 §3), under their effect ids. */
+    publishedRows(result: StepResult, seq: number) {
+      if (publishConfig === null) return [];
+      const { correlationId } = journalTrace(result.event.trace, this.eventIdOf(seq));
+      const now = Date.now();
+      const transition = { actorType: _actorName, actorId: this.subscriberId(), seq, at: now, correlationId };
+      return publishedMessages(publishConfig, result.effects.getEmitted(), transition).map((message) => ({
+        id: message.effectId,
+        seq,
+        index: message.index,
+        service: PUBLISH_SERVICE,
+        input: message.body,
+        createdAt: now,
+      }));
+    }
+
     writeEffects(result: StepResult, seq: number, caller: string, callerType: "user" | "service"): void {
-      insertExecutions(this.ctx.storage.sql, result.effects.toExecutionEntries(seq));
+      insertExecutions(this.ctx.storage.sql, [
+        ...result.effects.toExecutionEntries(seq),
+        ...this.publishedRows(result, seq),
+      ]);
       const linkCalls = result.effects.getLinks();
       const unlinkCalls = result.effects.getUnlinks();
       if (linkCalls.length > 0 || unlinkCalls.length > 0) {

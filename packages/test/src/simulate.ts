@@ -32,9 +32,13 @@ import {
   type JournalEvent,
   journalTrace,
   liveStepFacts,
+  type PublishConfig,
+  type PublishedBody,
   parseDuration,
   parseEffectId,
+  publishedMessages,
   resolveJournalConfig,
+  resolvePublish,
   resolveRole,
   type StepCause,
   type StepResult,
@@ -145,6 +149,8 @@ export interface Simulation {
   failedForwards(): FailedForward[];
   /** Every domain event any actor emitted (ADR-017 §2), in the order they were committed. */
   events(): SimEvent[];
+  /** Messages published to a queue (ADR-017 §3), in commit order. Delivered at once: no retries. */
+  published(queue: string): PublishedBody[];
   /** An independent copy of the whole simulation. */
   branch(): Simulation;
 }
@@ -180,6 +186,7 @@ interface SimData {
   pending: PendingEffect[];
   failedForwards: FailedForward[];
   events: SimEvent[];
+  published: Array<{ queue: string; body: PublishedBody }>;
 }
 
 const MAX_TIMER_FIRINGS = 10_000;
@@ -205,7 +212,15 @@ export function simulate(options: SimulateOptions = {}): Simulation {
   for (const contract of options.contracts ?? []) contracts.set(contract.name, { contract, def: toSimDef(contract) });
   return createSimulation(
     contracts,
-    { clock: options.now ?? 0, rng: options.seed ?? 1, actors: {}, pending: [], failedForwards: [], events: [] },
+    {
+      clock: options.now ?? 0,
+      rng: options.seed ?? 1,
+      actors: {},
+      pending: [],
+      failedForwards: [],
+      events: [],
+      published: [],
+    },
     options.env ?? {},
   );
 }
@@ -232,6 +247,17 @@ function createSimulation(
     const def = toSimDef(contract);
     contracts.set(contract.name, { contract, def });
     return def;
+  }
+
+  /** The contract's publish config, validated (as the runtime does when it defines the actor). */
+  const publishConfigs = new WeakMap<SimDef, PublishConfig | null>();
+  function publishOf(def: SimDef): PublishConfig | null {
+    let config = publishConfigs.get(def);
+    if (config === undefined) {
+      config = resolvePublish(def.publish, def.events, def.services);
+      publishConfigs.set(def, config);
+    }
+    return config;
   }
 
   function record(address: ActorAddress): ActorData {
@@ -273,7 +299,10 @@ function createSimulation(
   /** The flow an effect continues: its declaring event's correlation id, caused by the effect (ADR-017 §4). */
   function effectTrace(actor: ActorData, effectId: string): Trace {
     const seq = parseEffectId(effectId)?.seq ?? 0;
-    const declared = actor.journal.events.find((e) => e.seq === seq)?.correlationId;
+    // Seqs are contiguous in a simulated journal: index, not search (timer loops fire thousands).
+    const { events } = actor.journal;
+    const candidate = events[seq - (events[0]?.seq ?? 1)];
+    const declared = candidate?.seq === seq ? candidate.correlationId : undefined;
     return {
       correlationId: declared ?? eventId(actor.type, actor.id, seq),
       causationId: effectCauseId(actor.type, actor.id, effectId),
@@ -382,6 +411,17 @@ function createSimulation(
     actor.timers.sort((a, b) => a.fireAt - b.fireAt);
   }
 
+  /** Published events (ADR-017 §3) are delivered to their queue at once. */
+  function publish(actor: ActorData, def: SimDef, result: StepResult): void {
+    const config = publishOf(def);
+    if (config === null) return;
+    const { correlationId } = journalTrace(result.event.trace, eventId(actor.type, actor.id, actor.seq));
+    const transition = { actorType: actor.type, actorId: actor.id, seq: actor.seq, at: data.clock, correlationId };
+    for (const { body } of publishedMessages(config, result.effects.getEmitted(), transition)) {
+      data.published.push({ queue: config.queue, body });
+    }
+  }
+
   /** `from`: who forwarded messages are sent as (null for transitions that cannot forward). */
   function commit(actor: ActorData, result: StepResult, from: Caller | null): void {
     const def = defOf(actor.type);
@@ -401,6 +441,7 @@ function createSimulation(
     for (const { name, payload } of result.event.emitted ?? []) {
       data.events.push({ actor: { type: actor.type, id: actor.id }, seq: actor.seq, name, payload });
     }
+    publish(actor, def, result);
     for (const forward of result.effects.toForwardEntries(actor.seq)) {
       if (from !== null) {
         const trace = effectTrace(actor, forward.id);
@@ -610,6 +651,7 @@ function createSimulation(
     const address = { type: contract.name, id };
     return (async () => {
       if (data.actors[keyOf(address)] !== undefined) throw new Error(`simulate: ${keyOf(address)} is already spawned`);
+      publishOf(def);
       const parsed = def.input.safeParse(input);
       if (!parsed.success) throw new Error(`Invalid input: ${parsed.error.message}`);
       const links: Array<{ name: string; id: string }> = [];
@@ -728,6 +770,7 @@ function createSimulation(
     advance,
     failedForwards: () => [...data.failedForwards],
     events: () => [...data.events],
+    published: (queue) => data.published.filter((p) => p.queue === queue).map((p) => p.body),
     branch: () => createSimulation(new Map(contracts), structuredClone(data), env),
   };
   return simulation;

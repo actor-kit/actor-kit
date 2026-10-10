@@ -297,3 +297,18 @@ describe("examples/auction emits its domain events", () => {
     await replayJournal(AuctionContract, a.journal);
   });
 });
+
+describe("examples/auction publishes bids and results", () => {
+  it("to AUCTION_EVENTS: BidPlaced and AuctionClosed, not BidIgnored", async () => {
+    const { AuctionContract } = await import("../../examples/auction/src/auction");
+    const sim = simulate({ contracts: [AuctionContract], now: 1_000 });
+    const a = await sim.spawn(AuctionContract, "lot-1", { item: "lamp" });
+    a.send("ann", { type: "BID", amount: 10 });
+    a.send("bob", { type: "BID", amount: 5 });
+    a.send("house", { type: "CLOSE" }, { callerType: "service" });
+    expect(sim.published("AUCTION_EVENTS").map((m) => [m.name, m.idempotencyKey])).toEqual([
+      ["BidPlaced", "auction/lot-1/2:0"],
+      ["AuctionClosed", "auction/lot-1/4:0"],
+    ]);
+  });
+});

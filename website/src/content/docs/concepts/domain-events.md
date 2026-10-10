@@ -53,3 +53,33 @@ export const Auction = defineActor("auction", {
 ## Studio
 
 The timeline lists each entry's emitted events (payloads redacted like message payloads).
+
+## Publishing to a queue
+
+```typescript
+defineActor("auction", {
+  events: auction.events,
+  publish: { queue: "AUCTION_EVENTS", events: ["BidPlaced", "AuctionClosed"] },
+  // ...
+});
+```
+
+```toml
+# wrangler.toml
+[[queues.producers]]
+binding = "AUCTION_EVENTS"
+queue = "auction-events"
+```
+
+Each emitted event named in `publish.events` (a type error if it is not declared in `events`)
+gets an outbox row under its effect id, in the same transaction as the state, and is sent to the
+Queue binding after commit, with the outbox's retries, dead letters and redrive. Studio's Outbox
+panel lists the rows under the service `__publish`. The message body:
+
+```typescript
+{ actorType, actorId, seq, index, name, payload, at, causationId, correlationId, idempotencyKey }
+```
+
+`idempotencyKey` is `${actorType}/${actorId}/${seq}:${index}` and is stable across retries:
+consumers dedupe on it. `simulate()` delivers published messages at once and lists them with
+`sim.published("AUCTION_EVENTS")`.
