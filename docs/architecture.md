@@ -457,3 +457,18 @@ Identity model:
 - `withCallerIdentity()` scrubs any inbound identity headers first (prevents client spoofing)
 - CORS/Origin validation is handled at the Worker level (e.g., Hono `cors()` middleware), not inside the actor
 - JWT via `Sec-WebSocket-Protocol` is available as a fallback for external clients
+
+### Typed services (ADR-016)
+
+- `runtime/effect-info.ts`: a service's `effect` (`actorType`, `actorId`, `effectId`, `idempotencyKey`, `attempt`,
+  `signal`); forwards pass the same fields (no signal) as `send()`'s 4th argument, read by the target as
+  `ctx.delivery` and journaled as the `delivery` fact.
+- `runtime/service-error.ts` / `retry.ts`: `fail()`, typed errors (declared, `Timeout`, `Defect`), the retry rule
+  (`retry.while`, default: built-ins only), `settleTry`. The journal stores the parsed error; the outbox keeps its
+  `_tag` in `last_error_tag`.
+- `runtime/attempt.ts`: `runAttempt` (time limit, AbortSignal, late results discarded) and the per-actor in-flight
+  registry that restore and redrive abort.
+- `runtime/env.ts`: binding helpers and `parseActorEnv`; the DO parses its env once in the constructor and refuses
+  everything (500 / thrown RPC error) when it does not match. Handlers see the parsed env.
+- `runtime/determinism.ts`: `withDeterminismGuard`, passed by the harness as `StepFacts.guard` / `FoldOptions.guard`.
+

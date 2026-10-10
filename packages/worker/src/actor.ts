@@ -24,7 +24,13 @@ import { DOQB } from "workers-qb";
 import { z } from "zod";
 import type { LifecycleEvent } from "./define";
 import { hasActorDefShape } from "./runtime/actor-def";
-import { createInFlight, DEFAULT_TIMEOUT_MS, resolveTimeoutMs, runAttempt } from "./runtime/attempt";
+import {
+  type AttemptResult,
+  createInFlight,
+  DEFAULT_TIMEOUT_MS,
+  resolveTimeoutMs,
+  runAttempt,
+} from "./runtime/attempt";
 import { closeCodeToSend } from "./runtime/close-code";
 import { type ConnectRequest, parseConnectRequest } from "./runtime/connect-request";
 import {
@@ -944,16 +950,7 @@ export function actor(
 
       const attempt = startAttempt(sql, entry.id);
       this.pushStudioOutbox();
-      const controller = new AbortController();
-      this.inFlight.start("executions", entry.id, controller);
-      const fields = { actorType: _actorName, actorId: this.subscriberId(), effectId: entry.id, attempt };
-      const ms = serviceTimeouts.get(entry.service) ?? DEFAULT_TIMEOUT_MS;
-      const outcome = await runAttempt(
-        (signal) => tryService(serviceDef, entry.input, this.handlerEnv, effectInfo({ ...fields, signal })),
-        ms,
-        controller,
-      );
-      this.inFlight.finish("executions", entry.id, controller);
+      const outcome = await this.tryExecution(entry, serviceDef, attempt);
 
       // Aborted (a restore undid its transition, or a redrive replaced it): discard the result, settle nothing.
       if ("aborted" in outcome || !isRunning(sql, entry.id)) {
@@ -974,6 +971,25 @@ export function actor(
         this.endExecution(entry, attempt, outcome, settled, settle);
       }
       this.pushStudioOutbox();
+    }
+
+    /** Run one try of a service under its time limit, registered as in flight (ADR-016 §3). */
+    async tryExecution(
+      entry: { id: string; service: string; input: unknown },
+      serviceDef: { fn(input: unknown, env: unknown, effect: EffectInfo): unknown; errors?: ErrorsParser | undefined },
+      attempt: number,
+    ): Promise<AttemptResult> {
+      const controller = new AbortController();
+      this.inFlight.start("executions", entry.id, controller);
+      const fields = { actorType: _actorName, actorId: this.subscriberId(), effectId: entry.id, attempt };
+      const ms = serviceTimeouts.get(entry.service) ?? DEFAULT_TIMEOUT_MS;
+      const outcome = await runAttempt(
+        (signal) => tryService(serviceDef, entry.input, this.handlerEnv, effectInfo({ ...fields, signal })),
+        ms,
+        controller,
+      );
+      this.inFlight.finish("executions", entry.id, controller);
+      return outcome;
     }
 
     /** The try that ends a row: log a dead letter, then run onDone/onError with the final status. */

@@ -28,6 +28,21 @@ const { state } = t.send("increment", {});
 expect(state.count).toBe(2);
 ```
 
+## Typed env and determinism (ADR-016)
+
+```ts
+// Fakes typed against the contract's `env` schema, parsed like the runtime parses the Worker env
+const t = testActor(CheckoutContract, { env: { PAYMENTS: fakePayments, STRIPE_KEY: "pk_test" } });
+const sim = simulate({ env: { checkout: { PAYMENTS: fakePayments, STRIPE_KEY: "pk_test" } } });
+
+// A service failure as onError gets it: declared ({ _tag: "CardDeclined", ... }), Timeout or Defect
+sim.reject(effect, { _tag: "CardDeclined", reason: "stolen" });
+```
+
+While a handler runs under `testActor()`, `simulate()` or `replayJournal()`, `Date.now()`, `new Date()`,
+`performance.now()`, `Math.random()`, `crypto.randomUUID()` and `crypto.getRandomValues()` throw
+`NondeterminismError`: use `ctx.now()`, `ctx.random()` and `ctx.id()`.
+
 ## Docs
 
 Full documentation at [actorkit.dev](https://actorkit.dev).

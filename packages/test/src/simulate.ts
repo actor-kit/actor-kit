@@ -211,6 +211,15 @@ function errorOf(
   const builtIn = BuiltInErrorSchema.safeParse(error);
   if (builtIn.success) return builtIn.data;
   if (isBuiltInError(error)) throw new Error(`simulate: invalid ${error._tag} error: ${builtIn.error.message}`);
+  return declaredError(error, service, errors);
+}
+
+/** A declared rejection, parsed against the service's `errors`; one that does not parse is a test error. */
+function declaredError(
+  error: TaggedError,
+  service: string,
+  errors: ErrorsParser | undefined,
+): Readonly<Record<string, unknown>> {
   if (errors === undefined)
     throw new Error(`simulate: service "${service}" declares no errors to reject with "${error._tag}"`);
   const parsed = errors.safeParse(error);
