@@ -15,6 +15,9 @@ export { message } from "./message";
 export type { ActorRef, LocationHint } from "./ref";
 export { createRef } from "./ref";
 export { hasActorDefShape } from "./runtime/actor-def";
+// Timeouts and cancellation of tries (ADR-016 §3)
+export type { AttemptResult, InFlight } from "./runtime/attempt";
+export { createInFlight, DEFAULT_TIMEOUT_MS, resolveTimeoutMs, runAttempt } from "./runtime/attempt";
 // CDC
 export type { ChangeEntry } from "./runtime/cdc";
 export { createChangeEntry } from "./runtime/cdc";

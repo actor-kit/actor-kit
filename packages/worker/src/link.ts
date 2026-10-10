@@ -33,6 +33,8 @@ export interface LinkDef<TContract, TView, TState = unknown> {
   readonly onUnlink: ((state: TState, id: string | undefined, ctx: DeterministicContext) => TState) | undefined;
   /** Tries and backoff for messages forwarded through this link (same shape and defaults as services). */
   readonly retry: RetryOption;
+  /** Time limit per forward try, in ms (ADR-016 §3, default 30 000). */
+  readonly timeoutMs: number | undefined;
 }
 
 /** Link error codes. */
@@ -56,6 +58,8 @@ export function link<
     onUnlink?: (state: TState, id: string | undefined, ctx: DeterministicContext) => TState;
     /** Tries and backoff for ctx.forward() through this link. Default: 3 tries, 1s then 5s apart. */
     retry?: RetryOption;
+    /** Time limit per forward try, in ms. Default 30 000; a try that runs out is a Timeout (retried). */
+    timeoutMs?: number;
   },
 ): LinkDef<TContract, TView, TState> {
   return {
@@ -64,5 +68,6 @@ export function link<
     onError: handlers.onError,
     onUnlink: handlers.onUnlink,
     retry: handlers.retry,
+    timeoutMs: handlers.timeoutMs,
   };
 }

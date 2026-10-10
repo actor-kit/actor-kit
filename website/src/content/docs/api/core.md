@@ -59,7 +59,7 @@ For flat messages, wraps them so every role has access — guards handle authori
 | `views` | Yes | Per-role view definitions |
 | `version` | No | Number for migration |
 | `lifecycle` | No | Connection handlers (`connect`, `disconnect`) |
-| `services` | No | Async work run through the outbox: `{ fn(input, env, effect), errors?, retry?, onDone?, onError? }` per name. `effect` is `{ actorType, actorId, effectId, idempotencyKey, attempt, signal }`; `onError` gets a typed error. See [Side Effects](/concepts/side-effects/) |
+| `services` | No | Async work run through the outbox: `{ fn(input, env, effect), errors?, retry?, timeoutMs?, onDone?, onError? }` per name. `effect` is `{ actorType, actorId, effectId, idempotencyKey, attempt, signal }`; `onError` gets a typed error. See [Side Effects](/concepts/side-effects/) |
 | `observe` | No | `{ onTransition }` hook |
 | `migrate` | No | `(persisted, fromVersion) => newState` |
 | `serialize` | No | Custom state serializer |

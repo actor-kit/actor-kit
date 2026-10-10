@@ -89,6 +89,8 @@ export interface ServiceDef<TState, TDeclared = unknown> {
   /** The async work. `effect`: actor, effect id, idempotency key, try number, AbortSignal. */
   fn(input: unknown, env: unknown, effect: EffectInfo): Promise<unknown>;
   readonly retry?: ServiceRetry<ServiceErrorOf<TDeclared>>;
+  /** Time limit per try, in ms (default 30 000). On expiry `effect.signal` is aborted and the try is a Timeout. */
+  readonly timeoutMs?: number;
   onDone?(state: TState, result: unknown, input: unknown, ctx: ServiceCallbackContext): TState;
   /** Runs once, after the last try failed (or at once for an error `retry.while` does not retry). */
   onError?(state: TState, error: ServiceErrorOf<TDeclared>, input: unknown, ctx: ServiceCallbackContext): TState;

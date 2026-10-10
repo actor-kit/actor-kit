@@ -158,3 +158,29 @@ describe("simulate().reject with typed errors", () => {
     expect(actor.state.errors).toEqual([{ _tag: "Defect", message: '"X" parsed to an untagged value' }]);
   });
 });
+
+describe("simulate().reject for a service the actor does not declare", () => {
+  it("a string is still a Defect, with or without a services block", async () => {
+    for (const services of [{}, undefined]) {
+      const Ghost = defineActor("ghost", {
+        input: z.object({}),
+        init: (): PayState => ({ errors: [] }),
+        roles: { any: () => true },
+        ...(services === undefined ? {} : { services }),
+        messages: {
+          GO: message(z.object({}), (st: PayState, _p, ctx) => {
+            ctx.execute("missing", {});
+            return st;
+          }),
+        },
+        views: { any: view.shared(schema({ n: uint32 }), (st: PayState) => ({ n: st.errors.length })) },
+      });
+      const sim = simulate();
+      const actor = await sim.spawn(Ghost, "g", {});
+      actor.send("u", { type: "GO" });
+      sim.reject("2:0", "nobody home");
+      expect(sim.pendingEffects()).toEqual([]);
+      expect(actor.state.errors).toEqual([]);
+    }
+  });
+});

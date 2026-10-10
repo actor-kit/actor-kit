@@ -190,7 +190,7 @@ function isPlainRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-const BuiltInErrorSchema = z.discriminatedUnion("_tag", [
+const BuiltInErrorSchema = z.union([
   z.object({ _tag: z.literal("Timeout"), ms: z.number() }),
   z.object({ _tag: z.literal("Defect"), message: z.string() }),
 ]);

@@ -11,7 +11,7 @@ import { replayJournal } from "@actor-kit/test";
 import { readJournal } from "@actor-kit/worker/testing";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
-import { TellerContract } from "./src/typed-services-actors";
+import { abortedTries, TellerContract } from "./src/typed-services-actors";
 
 let n = 0;
 const unique = (prefix: string) => `${prefix}-${Date.now()}-${++n}`;
@@ -253,5 +253,50 @@ describe("typed service errors (ADR-016 §2)", () => {
     expect(state.errors).toEqual([{ _tag: "CardDeclined", reason: "stolen card" }]);
     const journal = await runInDurableObject(stub, (_i, s) => readJournal(s.storage.sql));
     expect(journal.events.slice(-2).map((e) => e.causeType)).toEqual(["restore", "service.onError"]);
+  });
+});
+
+describe("timeouts and cancellation (ADR-016 §3)", () => {
+  it("a try that runs out of time is aborted and fails as a Timeout; its late result is discarded", async () => {
+    const { name, stub } = await teller();
+    await stub.send("u", "user", { type: "RUN", service: "SLOW" });
+    const seq = await lastMessageSeq(stub);
+    const { state } = await waitFor(
+      async () => TellerInspect.parse(await stub.__inspect()),
+      (i) => i.state.errors.length === 1,
+    );
+    expect(state).toEqual({ echoes: [], errors: [{ _tag: "Timeout", ms: 50 }] });
+    expect(await outboxRow(stub)).toMatchObject({ status: "failed", attempts: 1, lastErrorTag: "Timeout" });
+    const key = `teller/${name}/${seq}:0`;
+    await waitFor(
+      async () => abortedTries.get(key),
+      (reason) => reason !== undefined,
+    );
+    expect(abortedTries.get(key)).toBe('{"_tag":"Timeout","ms":50}');
+    await new Promise((r) => setTimeout(r, 50));
+    expect(TellerInspect.parse(await stub.__inspect()).state.echoes).toEqual([]);
+  });
+
+  it("restore aborts a try of an undone effect; its late result is discarded", async () => {
+    const { name, stub } = await teller();
+    await stub.send("u", "user", { type: "RUN", service: "HANG" });
+    const seq = await lastMessageSeq(stub);
+    await waitFor(
+      () => outboxRow(stub),
+      (row) => row?.status === "running",
+    );
+    expect(await stub.__restore({ toSeq: seq - 1 })).toEqual({ ok: true });
+    const key = `teller/${name}/${seq}:0`;
+    await waitFor(
+      async () => abortedTries.get(key),
+      (reason) => reason !== undefined,
+    );
+    expect(abortedTries.get(key)).toContain(`restored to seq ${seq - 1}`);
+    await new Promise((r) => setTimeout(r, 50));
+    expect(TellerInspect.parse(await stub.__inspect()).state).toEqual({ echoes: [], errors: [] });
+    expect(await outboxRow(stub)).toMatchObject({
+      status: "failed",
+      lastError: `cancelled: the actor was restored to seq ${seq - 1}`,
+    });
   });
 });

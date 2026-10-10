@@ -13,6 +13,8 @@
  * the same typed value.
  */
 
+import { z } from "zod";
+
 /** A value with a `_tag` naming the kind of failure. */
 export type TaggedError = {
   readonly _tag: string;
@@ -36,12 +38,19 @@ export type ServiceError<TDeclared = never> = TDeclared | BuiltInError;
 
 const FAILURE = Symbol.for("actor-kit.service-failure");
 
+/** The built-in errors, as a schema (a plain union: it cannot throw while the module loads). */
+const BuiltInErrorSchema = z.union([
+  z.object({ _tag: z.literal("Timeout"), ms: z.number() }),
+  z.object({ _tag: z.literal("Defect"), message: z.string() }),
+]);
+
 /** What `fail(error)` returns: throw it from a service's `fn`. */
 export class ServiceFailure<TError extends TaggedError = TaggedError> extends Error {
   override name = "ServiceFailure";
-  readonly [FAILURE] = true;
+  readonly [FAILURE]: TError;
   constructor(readonly error: TError) {
     super(error._tag);
+    this[FAILURE] = error;
   }
 }
 
@@ -56,8 +65,8 @@ export function fail<const TError extends TaggedError>(error: TError): ServiceFa
 
 /** Recognises a fail() value, also one made by another copy of this module (bundled twice). */
 function failureOf(thrown: unknown): TaggedError | null {
-  if (typeof thrown !== "object" || thrown === null || !(FAILURE in thrown)) return null;
-  const error: unknown = "error" in thrown ? thrown.error : undefined;
+  if (!(thrown instanceof Error) || !(FAILURE in thrown)) return null;
+  const error: unknown = thrown[FAILURE];
   return isTaggedError(error) ? error : null;
 }
 
@@ -95,9 +104,9 @@ export function classifyFailure(thrown: unknown, errors: ErrorsParser | undefine
 
 /** The outbox's "Last error" text: a Defect's message, a Timeout's limit, a declared error as JSON. */
 export function describeServiceError(error: TaggedError): string {
-  if (error._tag === "Defect" && "message" in error && typeof error.message === "string") return error.message;
-  if (error._tag === "Timeout" && "ms" in error && typeof error.ms === "number") return `timed out after ${error.ms}ms`;
-  return JSON.stringify(error);
+  const builtIn = BuiltInErrorSchema.safeParse(error);
+  if (!builtIn.success) return JSON.stringify(error);
+  return builtIn.data._tag === "Defect" ? builtIn.data.message : `timed out after ${builtIn.data.ms}ms`;
 }
 
 /** A service error read back from the journal (any object): described like describeServiceError. */

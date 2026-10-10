@@ -15,6 +15,8 @@ import {
   describeServiceError,
   fail,
   isBuiltInError,
+  isTaggedError,
+  linkRetryRules,
   resolveRetryPolicy,
   resolveRetryRule,
   settleAttempt,
@@ -100,14 +102,14 @@ describe("built-in errors", () => {
 });
 
 describe("the default retry rule", () => {
-  const rule = resolveRetryRule(undefined);
-
   it("retries the built-ins", () => {
+    const rule = resolveRetryRule(undefined);
     expect(rule({ _tag: "Defect", message: "x" })).toBe(true);
     expect(rule(timeoutError(10))).toBe(true);
   });
 
   it("does not retry a declared error: it is a domain answer", () => {
+    const rule = resolveRetryRule(undefined);
     expect(rule({ _tag: "CardDeclined", reason: "x" })).toBe(false);
     expect(resolveRetryRule({ attempts: 5 })({ _tag: "RateLimited" })).toBe(false);
   });
@@ -129,7 +131,7 @@ describe("retry.while", () => {
   });
 
   it("must be a function, and does not change the backoff policy", () => {
-    expect(() => resolveRetryPolicy({ while: true })).toThrow("Invalid service retry option");
+    expect(() => resolveRetryPolicy({ while: true })).toThrow(/Invalid service retry option.*expected a function/s);
     expect(() => resolveRetryRule({ while: "RateLimited" })).toThrow("Invalid service retry option");
     expect(resolveRetryPolicy({ attempts: 2, while: () => true })).toEqual({ ...DEFAULT_RETRY_POLICY, attempts: 2 });
   });
@@ -224,5 +226,36 @@ describe("describeRecordedError", () => {
   it("a Defect or Timeout without its field is shown as JSON", () => {
     expect(describeServiceError({ _tag: "Defect" })).toBe('{"_tag":"Defect"}');
     expect(describeServiceError({ _tag: "Timeout" })).toBe('{"_tag":"Timeout"}');
+  });
+});
+
+describe("more edges (mutation)", () => {
+  it("isTaggedError needs an object with a string _tag", () => {
+    expect(isTaggedError({ _tag: "X" })).toBe(true);
+    expect(isTaggedError(null)).toBe(false);
+    expect(isTaggedError("X")).toBe(false);
+    expect(isTaggedError({})).toBe(false);
+    expect(isTaggedError({ _tag: 5 })).toBe(false);
+  });
+
+  it("an Error that merely has an `error` field is not a fail()", () => {
+    const lookalike = Object.assign(new Error("lookalike"), { error: { _tag: "CardDeclined", reason: "x" } });
+    expect(classifyFailure(lookalike, Errors)).toEqual({ _tag: "Defect", message: "lookalike" });
+  });
+
+  it("only a well-formed built-in is described as one", () => {
+    expect(describeServiceError({ _tag: "CardDeclined", message: "m" })).toBe('{"_tag":"CardDeclined","message":"m"}');
+    expect(describeServiceError({ _tag: "Other", ms: 5 })).toBe('{"_tag":"Other","ms":5}');
+    expect(describeServiceError({ _tag: "Timeout", ms: "5" })).toBe('{"_tag":"Timeout","ms":"5"}');
+  });
+
+  it("linkRetryRules: one rule per declared link, named in errors", () => {
+    const rules = linkRetryRules({ room: { retry: { while: () => true } }, plain: {} });
+    expect([...rules.keys()]).toEqual(["room", "plain"]);
+    expect(rules.get("room")?.({ _tag: "CardDeclined" })).toBe(true);
+    expect(rules.get("plain")?.({ _tag: "CardDeclined" })).toBe(false);
+    expect(rules.get("plain")?.({ _tag: "Timeout", ms: 1 })).toBe(true);
+    expect(linkRetryRules(undefined).size).toBe(0);
+    expect(() => linkRetryRules({ room: { retry: { while: 1 } } })).toThrow('Invalid link "room" retry option');
   });
 });

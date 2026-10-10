@@ -47,6 +47,9 @@ const PayErrors = z.discriminatedUnion("_tag", [
   z.object({ _tag: z.literal("RateLimited"), retryAfterMs: z.number() }),
 ]);
 
+/** Why each SLOW / HANG try's signal was aborted, by idempotency key (one isolate in the test pool). */
+export const abortedTries = new Map<string, string>();
+
 const fast = (attempts: number) => ({ attempts, backoff: { baseMs: 1, factor: 1, jitter: 0 } });
 const recordError = (s: TellerState, error: unknown): TellerState => ({ ...s, errors: [...s.errors, error] });
 const recordEcho = (s: TellerState, result: unknown): TellerState => ({ ...s, echoes: [...s.echoes, result] });
@@ -83,6 +86,27 @@ const TellerContract = defineActor("teller", {
       fn: async (): Promise<never> => {
         throw fail({ _tag: "Stolen" });
       },
+      onError: recordError,
+    },
+    SLOW: {
+      timeoutMs: 50,
+      retry: fast(1),
+      fn: async (_input: unknown, _env: unknown, effect: EffectInfo) => {
+        await new Promise((resolve) => effect.signal.addEventListener("abort", resolve));
+        abortedTries.set(effect.idempotencyKey, String(JSON.stringify(effect.signal.reason)));
+        return "late";
+      },
+      onDone: recordEcho,
+      onError: recordError,
+    },
+    HANG: {
+      retry: fast(1),
+      fn: async (_input: unknown, _env: unknown, effect: EffectInfo) => {
+        await new Promise((resolve) => effect.signal.addEventListener("abort", resolve));
+        abortedTries.set(effect.idempotencyKey, String(effect.signal.reason));
+        return "late";
+      },
+      onDone: recordEcho,
       onError: recordError,
     },
     LIMITED: {

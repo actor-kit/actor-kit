@@ -57,6 +57,7 @@ A service has these parts:
 - **`onDone`** — optional. Pure state transition that receives `(state, result, input)`. The result type is inferred from `fn`'s return type.
 - **`errors`** — optional. The service's declared failures, a `z.discriminatedUnion("_tag", [...])`. See [Typed errors](#typed-errors).
 - **`onError`** — optional. Pure state transition that receives `(state, error, input)`, where `error` is a typed, tagged error: one of the declared `errors`, `{ _tag: "Timeout", ms }` or `{ _tag: "Defect", message }`. It runs once, when the row fails for good.
+- **`timeoutMs`** — optional. Time limit per try, default **30 000 ms**. When it runs out the runtime aborts `effect.signal` and the try fails as `{ _tag: "Timeout", ms }` (retried by default). Pass `effect.signal` to `fetch` and SDKs so the work actually stops. A long job must set a larger `timeoutMs`.
 - **`retry`** — optional. `{ attempts, backoff: { baseMs, factor, maxMs, jitter }, while }`. Default: 3 tries, 1s then 5s apart, ±20% jitter; only `Timeout` and `Defect` are retried. `{ attempts: 1 }` turns retries off.
 
 All three are declared at module level — no closures, fully serializable, crash-safe. The `input` argument is the original value passed to `execute()`, available in all three functions.
@@ -95,6 +96,16 @@ services: {
 - **Default retry rule: the built-ins are retried, declared errors are not.** A declared error is a domain answer, not a transient fault: a declined card fails at once and `onError` runs. `retry.while(error)` overrides the rule per error (above, a rate limit is retried too).
 - The journal stores the parsed error, so replay and restore deliver the same typed value to `onError`.
 - Studio's Outbox shows the error's `_tag` in the Last error column. A declared error's fields are application values, redacted by `studio.redact` like payloads.
+
+## Timeouts and cancellation
+
+Every try runs under its service's `timeoutMs` (default 30 seconds), and every forward under its link's (`link(Contract, { onUpdate, timeoutMs })`, same default). The try gets an `AbortSignal` as `effect.signal`; it is aborted when:
+
+- the try runs out of time (the try then fails as `{ _tag: "Timeout", ms }`, which is retried by default);
+- a restore undoes the transition that declared the effect (the row becomes a dead letter);
+- an operator redrives the effect while an earlier try of it is still running.
+
+A result that arrives after its try was aborted is discarded, never applied. A forward's RPC cannot be cancelled mid-flight, but its late answer is discarded the same way. The Workers runtime gives a Durable Object no shutdown hook: tries in flight when an isolate is evicted die with it and run again on wake (delivery is at least once).
 
 ## Fire-and-Forget
 

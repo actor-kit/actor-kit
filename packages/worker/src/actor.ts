@@ -24,6 +24,7 @@ import { DOQB } from "workers-qb";
 import { z } from "zod";
 import type { LifecycleEvent } from "./define";
 import { hasActorDefShape } from "./runtime/actor-def";
+import { createInFlight, DEFAULT_TIMEOUT_MS, resolveTimeoutMs, runAttempt } from "./runtime/attempt";
 import { closeCodeToSend } from "./runtime/close-code";
 import { type ConnectRequest, parseConnectRequest } from "./runtime/connect-request";
 import {
@@ -220,6 +221,8 @@ interface ActorDef {
        * idempotency key (`${actorType}/${actorId}/${effectId}`), the try number and the try's AbortSignal.
        */
       fn(input: unknown, env: unknown, effect: EffectInfo): Promise<unknown>;
+      /** Time limit per try in ms (ADR-016 §3). Default 30 000. */
+      timeoutMs?: number;
       /** Declared failures (ADR-016 §2): a `z.discriminatedUnion("_tag", ...)` that `fail(...)` values parse against. */
       errors?: ErrorsParser;
       /** Tries, backoff and `while` (ADR-015 D1, ADR-016 §2). Default: 3 tries, 1s then 5s apart, ±20% jitter. */
@@ -245,6 +248,8 @@ interface ActorDef {
       onUnlink?: ((state: unknown, id: string | undefined, ctx: DeterministicContext) => unknown) | undefined;
       /** Tries and backoff for forwards through this link (ADR-015 D1). */
       retry?: unknown;
+      /** Time limit per forward try in ms (ADR-016 §3). Default 30 000. */
+      timeoutMs?: number | undefined;
     }
   >;
   serialize?(state: unknown): unknown;
@@ -440,6 +445,13 @@ export function actor(
   );
   const forwardPolicies = linkRetryPolicies(def.links);
   const forwardRules = linkRetryRules(def.links);
+  // Time limits per try (ADR-016 §3), validated at definition time.
+  const serviceTimeouts = new Map<string, number>(
+    Object.entries(def.services ?? {}).map(([name, s]) => [name, resolveTimeoutMs(s.timeoutMs, `service "${name}"`)]),
+  );
+  const forwardTimeouts = new Map<string, number>(
+    Object.entries(def.links ?? {}).map(([name, l]) => [name, resolveTimeoutMs(l.timeoutMs, `link "${name}"`)]),
+  );
 
   const DOClass = class ActorInstance extends DurableObject {
     state: unknown = undefined;
@@ -455,6 +467,7 @@ export function actor(
     connectionChecksums = new Map<WebSocket, string>(); // last checksum sent per connection
     supportsBinary = new Map<WebSocket, boolean>(); // per-connection binary capability
     drainingExecutions = false; // Prevents concurrent execution drains
+    inFlight = createInFlight(); // Tries running now, so redrive and restore can abort them (ADR-016 §3)
     timersChanged = false; // A commit scheduled or cancelled timers: push them to Studio after it
     journalAhead = false; // The snapshot lags the journal (same code version): rebuild it on wake
     rebuildFrom: number | null = null; // Stored version to rebuild from by replay (ADR-015 D5), on wake
@@ -908,17 +921,19 @@ export function actor(
 
       const attempt = startAttempt(sql, entry.id);
       this.pushStudioOutbox();
-      const effect = effectInfo({
-        actorType: _actorName,
-        actorId: this.subscriberId(),
-        effectId: entry.id,
-        attempt,
-        signal: new AbortController().signal,
-      });
-      const outcome = await tryService(serviceDef, entry.input, this.env, effect);
+      const controller = new AbortController();
+      this.inFlight.start("executions", entry.id, controller);
+      const fields = { actorType: _actorName, actorId: this.subscriberId(), effectId: entry.id, attempt };
+      const ms = serviceTimeouts.get(entry.service) ?? DEFAULT_TIMEOUT_MS;
+      const outcome = await runAttempt(
+        (signal) => tryService(serviceDef, entry.input, this.env, effectInfo({ ...fields, signal })),
+        ms,
+        controller,
+      );
+      this.inFlight.finish("executions", entry.id, controller);
 
-      // A restore may have cancelled this try while it ran: its transition is undone, settle nothing.
-      if (!isRunning(sql, entry.id)) {
+      // Aborted (a restore undid its transition, or a redrive replaced it): discard the result, settle nothing.
+      if ("aborted" in outcome || !isRunning(sql, entry.id)) {
         this.pushStudioOutbox();
         return;
       }
@@ -1119,10 +1134,18 @@ export function actor(
         effectId: entry.id,
         attempt,
       });
-      const outcome = await trySend(target.send, entry.caller, callerType, target.message, delivery);
+      const controller = new AbortController();
+      this.inFlight.start("forwards", entry.id, controller);
+      const ms = forwardTimeouts.get(entry.linkName) ?? DEFAULT_TIMEOUT_MS;
+      const outcome = await runAttempt(
+        () => trySend(target.send, entry.caller, callerType, target.message, delivery),
+        ms,
+        controller,
+      );
+      this.inFlight.finish("forwards", entry.id, controller);
 
-      // A restore may have cancelled this try while it ran: its transition is undone, settle nothing.
-      if (isRunning(sql, entry.id, "forwards")) this.settleForward(entry, attempt, outcome);
+      // Aborted, or a restore cancelled this try while it ran: its transition is undone, settle nothing.
+      if (!("aborted" in outcome) && isRunning(sql, entry.id, "forwards")) this.settleForward(entry, attempt, outcome);
       this.pushStudioOutbox();
     }
 
@@ -2360,6 +2383,10 @@ export function actor(
       if (!redriveExecution(sql, effectId) && !redriveExecution(sql, effectId, "forwards")) {
         return Promise.resolve({ ok: false, error: `Effect ${effectId} is not a failed execution` });
       }
+      // A try of the dead letter still in flight (a restore cancelled it while it ran) is aborted: its
+      // result must not settle the redriven row.
+      this.inFlight.abort("executions", effectId, "redriven");
+      this.inFlight.abort("forwards", effectId, "redriven");
       this.pushStudioOutbox();
       void this.drainExecutions();
       void this.drainForwards();
@@ -2424,6 +2451,7 @@ export function actor(
           Date.now(),
         );
         cancelUndoneEffects(sql, toSeq, `cancelled: the actor was restored to seq ${toSeq}`);
+        this.inFlight.abortAfter(toSeq, `cancelled: the actor was restored to seq ${toSeq}`);
         this.timersChanged = true;
       });
       for (const recorded of plan.redeliver) this.redeliver(recorded);
