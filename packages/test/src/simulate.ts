@@ -47,7 +47,7 @@ import {
 import { z } from "zod";
 import type { ContractInput, ContractState } from "./contract-types";
 import { nextRandom, uuidFrom } from "./seeded";
-import { type SimDef, toSimDef } from "./sim-def";
+import { type SimDef, simEnv, toSimDef } from "./sim-def";
 
 // --- Public types ---
 
@@ -151,6 +151,10 @@ export interface SimulateOptions {
   readonly seed?: number;
   /** Start time of the virtual clock (default 0). */
   readonly now?: number;
+  /**
+   * The env handlers see. For a contract that declares an `env` schema (ADR-016 §4): fakes keyed by contract
+   * name, `{ checkout: { PAYMENTS: fakePayments } }`, parsed against its schema. Others get this value as is.
+   */
   readonly env?: unknown;
 }
 
@@ -237,6 +241,13 @@ function createSimulation(
     return next.value;
   };
   const sources = { now: () => data.clock, id: () => uuidFrom(random), random };
+
+  const envs = new Map<string, unknown>();
+  /** The env an actor type's handlers see (its parsed fakes, ADR-016 §4), parsed once per type. */
+  function envFor(type: string): unknown {
+    if (!envs.has(type)) envs.set(type, simEnv(defOf(type), type, env));
+    return envs.get(type);
+  }
 
   function defOf(type: string): SimDef {
     const entry = contracts.get(type);
@@ -347,7 +358,7 @@ function createSimulation(
 
   function receive(subscriber: ActorData, link: string, sourceId: string, view: Record<string, unknown>): void {
     const cause: StepCause = { type: "link.onUpdate", link, sourceId, view };
-    const result = step(defOf(subscriber.type), subscriber.state, cause, factsFor(subscriber), env);
+    const result = step(defOf(subscriber.type), subscriber.state, cause, factsFor(subscriber), envFor(subscriber.type));
     if (result.state !== subscriber.state) commit(subscriber, result, null);
   }
 
@@ -431,7 +442,11 @@ function createSimulation(
     const callerType = options.callerType ?? "user";
     const role = resolveRole(def.roles, actor.state, caller, { callerType });
     if (role === null) return { ok: false, error: "No role matched" };
-    const admission = admitMessage(def.messages ?? {}, role, actor.state, message, { caller, callerType, env });
+    const admission = admitMessage(def.messages ?? {}, role, actor.state, message, {
+      caller,
+      callerType,
+      env: envFor(actor.type),
+    });
     if (!admission.ok) return admission;
     const cause: StepCause = {
       type: "message",
@@ -442,7 +457,7 @@ function createSimulation(
       role,
       delivery,
     };
-    const result = step(def, actor.state, cause, factsFor(actor), env);
+    const result = step(def, actor.state, cause, factsFor(actor), envFor(actor.type));
     def.observe?.onTransition?.(actor.state, result.handlerState, message, { caller, role });
     commit(actor, result, { caller, callerType });
     return { ok: true };
@@ -458,7 +473,10 @@ function createSimulation(
     const lifecycle = (type: "lifecycle.connect" | "lifecycle.disconnect", connectionRole: string | null) => {
       const callerConnections = actor.connections[slot] ?? 0;
       const cause: StepCause = { type, caller, callerType, callerConnections, role: connectionRole };
-      commitIfChanged(actor, step(def, actor.state, cause, factsFor(actor), env), { caller, callerType });
+      commitIfChanged(actor, step(def, actor.state, cause, factsFor(actor), envFor(actor.type)), {
+        caller,
+        callerType,
+      });
     };
     actor.connections[slot] = (actor.connections[slot] ?? 0) + 1;
     lifecycle("lifecycle.connect", role);
@@ -493,7 +511,7 @@ function createSimulation(
     const settled = cause(pending);
     data.pending = data.pending.filter((p) => p !== pending);
     const actor = record(pending.actor);
-    const result = step(defOf(actor.type), actor.state, settled, factsFor(actor), env);
+    const result = step(defOf(actor.type), actor.state, settled, factsFor(actor), envFor(actor.type));
     if (result.state !== actor.state) commit(actor, result, null);
   }
 
@@ -513,7 +531,7 @@ function createSimulation(
     actor.timers = actor.timers.filter((t) => t !== timer);
     const { id, name, key, payload, fireAt } = timer;
     const cause: StepCause = { type: "timer", id, name, key, payload, fireAt, lateBy: data.clock - fireAt };
-    commit(actor, step(defOf(actor.type), actor.state, cause, factsFor(actor), env), {
+    commit(actor, step(defOf(actor.type), actor.state, cause, factsFor(actor), envFor(actor.type)), {
       caller: `timer:${name}`,
       callerType: "service",
     });
@@ -608,7 +626,7 @@ function createSimulation(
         caller: options.caller ?? "system",
         callerType: options.callerType ?? "service",
       };
-      const init = await stepInit(def, caller, facts, { env, link });
+      const init = await stepInit(def, caller, facts, { env: envFor(contract.name), link });
       const actor: ActorData = {
         ...address,
         state: init.state,

@@ -300,3 +300,43 @@ describe("timeouts and cancellation (ADR-016 §3)", () => {
     });
   });
 });
+
+describe("typed env (ADR-016 §4)", () => {
+  it("services and onDone see the parsed env: the declared bindings only", async () => {
+    const name = unique("env-typed");
+    const stub = env.ENV_TYPED.get(env.ENV_TYPED.idFromName(name));
+    await stub.spawn({ actorId: name, caller: "svc", callerType: "service", input: {} });
+    await stub.send("u", "user", { type: "KEYS" });
+    const { state } = await waitFor(
+      async () => z.object({ state: z.object({ keys: z.array(z.string()) }) }).parse(await stub.__inspect()),
+      (i) => i.state.keys.length > 0,
+    );
+    expect(state.keys).toEqual(["STUDIO_CALLER_HASH_KEY", "TELLER", "onDone:2"]);
+  });
+
+  it("an env that does not match refuses every request, naming each bad binding", async () => {
+    const stub = env.ENV_MISBOUND.get(env.ENV_MISBOUND.idFromName(unique("env-misbound")));
+    const response = await stub.fetch("https://actor/ws");
+    expect(response.status).toBe(500);
+    const text = await response.text();
+    expect(text).toContain('Actor "env-misbound" cannot run: its env does not match its schema.');
+    expect(text).toContain("- SESSIONS: expected a KV namespace binding");
+    expect(text).toContain("- STRIPE_KEY:");
+    expect(text).not.toContain("TELLER");
+    const refused = await rpcError(() => stub.send("u", "user", { type: "PING" }));
+    expect(refused).toContain("- SESSIONS: expected a KV namespace binding");
+    expect(await rpcError(() => stub.spawn({ caller: "svc", callerType: "service", input: {} }))).toContain(
+      "cannot run",
+    );
+    expect(await rpcError(() => stub.getSnapshot("u", "user"))).toContain("cannot run");
+  });
+});
+
+async function rpcError(call: () => Promise<unknown>): Promise<string> {
+  try {
+    await call();
+    return "";
+  } catch (error) {
+    return error instanceof Error ? error.message : String(error);
+  }
+}

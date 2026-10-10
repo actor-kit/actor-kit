@@ -56,6 +56,8 @@ Throws if:
 - Zod validation fails
 - Guard returns false
 
+`testActor(contract, { env })` takes fakes typed against the contract's `env` schema and parses them like the runtime parses the Worker env (a mismatch throws, naming each binding); handlers see the parsed env.
+
 Options: `{ callerType: "service" }` to override the default "user"; `{ delivery }` to send the message as a forward would (`ctx.delivery`, ADR-016), e.g. to test that a handler ignores a retried delivery.
 
 ### `t.view(state, caller, opts?)`
@@ -119,7 +121,8 @@ await replayJournal(AuctionContract, room.journal);           // every simulated
 ```
 
 - **Options**: `contracts` (reachable by name for forwards and init links; spawned contracts are added), `seed`
-  (for `ctx.id()` and `ctx.random()`, default 1), `now` (start of the virtual clock, default 0), `env`.
+  (for `ctx.id()` and `ctx.random()`, default 1), `now` (start of the virtual clock, default 0), `env` (for a contract with an `env` schema: fakes keyed by contract
+  name, `{ checkout: { PAYMENTS: fake } }`, parsed against it when the actor is spawned; other contracts get `env` as is).
 - **`spawn(contract, id, input, { caller, callerType }?)`**: parses the input and runs `init` (async). Init links
   read the linked actor's view as a service caller.
 - **`actor(contract, id)`**: a handle with `state`, `journal`, `timers`, `links`, `send`, `role`, `view` and

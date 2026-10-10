@@ -62,6 +62,25 @@ A service has these parts:
 
 All three are declared at module level — no closures, fully serializable, crash-safe. The `input` argument is the original value passed to `execute()`, available in all three functions.
 
+## Typed env
+
+Declare the bindings an actor uses as a Zod object; the runtime parses the Worker env against it once, before the actor serves anything:
+
+```typescript
+import { d1, defineActor, durableObject, kv, queue, r2, service } from "@actor-kit/worker";
+
+defineActor("checkout", {
+  env: z.object({ PAYMENTS: service<PaymentsApi>(), SESSIONS: kv(), STRIPE_PUBLISHABLE_KEY: z.string().min(1) }),
+  // ...
+});
+```
+
+- `service<T>()`, `durableObject<T>()`, `queue<T>()`, `kv()`, `r2()` and `d1()` check a binding's runtime shape (its methods) and type it; plain Zod schemas check vars and secrets.
+- If the env does not parse, the actor refuses every request with a **500 naming each missing or wrong binding** (RPC calls throw the same message) and logs one structured line (`actor_kit.env.invalid`, binding names and reasons, never values). It never runs a handler against an unchecked env.
+- Services' `fn(input, env, effect)`, `onDone`/`onError`'s `ctx.env` and lifecycle handlers' `ctx.env` are typed `z.infer<typeof env>` by `defineActor`, and see the parsed env (the declared bindings only). Message and timer handlers are written with `message()` / `timer()`, whose types TypeScript fixes before `defineActor` sees them: annotate `ctx: MessageContext<z.infer<typeof Env>>` there.
+- Without `env`, env stays `unknown` and handlers get the Worker env as it is.
+- Tests take fakes typed against the schema and parse them the same way: `testActor(Contract, { env: fakes })`, `simulate({ env: { checkout: fakes } })` (keyed by contract name).
+
 ## Typed errors
 
 A service fails with a value, not a string. Declare its failures as a tagged union and throw `fail(...)`:

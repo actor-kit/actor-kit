@@ -12,7 +12,16 @@
 
 import type { DeliveryInfo } from "@actor-kit/core";
 import { schema, uint32, view } from "@actor-kit/core";
-import { createActorClass, defineActor, type EffectInfo, fail, link, message } from "@actor-kit/worker";
+import {
+  createActorClass,
+  defineActor,
+  durableObject,
+  type EffectInfo,
+  fail,
+  kv,
+  link,
+  message,
+} from "@actor-kit/worker";
 import { z } from "zod";
 
 type TillState = { received: Array<{ text: string; delivery: DeliveryInfo | null }> };
@@ -137,3 +146,46 @@ const TellerContract = defineActor("teller", {
 export { TellerContract };
 export const Teller = createActorClass(TellerContract);
 export const Till = createActorClass(TillContract);
+
+// --- §4 typed env ---
+
+type EnvState = { keys: string[] };
+
+const envView = { any: view.shared(schema({ n: uint32 }), (s: EnvState) => ({ n: s.keys.length })) };
+
+/** Its env schema matches the test worker: handlers and services see only the declared bindings. */
+const Typed = defineActor("env-typed", {
+  input: z.object({}),
+  init: (): EnvState => ({ keys: [] }),
+  env: z.object({ STUDIO_CALLER_HASH_KEY: z.string().min(1), TELLER: durableObject() }),
+  roles: { any: () => true },
+  services: {
+    KEYS: {
+      fn: async (_input: unknown, env: Record<string, unknown>) => Object.keys(env).sort(),
+      onDone: (_s: EnvState, result: unknown, _input: unknown, ctx: { env: Record<string, unknown> }) => ({
+        keys: [...z.array(z.string()).parse(result), `onDone:${Object.keys(ctx.env).length}`],
+      }),
+    },
+  },
+  messages: {
+    KEYS: message(z.object({}), (s: EnvState, _p, ctx) => {
+      ctx.execute("KEYS", {});
+      return s;
+    }),
+  },
+  views: envView,
+  studio: { enabled: true },
+});
+
+/** Its env schema needs bindings the test worker does not have: every request is refused. */
+const Misbound = defineActor("env-misbound", {
+  input: z.object({}),
+  init: (): EnvState => ({ keys: [] }),
+  env: z.object({ SESSIONS: kv(), STRIPE_KEY: z.string().min(1), TELLER: durableObject() }),
+  roles: { any: () => true },
+  messages: { PING: message(z.object({}), (s: EnvState) => s) },
+  views: envView,
+});
+
+export const EnvTyped = createActorClass(Typed);
+export const EnvMisbound = createActorClass(Misbound);

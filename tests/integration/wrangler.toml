@@ -204,3 +204,15 @@ class_name = "Till"
 [[migrations]]
 tag = "v17"
 new_sqlite_classes = ["Teller", "Till"]
+
+[[durable_objects.bindings]]
+name = "ENV_TYPED"
+class_name = "EnvTyped"
+
+[[durable_objects.bindings]]
+name = "ENV_MISBOUND"
+class_name = "EnvMisbound"
+
+[[migrations]]
+tag = "v18"
+new_sqlite_classes = ["EnvTyped", "EnvMisbound"]

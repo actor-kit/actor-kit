@@ -31,6 +31,19 @@ export { formatEffectId, parseEffectId } from "./runtime/effect-id";
 // Effect metadata: idempotency keys and forward delivery (ADR-016 §1)
 export type { DeliveryInfo, EffectInfo } from "./runtime/effect-info";
 export { DeliveryInfoSchema, deliveryInfo, effectInfo, idempotencyKey } from "./runtime/effect-info";
+// Typed env (ADR-016 §4)
+export type { EnvIssue, EnvParser, ParsedEnv } from "./runtime/env";
+export {
+  d1,
+  durableObject,
+  envErrorMessage,
+  envInvalidEvent,
+  kv,
+  parseActorEnv,
+  queue,
+  r2,
+  service,
+} from "./runtime/env";
 export { getTokenFromRequest } from "./runtime/get-token";
 // Actor journal (ADR-013): facts, events, replay
 export type {

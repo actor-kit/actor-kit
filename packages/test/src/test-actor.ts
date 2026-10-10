@@ -19,8 +19,8 @@ import type {
   TimelineEntry,
 } from "@actor-kit/core";
 import { xxh64 } from "@actor-kit/core";
-import type { LifecycleEvent, LinkCall, RolePredicate, UnlinkCall } from "@actor-kit/worker/testing";
-import { createLiveFacts, resolveRole, routeMessage } from "@actor-kit/worker/testing";
+import type { EnvParser, LifecycleEvent, LinkCall, RolePredicate, UnlinkCall } from "@actor-kit/worker/testing";
+import { createLiveFacts, envErrorMessage, parseActorEnv, resolveRole, routeMessage } from "@actor-kit/worker/testing";
 import type { z } from "zod";
 
 // --- Actor definition shape (minimal for testing) ---
@@ -245,6 +245,32 @@ function recordEffects() {
   return { captured, ctx };
 }
 
+// --- Typed env (ADR-016 §4) ---
+
+/** The env a contract's handlers see: its `env` schema's output, or `unknown` without one. */
+type ContractEnv<T> = T extends { def: { env: { _output: infer E } } } ? E : unknown;
+
+/** testActor's options: `env`, fakes typed against the contract's `env` schema. */
+export interface TestActorOptions<TContract> {
+  env?: ContractEnv<TContract>;
+}
+
+function hasEnvSchema(arg: unknown): arg is { name: string; def: { env: EnvParser } } {
+  if (typeof arg !== "object" || arg === null || !("def" in arg) || !("name" in arg)) return false;
+  const def = arg.def;
+  if (typeof def !== "object" || def === null || !("env" in def)) return false;
+  const env = def.env;
+  return typeof env === "object" && env !== null && "safeParse" in env && typeof env.safeParse === "function";
+}
+
+/** Fakes are parsed like the runtime parses the Worker env; one that doesn't match throws, naming each binding. */
+function harnessEnv(arg: unknown, env: unknown): unknown {
+  if (!hasEnvSchema(arg)) return env ?? {};
+  const parsed = parseActorEnv(arg.def.env, env);
+  if (!parsed.ok) throw new Error(`testActor: ${envErrorMessage(arg.name, parsed.issues)}`);
+  return parsed.env;
+}
+
 // --- Implementation ---
 
 // Overload 1: Contract (from defineActor) — requires roles, messages, views
@@ -261,6 +287,7 @@ export function testActor<
   },
 >(
   contract: TContract,
+  options?: TestActorOptions<TContract>,
 ): ContractTestHarness<
   ContractState<TContract>,
   ContractInput<TContract>,
@@ -269,14 +296,19 @@ export function testActor<
 >;
 
 // Overload 2: Raw TestableActorDef (legacy)
-export function testActor<TState, TInput>(def: TestableActorDef<TState, TInput>): TestHarness<TState, TInput>;
+export function testActor<TState, TInput>(
+  def: TestableActorDef<TState, TInput>,
+  options?: { env?: unknown },
+): TestHarness<TState, TInput>;
 
 // Implementation
 export function testActor(
   arg: TestableActorDef<unknown, unknown> | ContractShape,
+  options: { env?: unknown } = {},
 ): TestHarness<unknown, unknown> | ContractTestHarness<unknown, unknown, unknown, unknown> {
   // Extract def from contract or use directly
   const def = isContract(arg) ? extractDef(arg) : arg;
+  const env = harnessEnv(arg, options.env);
 
   // sendWithEffects as standalone function for safe destructuring
   async function sendWithEffectsImpl(
@@ -294,7 +326,7 @@ export function testActor(
       ...createLiveFacts().ctx,
       caller,
       callerType,
-      env: {},
+      env,
       ...(opts?.delivery === undefined ? {} : { delivery: opts.delivery }),
       ...effects.ctx,
     });
@@ -323,7 +355,7 @@ export function testActor(
       }
       return def.init(parsed.data, {
         ...createLiveFacts().ctx,
-        env: {},
+        env,
         link: async () => {
           throw new Error("link() not available in test harness init — use send() for link testing");
         },

@@ -399,7 +399,10 @@ function withEffectId<P extends object>(payload: P, effectId: string | undefined
   return effectId === undefined ? payload : { ...payload, effectId };
 }
 
-function serviceDone(def: StepDef, state: unknown, cause: On<"service.onDone">, det: DeterministicContext) {
+/** What onDone / onError get as ctx: now/id/random and the actor's env (ADR-016 §4). */
+type ServiceCallbackCtx = DeterministicContext & { readonly env: unknown };
+
+function serviceDone(def: StepDef, state: unknown, cause: On<"service.onDone">, det: ServiceCallbackCtx) {
   const onDone = def.services?.[cause.service]?.onDone;
   return {
     next: onDone === undefined ? state : onDone(state, cause.result, cause.input, det),
@@ -408,7 +411,7 @@ function serviceDone(def: StepDef, state: unknown, cause: On<"service.onDone">, 
   };
 }
 
-function serviceError(def: StepDef, state: unknown, cause: On<"service.onError">, det: DeterministicContext) {
+function serviceError(def: StepDef, state: unknown, cause: On<"service.onError">, det: ServiceCallbackCtx) {
   const onError = def.services?.[cause.service]?.onError;
   return {
     next: onError === undefined ? state : onError(state, cause.error, cause.input, det),
@@ -444,12 +447,18 @@ function migrate(def: StepDef, cause: On<"migrate">) {
   };
 }
 
-function runCallback(def: StepDef, state: unknown, cause: CallbackCause, det: DeterministicContext): CallbackOutcome {
+function runCallback(
+  def: StepDef,
+  state: unknown,
+  cause: CallbackCause,
+  det: DeterministicContext,
+  env: unknown,
+): CallbackOutcome {
   switch (cause.type) {
     case "service.onDone":
-      return serviceDone(def, state, cause, det);
+      return serviceDone(def, state, cause, { ...det, env });
     case "service.onError":
-      return serviceError(def, state, cause, det);
+      return serviceError(def, state, cause, { ...det, env });
     case "link.onUpdate":
       return linkUpdate(def, state, cause, det);
     case "link.onError":
@@ -459,8 +468,8 @@ function runCallback(def: StepDef, state: unknown, cause: CallbackCause, det: De
   }
 }
 
-function stepCallback(def: StepDef, state: unknown, cause: CallbackCause, facts: StepFacts): StepResult {
-  const { next, name, payload } = runCallback(def, state, cause, facts.ctx);
+function stepCallback(def: StepDef, state: unknown, cause: CallbackCause, facts: StepFacts, env: unknown): StepResult {
+  const { next, name, payload } = runCallback(def, state, cause, facts.ctx, env);
   return {
     state: next,
     handlerState: next,
@@ -519,7 +528,7 @@ export function step(def: StepDef, state: unknown, cause: StepCause, facts: Step
     case "timer":
       return stepTimer(def, state, cause, facts, env);
     default:
-      return stepCallback(def, state, cause, facts);
+      return stepCallback(def, state, cause, facts, env);
   }
 }
 

@@ -15,4 +15,5 @@ export type {
   Simulation,
 } from "./simulate";
 export { simulate } from "./simulate";
+export type { TestActorOptions } from "./test-actor";
 export { testActor } from "./test-actor";

@@ -37,6 +37,10 @@ describe("resolveTimeoutMs", () => {
     expect(resolveTimeoutMs(undefined, "service")).toBe(30_000);
   });
 
+  it("refuses a non-number even before checking it is finite", () => {
+    expect(() => resolveTimeoutMs("5", "service")).toThrow("Invalid service timeoutMs");
+  });
+
   it("takes a positive number of ms", () => {
     expect(resolveTimeoutMs(250, "service")).toBe(250);
     expect(resolveTimeoutMs(0.5, "service")).toBe(0.5);
@@ -126,8 +130,11 @@ describe("in-flight tries", () => {
     inFlight.finish("executions", "3:0", first);
     expect(inFlight.abort("executions", "3:0", "x")).toBe(true);
     expect(second.signal.aborted).toBe(true);
-    inFlight.finish("executions", "3:0", second);
-    expect(inFlight.abort("executions", "3:0", "x")).toBe(false);
+    const done = new AbortController();
+    inFlight.start("forwards", "4:0", done);
+    inFlight.finish("forwards", "4:0", done);
+    expect(inFlight.abort("forwards", "4:0", "x")).toBe(false);
+    expect(done.signal.aborted).toBe(false);
   });
 
   it("aborts every try of effects declared after a seq (restore)", () => {

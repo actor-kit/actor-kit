@@ -64,6 +64,8 @@ CRAP over `packages/worker/src/runtime`, `packages/test/src`, `packages/core/src
 | Step | Mutated | Score | Survivors | Max CRAP |
 |---|---|---|---|---|
 | 1. Idempotency (`effect-info.ts`, delivery in step/journal/simulate/testActor) | 107 | 99.07% (106/107) after killing `step.ts` `delivery === undefined` (first run 98.17%, 2 survivors) | `simulate.ts` `from !== null` before delivering forwards (equivalent, listed below) | 7.0 (runtime, test), 6.0 (core) |
+| 2. Typed errors (`service-error.ts`, `retry.ts` rule/settleTry, outbox-store tag, studio-project, simulate reject, outbox panel) | 345 | 91.30% (315/345) first run; survivors then killed (tests for isTaggedError, look-alike Errors, linkRetryRules, undeclared services) or removed by simplifying (`describeServiceError` through a schema, the failure read from its symbol, plain `z.union` built-in schemas that cannot throw on load); re-run below | see "Equivalent mutants" (service-error.ts, retry.ts) | worker runtime 7.0 |
+| 3. Timeouts (`attempt.ts`, `link.ts` timeoutMs) + re-run of step 2's changed functions | 218 | 95.41% (208/218); then `runAttempt` simplified (no `done` flag: a promise settles once) and the `finish` test fixed to kill `inFlight.finish` mutants | see "Equivalent mutants" (attempt.ts) | worker runtime 7.0 |
 
 ## Equivalent mutants
 
@@ -122,6 +124,10 @@ Surviving mutants that no test can kill, because the mutated program behaves ide
 | test | simulate.ts:276 (×2) | `def.links?.[name]?.contract` → without `?.` | Only declared links are ever recorded on an actor, so the link definition always exists. |
 | test | simulate.ts:305 | `if (role === null) return` → `if (false)` | `def.views[null]` is `views["null"]`, undefined, so the next check returns. |
 | test | simulate.ts:357 | `if (from !== null)` before delivering forwards → `true` | `from` is null only for callbacks (onDone, onError, onUpdate), whose step has an empty outbox: there are no forwards to deliver. |
+| worker | service-error.ts:39 | `Symbol.for("actor-kit.service-failure")` → `Symbol.for("")` | The same registered symbol is used to mark and to read a failure, so any key works. |
+| worker | service-error.ts:68 | whole `if (!(thrown instanceof Error) \|\| !(FAILURE in thrown))` → `false` | A thrown value that is not a failure has no `[FAILURE]`, so it reads `undefined`, which isTaggedError rejects: still null. |
+| worker | retry.ts:64 | `parseOption(...)?.while` → `.while` | Kills by throwing a TypeError while test modules load (resolveRetryRule(undefined) via defineActor/link at module level), which Stryker's Vitest runner reports as survived (testing-strategy gotcha); run by hand it fails `service-errors.test.ts`. |
+| worker | attempt.ts:20 | `typeof option !== "number"` → `false` | `Number.isFinite` is false for every non-number, so the same error is thrown; the typeof is for the type checker. |
 | test | simulate.ts:562 (×2, one NoCoverage) | init's unlink targets `() => []` → `undefined` / `["…"]` | `init` gets no `unlink`, so the fact is never read. |
 
 ## Bugs found while hardening (2026-10-07)

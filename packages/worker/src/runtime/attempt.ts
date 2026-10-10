@@ -38,12 +38,9 @@ export function runAttempt(
 ): Promise<AttemptResult> {
   if (controller.signal.aborted) return Promise.resolve({ aborted: true });
   return new Promise((resolve) => {
-    let done = false;
+    // The first call settles the promise; later ones (a late result, the abort a timeout causes) do nothing.
     const finish = (result: AttemptResult) => {
-      if (done) return;
-      done = true;
       clearTimeout(timer);
-      controller.signal.removeEventListener("abort", onAbort);
       resolve(result);
     };
     const onAbort = () => finish({ aborted: true });
@@ -51,7 +48,7 @@ export function runAttempt(
       finish({ ok: false, error: timeoutError(ms) });
       controller.abort(timeoutError(ms));
     }, ms);
-    controller.signal.addEventListener("abort", onAbort);
+    controller.signal.addEventListener("abort", onAbort, { once: true });
     run(controller.signal).then(finish, (error: unknown) =>
       finish({ ok: false, error: classifyFailure(error, undefined) }),
     );

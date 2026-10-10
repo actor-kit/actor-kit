@@ -4,8 +4,8 @@
  * this checks the shape at runtime before simulate() uses it.
  */
 
-import type { JournalOption, RolePredicate, StepDef, StepMessageSlot } from "@actor-kit/worker/testing";
-import { toRuntimeDef } from "@actor-kit/worker/testing";
+import type { EnvParser, JournalOption, RolePredicate, StepDef, StepMessageSlot } from "@actor-kit/worker/testing";
+import { envErrorMessage, parseActorEnv, toRuntimeDef } from "@actor-kit/worker/testing";
 
 export interface SimDef extends StepDef {
   readonly input: {
@@ -22,6 +22,8 @@ export interface SimDef extends StepDef {
     onTransition?(prev: unknown, next: unknown, event: { type: string }, ctx: { caller: string; role: string }): void;
   };
   readonly journal?: JournalOption;
+  /** The typed env schema (ADR-016 §4): the simulation's fakes for this contract are parsed against it. */
+  readonly env?: EnvParser;
   readonly version?: number;
 }
 
@@ -66,4 +68,17 @@ export function toSimDef(contract: { readonly name: string; readonly def: unknow
   }
   // The version chain (ADR-015 D5) compiles into version, migrate and upcast, as in the runtime.
   return { ...toRuntimeDef(def), messages: roleNested(def.messages, def.roles) };
+}
+
+/**
+ * The env an actor's handlers see in a simulation (ADR-016 §4). A contract with an `env` schema takes
+ * `options.env[contract name]`, parsed like the runtime parses the Worker env (a fake that does not
+ * match throws, naming each binding); one without a schema gets `options.env` as it is.
+ */
+export function simEnv(def: SimDef, name: string, env: unknown): unknown {
+  if (def.env === undefined) return env;
+  const fakes = isRecord(env) ? env[name] : undefined;
+  const parsed = parseActorEnv(def.env, fakes);
+  if (!parsed.ok) throw new Error(`simulate: ${envErrorMessage(name, parsed.issues)}`);
+  return parsed.env;
 }

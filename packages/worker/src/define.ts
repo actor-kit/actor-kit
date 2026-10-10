@@ -20,7 +20,7 @@
  *   type Messages = keyof typeof Counter.def.messages;
  */
 
-import type { DeterministicContext } from "@actor-kit/core";
+import type { CancelFn, DeterministicContext, ExecuteFn, ForwardFn, ScheduleFn } from "@actor-kit/core";
 import type { ZodType } from "zod";
 import type { EffectInfo } from "./runtime/effect-info";
 import type { BuiltInError } from "./runtime/service-error";
@@ -49,7 +49,11 @@ export function defineActor<
   },
   TState = unknown,
   TErrors extends Record<string, unknown> = Record<never, never>,
->(name: TName, def: TDef & VersionsCheck<TDef> & TypedServices<TState, TErrors>): ActorContract<TName, TDef> {
+  TEnvSchema extends ZodType | undefined = undefined,
+>(
+  name: TName,
+  def: TDef & VersionsCheck<TDef> & { env?: TEnvSchema } & TypedServices<TState, TErrors, EnvOf<TEnvSchema>>,
+): ActorContract<TName, TDef> {
   return { name, def };
 }
 
@@ -62,8 +66,22 @@ export function defineActor<
  */
 export type ServiceErrorOf<TDeclared> = unknown extends TDeclared ? BuiltInError : TDeclared | BuiltInError;
 
+/** What handlers see as `env`: the `env` schema's output (ADR-016 §4), or `unknown` without one. */
+export type EnvOf<TEnvSchema> = TEnvSchema extends ZodType<infer TEnv> ? TEnv : unknown;
+
 /** What a service's onDone / onError get as their last argument. */
-export type ServiceCallbackContext = DeterministicContext;
+export type ServiceCallbackContext<TEnv = unknown> = DeterministicContext & { readonly env: TEnv };
+
+/** What lifecycle.connect / disconnect get as ctx. */
+export interface LifecycleContext<TEnv = unknown> extends DeterministicContext {
+  readonly caller: string;
+  readonly callerType: "user" | "service";
+  readonly env: TEnv;
+  readonly execute: ExecuteFn;
+  readonly forward: ForwardFn;
+  readonly schedule: ScheduleFn;
+  readonly cancel: CancelFn;
+}
 
 /** A service's `retry` option, with `while` typed by its error union. */
 export interface ServiceRetry<TError> {
@@ -83,26 +101,30 @@ export interface ServiceRetry<TError> {
  * A service in the `services` block, as defineActor types it. Methods (not function properties), so a
  * handler may annotate a narrower input or result.
  */
-export interface ServiceDef<TState, TDeclared = unknown> {
+export interface ServiceDef<TState, TDeclared = unknown, TEnv = unknown> {
   /** Declared failures: a `z.discriminatedUnion("_tag", [...])`. `throw fail(error)` values parse against it. */
   readonly errors?: ZodType<TDeclared>;
   /** The async work. `effect`: actor, effect id, idempotency key, try number, AbortSignal. */
-  fn(input: unknown, env: unknown, effect: EffectInfo): Promise<unknown>;
+  fn(input: unknown, env: TEnv, effect: EffectInfo): Promise<unknown>;
   readonly retry?: ServiceRetry<ServiceErrorOf<TDeclared>>;
   /** Time limit per try, in ms (default 30 000). On expiry `effect.signal` is aborted and the try is a Timeout. */
   readonly timeoutMs?: number;
-  onDone?(state: TState, result: unknown, input: unknown, ctx: ServiceCallbackContext): TState;
+  onDone?(state: TState, result: unknown, input: unknown, ctx: ServiceCallbackContext<TEnv>): TState;
   /** Runs once, after the last try failed (or at once for an error `retry.while` does not retry). */
-  onError?(state: TState, error: ServiceErrorOf<TDeclared>, input: unknown, ctx: ServiceCallbackContext): TState;
+  onError?(state: TState, error: ServiceErrorOf<TDeclared>, input: unknown, ctx: ServiceCallbackContext<TEnv>): TState;
 }
 
 /**
  * The typed parts of a definition: the state comes from init, each service's error union from its
  * `errors` (inferred per service, so every onError sees its own).
  */
-type TypedServices<TState, TErrors> = {
+type TypedServices<TState, TErrors, TEnv> = {
   init(...args: never[]): TState | PromiseLike<TState>;
-  services?: { [K in keyof TErrors]: ServiceDef<TState, TErrors[K]> };
+  services?: { [K in keyof TErrors]: ServiceDef<TState, TErrors[K], TEnv> };
+  lifecycle?: {
+    connect?(state: TState, event: LifecycleEvent, ctx: LifecycleContext<TEnv>): TState;
+    disconnect?(state: TState, event: LifecycleEvent, ctx: LifecycleContext<TEnv>): TState;
+  };
 };
 
 type InitState<TDef> = TDef extends { init(...args: never[]): infer S } ? Awaited<S> : never;

@@ -18,6 +18,9 @@ export type { ActorRef, LocationHint } from "./ref";
 export { createRef } from "./ref";
 // Effect metadata (ADR-016 §1): what a service's third argument and a forward's ctx.delivery carry
 export type { DeliveryInfo, EffectInfo } from "./runtime/effect-info";
+// Typed env (ADR-016 §4): binding helpers for the `env` schema
+export type { EnvIssue } from "./runtime/env";
+export { d1, durableObject, kv, queue, r2, service } from "./runtime/env";
 export { getTokenFromRequest } from "./runtime/get-token";
 // Namespace resolution
 export { resolveNamespace } from "./runtime/resolve-namespace";

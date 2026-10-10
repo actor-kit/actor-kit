@@ -34,6 +34,7 @@ import {
   type EffectInfo,
   effectInfo,
 } from "./runtime/effect-info";
+import { type EnvParser, envErrorMessage, envInvalidEvent, parseActorEnv } from "./runtime/env";
 import {
   appendJournalEvent,
   clockedSources,
@@ -180,6 +181,8 @@ interface ActorMessageSlot {
 
 interface ActorDef {
   input: z.ZodType;
+  /** Typed env (ADR-016 §4): a Zod object, parsed once before the actor serves anything. */
+  env?: EnvParser;
   init(
     input: unknown,
     ctx: { env: unknown; link: (name: string, id: string) => Promise<unknown> } & DeterministicContext,
@@ -460,6 +463,10 @@ export function actor(
     version: number;
     /** env stored with index signature — the base DurableObject.env lacks it. */
     envBindings: Record<string, unknown>;
+    /** What handlers and services see as env: the parsed `env` schema's output, or the raw env without one. */
+    handlerEnv: unknown = undefined;
+    /** Set when the env does not match the actor's `env` schema: every request is refused with it. */
+    envError: string | null = null;
     // Keyed by WebSocket (not caller) to support multi-tab/multi-device
     connections = new Map<WebSocket, { caller: string; callerType: "user" | "service" }>();
     previousViews = new Map<WebSocket, string>(); // dedupe key: "role:json"
@@ -492,6 +499,15 @@ export function actor(
       super(ctx, env);
       this.envBindings = env;
       this.version = def.version ?? 1;
+      // Typed env (ADR-016 §4): parsed once, before anything is served. One that does not parse is
+      // logged once; then every request is refused and no handler ever runs.
+      const parsedEnv = parseActorEnv(def.env, env);
+      if (!parsedEnv.ok) {
+        this.envError = envErrorMessage(_actorName, parsedEnv.issues);
+        console.error(JSON.stringify(envInvalidEvent(_actorName, parsedEnv.issues)));
+        return;
+      }
+      this.handlerEnv = parsedEnv.env;
       // Restore persisted state before any requests are served (hibernation wake / restart).
       // blockConcurrencyWhile ensures no fetch/send/WebSocket during init.
       // Never creates storage: a DO that was never written stays empty until an entry
@@ -532,6 +548,7 @@ export function actor(
      * With `create: false`, a DO with no actor storage is left untouched (no tables, no rows).
      */
     loadPersisted({ create }: { create: boolean }): void {
+      this.assertEnv();
       this.detectStudioConfig();
       if (this.persistedLoaded) return;
       if (!create && !this.hasActorStorage()) return;
@@ -545,6 +562,11 @@ export function actor(
       if (first === undefined) return;
       this.restoreSnapshot(SnapshotRowSchema.parse(first));
       this.resumeAfterLoad();
+    }
+
+    /** Refuse to serve anything (no handler runs) when the env did not parse (ADR-016 §4). */
+    assertEnv(): void {
+      if (this.envError !== null) throw new Error(this.envError);
     }
 
     /** Put the stored snapshot in memory, migrating it through the step core when its version is older. */
@@ -625,7 +647,7 @@ export function actor(
         { input: emptyParsed.data, caller: null, callerType: null },
         liveStepFacts(createLiveFacts(), () => []),
         {
-          env: this.env,
+          env: this.handlerEnv,
           link: async () => {
             throw new Error("link() not available during auto-spawn");
           },
@@ -832,6 +854,7 @@ export function actor(
      * transaction), run the outbox retries that are due, then re-arm for the next deadline.
      */
     async alarm(): Promise<void> {
+      if (this.envError !== null) return;
       this.loadPersisted({ create: false });
       if (!this.initialized) return;
       this.fireDueTimers(Date.now());
@@ -926,7 +949,7 @@ export function actor(
       const fields = { actorType: _actorName, actorId: this.subscriberId(), effectId: entry.id, attempt };
       const ms = serviceTimeouts.get(entry.service) ?? DEFAULT_TIMEOUT_MS;
       const outcome = await runAttempt(
-        (signal) => tryService(serviceDef, entry.input, this.env, effectInfo({ ...fields, signal })),
+        (signal) => tryService(serviceDef, entry.input, this.handlerEnv, effectInfo({ ...fields, signal })),
         ms,
         controller,
       );
@@ -996,7 +1019,7 @@ export function actor(
     runStep(cause: StepCause, now?: number): StepResult {
       const live = createLiveFacts(now === undefined ? undefined : clockedSources(now));
       const facts = liveStepFacts(live, (name) => this.readLinkTargets(name));
-      return step(def, this.state, cause, facts, this.env);
+      return step(def, this.state, cause, facts, this.handlerEnv);
     }
 
     /** The snapshot (at this code version) is behind the journal's last seq. */
@@ -1022,7 +1045,7 @@ export function actor(
       const sql = this.ctx.storage.sql;
       const journal = readJournal(sql);
       try {
-        const { state } = await foldJournal(def, journal, { env: this.env });
+        const { state } = await foldJournal(def, journal, { env: this.handlerEnv });
         const json = JSON.stringify(def.serialize ? def.serialize(state) : state);
         sql.exec(
           "UPDATE snapshots SET state = ?, checksum = ?, last_seq = ?, updated_at = ? WHERE id = 1",
@@ -1046,7 +1069,7 @@ export function actor(
      */
     async rebuildByReplay(fromVersion: number): Promise<void> {
       this.rebuildFrom = null;
-      const state = await rebuildFromJournal(def, readJournal(this.ctx.storage.sql), { env: this.env });
+      const state = await rebuildFromJournal(def, readJournal(this.ctx.storage.sql), { env: this.handlerEnv });
       this.pendingCause = { type: "migrate", fromVersion, toVersion: this.version };
       this.commit(state, {
         causeType: "migrate",
@@ -1562,7 +1585,7 @@ export function actor(
         def,
         { input: parsed.data, caller: input.caller, callerType: input.callerType },
         liveStepFacts(live, () => []),
-        { env: this.env, link },
+        { env: this.handlerEnv, link },
       );
 
       // Persist state + init links atomically
@@ -1645,7 +1668,11 @@ export function actor(
       }
 
       // Admit (validate payload, run guard); the transition runs through the step core in applyMessage().
-      const admission = admitMessage(def.messages, role, this.state, event, { caller, callerType, env: this.env });
+      const admission = admitMessage(def.messages, role, this.state, event, {
+        caller,
+        callerType,
+        env: this.handlerEnv,
+      });
       if (!admission.ok) return rejected(admission);
       return { ok: true, role, payload: admission.payload };
     }
@@ -1797,6 +1824,7 @@ export function actor(
       // Workers MUST call withCallerIdentity() before forwarding to the DO — forwarding
       // raw client requests (stub.fetch(request)) allows header spoofing.
       // CORS/Origin validation is handled at the Worker level (e.g., Hono cors() middleware).
+      if (this.envError !== null) return new Response(this.envError, { status: 500 });
       const connect = parseConnectRequest(request);
       if (!connect.ok) return new Response(connect.message, { status: connect.status });
 
@@ -2429,7 +2457,7 @@ export function actor(
       const sql = this.ctx.storage.sql;
       let plan: Awaited<ReturnType<typeof planRestore>>;
       try {
-        plan = await planRestore(def, readJournal(sql), toSeq, { env: this.env });
+        plan = await planRestore(def, readJournal(sql), toSeq, { env: this.handlerEnv });
       } catch (error) {
         return { ok: false, error: error instanceof Error ? error.message : String(error) };
       }
