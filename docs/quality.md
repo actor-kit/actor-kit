@@ -118,6 +118,9 @@ Surviving mutants that no test can kill, because the mutated program behaves ide
 | worker | journal.ts:583, 813 | init `timerOps: []` / rebuild-skipped migrate `emitted: []` → `["Stryker was here"]` | Same family as journal.ts:535/750: init schedules nothing, and a rebuild compares neither checksums nor emitted events. |
 | worker | journal.ts:647 | `i < length` → `i <= length` | Past the end both lists give `undefined`, which describe the same ("nothing"): no difference is found there. |
 | test | test-actor.ts:386 | `if (def.events)` → `true` | Assigns `undefined` when absent; `emit` reads it with `?.` either way. |
+| test | simulate.ts:222 | initial `published: []` → `["Stryker was here"]` | `published(queue)` filters by `p.queue`; a string has none, so it is never listed. |
+| test | simulate.ts:256 | memo `if (config === undefined)` → `true` | Recomputes the same publish config each time; only slower. |
+| test | simulate.ts:301 | `parseEffectId(effectId)?.seq` → `.seq` | Simulated effect ids are always `seq:index`, so the parse never fails. |
 | worker | journal-timeline.ts:202 | init start `timers: []` → `["Stryker was here"]` | Same as journal.ts:535/750: an init event schedules nothing from its start point, and timeline states never read the pending timers. |
 | worker | journal-timeline.ts:203 | `from === undefined \|\| …` → `false \|\| …` | Folding a non-init event onto no point throws inside the try, which returns null: the same "state not available". |
 
