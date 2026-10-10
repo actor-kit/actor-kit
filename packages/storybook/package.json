@@ -1,6 +1,6 @@
 {
   "name": "@actor-kit/storybook",
-  "version": "0.0.1",
+  "version": "0.2.0",
   "type": "module",
   "main": "./dist/index.js",
   "module": "./dist/index.js",
@@ -12,8 +12,9 @@
     }
   },
   "files": [
-    "src",
-    "dist"
+    "dist",
+    "README.md",
+    "LICENSE"
   ],
   "scripts": {
     "build": "tsdown",

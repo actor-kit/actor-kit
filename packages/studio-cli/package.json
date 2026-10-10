@@ -1,6 +1,6 @@
 {
   "name": "@actor-kit/studio-cli",
-  "version": "0.0.1",
+  "version": "0.2.0",
   "description": "Read-only CLI and MCP server for Actor Kit Studio (inspect, timeline, view) behind Cloudflare Access",
   "type": "module",
   "bin": {
@@ -37,5 +37,10 @@
     "studio",
     "mcp",
     "cli"
+  ],
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
   ]
 }

@@ -1,6 +1,6 @@
 {
   "name": "@actor-kit/client",
-  "version": "0.0.1",
+  "version": "0.2.0",
   "type": "module",
   "exports": {
     ".": {
@@ -29,5 +29,10 @@
     "durable-objects",
     "real-time",
     "websocket"
+  ],
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
   ]
 }

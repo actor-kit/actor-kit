@@ -1,6 +1,6 @@
 {
   "name": "@actor-kit/studio",
-  "version": "0.0.1",
+  "version": "0.2.0",
   "type": "module",
   "exports": {
     ".": {
@@ -45,5 +45,10 @@
     "durable-objects",
     "devtools",
     "studio"
+  ],
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
   ]
 }

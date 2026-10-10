@@ -11,31 +11,48 @@ pnpm add @actor-kit/core @actor-kit/worker zod
 ## Usage
 
 ```ts
-import { defineActor, createActorClass, message } from "@actor-kit/worker";
-import { withCallerIdentity } from "@actor-kit/worker";
+import { nullable, schema, string, uint32, view } from "@actor-kit/core";
+import { createActorClass, defineActor, message } from "@actor-kit/worker";
 import { z } from "zod";
 
-const counter = defineActor({
-  init: () => ({ count: 0 }),
+const CounterView = schema({ count: uint32, lastUpdatedBy: nullable(string) });
+
+export const Counter = defineActor("counter", {
+  input: z.object({}),
+  init: () => ({ count: 0, lastUpdatedBy: null as string | null }),
   roles: {
-    anyone: () => true,
+    admin: (_s, _caller, { callerType }) => callerType === "service",
+    user: () => true,
   },
   messages: {
-    anyone: {
-      increment: message(z.object({}), (state) => ({
-        ...state,
-        count: state.count + 1,
-      })),
-    },
+    INCREMENT: message(z.object({}), (state, _p, { caller }) => ({ count: state.count + 1, lastUpdatedBy: caller })),
+    RESET: message(z.object({}), {
+      guard: (_s, _p, ctx) => ctx.role === "admin",
+      handler: () => ({ count: 0, lastUpdatedBy: null }),
+    }),
+  },
+  views: {
+    admin: view.shared(CounterView, (s) => s),
+    user: view.shared(CounterView, (s) => s),
   },
 });
 
-// Generate the Durable Object class
-export const Counter = createActorClass(counter);
-
-// Stamp caller identity on incoming requests
-export default { fetch: withCallerIdentity(/* ... */) };
+// worker.ts: the Durable Object class
+export const CounterDO = createActorClass(Counter);
 ```
+
+Handlers are synchronous reducers. Read time and randomness through `ctx.now()`, `ctx.id()` and
+`ctx.random()`; the runtime records them so the journal can be replayed.
+
+## Timers
+
+```ts
+ctx.schedule("roundEnd", { in: "30s", key: "round-1", payload: { round: 1 } }); // in any handler
+ctx.cancel("round-1");
+```
+
+Declared in a `timers` block with `timer(schema, handler)`, saved to SQLite and fired by the Durable
+Object alarm, so they survive hibernation and deploys.
 
 ## Services
 
