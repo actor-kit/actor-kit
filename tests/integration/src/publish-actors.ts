@@ -1,8 +1,9 @@
 /**
  * Actors for tests/integration/publish.test.ts (ADR-017 §3): Lot publishes Placed to the LOT_EVENTS
- * queue; LotUnbound publishes to a queue that is not bound, so its rows retry and dead-letter.
+ * queue; LotUnbound publishes to a queue that is not bound, so its rows retry and dead-letter; LotTyped
+ * declares the queue in a typed env (ADR-016 §4) and publishes through the parsed env.
  */
-import { createActorClass, defineActor, setup } from "@actor-kit/worker";
+import { createActorClass, defineActor, queue, setup } from "@actor-kit/worker";
 import { z } from "zod";
 
 type S = { n: number };
@@ -27,4 +28,8 @@ const LotContract = defineActor("lot", {
 export const Lot = createActorClass(LotContract);
 export const LotUnbound = createActorClass(
   defineActor("lot-unbound", { ...LotContract.def, publish: { queue: "MISSING_QUEUE", events: ["Placed"] } }),
+);
+
+export const LotTyped = createActorClass(
+  defineActor("lot-typed", { ...LotContract.def, env: z.object({ LOT_EVENTS: queue() }) }),
 );

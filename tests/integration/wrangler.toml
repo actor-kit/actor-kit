@@ -245,3 +245,11 @@ class_name = "QuizStates"
 [[migrations]]
 tag = "v20"
 new_sqlite_classes = ["QuizStates"]
+
+[[durable_objects.bindings]]
+name = "LOT_TYPED"
+class_name = "LotTyped"
+
+[[migrations]]
+tag = "v21"
+new_sqlite_classes = ["LotTyped"]

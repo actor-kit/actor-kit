@@ -8,8 +8,9 @@
  */
 
 import { formatEffectId } from "./effect-id";
+import { idempotencyKey as effectIdempotencyKey } from "./effect-info";
 import type { EmittedEffect } from "./outbox";
-import { effectCauseId, eventId } from "./trace";
+import { eventId } from "./trace";
 
 /** The outbox "service" a published event's row runs under. Reserved: actors cannot declare it. */
 export const PUBLISH_SERVICE = "__publish";
@@ -74,7 +75,8 @@ export function publishedMessages(
     .filter((event) => config.events.has(event.name))
     .map(({ name, payload, index }) => {
       const effectId = formatEffectId(seq, index);
-      const idempotencyKey = effectCauseId(actorType, actorId, effectId);
+      // The same key every effect has (ADR-016 §1): unique across the deployment, stable across retries.
+      const idempotencyKey = effectIdempotencyKey(actorType, actorId, effectId);
       const causationId = eventId(actorType, actorId, seq);
       const body = { actorType, actorId, seq, index, name, payload, at, causationId, correlationId, idempotencyKey };
       return { effectId, index, body };

@@ -70,4 +70,50 @@ describe("publish", () => {
       ["2:1", "retrying", 'Queue binding "MISSING_QUEUE" is not bound'],
     ]);
   });
+
+  it("a queue failure is a Defect, retried by the default rule like a service's (ADR-016 §2)", async () => {
+    const id = `lot-unbound-tag-${Date.now()}`;
+    const stub = env.LOT_UNBOUND.get(env.LOT_UNBOUND.idFromName(id));
+    await stub.spawn({ actorId: id, caller: "u", callerType: "user", input: {} });
+    await stub.send("u", "user", { type: "PLACE", n: 1 });
+    const tried = await until(
+      () => tagged(stub),
+      (r) => r[0]?.status === "retrying",
+    );
+    expect(tried).toEqual([{ id: "2:1", status: "retrying", attempts: 1, last_error_tag: "Defect" }]);
+  });
+
+  it("with a typed env, the queue binding is the parsed env's (ADR-016 §4)", async () => {
+    const id = `lot-typed-${Date.now()}`;
+    const stub = env.LOT_TYPED.get(env.LOT_TYPED.idFromName(id));
+    await stub.spawn({ actorId: id, caller: "u", callerType: "user", input: {} });
+    await stub.send("u", "user", { type: "PLACE", n: 4 });
+    const sent = await until(
+      () => rows(stub),
+      (r) => r[0]?.status === "done",
+    );
+    expect(sent.map((r) => [r.id, r.service, r.status])).toEqual([["2:1", "__publish", "done"]]);
+    expect(JSON.parse(sent[0]?.payload ?? "null")).toMatchObject({
+      actorType: "lot-typed",
+      name: "Placed",
+      payload: { n: 4 },
+      idempotencyKey: `lot-typed/${id}/2:1`,
+    });
+  });
 });
+
+const TaggedRow = z.object({
+  id: z.string(),
+  status: z.string(),
+  attempts: z.number(),
+  last_error_tag: z.string().nullable(),
+});
+
+async function tagged(stub: DurableObjectStub) {
+  return runInDurableObject(stub, (_i, state) =>
+    state.storage.sql
+      .exec("SELECT id, status, attempts, last_error_tag FROM executions ORDER BY seq, idx")
+      .toArray()
+      .map((r) => TaggedRow.parse(r)),
+  );
+}
