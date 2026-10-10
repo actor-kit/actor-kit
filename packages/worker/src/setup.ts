@@ -125,8 +125,8 @@ type PhaseGuardCtx<TEnv, SD extends StateDecls, P extends keyof SD & string> = G
   readonly local: LocalOf<SD[P]>;
 };
 
-export interface PhaseHelpers<SD extends StateDecls, E, P extends keyof SD & string> {
-  message<Pay, S, TEnv = unknown>(
+export interface PhaseHelpers<SD extends StateDecls, E, P extends keyof SD & string, TEnvDefault = unknown> {
+  message<Pay, S, TEnv = TEnvDefault>(
     schema: z.ZodType<Pay>,
     handler:
       | Handler<S, Pay, PhaseCtx<TEnv, E, SD, P, S>, PhaseResult<S>>
@@ -135,11 +135,11 @@ export interface PhaseHelpers<SD extends StateDecls, E, P extends keyof SD & str
           handler: Handler<S, Pay, PhaseCtx<TEnv, E, SD, P, S>, PhaseResult<S>>;
         },
   ): PhaseMessageDef<S, Pay>;
-  timer<Pay, S, TEnv = unknown>(
+  timer<Pay, S, TEnv = TEnvDefault>(
     schema: z.ZodType<Pay>,
     handler: Handler<S, Pay, PhaseTimerCtx<TEnv, E, SD, P, S>, PhaseResult<S>>,
   ): PhaseTimerDef<S, Pay>;
-  state<S, TEnv = unknown>(def: {
+  state<S, TEnv = TEnvDefault>(def: {
     enter?: (
       shared: S,
       input: InputArgs<SD[P]> extends [infer I] ? I : undefined,
@@ -150,12 +150,17 @@ export interface PhaseHelpers<SD extends StateDecls, E, P extends keyof SD & str
   }): StateDef<S>;
 }
 
-export interface Setup<ES extends EventSchemas, SD extends StateDecls> {
+/** What handlers see as `ctx.env`: the `env` schema's output (ADR-016 §4), or `unknown` without one. */
+export type SetupEnv<TEnvSchema> = TEnvSchema extends z.ZodType<infer TEnv> ? TEnv : unknown;
+
+export interface Setup<ES extends EventSchemas, SD extends StateDecls, TEnvSchema = undefined> {
   /** The declared events, for the actor's `events`. */
   readonly events: ES;
   /** The declared states (schemas only; behaviour goes in the actor's `states`), if any. */
   readonly states: SD | undefined;
-  message<P, S, TEnv = unknown>(
+  /** The declared env schema (ADR-016 §4), for the actor's `env`; it types ctx.env in every helper. */
+  readonly env: TEnvSchema;
+  message<P, S, TEnv = SetupEnv<TEnvSchema>>(
     schema: z.ZodType<P>,
     handler:
       | Handler<S, P, EmittingMessageContext<TEnv, EventPayloads<ES>>>
@@ -164,12 +169,12 @@ export interface Setup<ES extends EventSchemas, SD extends StateDecls> {
           handler: Handler<S, P, EmittingMessageContext<TEnv, EventPayloads<ES>>>;
         },
   ): MessageDef<S, P, TEnv>;
-  timer<P, S, TEnv = unknown>(
+  timer<P, S, TEnv = SetupEnv<TEnvSchema>>(
     schema: z.ZodType<P>,
     handler: Handler<S, P, EmittingTimerContext<TEnv, EventPayloads<ES>>>,
   ): TimerDef<S, P, TEnv>;
   /** Helpers for one declared state: its messages, timers and `enter` see its typed local. */
-  in<P extends keyof SD & string>(phase: P): PhaseHelpers<SD, EventPayloads<ES>, P>;
+  in<P extends keyof SD & string>(phase: P): PhaseHelpers<SD, EventPayloads<ES>, P, SetupEnv<TEnvSchema>>;
 }
 
 /** The persisted state of an actor declared with `kit`, for views and roles: `PhasedStateOf<typeof kit, Shared>`. */
@@ -187,10 +192,22 @@ function typed<S, P, Ctx extends { readonly emit: (name: string, payload: unknow
 export function setup<const ES extends EventSchemas, const SD extends StateDecls = Record<never, never>>(declarations: {
   events: ES;
   states?: SD;
-}): Setup<ES, SD> {
+}): Setup<ES, SD>;
+/** With `env` (ADR-016 §4): every helper's ctx.env is the schema's output; pass `env: kit.env` to the actor. */
+export function setup<
+  const ES extends EventSchemas,
+  const SD extends StateDecls = Record<never, never>,
+  TEnvSchema extends z.ZodType = z.ZodType,
+>(declarations: { events: ES; states?: SD; env: TEnvSchema }): Setup<ES, SD, TEnvSchema>;
+export function setup<
+  const ES extends EventSchemas,
+  const SD extends StateDecls,
+  TEnvSchema extends z.ZodType | undefined,
+>(declarations: { events: ES; states?: SD; env?: TEnvSchema }): Setup<ES, SD, TEnvSchema | undefined> {
   return {
     events: declarations.events,
     states: declarations.states,
+    env: declarations.env,
     message(schema, handler) {
       if (typeof handler === "function") return message(schema, typed(handler));
       return message(schema, { guard: handler.guard, handler: typed(handler.handler) });

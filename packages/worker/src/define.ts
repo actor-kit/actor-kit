@@ -129,12 +129,17 @@ type TypedServices<TState, TErrors, TEnv> = {
   };
 };
 
-/** ADR-017 §3: `publish.events` may only name events the actor declares in `events`. */
+/**
+ * ADR-017 §3: `publish.events` may only name events the actor declares in `events`. With a typed
+ * `env` (ADR-016 §4), `publish.queue` must be one of its bindings: the parsed env keeps only those.
+ */
 type PublishCheck<TDef> = TDef extends { publish: unknown }
-  ? TDef extends { events: infer E }
-    ? { publish: { queue: string; events: readonly (keyof E & string)[] } }
-    : { publish: { queue: string; events: readonly never[] } }
+  ? { publish: { queue: PublishQueue<TDef>; events: readonly PublishEvents<TDef>[] } }
   : unknown;
+
+type PublishEvents<TDef> = TDef extends { events: infer E } ? keyof E & string : never;
+
+type PublishQueue<TDef> = TDef extends { env: ZodType<infer TEnv> } ? keyof TEnv & string : string;
 
 type InitState<TDef> = TDef extends { init(...args: never[]): infer S } ? Awaited<S> : never;
 
