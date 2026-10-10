@@ -154,6 +154,6 @@ With `keep`, events at or below the newest checkpoint `B` with `B <= lastSeq - k
 
 ### Neutral
 
-- The Studio timeline keeps its own table for now. Step 3 makes it a view over `events`.
+- The Studio timeline kept its own table until ADR-017 §5, which made it a view over `events` and dropped the table.
 - `runtime/cdc.ts` (the unbuilt CDC delta log) is superseded: a delta log can't replay through new code; an event log can.
 - A journal that spans a `version` bump doesn't replay under the new handlers until step 4 adds upcasters.

@@ -82,8 +82,8 @@ Surviving mutants that no test can kill, because the mutated program behaves ide
 | studio | middleware.ts:237 (×3) | `rawType !== undefined && rawId !== undefined` → `\|\|` / `true` | Both regex groups are required, so a match always fills both; the check exists for the type checker. |
 | studio | registry.ts:81 | `previousActorId !== actorId` → `true` | Deleting and re-inserting the same row in one transaction leaves an identical row. |
 | studio-cli | cli.ts:50 | `actorType === undefined` → `false` | `actorId` is `undefined` whenever `actorType` is, so the same error is thrown. |
-| studio-cli | client.ts:77 | `{ state: z.unknown() }` → `{}` | `z.unknown()` accepts a missing key; only the static type differs. |
-| studio-cli | shape.ts:42 | `catch { return undefined }` → `{}` | Returns `undefined` either way. |
+| studio-cli | client.ts:78 | `{ state: z.unknown() }` → `{}` | `z.unknown()` accepts a missing key; only the static type differs. |
+| studio-cli | shape.ts:43 | `catch { return undefined }` → `{}` | Returns `undefined` either way. |
 | studio UI | all components | ~70 className literals, colour tables (OUTBOX_STATUS_CLASS, SCALAR_CLASS, CAUSE_LABELS colours), status-badge pulse dot, active-tab class | Styling only; each state is also rendered as text or `data-status`. |
 | studio UI | timeline-panel.tsx:9-11 | cause label entries → `[]` | The fallback label equals the cause type; only the colour differs. |
 | studio UI | inspect-panels.tsx:116,142; actor-table.tsx:19; json-diff.tsx:41 | React key template → `""` | Keys only; no visible difference for distinct rows. |
@@ -114,6 +114,8 @@ Surviving mutants that no test can kill, because the mutated program behaves ide
 | test | simulate.ts:305 | `if (role === null) return` → `if (false)` | `def.views[null]` is `views["null"]`, undefined, so the next check returns. |
 | test | simulate.ts:357 | `if (from !== null)` before delivering forwards → `true` | `from` is null only for callbacks (onDone, onError, onUpdate), whose step has an empty outbox: there are no forwards to deliver. |
 | test | simulate.ts:562 (×2, one NoCoverage) | init's unlink targets `() => []` → `undefined` / `["…"]` | `init` gets no `unlink`, so the fact is never read. |
+| worker | journal-timeline.ts:202 | init start `timers: []` → `["Stryker was here"]` | Same as journal.ts:535/750: an init event schedules nothing from its start point, and timeline states never read the pending timers. |
+| worker | journal-timeline.ts:203 | `from === undefined \|\| …` → `false \|\| …` | Folding a non-init event onto no point throws inside the try, which returns null: the same "state not available". |
 
 ## Bugs found while hardening (2026-10-07)
 

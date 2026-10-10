@@ -179,4 +179,9 @@ export const ACTOR_KIT_MIGRATIONS: ReadonlyArray<{ readonly name: string; readon
       CREATE INDEX IF NOT EXISTS idx_forwards_due ON forwards(status, next_attempt_at);
     `,
   },
+  {
+    // One history (ADR-017 §5): Studio's timeline is read from the journal; its own table goes.
+    name: "0014_drop_timeline",
+    sql: "DROP TABLE IF EXISTS timeline;",
+  },
 ];

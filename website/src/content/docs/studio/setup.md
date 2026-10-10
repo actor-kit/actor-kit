@@ -121,19 +121,23 @@ const Counter = defineActor("counter", {
 
 ## Configuration
 
-### Timeline size
+### Timeline history
 
-Each actor stores the last 500 timeline entries by default. To change this:
+The timeline is the actor's journal: every journaled event is a timeline entry, and the state
+after it is read from a journal checkpoint or replayed from the newest one before it. There is no
+separate timeline table or size. The journal keeps everything by default; to bound it (and so the
+timeline), set `journal.keep`:
 
 ```typescript
 const Counter = defineActor("counter", {
   // ... your actor definition
-  studio: {
-    enabled: true,
-    timelineSize: 1000, // keep more history
-  },
+  journal: { keep: 10_000 }, // roughly the newest 10,000 events
 });
 ```
+
+An actor with `journal: false` has an empty timeline. An entry whose state cannot be rebuilt
+(written by an older code version, or before the oldest checkpoint left after pruning) shows
+"State not available" instead of a state.
 
 ## API routes
 

@@ -379,34 +379,41 @@ const CheckpointRowSchema = z.object({
   timers: z.string().optional(),
 });
 
+/** The `events` columns, in the order every reader selects them. */
+export const JOURNAL_EVENT_COLUMNS =
+  "seq, cause_type, name, payload, caller, caller_type, role, facts, code_version, state_checksum, created_at";
+
+/** Parse one `events` row (selected with JOURNAL_EVENT_COLUMNS) at the storage boundary. */
+export function parseJournalEventRow(raw: unknown): JournalEvent {
+  const row = EventRowSchema.parse(raw);
+  const payload: unknown = JSON.parse(row.payload);
+  return {
+    seq: row.seq,
+    causeType: row.cause_type,
+    name: row.name,
+    payload,
+    caller: row.caller,
+    callerType: row.caller_type,
+    role: row.role,
+    facts: FactsSchema.parse(JSON.parse(row.facts)),
+    codeVersion: row.code_version,
+    stateChecksum: row.state_checksum,
+    createdAt: row.created_at,
+  };
+}
+
+/** Parse one `journal_checkpoints` row at the storage boundary. */
+export function parseCheckpointRow(raw: unknown): JournalCheckpoint {
+  return CheckpointRowSchema.parse(raw);
+}
+
 /** Read and parse a DO's journal (events + checkpoints), oldest first. */
 export function readJournal(sql: JournalSql): Journal {
   const events = sql
-    .exec(
-      "SELECT seq, cause_type, name, payload, caller, caller_type, role, facts, code_version, state_checksum, created_at FROM events ORDER BY seq",
-    )
+    .exec(`SELECT ${JOURNAL_EVENT_COLUMNS} FROM events ORDER BY seq`)
     .toArray()
-    .map((raw): JournalEvent => {
-      const row = EventRowSchema.parse(raw);
-      const payload: unknown = JSON.parse(row.payload);
-      return {
-        seq: row.seq,
-        causeType: row.cause_type,
-        name: row.name,
-        payload,
-        caller: row.caller,
-        callerType: row.caller_type,
-        role: row.role,
-        facts: FactsSchema.parse(JSON.parse(row.facts)),
-        codeVersion: row.code_version,
-        stateChecksum: row.state_checksum,
-        createdAt: row.created_at,
-      };
-    });
-  const checkpoints = sql
-    .exec("SELECT * FROM journal_checkpoints ORDER BY seq")
-    .toArray()
-    .map((raw): JournalCheckpoint => CheckpointRowSchema.parse(raw));
+    .map(parseJournalEventRow);
+  const checkpoints = sql.exec("SELECT * FROM journal_checkpoints ORDER BY seq").toArray().map(parseCheckpointRow);
   return { events, checkpoints };
 }
 
@@ -693,7 +700,11 @@ function upcastEvent(def: ReplayableDef, event: JournalEvent): JournalEvent {
   return { ...event, payload: def.upcast(event.name, event.payload, event.codeVersion) };
 }
 
-async function foldEvent(
+/**
+ * One event folded onto `point` (the state and pending timers before it). A `restore` event goes
+ * back to the point at its toSeq, which `points` must hold. Throws when the event does not replay.
+ */
+export async function foldEvent(
   def: ReplayableDef,
   point: FoldPoint,
   event: JournalEvent,

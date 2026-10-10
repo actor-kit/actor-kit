@@ -99,7 +99,7 @@ export async function projectTimelineEntry(
   return {
     ...entry,
     causeData: await projectCause(entry.causeData, projection),
-    stateSnapshot: projectJson(entry.stateSnapshot, projection),
+    stateSnapshot: entry.stateSnapshot === null ? null : projectJson(entry.stateSnapshot, projection),
   };
 }
 

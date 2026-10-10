@@ -65,6 +65,9 @@ export {
   rebuildFromJournal,
   resolveJournalConfig,
 } from "./runtime/journal";
+// Studio timeline read from the journal (ADR-017 §5)
+export type { TimelinePageQuery, TimelineSource } from "./runtime/journal-timeline";
+export { readStudioTimeline, timelineCause, timelineEntry } from "./runtime/journal-timeline";
 // Live app connections from held sockets (pure)
 export type { ConnectionAttachment, LiveConnection, SocketRecord } from "./runtime/live-connections";
 export {
@@ -155,11 +158,9 @@ export type {
 export {
   handleStudioFrame,
   parseTimelineOptions,
-  resolveTimelineSize,
   toActiveLink,
   toLinkSubscriber,
   toOutboxEntry,
-  toTimelineEntry,
 } from "./runtime/studio-protocol";
 export { findStudioRegistry, looksLikeDONamespace } from "./runtime/studio-registry";
 export type { DueTimer, TimerFailedEvent, TimerRow } from "./runtime/timers-store";

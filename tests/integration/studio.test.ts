@@ -403,16 +403,15 @@ describe("Studio instrumentation (integration)", () => {
     });
   });
 
-  describe("ring buffer pruning", () => {
-    it("caps timeline entries at the configured timelineSize (default 500)", async () => {
+  describe("no ring buffer (ADR-017 §5)", () => {
+    it("lists every journaled event: the journal keeps everything by default", async () => {
       const actorId = `ring-buffer-${Date.now()}`;
       const id = env.COUNTER.idFromName(actorId);
       const stub = env.COUNTER.get(id);
 
       await stub.spawn({ actorId, caller: "user-1", callerType: "user", input: {} });
 
-      // Send enough messages to exceed the 500 default limit
-      // init(1) + 510 messages = 511 total, should be pruned to 500
+      // More than the old 500-entry ring buffer: init(1) + 510 messages = 511 entries, none pruned.
       for (let i = 0; i < 510; i++) {
         await stub.send("user-1", "user", { type: "INCREMENT", amount: 1 });
       }
@@ -422,13 +421,11 @@ describe("Studio instrumentation (integration)", () => {
         hasMore: boolean;
       };
 
-      // Should be capped at 500 (the default timelineSize)
-      expect(result.entries.length).toBeLessThanOrEqual(500);
-      expect(result.entries.length).toBeGreaterThanOrEqual(490); // allow small variance from pruning timing
-
-      // The oldest entry should NOT be init (it was pruned)
+      expect(result.entries.length).toBe(511);
+      expect(result.hasMore).toBe(false);
+      // The oldest entry is init: nothing was pruned.
       const oldest = result.entries[result.entries.length - 1];
-      expect(oldest?.causeType).toBe("message");
+      expect(oldest?.causeType).toBe("init");
     });
   });
 

@@ -4,7 +4,7 @@
  *
  * StudioProbe exercises every timeline cause the runtime can produce:
  * init, migrate, message, lifecycle.connect / lifecycle.disconnect,
- * service.onDone / service.onError. It has a tiny timeline (5 entries),
+ * service.onDone / service.onError. It keeps a tiny journal (5 events, so a 5-entry timeline),
  * no catch-all role, a shared view and a perCaller view.
  *
  * StudioOff opts out of studio instrumentation with `studio: { enabled: false }`,
@@ -27,7 +27,8 @@ export type ProbeState = {
 const ProbeAdminView = schema({ count: uint32, connects: uint32, disconnects: uint32, lastResult: string });
 const ProbeMemberView = schema({ count: uint32, viewer: string, isOwner: string });
 
-export const PROBE_TIMELINE_SIZE = 5;
+/** The probe keeps 5 journal events: its timeline (ADR-017 §5) shows those. */
+export const PROBE_JOURNAL_KEEP = 5;
 export const PROBE_VERSION = 2;
 
 const ProbeV1 = z.object({ owner: z.string(), count: z.number() });
@@ -121,7 +122,8 @@ const StudioProbeContract = defineActor("studio-probe", {
       isOwner: caller === state.owner ? "yes" : "no",
     })),
   },
-  studio: { timelineSize: PROBE_TIMELINE_SIZE },
+  // A checkpoint every event, so pruning keeps exactly PROBE_JOURNAL_KEEP events.
+  journal: { keep: PROBE_JOURNAL_KEEP, checkpointEvery: 1 },
 });
 
 export const StudioProbe = createActorClass(StudioProbeContract);

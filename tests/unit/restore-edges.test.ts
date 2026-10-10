@@ -1,17 +1,10 @@
 /**
  * Restore edges (ADR-015 D3): journal ordering and bounds, which recorded results count, checkpoint
- * choice, timer bookkeeping (applyScheduleOps), restore events to the fold's start, timeline seq.
+ * choice, timer bookkeeping (applyScheduleOps), restore events to the fold's start.
  */
 
 import { xxh64 } from "@actor-kit/core";
-import {
-  applyScheduleOps,
-  checksumState,
-  foldEvents,
-  type JournalEvent,
-  planRestore,
-  toTimelineEntry,
-} from "@actor-kit/worker/testing";
+import { applyScheduleOps, checksumState, foldEvents, type JournalEvent, planRestore } from "@actor-kit/worker/testing";
 import { describe, expect, it } from "vitest";
 
 type S = { n: number };
@@ -154,41 +147,5 @@ describe("applyScheduleOps", () => {
     ]);
     expect(next.map((t) => [t.key, t.id, t.fireAt])).toEqual([["a", "2:0", 30]]);
     expect(start.map((t) => t.key)).toEqual(["a", "b"]);
-  });
-});
-
-describe("toTimelineEntry: journal seq", () => {
-  const row = { id: 1, cause_type: "init", cause_data: "{}", state_snapshot: "{}", checksum: "c", created_at: 5 };
-
-  it("carries the seq when the row has one, and leaves it out otherwise", () => {
-    expect(toTimelineEntry({ ...row, seq: 7 })).toEqual({
-      id: 1,
-      causeType: "init",
-      causeData: "{}",
-      stateSnapshot: "{}",
-      checksum: "c",
-      createdAt: 5,
-      seq: 7,
-    });
-    expect(toTimelineEntry({ ...row, seq: null })).toStrictEqual({
-      id: 1,
-      causeType: "init",
-      causeData: "{}",
-      stateSnapshot: "{}",
-      checksum: "c",
-      createdAt: 5,
-    });
-    expect(toTimelineEntry(row)).toStrictEqual({
-      id: 1,
-      causeType: "init",
-      causeData: "{}",
-      stateSnapshot: "{}",
-      checksum: "c",
-      createdAt: 5,
-    });
-  });
-
-  it("refuses a seq that is not a number", () => {
-    expect(() => toTimelineEntry({ ...row, seq: "7" })).toThrow();
   });
 });

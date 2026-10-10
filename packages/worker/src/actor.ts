@@ -12,13 +12,7 @@
  */
 
 import { DurableObject } from "cloudflare:workers";
-import type {
-  ContractMessages,
-  DeterministicContext,
-  FieldDescriptor,
-  MutationCause,
-  SchemaDefinition,
-} from "@actor-kit/core";
+import type { ContractMessages, DeterministicContext, FieldDescriptor, SchemaDefinition } from "@actor-kit/core";
 import { createDeltaFrame, createSnapshotFrame, encode, encodeDelta, xxh64 } from "@actor-kit/core";
 import { DOQB } from "workers-qb";
 import { z } from "zod";
@@ -40,6 +34,7 @@ import {
   rebuildFromJournal,
   resolveJournalConfig,
 } from "./runtime/journal";
+import { readStudioTimeline, timelineEntry } from "./runtime/journal-timeline";
 import {
   isStudioSocket,
   type LiveConnection,
@@ -90,17 +85,16 @@ import {
   type StudioProjection,
 } from "./runtime/studio-project";
 import {
+  DEFAULT_TIMELINE_LIMIT,
   handleStudioFrame,
   parseInspectOptions,
   parseTimelineOptions,
   parseViewOptions,
-  resolveTimelineSize,
   STUDIO_VIEWER_HEADER,
   type StudioTimelineEntry,
   type StudioViewer,
   type StudioViewReply,
   studioView,
-  toTimelineEntry,
   viewerFromHeader,
   viewerFromTags,
   viewerTags,
@@ -228,13 +222,12 @@ interface ActorDef {
   journal?: JournalOption;
   studio?: {
     /**
-     * true: force-enable timeline recording regardless of registry detection.
-     * false: opt out — no timeline, no registry registration, every studio entry point is rejected.
+     * true: force-enable Studio regardless of registry detection.
+     * false: opt out — no registry registration, every studio entry point is rejected.
      * undefined: enabled when a StudioRegistry is detected.
+     * The timeline is the journal (ADR-017 §5): `journal.keep` is its retention.
      */
     enabled?: boolean;
-    /** Timeline ring-buffer size (positive integer, default 500). */
-    timelineSize?: number;
     /**
      * Path globs redacted from everything Studio returns (ADR-014): state, cause data, outbox
      * payloads and views, each relative to its own root. `*` = one segment, `**` = any depth.
@@ -405,13 +398,14 @@ export function actor(
   // `migrate` options are refused.
   const def = toRuntimeDef(actorDef);
   // Validate studio config at definition time, not on the first mutation.
-  const configuredTimelineSize = resolveTimelineSize(def.studio?.timelineSize);
   const studioRedactor = compileRedaction(def.studio?.redact);
   const journalConfig = resolveJournalConfig(def.journal);
   const retryPolicies = new Map<string, RetryPolicy>(
     Object.entries(def.services ?? {}).map(([name, service]) => [name, resolveRetryPolicy(service.retry)]),
   );
   const forwardPolicies = linkRetryPolicies(def.links);
+  /** What Studio shows as a link's source type: the linked contract's binding name. */
+  const linkSourceType = (link: string): string => bindingName(def.links?.[link]?.contract.name ?? link);
 
   const DOClass = class ActorInstance extends DurableObject {
     state: unknown = undefined;
@@ -432,10 +426,8 @@ export function actor(
     rebuildFrom: number | null = null; // Stored version to rebuild from by replay (ADR-015 D5), on wake
     previousSubscriberViews = new Map<string, string>(); // dedupe: "type:id" → "role:json"
 
-    // --- Timeline (studio instrumentation) ---
+    // --- Studio instrumentation ---
     studioEnabled = false; // Detected from ctx.exports on init
-    pendingCause: MutationCause | null = null; // Set before persistState(), consumed by persistState()
-    timelineSize = configuredTimelineSize; // Ring buffer max entries
     studioConnections = new Set<WebSocket>(); // Studio WebSocket connections (separate from app connections)
     registryStub: DurableObjectStub | null = null; // Cached StudioRegistry stub for RPC
     lastRegistryTouch = 0; // Timestamp of last registry touch (for debouncing)
@@ -524,9 +516,8 @@ export function actor(
       // without running webSocketClose, a hibernation wake keeps them.
       this.updateRegistryConnections();
 
-      // Persist the migrated state once (stamped with the new version) and record it on the timeline.
+      // Persist the migrated state once (stamped with the new version); it is journaled as a migrate event.
       if (migration !== null) {
-        this.pendingCause = { type: "migrate", fromVersion: row.version, toVersion: this.version };
         this.commit(this.state, migration.event);
       }
     }
@@ -591,7 +582,6 @@ export function actor(
         },
       );
 
-      this.pendingCause = { type: "init" };
       this.commit(init.state, init.event);
       this.initialized = true;
     }
@@ -687,7 +677,6 @@ export function actor(
         });
       } catch (error) {
         this.state = previous;
-        this.pendingCause = null;
         this.timersChanged = false;
         throw error;
       }
@@ -725,48 +714,21 @@ export function actor(
         });
       }
 
-      // Timeline instrumentation — write entry if studio is enabled and a cause is pending
-      const cause = this.pendingCause;
-      this.pendingCause = null;
-      if (this.studioEnabled && cause !== null) {
-        const { type: causeType, ...causeRest } = cause;
-        const causeDataJson = JSON.stringify(causeRest);
-        const entry = toTimelineEntry(
-          this.ctx.storage.sql
-            .exec(
-              "INSERT INTO timeline (cause_type, cause_data, state_snapshot, checksum, created_at, seq) VALUES (?, ?, ?, ?, ?, ?) RETURNING id, cause_type, cause_data, state_snapshot, checksum, created_at, seq",
-              causeType,
-              causeDataJson,
-              json,
-              checksum,
-              now,
-              seq,
-            )
-            .one(),
-        );
-
-        // Ring buffer pruning
-        this.pruneTimeline();
-
+      if (this.studioEnabled) {
         // Touch registry (debounced)
         this.touchRegistry();
-
-        // Push to studio connections (covers hibernated sockets too)
-        if (this.hasStudioWs()) {
+        // The timeline is the journal (ADR-017 §5): push the event just appended to studio sockets.
+        if (journalConfig.enabled && this.hasStudioWs()) {
+          // As the journal stores it: an undefined payload is null.
+          const payload = draft.payload ?? null;
+          const event = { ...draft, payload, seq, codeVersion: this.version, stateChecksum: checksum, createdAt: now };
+          const entry = timelineEntry(event, json, linkSourceType);
           this.broadcastToStudio(async (projection) => ({
             type: "studio.timeline",
             entry: await projectTimelineEntry(entry, projection),
           }));
         }
       }
-    }
-
-    /** Prune timeline to keep at most timelineSize entries. */
-    pruneTimeline(): void {
-      this.ctx.storage.sql.exec(
-        "DELETE FROM timeline WHERE id NOT IN (SELECT id FROM timeline ORDER BY id DESC LIMIT ?)",
-        this.timelineSize,
-      );
     }
 
     computeChecksum(json: string): string {
@@ -821,7 +783,6 @@ export function actor(
         if (parsed !== undefined && !parsed.success) throw new Error(`invalid payload: ${parsed.error.message}`);
         const payload = parsed?.success ? parsed.data : due.payload;
         const result = this.runStep({ type: "timer", ...due, payload, lateBy }, now);
-        this.pendingCause = { type: "timer", name: due.name, key: due.key, payload, fireAt: due.fireAt, lateBy };
         this.commit(result.state, result.event, (seq) => {
           deleteTimer(sql, due.id);
           this.writeEffects(result, seq, `timer:${due.name}`, "service");
@@ -937,9 +898,6 @@ export function actor(
         settle();
         return;
       }
-      this.pendingCause = outcome.ok
-        ? { type: "service.onDone", service, input, result: outcome.result }
-        : { type: "service.onError", service, input, error: outcome.message };
       this.commit(result.state, result.event, settle);
       this.broadcastViews();
     }
@@ -999,7 +957,6 @@ export function actor(
     async rebuildByReplay(fromVersion: number): Promise<void> {
       this.rebuildFrom = null;
       const state = await rebuildFromJournal(def, readJournal(this.ctx.storage.sql), { env: this.env });
-      this.pendingCause = { type: "migrate", fromVersion, toVersion: this.version };
       this.commit(state, {
         causeType: "migrate",
         name: null,
@@ -1231,12 +1188,6 @@ export function actor(
         error: { message: errorMessage, code: "unreachable" },
       });
       if (result.state === this.state) return;
-      this.pendingCause = {
-        type: "link.onError",
-        sourceType: bindingName(linkDef.contract.name),
-        sourceId: targetId,
-        error: errorMessage,
-      };
       this.commit(result.state, result.event);
       this.broadcastViews();
     }
@@ -1358,7 +1309,6 @@ export function actor(
       // Run onUpdate reducer
       const result = this.runStep({ type: "link.onUpdate", link: linkName, sourceId, view: viewWithRole });
       if (result.state === this.state) return;
-      this.pendingCause = { type: "link.onUpdate", sourceType, sourceId, viewData: viewWithRole };
       this.commit(result.state, result.event, () => {
         this.ctx.storage.sql.exec(
           "UPDATE active_links SET version = ? WHERE target_type = ? AND target_id = ? AND link_name = ?",
@@ -1490,7 +1440,6 @@ export function actor(
       );
 
       // Persist state + init links atomically
-      this.pendingCause = { type: "init" };
       this.commit(init.state, init.event, () => {
         for (const { name, id } of initLinks) this.insertLink(name, id, "INSERT OR REPLACE");
       });
@@ -1560,17 +1509,6 @@ export function actor(
         callerType,
         role,
       });
-
-      // Timeline: record message cause
-      const { type: _msgType, ...msgPayload } = event;
-      this.pendingCause = {
-        type: "message",
-        messageType: event.type,
-        caller,
-        callerType,
-        role,
-        payload: msgPayload,
-      };
 
       // onTransition sees the handler's state, before onUnlink
       this.observeTransition(result.handlerState, event, caller, role);
@@ -1799,16 +1737,15 @@ export function actor(
         callerConnections: this.callerConnectionCount(caller, callerType),
         role,
       });
-      this.commitLifecycle(result, { type: "lifecycle.connect", caller, callerType, role }, caller, callerType);
+      this.commitLifecycle(result, caller, callerType);
     }
 
     /**
      * Commit a lifecycle transition when it did something: changed the state or declared effects
      * (executions, forwards, timer schedules or cancels).
      */
-    commitLifecycle(result: StepResult, cause: MutationCause, caller: string, callerType: "user" | "service"): void {
+    commitLifecycle(result: StepResult, caller: string, callerType: "user" | "service"): void {
       if (result.state === this.state && !declaresEffects(result)) return;
-      this.pendingCause = cause;
       this.commit(result.state, result.event, (seq) => this.writeEffects(result, seq, caller, callerType));
       this.afterEffects(result);
     }
@@ -1971,8 +1908,7 @@ export function actor(
         callerConnections: this.callerConnectionCount(caller, callerType, ws),
         role: null,
       });
-      const role = result.event.role ?? "unknown";
-      this.commitLifecycle(result, { type: "lifecycle.disconnect", caller, callerType, role }, caller, callerType);
+      this.commitLifecycle(result, caller, callerType);
     }
 
     // --- Studio WebSocket handling ---
@@ -2047,17 +1983,16 @@ export function actor(
         }));
     }
 
-    /** Read the raw studio snapshot synchronously (state as of now). */
+    /** The newest page of the timeline, read from the journal (raw: project before returning it). */
+    readTimeline(query: { limit: number; before?: number | undefined }) {
+      return readStudioTimeline(this.ctx.storage.sql, { def, sourceType: linkSourceType, env: this.env }, query);
+    }
+
+    /** Read the raw studio snapshot (state as of now; the timeline is read from the journal now). */
     readStudioSnapshot() {
-      const timeline = this.ctx.storage.sql
-        .exec(
-          "SELECT id, cause_type, cause_data, state_snapshot, checksum, created_at, seq FROM timeline ORDER BY id DESC LIMIT 50",
-        )
-        .toArray()
-        .map(toTimelineEntry);
       return {
         state: this.state,
-        timeline,
+        timeline: this.readTimeline({ limit: DEFAULT_TIMELINE_LIMIT }),
         connections: this.liveConnections(),
         outbox: this.readOutbox(),
         timers: readTimers(this.ctx.storage.sql),
@@ -2077,7 +2012,7 @@ export function actor(
       return {
         type: "studio.snapshot",
         state: projectState(snapshot.state, projection),
-        timeline: await Promise.all(snapshot.timeline.map((e) => projectTimelineEntry(e, projection))),
+        timeline: await Promise.all((await snapshot.timeline).entries.map((e) => projectTimelineEntry(e, projection))),
         connections: await projectConnections(snapshot.connections, projection),
         outbox: snapshot.outbox.map((row) => projectOutboxRow(row, projection)),
         timers: snapshot.timers.map((row) => projectTimerRow(row, projection)),
@@ -2232,8 +2167,8 @@ export function actor(
       return projectConnections(this.liveConnections(), projection).then((connections) => ({ ...base, connections }));
     }
 
-    /** Studio RPC: returns paginated timeline entries, newest first, redacted (ADR-014).
-     * `before` is an exclusive entry-ID cursor; IDs are unique, so equal timestamps
+    /** Studio RPC: returns paginated timeline entries (journal events, ADR-017 §5), newest first,
+     * redacted (ADR-014). `before` is an exclusive seq cursor; seqs are unique, so equal timestamps
      * never cause gaps or duplicates at page boundaries. Invalid options are rejected. */
     __getTimeline(opts?: { limit?: number; before?: number; viewer?: StudioViewer }): Promise<{
       entries: StudioTimelineEntry[];
@@ -2246,27 +2181,9 @@ export function actor(
       const projection = this.studioProjection(viewer ?? "human");
       if (!this.persistedLoaded) return Promise.resolve({ entries: [], hasMore: false });
 
-      const rows =
-        before !== undefined
-          ? this.ctx.storage.sql
-              .exec(
-                "SELECT id, cause_type, cause_data, state_snapshot, checksum, created_at, seq FROM timeline WHERE id < ? ORDER BY id DESC LIMIT ?",
-                before,
-                limit + 1,
-              )
-              .toArray()
-          : this.ctx.storage.sql
-              .exec(
-                "SELECT id, cause_type, cause_data, state_snapshot, checksum, created_at, seq FROM timeline ORDER BY id DESC LIMIT ?",
-                limit + 1,
-              )
-              .toArray();
-
-      const hasMore = rows.length > limit;
-      const raw = rows.slice(0, limit).map(toTimelineEntry);
-      return Promise.all(raw.map((entry) => projectTimelineEntry(entry, projection))).then((entries) => ({
-        entries,
-        hasMore,
+      return this.readTimeline({ limit, before }).then(async (page) => ({
+        entries: await Promise.all(page.entries.map((entry) => projectTimelineEntry(entry, projection))),
+        hasMore: page.hasMore,
       }));
     }
 
@@ -2331,7 +2248,6 @@ export function actor(
       } catch (error) {
         return { ok: false, error: error instanceof Error ? error.message : String(error) };
       }
-      this.pendingCause = { type: "restore", toSeq };
       const draft: JournalDraft = {
         causeType: "restore",
         name: null,
@@ -2379,10 +2295,6 @@ export function actor(
             };
       const result = this.runStep(cause);
       if (result.state === this.state) return;
-      this.pendingCause =
-        cause.type === "service.onDone"
-          ? { type: cause.type, service, input: cause.input, result: cause.result }
-          : { type: cause.type, service, input: cause.input, error: cause.error.message };
       this.commit(result.state, result.event);
     }
 
@@ -2526,10 +2438,10 @@ export interface TypedActorClass<TContract> {
         id: number;
         causeType: string;
         causeData: string;
-        stateSnapshot: string;
+        stateSnapshot: string | null;
         checksum: string;
         createdAt: number;
-        seq?: number;
+        seq: number;
       }>;
       hasMore: boolean;
     }>;

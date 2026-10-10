@@ -1,9 +1,4 @@
-import {
-  handleStudioFrame,
-  parseTimelineOptions,
-  resolveTimelineSize,
-  toTimelineEntry,
-} from "@actor-kit/worker/testing";
+import { handleStudioFrame, parseTimelineOptions } from "@actor-kit/worker/testing";
 import { describe, expect, it } from "vitest";
 
 type State = { owner: string; count: number };
@@ -29,21 +24,6 @@ const source = {
 
 const frame = (value: unknown) => handleStudioFrame(JSON.stringify(value), source);
 
-describe("resolveTimelineSize", () => {
-  it("defaults to 500", () => {
-    expect(resolveTimelineSize(undefined)).toBe(500);
-  });
-
-  it("accepts positive integers", () => {
-    expect(resolveTimelineSize(1)).toBe(1);
-    expect(resolveTimelineSize(1000)).toBe(1000);
-  });
-
-  it.each([0, -1, 2.5, Number.NaN, Number.POSITIVE_INFINITY])("rejects %s", (size) => {
-    expect(() => resolveTimelineSize(size)).toThrow(/timelineSize must be a positive integer/);
-  });
-});
-
 describe("parseTimelineOptions", () => {
   it("defaults limit to 50 with no cursor", () => {
     expect(parseTimelineOptions(undefined)).toEqual({ limit: 50, before: undefined });
@@ -68,32 +48,6 @@ describe("parseTimelineOptions", () => {
     null,
   ])("rejects %j", (opts) => {
     expect(() => parseTimelineOptions(opts)).toThrow(/^Invalid timeline options/);
-  });
-});
-
-describe("toTimelineEntry", () => {
-  it("maps a timeline row to the wire shape", () => {
-    expect(
-      toTimelineEntry({
-        id: 7,
-        cause_type: "message",
-        cause_data: "{}",
-        state_snapshot: '{"a":1}',
-        checksum: "abc",
-        created_at: 99,
-      }),
-    ).toEqual({
-      id: 7,
-      causeType: "message",
-      causeData: "{}",
-      stateSnapshot: '{"a":1}',
-      checksum: "abc",
-      createdAt: 99,
-    });
-  });
-
-  it("rejects malformed rows", () => {
-    expect(() => toTimelineEntry({ id: "7", cause_type: "message" })).toThrow();
   });
 });
 

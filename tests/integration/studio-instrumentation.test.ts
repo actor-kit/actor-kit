@@ -12,7 +12,7 @@
 import { env, runInDurableObject } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
-import { PROBE_TIMELINE_SIZE, PROBE_VERSION, StudioProbe } from "./src/studio-probe";
+import { PROBE_JOURNAL_KEEP, PROBE_VERSION, StudioProbe } from "./src/studio-probe";
 import { Counter } from "./src/worker";
 
 // --- Boundary schemas (parse everything that comes back from the DO) ---
@@ -221,10 +221,10 @@ async function registryEntry(actorType: string, actorId: string) {
   return rows.find((r) => r.actorId === actorId);
 }
 
-// --- Timeline retention ---
+// --- Timeline retention: the journal's (ADR-017 §5) ---
 
 describe("timeline retention", () => {
-  it("caps at timelineSize and evicts the oldest entries first", async () => {
+  it("keeps what journal.keep keeps and evicts the oldest entries first", async () => {
     const name = uniqueName("retention");
     const stub = await spawnProbe(name);
     for (let i = 1; i <= 7; i++) {
@@ -232,7 +232,7 @@ describe("timeline retention", () => {
     }
 
     const page = await timeline(stub, { limit: 100 });
-    expect(page.entries).toHaveLength(PROBE_TIMELINE_SIZE);
+    expect(page.entries).toHaveLength(PROBE_JOURNAL_KEEP);
     // init + 7 messages = ids 1..8; the 5 newest (8..4) survive, newest first.
     expect(page.entries.map((e) => e.id)).toEqual([8, 7, 6, 5, 4]);
     expect(page.entries.map((e) => ProbeStateSchema.parse(JSON.parse(e.stateSnapshot)).count)).toEqual([7, 6, 5, 4, 3]);
@@ -254,11 +254,11 @@ describe("timeline retention", () => {
     });
 
     expect(after.restored).toEqual(before);
-    expect(after.capped.entries).toHaveLength(PROBE_TIMELINE_SIZE);
+    expect(after.capped.entries).toHaveLength(PROBE_JOURNAL_KEEP);
     expect(after.capped.entries.map((e) => e.id)).toEqual([8, 7, 6, 5, 4]);
   });
 
-  it("rejects a non-positive timelineSize at definition time", async () => {
+  it("rejects a non-positive journal.keep at definition time", async () => {
     const { actor } = await import("@actor-kit/worker");
     const def = {
       input: z.object({}),
@@ -266,9 +266,9 @@ describe("timeline retention", () => {
       roles: { user: () => true },
       views: {},
     };
-    expect(() => actor("bad-size", { ...def, studio: { timelineSize: 0 } })).toThrow(/timelineSize/);
-    expect(() => actor("bad-size", { ...def, studio: { timelineSize: -1 } })).toThrow(/timelineSize/);
-    expect(() => actor("bad-size", { ...def, studio: { timelineSize: 2.5 } })).toThrow(/timelineSize/);
+    expect(() => actor("bad-size", { ...def, journal: { keep: 0 } })).toThrow(/journal.keep/);
+    expect(() => actor("bad-size", { ...def, journal: { keep: -1 } })).toThrow(/journal.keep/);
+    expect(() => actor("bad-size", { ...def, journal: { keep: 2.5 } })).toThrow(/journal.keep/);
   });
 });
 
@@ -414,7 +414,7 @@ describe("__getTimeline pagination", () => {
     const stub = await counterWith(13);
     // Force every entry onto the same millisecond: the cursor must not depend on created_at.
     await runInDurableObject(stub, (_instance, state) => {
-      state.storage.sql.exec("UPDATE timeline SET created_at = 1700000000000");
+      state.storage.sql.exec("UPDATE events SET created_at = 1700000000000");
     });
 
     const all = await timeline(stub, { limit: 100 });
@@ -840,7 +840,7 @@ describe("studio disabled (studio: { enabled: false })", () => {
     expect(res.webSocket).toBeNull();
   });
 
-  it("records no timeline or connection rows and does not register", async () => {
+  it("has no timeline table or connection rows and does not register", async () => {
     const name = uniqueName("off-rows");
     const stub = off(name);
     await stub.send("u", "user", { type: "INCREMENT" });
@@ -848,7 +848,10 @@ describe("studio disabled (studio: { enabled: false })", () => {
     await client.next((m) => m.type === "snapshot");
 
     const counts = await runInDurableObject(stub, (_instance, state) => ({
-      timeline: state.storage.sql.exec("SELECT COUNT(*) AS n FROM timeline").one()["n"],
+      // The timeline is the journal (ADR-017 §5): migration 0014 drops the old table.
+      timeline: state.storage.sql
+        .exec("SELECT COUNT(*) AS n FROM sqlite_master WHERE type = 'table' AND name = 'timeline'")
+        .one()["n"],
       // Connections are no longer persisted (migration 0008 drops studio_connections): no such table may exist.
       connections: state.storage.sql
         .exec("SELECT COUNT(*) AS n FROM sqlite_master WHERE type = 'table' AND name = 'studio_connections'")

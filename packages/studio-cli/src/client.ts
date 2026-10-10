@@ -62,7 +62,8 @@ export const TimelineEntrySchema = z.object({
   id: z.number().int(),
   causeType: z.string(),
   causeData: z.string(),
-  stateSnapshot: z.string(),
+  /** Null when the journal could not rebuild the after-state (ADR-017 §5). */
+  stateSnapshot: z.string().nullable(),
   checksum: z.string(),
   createdAt: z.number(),
 });

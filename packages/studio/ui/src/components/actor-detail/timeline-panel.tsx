@@ -104,7 +104,7 @@ function EntryDetails({
           <RestoreButton actorType={actor.actorType} actorId={actor.actorId} seq={entry.seq} />
         </div>
       )}
-      {previous !== undefined && (
+      {previous !== undefined && previous.stateUnavailable !== true && entry.stateUnavailable !== true && (
         <Section title="Changes:">
           <JsonDiff before={previous.state} after={entry.state} />
         </Section>
@@ -113,7 +113,11 @@ function EntryDetails({
         <JsonTree data={entry.cause} />
       </Section>
       <Section title="State after:">
-        <JsonTree data={entry.state} />
+        {entry.stateUnavailable === true ? (
+          <p className="text-zinc-500">State not available: it could not be rebuilt from the journal.</p>
+        ) : (
+          <JsonTree data={entry.state} />
+        )}
       </Section>
     </div>
   );
