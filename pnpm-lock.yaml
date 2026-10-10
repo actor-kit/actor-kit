@@ -296,6 +296,25 @@ importers:
         specifier: ^4.141.0
         version: 4.141.0(@cloudflare/workers-types@5.20260927.1)(@types/node@26.6.4)
 
+  examples/quiz:
+    dependencies:
+      '@actor-kit/core':
+        specifier: workspace:*
+        version: link:../../packages/core
+      '@actor-kit/worker':
+        specifier: workspace:*
+        version: link:../../packages/worker
+      zod:
+        specifier: ^4.6.5
+        version: 4.6.5
+    devDependencies:
+      '@cloudflare/workers-types':
+        specifier: ^5.20260927.1
+        version: 5.20260927.1
+      typescript:
+        specifier: ^7.0.2
+        version: 7.0.2
+
   examples/todo-list:
     dependencies:
       '@actor-kit/client':

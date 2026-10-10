@@ -187,4 +187,22 @@ export const ACTOR_KIT_MIGRATIONS: ReadonlyArray<{ readonly name: string; readon
       ALTER TABLE forwards ADD COLUMN last_error_tag TEXT;
     `,
   },
+  {
+    // One history (ADR-017 §5): Studio's timeline is read from the journal; its own table goes.
+    name: "0015_drop_timeline",
+    sql: "DROP TABLE IF EXISTS timeline;",
+  },
+  {
+    // Causation and correlation ids on every journal event (ADR-017 §4). NULL for older rows.
+    name: "0016_trace_ids",
+    sql: `
+      ALTER TABLE events ADD COLUMN correlation_id TEXT;
+      ALTER TABLE events ADD COLUMN causation_id TEXT;
+    `,
+  },
+  {
+    // Domain events a transition emitted (ADR-017 §2): a JSON array, NULL when none.
+    name: "0017_emitted",
+    sql: "ALTER TABLE events ADD COLUMN emitted TEXT;",
+  },
 ];

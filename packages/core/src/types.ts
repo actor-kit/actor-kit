@@ -65,6 +65,11 @@ export interface ScheduleOptions {
   readonly key?: string;
   /** Validated by the timer's schema when scheduled. */
   readonly payload?: unknown;
+  /**
+   * `"state"` (actors with `states`, ADR-017 §1): the timer belongs to the current phase and is
+   * cancelled when the actor leaves it. Its key defaults to `${phase}:${timer}`.
+   */
+  readonly scope?: "state";
 }
 
 /** schedule() starts a durable timer declared in the actor's `timers` block. */
@@ -88,6 +93,13 @@ export interface DeliveryInfo {
   readonly attempt: number;
 }
 
+/**
+ * emit() records a domain event declared in the actor's `events` (ADR-017 §2). The payload is
+ * parsed by the event's schema; an undeclared name or an invalid payload fails the transition.
+ * `setup({ events })` gives handlers an emit typed by the declared events.
+ */
+export type EmitFn = (name: string, payload: unknown) => void;
+
 export interface MessageContext<TEnv = unknown> extends DeterministicContext {
   readonly caller: string;
   readonly callerType: "user" | "service";
@@ -101,6 +113,7 @@ export interface MessageContext<TEnv = unknown> extends DeterministicContext {
   readonly forward: ForwardFn;
   readonly schedule: ScheduleFn;
   readonly cancel: CancelFn;
+  readonly emit: EmitFn;
 }
 
 /** What a timer's handler gets. A timer has no caller and no role. */
@@ -114,6 +127,7 @@ export interface TimerContext<TEnv = unknown> extends DeterministicContext {
   readonly forward: ForwardFn;
   readonly schedule: ScheduleFn;
   readonly cancel: CancelFn;
+  readonly emit: EmitFn;
 }
 
 export interface TimerDef<TState = unknown, TPayload = unknown, TEnv = unknown> {

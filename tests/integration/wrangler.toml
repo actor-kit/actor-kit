@@ -216,3 +216,32 @@ class_name = "EnvMisbound"
 [[migrations]]
 tag = "v18"
 new_sqlite_classes = ["EnvTyped", "EnvMisbound"]
+
+[[durable_objects.bindings]]
+name = "LOT"
+class_name = "Lot"
+
+[[durable_objects.bindings]]
+name = "LOT_UNBOUND"
+class_name = "LotUnbound"
+
+[[migrations]]
+tag = "v19"
+new_sqlite_classes = ["Lot", "LotUnbound"]
+
+# Outbound event stream (ADR-017 §3)
+[[queues.producers]]
+binding = "LOT_EVENTS"
+queue = "lot-events"
+
+[[queues.producers]]
+binding = "AUCTION_EVENTS"
+queue = "auction-events"
+
+[[durable_objects.bindings]]
+name = "QUIZ_STATES"
+class_name = "QuizStates"
+
+[[migrations]]
+tag = "v20"
+new_sqlite_classes = ["QuizStates"]

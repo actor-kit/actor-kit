@@ -15,6 +15,7 @@ export type {
   SendOutcome,
   SimActor,
   SimConnection,
+  SimEvent,
   SimTimer,
   SimulateOptions,
   Simulation,

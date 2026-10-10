@@ -33,5 +33,21 @@ export { fail, ServiceFailure } from "./runtime/service-error";
 // Typed version chain (ADR-015 D5)
 export type { VersionDef, VersionOptions } from "./runtime/versions";
 export { version } from "./runtime/versions";
+// Typed declarations: setup({ events, states }) (ADR-017)
+export type {
+  EmittingMessageContext,
+  EmittingTimerContext,
+  EventPayloads,
+  EventSchemas,
+  Goto,
+  LocalOf,
+  PhasedState,
+  PhasedStateOf,
+  PhaseResult,
+  Setup,
+  StateDecl,
+  TypedEmit,
+} from "./setup";
+export { goto, PhaseTransition, setup, stay } from "./setup";
 // Timer helper (ADR-015 D2)
 export { timer } from "./timer";

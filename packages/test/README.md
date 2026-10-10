@@ -43,6 +43,11 @@ While a handler runs under `testActor()`, `simulate()` or `replayJournal()`, `Da
 `performance.now()`, `Math.random()`, `crypto.randomUUID()` and `crypto.getRandomValues()` throw
 `NondeterminismError`: use `ctx.now()`, `ctx.random()` and `ctx.id()`.
 
+## Domain events
+
+`testActor(...).send()` returns `emitted`; `simulate()` exposes `sim.events()`; `replayJournal()`
+fails at the first emitted event that differs from the journal.
+
 ## Docs
 
 Full documentation at [actorkit.dev](https://actorkit.dev).

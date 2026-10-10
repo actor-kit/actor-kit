@@ -10,19 +10,6 @@
 import { z } from "zod";
 import { type RolePredicate, resolveRole } from "./roles";
 
-// --- Config ---
-
-export const DEFAULT_TIMELINE_SIZE = 500;
-
-/** Validate `studio.timelineSize` at definition time. A size < 1 would drop or never prune entries. */
-export function resolveTimelineSize(size: number | undefined): number {
-  if (size === undefined) return DEFAULT_TIMELINE_SIZE;
-  if (!Number.isInteger(size) || size < 1) {
-    throw new Error(`studio.timelineSize must be a positive integer, got ${String(size)}`);
-  }
-  return size;
-}
-
 // --- Viewer (ADR-014) ---
 
 /** Who is looking. Agents get hashed callers. Omitted = human (the middleware only sets "agent"). */
@@ -91,39 +78,24 @@ export function parseTimelineOptions(opts: unknown): TimelineQuery {
   };
 }
 
-const TimelineRowSchema = z.object({
-  id: z.number(),
-  cause_type: z.string(),
-  cause_data: z.string(),
-  state_snapshot: z.string(),
-  checksum: z.string(),
-  created_at: z.number(),
-  seq: z.number().nullable().optional(),
-});
-
+/** One timeline entry: a journal event (ADR-017 §5), as __getTimeline, the snapshot and live pushes send it. */
 export interface StudioTimelineEntry {
+  /** The event's journal seq (also the pagination cursor). */
   id: number;
+  /** Same as `id`: the seq "restore to here" restores to (ADR-015 D3). */
+  seq: number;
   causeType: string;
   causeData: string;
-  stateSnapshot: string;
+  /** The persisted state after the event (JSON), or null when it cannot be rebuilt from the journal. */
+  stateSnapshot: string | null;
   checksum: string;
   createdAt: number;
-  /** The journal seq this entry recorded (ADR-015 D3: "restore to here"). Absent for older rows. */
-  seq?: number;
-}
-
-/** Parse a `timeline` SQLite row into the wire shape shared by __getTimeline, the snapshot and live pushes. */
-export function toTimelineEntry(raw: unknown): StudioTimelineEntry {
-  const row = TimelineRowSchema.parse(raw);
-  const entry = {
-    id: row.id,
-    causeType: row.cause_type,
-    causeData: row.cause_data,
-    stateSnapshot: row.state_snapshot,
-    checksum: row.checksum,
-    createdAt: row.created_at,
-  };
-  return typeof row.seq === "number" ? { ...entry, seq: row.seq } : entry;
+  /** The flow the event belongs to (ADR-017 §4); null for events written before ADR-017. */
+  correlationId: string | null;
+  /** The event or effect that caused it (`type/id/seq[:index]`); null when it started its flow. */
+  causationId: string | null;
+  /** Domain events the transition emitted (ADR-017 §2), as a JSON array of `{ name, payload }`; null when none. */
+  emitted: string | null;
 }
 
 // --- Outbox and links (shared by __inspect, the snapshot and live pushes) ---

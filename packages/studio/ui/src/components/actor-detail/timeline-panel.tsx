@@ -1,5 +1,8 @@
+import { Link } from "@tanstack/react-router";
 import type { ReactNode } from "react";
+import { parseCauseRef } from "../../cause-ref";
 import { formatCauseSummary } from "../../cause-summary";
+import { phaseChange } from "../../phase-change";
 import type { TimelineItem } from "../../protocol";
 import { recentTime } from "../../relative-time";
 import { JsonDiff } from "../json-diff";
@@ -37,9 +40,11 @@ interface TimelinePanelProps {
   timeline: TimelineItem[];
   expandedEntry: number | null;
   onToggle: (id: number) => void;
+  /** Expand one entry (a cause link to this actor's own timeline). */
+  onOpen: (id: number) => void;
 }
 
-export function TimelinePanel({ actor, timeline, expandedEntry, onToggle }: TimelinePanelProps) {
+export function TimelinePanel({ actor, timeline, expandedEntry, onToggle, onOpen }: TimelinePanelProps) {
   return (
     <div className="space-y-1" data-testid="timeline-panel">
       {timeline.length === 0 && <p className="text-zinc-500">No timeline entries.</p>}
@@ -52,6 +57,7 @@ export function TimelinePanel({ actor, timeline, expandedEntry, onToggle }: Time
           previous={timeline[idx + 1]}
           expanded={expandedEntry === entry.id}
           onToggle={() => onToggle(entry.id)}
+          onOpen={onOpen}
         />
       ))}
     </div>
@@ -64,9 +70,10 @@ interface TimelineRowProps {
   previous: TimelineItem | undefined;
   expanded: boolean;
   onToggle: () => void;
+  onOpen: (id: number) => void;
 }
 
-function TimelineRow({ actor, entry, previous, expanded, onToggle }: TimelineRowProps) {
+function TimelineRow({ actor, entry, previous, expanded, onToggle, onOpen }: TimelineRowProps) {
   const cause = causeLabel(entry.causeType);
   return (
     <div className="border border-zinc-800 rounded">
@@ -79,11 +86,21 @@ function TimelineRow({ actor, entry, previous, expanded, onToggle }: TimelineRow
       >
         <span className={`${cause.color} text-white text-xs px-1.5 py-0.5 rounded`}>{cause.label}</span>
         <span className="flex-1 text-zinc-300 break-all">{formatCauseSummary(entry.causeType, entry.cause)}</span>
+        {phaseChange(entry, previous) !== null && (
+          <span className="text-xs text-fuchsia-300" data-testid={`timeline-phase-${entry.id}`}>
+            → {phaseChange(entry, previous)}
+          </span>
+        )}
+        {entry.emitted !== undefined && entry.emitted.length > 0 && (
+          <span className="text-xs text-teal-300" data-testid={`timeline-emitted-${entry.id}`}>
+            {entry.emitted.map((e) => e.name).join(", ")}
+          </span>
+        )}
         <span className="text-zinc-600 text-xs" title={new Date(entry.createdAt).toISOString()}>
           {recentTime(entry.createdAt)}
         </span>
       </button>
-      {expanded && <EntryDetails actor={actor} entry={entry} previous={previous} />}
+      {expanded && <EntryDetails actor={actor} entry={entry} previous={previous} onOpen={onOpen} />}
     </div>
   );
 }
@@ -92,19 +109,22 @@ function EntryDetails({
   actor,
   entry,
   previous,
+  onOpen,
 }: {
   actor: ActorRef;
   entry: TimelineItem;
   previous: TimelineItem | undefined;
+  onOpen: (id: number) => void;
 }) {
   return (
     <div className="px-3 pb-3 border-t border-zinc-800/50 space-y-2">
+      <TraceSection actor={actor} entry={entry} onOpen={onOpen} />
       {entry.seq !== undefined && (
         <div className="pt-2">
           <RestoreButton actorType={actor.actorType} actorId={actor.actorId} seq={entry.seq} />
         </div>
       )}
-      {previous !== undefined && (
+      {previous !== undefined && previous.stateUnavailable !== true && entry.stateUnavailable !== true && (
         <Section title="Changes:">
           <JsonDiff before={previous.state} after={entry.state} />
         </Section>
@@ -112,10 +132,84 @@ function EntryDetails({
       <Section title="Cause data:">
         <JsonTree data={entry.cause} />
       </Section>
+      {entry.emitted !== undefined && entry.emitted.length > 0 && (
+        <Section title="Emitted:">
+          <JsonTree data={entry.emitted} />
+        </Section>
+      )}
       <Section title="State after:">
-        <JsonTree data={entry.state} />
+        {entry.stateUnavailable === true ? (
+          <p className="text-zinc-500">State not available: it could not be rebuilt from the journal.</p>
+        ) : (
+          <JsonTree data={entry.state} />
+        )}
       </Section>
     </div>
+  );
+}
+
+/** The entry's flow and cause (ADR-017 §4); nothing for entries written before ids. */
+function TraceSection({
+  actor,
+  entry,
+  onOpen,
+}: {
+  actor: ActorRef;
+  entry: TimelineItem;
+  onOpen: (id: number) => void;
+}) {
+  const { correlationId, causationId } = entry;
+  if (typeof correlationId !== "string") return null;
+  return (
+    <div className="pt-2 space-y-1 text-xs text-zinc-400">
+      <p>
+        Flow: <span data-testid="entry-correlation">{correlationId}</span>
+      </p>
+      {typeof causationId === "string" ? (
+        <p>
+          Caused by: <CauseLink actor={actor} causationId={causationId} onOpen={onOpen} />
+        </p>
+      ) : (
+        <p>Started this flow</p>
+      )}
+    </div>
+  );
+}
+
+/** The causing event: this actor's entry (expanded in place), another actor's timeline, or plain text. */
+function CauseLink({
+  actor,
+  causationId,
+  onOpen,
+}: {
+  actor: ActorRef;
+  causationId: string;
+  onOpen: (id: number) => void;
+}) {
+  const ref = parseCauseRef(causationId);
+  if (ref === null) return <span data-testid="entry-causation">{causationId}</span>;
+  if (ref.actorType === actor.actorType && ref.actorId === actor.actorId) {
+    return (
+      <button
+        type="button"
+        onClick={() => onOpen(ref.seq)}
+        className="text-sky-400 hover:underline"
+        data-testid="entry-causation"
+      >
+        {causationId}
+      </button>
+    );
+  }
+  return (
+    <Link
+      to="/actors/$actorType/$actorId"
+      params={{ actorType: ref.actorType, actorId: ref.actorId }}
+      search={{ entry: ref.seq }}
+      className="text-sky-400 hover:underline"
+      data-testid="entry-causation"
+    >
+      {causationId}
+    </Link>
   );
 }
 

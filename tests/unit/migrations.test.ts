@@ -34,17 +34,19 @@ describe("ACTOR_KIT_MIGRATIONS", () => {
       "0012_restore",
       "0013_forward_retries",
       "0014_last_error_tag",
+      "0015_drop_timeline",
+      "0016_trace_ids",
+      "0017_emitted",
     ]);
   });
 
-  it("build the actor's tables and indexes (studio_connections is created, then dropped)", () => {
+  it("build the actor's tables and indexes (studio_connections and timeline are created, then dropped)", () => {
     expect(schemaAfterMigrations()).toEqual([
       "index:idx_executions_due",
       "index:idx_executions_status",
       "index:idx_forwards_due",
       "index:idx_forwards_status_created",
       "index:idx_outbox_status_created",
-      "index:idx_timeline_created",
       "index:idx_timers_due",
       "table:active_links",
       "table:actor_meta",
@@ -55,8 +57,31 @@ describe("ACTOR_KIT_MIGRATIONS", () => {
       "table:link_subscribers",
       "table:outbox",
       "table:snapshots",
-      "table:timeline",
       "table:timers",
     ]);
+  });
+});
+
+describe("0015_drop_timeline (ADR-017 §5: one history)", () => {
+  it("drops a timeline table that holds rows; the journal is untouched", () => {
+    const sql = createNodeSql();
+    const before = ACTOR_KIT_MIGRATIONS.filter((m) => m.name < "0015");
+    for (const migration of before) sql.exec(migration.sql);
+    sql.exec(
+      "INSERT INTO timeline (cause_type, cause_data, state_snapshot, checksum, created_at, seq) VALUES ('init', '{}', '{}', 'c', 1, 1)",
+    );
+    sql.exec(
+      "INSERT INTO events (seq, cause_type, name, payload, caller, caller_type, role, facts, code_version, state_checksum, created_at) VALUES (1, 'init', NULL, '{}', NULL, NULL, NULL, '{}', 1, 'c', 1)",
+    );
+    const drop = ACTOR_KIT_MIGRATIONS.find((m) => m.name === "0015_drop_timeline");
+    if (drop === undefined) throw new Error("0015_drop_timeline is missing");
+    sql.exec(drop.sql);
+    const tables = sql
+      .exec("SELECT name FROM sqlite_master WHERE name IN ('timeline', 'idx_timeline_created', 'events')")
+      .toArray()
+      .map((row) => row["name"]);
+    expect(tables).toEqual(["events"]);
+    expect(sql.exec("SELECT COUNT(*) AS n FROM events").one()["n"]).toBe(1);
+    sql.close();
   });
 });

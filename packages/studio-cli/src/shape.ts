@@ -36,7 +36,8 @@ const CauseSchema = z.object({
   input: z.unknown().optional(),
 });
 
-function parseJson(text: string): unknown {
+function parseJson(text: string | null): unknown {
+  if (text === null) return undefined;
   try {
     return JSON.parse(text);
   } catch {

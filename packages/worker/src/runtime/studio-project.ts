@@ -100,8 +100,23 @@ export async function projectTimelineEntry(
   return {
     ...entry,
     causeData: await projectCause(entry.causeData, projection),
-    stateSnapshot: projectJson(entry.stateSnapshot, projection),
+    stateSnapshot: entry.stateSnapshot === null ? null : projectJson(entry.stateSnapshot, projection),
+    emitted: entry.emitted === null ? null : projectEmitted(entry.emitted, projection),
   };
+}
+
+/** Emitted events: each payload is redacted relative to its own root, like a message payload. */
+function projectEmitted(text: string, projection: StudioProjection): string {
+  if (!projection.redactor.active) return text;
+  const parsed = parseJson(text);
+  if (!Array.isArray(parsed)) return JSON.stringify(REDACTED);
+  return JSON.stringify(
+    parsed.map((event: unknown) => (isRecord(event) ? redactPayload(event, projection) : REDACTED)),
+  );
+}
+
+function redactPayload(event: Record<string, unknown>, projection: StudioProjection): Record<string, unknown> {
+  return Object.hasOwn(event, "payload") ? { ...event, payload: projection.redactor.apply(event["payload"]) } : event;
 }
 
 export type { OutboxRow as StudioOutboxRow } from "./outbox-store";

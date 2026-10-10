@@ -58,7 +58,10 @@ CREATE TABLE events (
   facts          TEXT NOT NULL,     -- JSON, see "Facts"
   code_version   INTEGER NOT NULL,  -- def.version when written
   state_checksum TEXT NOT NULL,     -- xxh64 of the serialized after-state
-  created_at     INTEGER NOT NULL
+  created_at     INTEGER NOT NULL,
+  correlation_id TEXT,              -- ADR-017 §4: the flow (`type/id/seq` of the event that started it)
+  causation_id   TEXT,              -- ADR-017 §4: the event or effect that caused this one (NULL: starts a flow)
+  emitted        TEXT               -- ADR-017 §2: JSON array of { name, payload } (NULL: none)
 );
 
 CREATE TABLE journal_checkpoints (
@@ -154,6 +157,6 @@ With `keep`, events at or below the newest checkpoint `B` with `B <= lastSeq - k
 
 ### Neutral
 
-- The Studio timeline keeps its own table for now. Step 3 makes it a view over `events`.
+- The Studio timeline kept its own table until ADR-017 §5, which made it a view over `events` and dropped the table.
 - `runtime/cdc.ts` (the unbuilt CDC delta log) is superseded: a delta log can't replay through new code; an event log can.
 - A journal that spans a `version` bump doesn't replay under the new handlers until step 4 adds upcasters.

@@ -12,13 +12,7 @@
  */
 
 import { DurableObject } from "cloudflare:workers";
-import type {
-  ContractMessages,
-  DeterministicContext,
-  FieldDescriptor,
-  MutationCause,
-  SchemaDefinition,
-} from "@actor-kit/core";
+import type { ContractMessages, DeterministicContext, FieldDescriptor, SchemaDefinition } from "@actor-kit/core";
 import { createDeltaFrame, createSnapshotFrame, encode, encodeDelta, xxh64 } from "@actor-kit/core";
 import { DOQB } from "workers-qb";
 import { z } from "zod";
@@ -33,13 +27,8 @@ import {
 } from "./runtime/attempt";
 import { closeCodeToSend } from "./runtime/close-code";
 import { type ConnectRequest, parseConnectRequest } from "./runtime/connect-request";
-import {
-  type DeliveryInfo,
-  DeliveryInfoSchema,
-  deliveryInfo,
-  type EffectInfo,
-  effectInfo,
-} from "./runtime/effect-info";
+import { parseEffectId } from "./runtime/effect-id";
+import { type DeliveryInfo, deliveryInfo, type EffectInfo, effectInfo } from "./runtime/effect-info";
 import { type EnvParser, envErrorMessage, envInvalidEvent, parseActorEnv } from "./runtime/env";
 import {
   appendJournalEvent,
@@ -55,6 +44,7 @@ import {
   rebuildFromJournal,
   resolveJournalConfig,
 } from "./runtime/journal";
+import { readStudioTimeline, timelineEntry } from "./runtime/journal-timeline";
 import {
   isStudioSocket,
   type LiveConnection,
@@ -63,6 +53,7 @@ import {
   type SocketRecord,
   toLiveConnections,
 } from "./runtime/live-connections";
+import { forwardMeta, type MessageMeta, parseMessageMeta, TraceSchema } from "./runtime/message-meta";
 import { ACTOR_KIT_MIGRATIONS } from "./runtime/migrations";
 import {
   cancelUndoneEffects,
@@ -80,6 +71,8 @@ import {
   requeueInterrupted,
   startAttempt,
 } from "./runtime/outbox-store";
+import type { StepStateDef } from "./runtime/phases";
+import { PUBLISH_SERVICE, type PublishOption, publishedMessages, resolvePublish, sendToQueue } from "./runtime/publish";
 import { resolveNamespace } from "./runtime/resolve-namespace";
 import { planRestore } from "./runtime/restore";
 import {
@@ -94,15 +87,8 @@ import {
   type TryOutcome,
 } from "./runtime/retry";
 import { resolveRole } from "./runtime/roles";
-import {
-  classifyFailure,
-  describeRecordedError,
-  describeServiceError,
-  type ErrorsParser,
-  isBuiltInError,
-  type TaggedError,
-} from "./runtime/service-error";
-import { admitMessage, liveStepFacts, type StepCause, type StepResult, step, stepInit } from "./runtime/step";
+import { classifyFailure, type ErrorsParser, isBuiltInError, type TaggedError } from "./runtime/service-error";
+import { admitStepMessage, liveStepFacts, type StepCause, type StepResult, step, stepInit } from "./runtime/step";
 import {
   type CallerHasher,
   createCallerHasher,
@@ -117,17 +103,16 @@ import {
   type StudioProjection,
 } from "./runtime/studio-project";
 import {
+  DEFAULT_TIMELINE_LIMIT,
   handleStudioFrame,
   parseInspectOptions,
   parseTimelineOptions,
   parseViewOptions,
-  resolveTimelineSize,
   STUDIO_VIEWER_HEADER,
   type StudioTimelineEntry,
   type StudioViewer,
   type StudioViewReply,
   studioView,
-  toTimelineEntry,
   viewerFromHeader,
   viewerFromTags,
   viewerTags,
@@ -146,6 +131,7 @@ import {
   timerByKey,
   timerFailedEvent,
 } from "./runtime/timers-store";
+import { effectCauseId, eventId, journalTrace, type Trace } from "./runtime/trace";
 import { toRuntimeDef } from "./runtime/versions";
 
 /** Reserved caller ID for studio WebSocket connections (stamped by the studio middleware). */
@@ -217,6 +203,13 @@ interface ActorDef {
       ctx: { caller: string; role: string },
     ): void;
   };
+  /** Domain events (ADR-017 §2): payload schemas by name; `ctx.emit` parses by them. */
+  events?: Record<string, z.ZodType>;
+  /** Outbound stream (ADR-017 §3): emitted events named here are sent to the Queue binding `queue`. */
+  publish?: PublishOption;
+  /** States with typed locals (ADR-017 §1). */
+  initial?: string;
+  states?: Record<string, StepStateDef>;
   /** Durable timers (ADR-015 D2): `timer(schema, handler)` per name. */
   timers?: Record<
     string,
@@ -267,13 +260,12 @@ interface ActorDef {
   journal?: JournalOption;
   studio?: {
     /**
-     * true: force-enable timeline recording regardless of registry detection.
-     * false: opt out — no timeline, no registry registration, every studio entry point is rejected.
+     * true: force-enable Studio regardless of registry detection.
+     * false: opt out — no registry registration, every studio entry point is rejected.
      * undefined: enabled when a StudioRegistry is detected.
+     * The timeline is the journal (ADR-017 §5): `journal.keep` is its retention.
      */
     enabled?: boolean;
-    /** Timeline ring-buffer size (positive integer, default 500). */
-    timelineSize?: number;
     /**
      * Path globs redacted from everything Studio returns (ADR-014): state, cause data, outbox
      * payloads and views, each relative to its own root. `*` = one segment, `**` = any depth.
@@ -296,6 +288,10 @@ const RedriveOptionsSchema = z.object({ effectId: z.string().min(1) });
 const FireTimerOptionsSchema = z.object({ key: z.string().min(1) });
 const RestoreOptionsSchema = z.object({ toSeq: z.number().int().positive() });
 const SnapshotSeqSchema = z.object({ version: z.number(), last_seq: z.number() });
+/** A flow carried across actors in forward and link-push metadata (ADR-017 §4), parsed at the RPC boundary. */
+const CorrelationRowSchema = z.object({ correlation_id: z.string().nullable() });
+const LastEventRowSchema = z.object({ seq: z.number(), correlation_id: z.string().nullable() });
+const LastSeqRowSchema = z.object({ last_seq: z.number() });
 /** A recorded service result to redeliver after a restore (journal payloads carry the effect id). */
 const RecordedResultSchema = z.union([
   z.object({ input: z.unknown(), result: z.unknown(), effectId: z.string() }),
@@ -370,10 +366,10 @@ async function trySend(
   caller: string,
   callerType: "user" | "service",
   message: MessageEnvelope,
-  delivery: DeliveryInfo,
+  meta: MessageMeta,
 ): Promise<TryOutcome> {
   try {
-    return { ok: true, result: await send(caller, callerType, message, delivery) };
+    return { ok: true, result: await send(caller, callerType, message, meta) };
   } catch (error) {
     return { ok: false, error: classifyFailure(error, undefined) };
   }
@@ -443,7 +439,6 @@ export function actor(
   // `migrate` options are refused.
   const def = toRuntimeDef(actorDef);
   // Validate studio config at definition time, not on the first mutation.
-  const configuredTimelineSize = resolveTimelineSize(def.studio?.timelineSize);
   const studioRedactor = compileRedaction(def.studio?.redact);
   const journalConfig = resolveJournalConfig(def.journal);
   const retryPolicies = new Map<string, RetryPolicy>(
@@ -461,6 +456,15 @@ export function actor(
   const forwardTimeouts = new Map<string, number>(
     Object.entries(def.links ?? {}).map(([name, l]) => [name, resolveTimeoutMs(l.timeoutMs, `link "${name}"`)]),
   );
+  // Published events go through the outbox as rows of a reserved service that sends to the queue.
+  const publishConfig = resolvePublish(def.publish, def.events, def.services);
+  const publishService =
+    publishConfig === null
+      ? null
+      : { fn: (body: unknown, env: unknown, _effect: EffectInfo) => sendToQueue(env, publishConfig.queue, body) };
+  if (publishConfig !== null) retryPolicies.set(PUBLISH_SERVICE, DEFAULT_RETRY_POLICY);
+  /** What Studio shows as a link's source type: the linked contract's binding name. */
+  const linkSourceType = (link: string): string => bindingName(def.links?.[link]?.contract.name ?? link);
 
   const DOClass = class ActorInstance extends DurableObject {
     state: unknown = undefined;
@@ -486,10 +490,8 @@ export function actor(
     rebuildFrom: number | null = null; // Stored version to rebuild from by replay (ADR-015 D5), on wake
     previousSubscriberViews = new Map<string, string>(); // dedupe: "type:id" → "role:json"
 
-    // --- Timeline (studio instrumentation) ---
+    // --- Studio instrumentation ---
     studioEnabled = false; // Detected from ctx.exports on init
-    pendingCause: MutationCause | null = null; // Set before persistState(), consumed by persistState()
-    timelineSize = configuredTimelineSize; // Ring buffer max entries
     studioConnections = new Set<WebSocket>(); // Studio WebSocket connections (separate from app connections)
     registryStub: DurableObjectStub | null = null; // Cached StudioRegistry stub for RPC
     lastRegistryTouch = 0; // Timestamp of last registry touch (for debouncing)
@@ -593,9 +595,8 @@ export function actor(
       // without running webSocketClose, a hibernation wake keeps them.
       this.updateRegistryConnections();
 
-      // Persist the migrated state once (stamped with the new version) and record it on the timeline.
+      // Persist the migrated state once (stamped with the new version); it is journaled as a migrate event.
       if (migration !== null) {
-        this.pendingCause = { type: "migrate", fromVersion: row.version, toVersion: this.version };
         this.commit(this.state, migration.event);
       }
     }
@@ -660,7 +661,6 @@ export function actor(
         },
       );
 
-      this.pendingCause = { type: "init" };
       this.commit(init.state, init.event);
       this.initialized = true;
     }
@@ -756,7 +756,6 @@ export function actor(
         });
       } catch (error) {
         this.state = previous;
-        this.pendingCause = null;
         this.timersChanged = false;
         throw error;
       }
@@ -784,6 +783,7 @@ export function actor(
         seq,
       );
 
+      const ids = journalTrace(draft.trace, eventId(_actorName, this.subscriberId(), seq));
       if (journalConfig.enabled) {
         appendJournalEvent(this.ctx.storage.sql, journalConfig, draft, {
           seq,
@@ -791,51 +791,34 @@ export function actor(
           checksum,
           version: this.version,
           now,
+          ...ids,
         });
       }
 
-      // Timeline instrumentation — write entry if studio is enabled and a cause is pending
-      const cause = this.pendingCause;
-      this.pendingCause = null;
-      if (this.studioEnabled && cause !== null) {
-        const { type: causeType, ...causeRest } = cause;
-        const causeDataJson = JSON.stringify(causeRest);
-        const entry = toTimelineEntry(
-          this.ctx.storage.sql
-            .exec(
-              "INSERT INTO timeline (cause_type, cause_data, state_snapshot, checksum, created_at, seq) VALUES (?, ?, ?, ?, ?, ?) RETURNING id, cause_type, cause_data, state_snapshot, checksum, created_at, seq",
-              causeType,
-              causeDataJson,
-              json,
-              checksum,
-              now,
-              seq,
-            )
-            .one(),
-        );
-
-        // Ring buffer pruning
-        this.pruneTimeline();
-
+      if (this.studioEnabled) {
         // Touch registry (debounced)
         this.touchRegistry();
-
-        // Push to studio connections (covers hibernated sockets too)
-        if (this.hasStudioWs()) {
+        // The timeline is the journal (ADR-017 §5): push the event just appended to studio sockets.
+        if (journalConfig.enabled && this.hasStudioWs()) {
+          // As the journal stores it: an undefined payload is null.
+          const payload = draft.payload ?? null;
+          const event = {
+            ...draft,
+            payload,
+            seq,
+            codeVersion: this.version,
+            stateChecksum: checksum,
+            createdAt: now,
+            correlationId: ids.correlationId,
+            ...(ids.causationId === null ? {} : { causationId: ids.causationId }),
+          };
+          const entry = timelineEntry(event, json, linkSourceType);
           this.broadcastToStudio(async (projection) => ({
             type: "studio.timeline",
             entry: await projectTimelineEntry(entry, projection),
           }));
         }
       }
-    }
-
-    /** Prune timeline to keep at most timelineSize entries. */
-    pruneTimeline(): void {
-      this.ctx.storage.sql.exec(
-        "DELETE FROM timeline WHERE id NOT IN (SELECT id FROM timeline ORDER BY id DESC LIMIT ?)",
-        this.timelineSize,
-      );
     }
 
     computeChecksum(json: string): string {
@@ -890,8 +873,7 @@ export function actor(
       try {
         if (parsed !== undefined && !parsed.success) throw new Error(`invalid payload: ${parsed.error.message}`);
         const payload = parsed?.success ? parsed.data : due.payload;
-        const result = this.runStep({ type: "timer", ...due, payload, lateBy }, now);
-        this.pendingCause = { type: "timer", name: due.name, key: due.key, payload, fireAt: due.fireAt, lateBy };
+        const result = this.runStep({ type: "timer", ...due, payload, lateBy, trace: this.effectTrace(due.id) }, now);
         this.commit(result.state, result.event, (seq) => {
           deleteTimer(sql, due.id);
           this.writeEffects(result, seq, `timer:${due.name}`, "service");
@@ -907,7 +889,7 @@ export function actor(
     /** After a committed transition: views, Studio, and draining the effects it declared. */
     afterEffects(result: StepResult): void {
       this.broadcastViews();
-      if (result.effects.getExecutions().length > 0) {
+      if (result.effects.getExecutions().length > 0 || this.publishes(result)) {
         this.pushStudioOutbox();
         this.drainExecutions();
       }
@@ -940,7 +922,8 @@ export function actor(
     /** One try of one execution: settle the row and, on the outcome that ends it, run onDone/onError. */
     async runExecution(entry: { id: string; service: string; input: unknown }): Promise<void> {
       const sql = this.ctx.storage.sql;
-      const serviceDef = def.services?.[entry.service];
+      const serviceDef =
+        entry.service === PUBLISH_SERVICE ? (publishService ?? undefined) : def.services?.[entry.service];
       const policy = retryPolicies.get(entry.service);
       if (serviceDef === undefined || policy === undefined) {
         finishAttempt(sql, entry.id, { status: "failed" }, `Service "${entry.service}" is not defined`);
@@ -1019,16 +1002,48 @@ export function actor(
       const cause: StepCause = outcome.ok
         ? { type: "service.onDone", service, input, result: outcome.result, effectId }
         : { type: "service.onError", service, input, error: { ...outcome.error }, effectId };
-      const result = this.runStep(cause);
+      const result = this.runStep({ ...cause, trace: this.effectTrace(effectId) });
       if (result.state === this.state) {
         settle();
         return;
       }
-      this.pendingCause = outcome.ok
-        ? { type: "service.onDone", service, input, result: outcome.result }
-        : { type: "service.onError", service, input, error: describeServiceError(outcome.error) };
       this.commit(result.state, result.event, settle);
       this.broadcastViews();
+    }
+
+    /** The id of an event of this actor (`type/id/seq`, ADR-017 §4). */
+    eventIdOf(seq: number): string {
+      return eventId(_actorName, this.subscriberId(), seq);
+    }
+
+    /**
+     * The flow an effect continues: the correlation id of the event that declared it (read from the
+     * journal; the event's own id when the journal no longer has it), caused by the effect itself.
+     */
+    effectTrace(effectId: string): Trace {
+      const seq = parseEffectId(effectId)?.seq ?? 0;
+      const [row] = this.ctx.storage.sql.exec("SELECT correlation_id FROM events WHERE seq = ?", seq).toArray();
+      const recorded = row === undefined ? null : CorrelationRowSchema.parse(row).correlation_id;
+      return {
+        correlationId: recorded ?? this.eventIdOf(seq),
+        causationId: effectCauseId(_actorName, this.subscriberId(), effectId),
+      };
+    }
+
+    /** The flow a view push continues: the newest event, which made the view what it is. */
+    sourceTrace(): Trace {
+      const sql = this.ctx.storage.sql;
+      const [row] = sql.exec("SELECT seq, correlation_id FROM events ORDER BY seq DESC LIMIT 1").toArray();
+      if (row !== undefined) {
+        const last = LastEventRowSchema.parse(row);
+        const id = this.eventIdOf(last.seq);
+        return { correlationId: last.correlation_id ?? id, causationId: id };
+      }
+      // journal: false — the snapshot's transition counter still numbers the event.
+      const id = this.eventIdOf(
+        LastSeqRowSchema.parse(sql.exec("SELECT last_seq FROM snapshots WHERE id = 1").one()).last_seq,
+      );
+      return { correlationId: id, causationId: id };
     }
 
     /** Run one transition through the step core with live facts (now/id/random, stored link targets). */
@@ -1086,7 +1101,6 @@ export function actor(
     async rebuildByReplay(fromVersion: number): Promise<void> {
       this.rebuildFrom = null;
       const state = await rebuildFromJournal(def, readJournal(this.ctx.storage.sql), { env: this.handlerEnv });
-      this.pendingCause = { type: "migrate", fromVersion, toVersion: this.version };
       this.commit(state, {
         causeType: "migrate",
         name: null,
@@ -1177,7 +1191,14 @@ export function actor(
       this.inFlight.start("forwards", entry.id, controller);
       const ms = forwardTimeouts.get(entry.linkName) ?? DEFAULT_TIMEOUT_MS;
       const outcome = await runAttempt(
-        () => trySend(target.send, entry.caller, callerType, target.message, delivery),
+        () =>
+          trySend(
+            target.send,
+            entry.caller,
+            callerType,
+            target.message,
+            forwardMeta(delivery, this.effectTrace(entry.id)),
+          ),
         ms,
         controller,
       );
@@ -1240,8 +1261,32 @@ export function actor(
     // --- Link processing (subscriber side) ---
 
     /** Persist a transition's effects under its seq (inside commit()'s transaction). */
+    /** Whether a transition emitted an event `publish` sends (its rows are in the outbox). */
+    publishes(result: StepResult): boolean {
+      return publishConfig !== null && result.effects.getEmitted().some((e) => publishConfig.events.has(e.name));
+    }
+
+    /** Outbox rows for the events a transition publishes (ADR-017 §3), under their effect ids. */
+    publishedRows(result: StepResult, seq: number) {
+      if (publishConfig === null) return [];
+      const { correlationId } = journalTrace(result.event.trace, this.eventIdOf(seq));
+      const now = Date.now();
+      const transition = { actorType: _actorName, actorId: this.subscriberId(), seq, at: now, correlationId };
+      return publishedMessages(publishConfig, result.effects.getEmitted(), transition).map((message) => ({
+        id: message.effectId,
+        seq,
+        index: message.index,
+        service: PUBLISH_SERVICE,
+        input: message.body,
+        createdAt: now,
+      }));
+    }
+
     writeEffects(result: StepResult, seq: number, caller: string, callerType: "user" | "service"): void {
-      insertExecutions(this.ctx.storage.sql, result.effects.toExecutionEntries(seq));
+      insertExecutions(this.ctx.storage.sql, [
+        ...result.effects.toExecutionEntries(seq),
+        ...this.publishedRows(result, seq),
+      ]);
       const linkCalls = result.effects.getLinks();
       const unlinkCalls = result.effects.getUnlinks();
       if (linkCalls.length > 0 || unlinkCalls.length > 0) {
@@ -1346,12 +1391,6 @@ export function actor(
         error: { message: errorMessage, code: "unreachable" },
       });
       if (result.state === this.state) return;
-      this.pendingCause = {
-        type: "link.onError",
-        sourceType: bindingName(linkDef.contract.name),
-        sourceId: targetId,
-        error: errorMessage,
-      };
       this.commit(result.state, result.event);
       this.broadcastViews();
     }
@@ -1435,9 +1474,13 @@ export function actor(
       viewData: unknown,
       role: string,
       version: number,
+      meta?: unknown,
     ): Promise<void> {
       await this.loadState();
       if (!this.initialized) return;
+      // The source's flow (ADR-017 §4); a push without (or with malformed) metadata starts a new one.
+      const traced = TraceSchema.safeParse(meta);
+      const trace = traced.success ? traced.data : undefined;
 
       // Find the link handler for this source
       const rows = this.ctx.storage.sql
@@ -1451,7 +1494,9 @@ export function actor(
       for (const row of rows) {
         const link = LinkVersionRowSchema.parse(row);
         // Monotonic version check
-        if (version > link.version) this.applyLinkUpdate(link.link_name, sourceType, sourceId, viewData, role, version);
+        if (version > link.version) {
+          this.applyLinkUpdate(link.link_name, sourceType, sourceId, viewData, role, version, trace);
+        }
       }
     }
 
@@ -1463,6 +1508,7 @@ export function actor(
       viewData: unknown,
       role: string,
       version: number,
+      trace: Trace | undefined,
     ): void {
       if (!def.links?.[linkName]) return;
 
@@ -1471,9 +1517,8 @@ export function actor(
       const viewWithRole = { ...(fields.success ? fields.data : {}), role };
 
       // Run onUpdate reducer
-      const result = this.runStep({ type: "link.onUpdate", link: linkName, sourceId, view: viewWithRole });
+      const result = this.runStep({ type: "link.onUpdate", link: linkName, sourceId, view: viewWithRole, trace });
       if (result.state === this.state) return;
-      this.pendingCause = { type: "link.onUpdate", sourceType, sourceId, viewData: viewWithRole };
       this.commit(result.state, result.event, () => {
         this.ctx.storage.sql.exec(
           "UPDATE active_links SET version = ? WHERE target_type = ? AND target_id = ? AND link_name = ?",
@@ -1537,7 +1582,7 @@ export function actor(
         );
         if (receive !== null) {
           // Fire and forget
-          void receive(sourceType, sourceId, viewData, role, version);
+          void receive(sourceType, sourceId, viewData, role, version, this.sourceTrace());
         }
       } catch {
         // Subscriber unreachable — skip
@@ -1605,7 +1650,6 @@ export function actor(
       );
 
       // Persist state + init links atomically
-      this.pendingCause = { type: "init" };
       this.commit(init.state, init.event, () => {
         for (const { name, id } of initLinks) this.insertLink(name, id, "INSERT OR REPLACE");
       });
@@ -1651,14 +1695,19 @@ export function actor(
       caller: string,
       callerType: "user" | "service",
       event: { type: string; [key: string]: unknown },
-      delivery?: unknown,
+      /**
+       * Set by another actor's forward: its delivery (ADR-016 §1) and the flow it continues (ADR-017 §4).
+       * Without it, the message has no ctx.delivery and starts a new flow.
+       */
+      meta?: unknown,
     ): Promise<{ ok: boolean; error?: string; detail?: string }> {
-      const forwarded = DeliveryInfoSchema.optional().safeParse(delivery);
-      if (!forwarded.success) return { ok: false, error: "invalid_delivery", detail: forwarded.error.message };
+      const forwarded = parseMessageMeta(meta);
+      if (!forwarded.ok) return forwarded;
       await this.loadState();
       const admitted = this.admit(caller, callerType, event);
       if (!admitted.ok) return admitted;
-      this.applyMessage(event, admitted.role, admitted.payload, { caller, callerType }, forwarded.data);
+      const { delivery, trace } = forwarded;
+      this.applyMessage(event, admitted.role, admitted.payload, { caller, callerType }, { delivery, trace });
       return { ok: true };
     }
 
@@ -1679,12 +1728,12 @@ export function actor(
       }
 
       // Get messages
-      if (def.messages === undefined) {
+      if (def.messages === undefined && def.states === undefined) {
         return { ok: false, error: "No messages available" };
       }
 
       // Admit (validate payload, run guard); the transition runs through the step core in applyMessage().
-      const admission = admitMessage(def.messages, role, this.state, event, {
+      const admission = admitStepMessage(def, role, this.state, event, {
         caller,
         callerType,
         env: this.handlerEnv,
@@ -1699,20 +1748,18 @@ export function actor(
       role: string,
       payload: unknown,
       { caller, callerType }: { caller: string; callerType: "user" | "service" },
-      delivery: DeliveryInfo | undefined,
+      { delivery, trace }: { delivery: DeliveryInfo | undefined; trace: Trace | undefined },
     ): void {
-      const result = this.runStep({ type: "message", name: event.type, payload, caller, callerType, role, delivery });
-
-      // Timeline: record message cause
-      const { type: _msgType, ...msgPayload } = event;
-      this.pendingCause = {
+      const result = this.runStep({
         type: "message",
-        messageType: event.type,
+        name: event.type,
+        payload,
         caller,
         callerType,
         role,
-        payload: msgPayload,
-      };
+        delivery,
+        trace,
+      });
 
       // onTransition sees the handler's state, before onUnlink
       this.observeTransition(result.handlerState, event, caller, role);
@@ -1941,16 +1988,15 @@ export function actor(
         callerConnections: this.callerConnectionCount(caller, callerType),
         role,
       });
-      this.commitLifecycle(result, { type: "lifecycle.connect", caller, callerType, role }, caller, callerType);
+      this.commitLifecycle(result, caller, callerType);
     }
 
     /**
      * Commit a lifecycle transition when it did something: changed the state or declared effects
      * (executions, forwards, timer schedules or cancels).
      */
-    commitLifecycle(result: StepResult, cause: MutationCause, caller: string, callerType: "user" | "service"): void {
+    commitLifecycle(result: StepResult, caller: string, callerType: "user" | "service"): void {
       if (result.state === this.state && !declaresEffects(result)) return;
-      this.pendingCause = cause;
       this.commit(result.state, result.event, (seq) => this.writeEffects(result, seq, caller, callerType));
       this.afterEffects(result);
     }
@@ -2113,8 +2159,7 @@ export function actor(
         callerConnections: this.callerConnectionCount(caller, callerType, ws),
         role: null,
       });
-      const role = result.event.role ?? "unknown";
-      this.commitLifecycle(result, { type: "lifecycle.disconnect", caller, callerType, role }, caller, callerType);
+      this.commitLifecycle(result, caller, callerType);
     }
 
     // --- Studio WebSocket handling ---
@@ -2189,17 +2234,16 @@ export function actor(
         }));
     }
 
-    /** Read the raw studio snapshot synchronously (state as of now). */
+    /** The newest page of the timeline, read from the journal (raw: project before returning it). */
+    readTimeline(query: { limit: number; before?: number | undefined }) {
+      return readStudioTimeline(this.ctx.storage.sql, { def, sourceType: linkSourceType, env: this.handlerEnv }, query);
+    }
+
+    /** Read the raw studio snapshot (state as of now; the timeline is read from the journal now). */
     readStudioSnapshot() {
-      const timeline = this.ctx.storage.sql
-        .exec(
-          "SELECT id, cause_type, cause_data, state_snapshot, checksum, created_at, seq FROM timeline ORDER BY id DESC LIMIT 50",
-        )
-        .toArray()
-        .map(toTimelineEntry);
       return {
         state: this.state,
-        timeline,
+        timeline: this.readTimeline({ limit: DEFAULT_TIMELINE_LIMIT }),
         connections: this.liveConnections(),
         outbox: this.readOutbox(),
         timers: readTimers(this.ctx.storage.sql),
@@ -2219,7 +2263,7 @@ export function actor(
       return {
         type: "studio.snapshot",
         state: projectState(snapshot.state, projection),
-        timeline: await Promise.all(snapshot.timeline.map((e) => projectTimelineEntry(e, projection))),
+        timeline: await Promise.all((await snapshot.timeline).entries.map((e) => projectTimelineEntry(e, projection))),
         connections: await projectConnections(snapshot.connections, projection),
         outbox: snapshot.outbox.map((row) => projectOutboxRow(row, projection)),
         timers: snapshot.timers.map((row) => projectTimerRow(row, projection)),
@@ -2374,8 +2418,8 @@ export function actor(
       return projectConnections(this.liveConnections(), projection).then((connections) => ({ ...base, connections }));
     }
 
-    /** Studio RPC: returns paginated timeline entries, newest first, redacted (ADR-014).
-     * `before` is an exclusive entry-ID cursor; IDs are unique, so equal timestamps
+    /** Studio RPC: returns paginated timeline entries (journal events, ADR-017 §5), newest first,
+     * redacted (ADR-014). `before` is an exclusive seq cursor; seqs are unique, so equal timestamps
      * never cause gaps or duplicates at page boundaries. Invalid options are rejected. */
     __getTimeline(opts?: { limit?: number; before?: number; viewer?: StudioViewer }): Promise<{
       entries: StudioTimelineEntry[];
@@ -2388,27 +2432,9 @@ export function actor(
       const projection = this.studioProjection(viewer ?? "human");
       if (!this.persistedLoaded) return Promise.resolve({ entries: [], hasMore: false });
 
-      const rows =
-        before !== undefined
-          ? this.ctx.storage.sql
-              .exec(
-                "SELECT id, cause_type, cause_data, state_snapshot, checksum, created_at, seq FROM timeline WHERE id < ? ORDER BY id DESC LIMIT ?",
-                before,
-                limit + 1,
-              )
-              .toArray()
-          : this.ctx.storage.sql
-              .exec(
-                "SELECT id, cause_type, cause_data, state_snapshot, checksum, created_at, seq FROM timeline ORDER BY id DESC LIMIT ?",
-                limit + 1,
-              )
-              .toArray();
-
-      const hasMore = rows.length > limit;
-      const raw = rows.slice(0, limit).map(toTimelineEntry);
-      return Promise.all(raw.map((entry) => projectTimelineEntry(entry, projection))).then((entries) => ({
-        entries,
-        hasMore,
+      return this.readTimeline({ limit, before }).then(async (page) => ({
+        entries: await Promise.all(page.entries.map((entry) => projectTimelineEntry(entry, projection))),
+        hasMore: page.hasMore,
       }));
     }
 
@@ -2477,7 +2503,6 @@ export function actor(
       } catch (error) {
         return { ok: false, error: error instanceof Error ? error.message : String(error) };
       }
-      this.pendingCause = { type: "restore", toSeq };
       const draft: JournalDraft = {
         causeType: "restore",
         name: null,
@@ -2524,12 +2549,8 @@ export function actor(
               error: payload.error,
               effectId: payload.effectId,
             };
-      const result = this.runStep(cause);
+      const result = this.runStep({ ...cause, trace: this.effectTrace(payload.effectId) });
       if (result.state === this.state) return;
-      this.pendingCause =
-        cause.type === "service.onDone"
-          ? { type: cause.type, service, input: cause.input, result: cause.result }
-          : { type: cause.type, service, input: cause.input, error: describeRecordedError(cause.error) };
       this.commit(result.state, result.event);
     }
 
@@ -2633,8 +2654,8 @@ export interface TypedActorClass<TContract> {
       caller: string,
       callerType: "user" | "service",
       event: ContractMessages<TContract>,
-      /** Set by a forward (ADR-016 §1): the target's handler reads it as ctx.delivery. */
-      delivery?: DeliveryInfo,
+      /** Set by a forward: ctx.delivery (ADR-016 §1) and the flow it continues (ADR-017 §4). */
+      meta?: MessageMeta | DeliveryInfo | Trace,
     ): Promise<{ ok: boolean; error?: string }>;
     getSnapshot(
       caller: string,
@@ -2675,10 +2696,13 @@ export interface TypedActorClass<TContract> {
         id: number;
         causeType: string;
         causeData: string;
-        stateSnapshot: string;
+        stateSnapshot: string | null;
         checksum: string;
         createdAt: number;
-        seq?: number;
+        seq: number;
+        correlationId: string | null;
+        causationId: string | null;
+        emitted: string | null;
       }>;
       hasMore: boolean;
     }>;

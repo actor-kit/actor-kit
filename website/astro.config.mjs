@@ -54,6 +54,8 @@ export default defineConfig({
             { slug: "concepts/binary-sync" },
             { slug: "concepts/side-effects" },
             { slug: "concepts/timers" },
+            { slug: "concepts/domain-events" },
+            { slug: "concepts/states" },
             { slug: "concepts/testing" },
           ],
         },

@@ -4,7 +4,14 @@
  * this checks the shape at runtime before simulate() uses it.
  */
 
-import type { EnvParser, JournalOption, RolePredicate, StepDef, StepMessageSlot } from "@actor-kit/worker/testing";
+import type {
+  EnvParser,
+  JournalOption,
+  PublishOption,
+  RolePredicate,
+  StepDef,
+  StepMessageSlot,
+} from "@actor-kit/worker/testing";
 import { envErrorMessage, parseActorEnv, toRuntimeDef } from "@actor-kit/worker/testing";
 
 export interface SimDef extends StepDef {
@@ -24,6 +31,7 @@ export interface SimDef extends StepDef {
   readonly journal?: JournalOption;
   /** The typed env schema (ADR-016 §4): the simulation's fakes for this contract are parsed against it. */
   readonly env?: EnvParser;
+  readonly publish?: PublishOption;
   readonly version?: number;
 }
 

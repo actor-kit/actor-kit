@@ -96,8 +96,8 @@ Surviving mutants that no test can kill, because the mutated program behaves ide
 | studio | middleware.ts:237 (×3) | `rawType !== undefined && rawId !== undefined` → `\|\|` / `true` | Both regex groups are required, so a match always fills both; the check exists for the type checker. |
 | studio | registry.ts:81 | `previousActorId !== actorId` → `true` | Deleting and re-inserting the same row in one transaction leaves an identical row. |
 | studio-cli | cli.ts:50 | `actorType === undefined` → `false` | `actorId` is `undefined` whenever `actorType` is, so the same error is thrown. |
-| studio-cli | client.ts:77 | `{ state: z.unknown() }` → `{}` | `z.unknown()` accepts a missing key; only the static type differs. |
-| studio-cli | shape.ts:42 | `catch { return undefined }` → `{}` | Returns `undefined` either way. |
+| studio-cli | client.ts:78 | `{ state: z.unknown() }` → `{}` | `z.unknown()` accepts a missing key; only the static type differs. |
+| studio-cli | shape.ts:43 | `catch { return undefined }` → `{}` | Returns `undefined` either way. |
 | studio UI | all components | ~70 className literals, colour tables (OUTBOX_STATUS_CLASS, SCALAR_CLASS, CAUSE_LABELS colours), status-badge pulse dot, active-tab class | Styling only; each state is also rendered as text or `data-status`. |
 | studio UI | timeline-panel.tsx:9-11 | cause label entries → `[]` | The fallback label equals the cause type; only the colour differs. |
 | studio UI | inspect-panels.tsx:116,142; actor-table.tsx:19; json-diff.tsx:41 | React key template → `""` | Keys only; no visible difference for distinct rows. |
@@ -126,7 +126,7 @@ Surviving mutants that no test can kill, because the mutated program behaves ide
 | test | simulate.ts:265 | unlink(name) unsubscribes `[]` → `["Stryker was here"]` | A string has no `name`, so it points at no source and nothing is forgotten. |
 | test | simulate.ts:276 (×2) | `def.links?.[name]?.contract` → without `?.` | Only declared links are ever recorded on an actor, so the link definition always exists. |
 | test | simulate.ts:305 | `if (role === null) return` → `if (false)` | `def.views[null]` is `views["null"]`, undefined, so the next check returns. |
-| test | simulate.ts:357 | `if (from !== null)` before delivering forwards → `true` | `from` is null only for callbacks (onDone, onError, onUpdate), whose step has an empty outbox: there are no forwards to deliver. |
+| test | simulate.ts:391 | `if (from !== null)` before delivering forwards → `true` | `from` is null only for callbacks (onDone, onError, onUpdate), whose step has an empty outbox: there are no forwards to deliver. |
 | worker | determinism.ts:44 (×2) | the temporary replacement's `writable` / `enumerable` flags flipped | Handlers only call the replaced functions; whether they are writable or enumerable for the length of a handler is not observable, and the original descriptor is put back exactly. |
 | worker | determinism.ts:75 | `saved.reverse()` → `saved` | Every saved entry is a different (target, key) pair, so the restore order does not matter. |
 | test | simulate.ts:248 | `if (!envs.has(type))` → `true` | Only a memo: parsing the same fakes again gives the same env. |
@@ -136,6 +136,12 @@ Surviving mutants that no test can kill, because the mutated program behaves ide
 | worker | retry.ts:64 | `parseOption(...)?.while` → `.while` | Kills by throwing a TypeError while test modules load (resolveRetryRule(undefined) via defineActor/link at module level), which Stryker's Vitest runner reports as survived (testing-strategy gotcha); run by hand it fails `service-errors.test.ts`. |
 | worker | attempt.ts:20 | `typeof option !== "number"` → `false` | `Number.isFinite` is false for every non-number, so the same error is thrown; the typeof is for the type checker. |
 | test | simulate.ts:562 (×2, one NoCoverage) | init's unlink targets `() => []` → `undefined` / `["…"]` | `init` gets no `unlink`, so the fact is never read. |
+| worker, studio UI | trace.ts:48, cause-ref.ts:18 (×3 each) | destructuring defaults `= ""` → `"Stryker was here!"` | Groups 1-3 of the id pattern always match when the pattern does; the defaults exist for the type checker. |
+| worker | journal.ts:583, 813 | init `timerOps: []` / rebuild-skipped migrate `emitted: []` → `["Stryker was here"]` | Same family as journal.ts:535/750: init schedules nothing, and a rebuild compares neither checksums nor emitted events. |
+| worker | journal.ts:647 | `i < length` → `i <= length` | Past the end both lists give `undefined`, which describe the same ("nothing"): no difference is found there. |
+| test | test-actor.ts:386 | `if (def.events)` → `true` | Assigns `undefined` when absent; `emit` reads it with `?.` either way. |
+| worker | journal-timeline.ts:202 | init start `timers: []` → `["Stryker was here"]` | Same as journal.ts:535/750: an init event schedules nothing from its start point, and timeline states never read the pending timers. |
+| worker | journal-timeline.ts:203 | `from === undefined \|\| …` → `false \|\| …` | Folding a non-init event onto no point throws inside the try, which returns null: the same "state not available". |
 
 ## Bugs found while hardening (2026-10-07)
 

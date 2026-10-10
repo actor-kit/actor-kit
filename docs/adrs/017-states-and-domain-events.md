@@ -119,3 +119,43 @@ Each step is test-first, with Stryker ≥ 90% (survivors justified in `docs/qual
 
 - **Positive:** phases, their data and their timers become structural; the journal records facts as well as commands; read models get a feed; multi-actor flows can be traced; one history to store, redact and restore.
 - **Negative:** the journal row grows (emitted events, two ids); `states` adds the largest type surface in the library; removing `timeline` changes Studio's data source.
+
+## Deviations (as built, 2026-10-10)
+
+The decision was built in the order above. Where the exact API could not be typed without casts,
+the closest fully type-safe design was chosen:
+
+- **Typed helpers come from `setup()`.** A `message()` written inline inside `defineActor` cannot
+  see the actor's `events` or `states`: TypeScript does not infer a nested generic call from its
+  sibling properties (verified with the compiler). So, like XState's `setup()`, declarations come
+  first and give typed helpers:
+  `const quiz = setup({ events, states: { round: { local, input } } })`, then
+  `quiz.message(...)` / `quiz.timer(...)` (typed `ctx.emit`) and
+  `quiz.in("round").message / .timer / .state({ enter, messages, timers })` (typed `ctx.local`,
+  `ctx.stay`, `ctx.goto`, `enter`'s input and return). The definition takes `events: quiz.events`.
+  A plain `message()` handler still has `ctx.emit(name, payload)`, checked at runtime only.
+- **`setup()` needs `events`** (`{}` when there are none), so `setup({ events })` alone types emit.
+- **Persisted state is `{ shared, phase, local, stateTimers }`**: `stateTimers` lists the keys of
+  the timers scheduled with `scope: "state"` in the phase, so exit cancels them as ordinary
+  journaled timer cancels (replay and restore need nothing new). A phase without a local has
+  `local: null`. A `scope: "state"` timer's key defaults to `${phase}:${timer}`.
+- **The initial state cannot have a local** (it is entered by `init`, before any input exists);
+  `enter` runs on `goto` only.
+- **Phase changes come from state messages, state timers and `enter`.** Top-level messages and
+  timers (through `quiz.message` / `quiz.timer`), lifecycle, service and link callbacks see the
+  shared state and return the next shared state (a stay); they cannot `goto`.
+- **Guards** in a state get the shared state, with `phase` and `local` in their context; views
+  and roles get the whole persisted state (`PhasedStateOf<typeof quiz, Shared>`, a union narrowed
+  by `phase`).
+- **Not yet covered:** `ContractMessages` (typed client `send`) lists only top-level messages, not
+  state messages; `testActor` does not run actors with states (use `simulate()`); `versions`
+  migrations of a states actor see the persisted object.
+- **Emits take an effect index** (shared with executions, forwards and timers), so a published
+  event's effect id is `seq:index` and `idempotencyKey` is stable. Emitting is available in
+  message and timer handlers and in `enter`, not in lifecycle, service or link callbacks.
+- **Publish rows** are outbox executions of the reserved service `__publish`, so they share the
+  outbox's retries, dead letters, redrive and Studio Outbox panel.
+- **Studio** shows an entry's flow and cause with a link (this actor: expands the entry; another
+  actor: opens its timeline at `?entry=N`), its emitted events, and marks phase changes. An entry
+  whose after-state cannot be rebuilt from the journal shows "State not available".
+- **Causation for an initial link push** (a new subscriber) is the source's newest event.

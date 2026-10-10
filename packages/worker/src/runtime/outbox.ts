@@ -97,6 +97,17 @@ interface OutboxCollector {
   cancel(key: string): void;
   /** Schedules and cancels, in declaration order, for the transition numbered `seq`. */
   toTimerOps(seq?: number): TimerOp[];
+  /** Record a domain event (ADR-017 §2), already parsed. Takes an effect index (publish uses it). */
+  emit(name: string, payload: unknown): void;
+  /** Emitted events in order, with their effect index. */
+  getEmitted(): EmittedEffect[];
+}
+
+/** A domain event a transition emitted, with its effect index (ADR-017 §2, §3). */
+export interface EmittedEffect {
+  readonly name: string;
+  readonly payload: unknown;
+  readonly index: number;
 }
 
 export function createOutbox(): OutboxCollector {
@@ -108,9 +119,18 @@ export function createOutbox(): OutboxCollector {
     | { readonly op: "schedule"; readonly timer: TimerSchedule; readonly index: number }
     | { readonly op: "cancel"; readonly key: string }
   > = [];
+  const emitted: EmittedEffect[] = [];
   let effects = 0;
 
   return {
+    emit(name: string, payload: unknown): void {
+      emitted.push({ name, payload, index: effects++ });
+    },
+
+    getEmitted(): EmittedEffect[] {
+      return [...emitted];
+    },
+
     execute(service: string, input: unknown): void {
       executions.push({ service, input, index: effects++ });
     },

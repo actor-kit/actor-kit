@@ -8,8 +8,8 @@
  */
 import { z } from "zod";
 
-/** A string holding JSON text, parsed into an unknown value. */
-const JsonText = z.string().transform((text, ctx): unknown => {
+/** JSON text parsed into an unknown value, or an "Invalid JSON text" issue. */
+function parseJsonValue(text: string, ctx: z.RefinementCtx): unknown {
   try {
     const value: unknown = JSON.parse(text);
     return value;
@@ -17,7 +17,10 @@ const JsonText = z.string().transform((text, ctx): unknown => {
     ctx.addIssue({ code: "custom", message: "Invalid JSON text" });
     return z.NEVER;
   }
-});
+}
+
+/** A string holding JSON text, parsed into an unknown value. */
+const JsonText = z.string().transform(parseJsonValue);
 
 const CauseRecord = z.record(z.string(), z.unknown());
 
@@ -97,30 +100,70 @@ export const InspectSchema = z.object({
 });
 export type InspectResult = z.infer<typeof InspectSchema>;
 
+/** The after-state: JSON text, or null when the journal could not rebuild it (ADR-017 §5). */
+const StateSnapshot = z
+  .string()
+  .nullable()
+  .transform((text, ctx): { known: boolean; value: unknown } =>
+    text === null ? { known: false, value: null } : { known: true, value: parseJsonValue(text, ctx) },
+  );
+
+/** A timeline entry as the UI holds it: cause and state parsed. */
+export interface TimelineItem {
+  id: number;
+  causeType: string;
+  cause: Record<string, unknown>;
+  /** The state after the entry (null and meaningless when `stateUnavailable`). */
+  state: unknown;
+  checksum: string;
+  createdAt: number;
+  seq: number | undefined;
+  /** The flow the event belongs to (ADR-017 §4); absent or null for events written before ids. */
+  correlationId: string | null | undefined;
+  /** The event or effect that caused it (`type/id/seq[:index]`); null when it started its flow. */
+  causationId: string | null | undefined;
+  /** Domain events the transition emitted (ADR-017 §2); undefined when none or before ADR-017. */
+  emitted: Array<{ name: string; payload: unknown }> | undefined;
+  /** Set when the journal could not rebuild the after-state. */
+  stateUnavailable?: true;
+}
+
 /** Wire entry → domain entry with cause and state already parsed. */
 export const TimelineEntrySchema = z
   .object({
+    /** The journal seq of the event (ADR-017 §5: the timeline is the journal). */
     id: z.number().int(),
     causeType: z.string(),
     causeData: JsonText.pipe(CauseRecord),
-    stateSnapshot: JsonText,
+    stateSnapshot: StateSnapshot,
     checksum: z.string(),
     createdAt: z.number(),
     /** The journal seq the entry recorded (ADR-015 D3). Absent from older rows. */
     seq: z.number().int().optional(),
+    correlationId: z.string().nullable().optional(),
+    causationId: z.string().nullable().optional(),
+    emitted: JsonText.pipe(z.array(z.object({ name: z.string(), payload: z.unknown() })))
+      .nullable()
+      .optional(),
   })
-  .transform((entry) => {
+  .transform((entry): TimelineItem => {
     const item = {
       id: entry.id,
       causeType: entry.causeType,
       cause: entry.causeData,
-      state: entry.stateSnapshot,
+      state: entry.stateSnapshot.value,
       checksum: entry.checksum,
       createdAt: entry.createdAt,
     };
-    return { ...item, seq: entry.seq };
+    const withSeq = {
+      ...item,
+      seq: entry.seq,
+      correlationId: entry.correlationId,
+      causationId: entry.causationId,
+      emitted: entry.emitted ?? undefined,
+    };
+    return entry.stateSnapshot.known ? withSeq : { ...withSeq, stateUnavailable: true };
   });
-export type TimelineItem = z.infer<typeof TimelineEntrySchema>;
 
 export const ActorsResponseSchema = z.object({ actors: z.array(ActorEntrySchema) });
 export const ActorTypesResponseSchema = z.object({ types: z.array(z.string()) });

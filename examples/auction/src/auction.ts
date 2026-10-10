@@ -3,7 +3,7 @@
 
 import { z } from "zod";
 import { boolean, nullable, schema, string, uint32, view } from "@actor-kit/core";
-import { defineActor, message } from "@actor-kit/worker/testing";
+import { defineActor, setup } from "@actor-kit/worker/testing";
 
 type Bid = { bidder: string; amount: number; timestamp: number };
 type AuctionState = {
@@ -22,7 +22,23 @@ const AuctionViewSchema = schema({
   winner: nullable(string),
 });
 
+/** Domain events (ADR-017 §2): what happened, journaled with the transition that emitted them. */
+const auction = setup({
+  events: {
+    BidPlaced: z.object({ bidder: z.string(), amount: z.number() }),
+    BidIgnored: z.object({ bidder: z.string(), amount: z.number(), reason: z.literal("too_low") }),
+    AuctionClosed: z.object({ winner: z.string(), amount: z.number() }),
+  },
+});
+
+const highestOf = (state: AuctionState) =>
+  state.bids.length > 0 ? Math.max(...state.bids.map((b) => b.amount)) : 0;
+
 export const AuctionContract = defineActor("auction", {
+  events: auction.events,
+  // The outbound stream (ADR-017 §3): bids and results go to the AUCTION_EVENTS queue for read models.
+  publish: { queue: "AUCTION_EVENTS", events: ["BidPlaced", "AuctionClosed"] },
+
   input: z.object({ item: z.string() }),
   init: (input: { item: string }): AuctionState => ({
     item: input.item,
@@ -42,29 +58,33 @@ export const AuctionContract = defineActor("auction", {
   },
 
   messages: {
-    BID: message(z.object({ amount: z.number().int().positive() }), {
+    BID: auction.message(z.object({ amount: z.number().int().positive() }), {
       guard: (state: AuctionState) => !state.closed,
-      handler: (state: AuctionState, { amount }, { caller, now }) => {
-        const highestBid =
-          state.bids.length > 0 ? Math.max(...state.bids.map((b) => b.amount)) : 0;
-        if (amount <= highestBid) return state; // Reject lower bids silently
+      handler: (state: AuctionState, { amount }, { caller, now, emit }) => {
+        if (amount <= highestOf(state)) {
+          // A lower bid changes nothing, but the journal still records that it was ignored.
+          emit("BidIgnored", { bidder: caller, amount, reason: "too_low" });
+          return state;
+        }
+        emit("BidPlaced", { bidder: caller, amount });
         return {
           ...state,
           bids: [...state.bids, { bidder: caller, amount, timestamp: now() }],
         };
       },
     }),
-    CLOSE: message(z.object({}), {
+    CLOSE: auction.message(z.object({}), {
       guard: (
         state: AuctionState,
         _payload: Record<string, never>,
         ctx: { role: string },
       ) => ctx.role === "auctioneer" && !state.closed && state.bids.length > 0,
-      handler: (state: AuctionState) => {
+      handler: (state: AuctionState, _payload, { emit }) => {
         const highestBid = state.bids.reduce(
           (best, b) => (b.amount > best.amount ? b : best),
           state.bids[0]!,
         );
+        emit("AuctionClosed", { winner: highestBid.bidder, amount: highestBid.amount });
         return {
           ...state,
           closed: true,

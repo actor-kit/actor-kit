@@ -162,35 +162,26 @@ type MutationCause =
   | { type: "link.onUnlink"; sourceType: string; sourceId: string };
 ```
 
-### Timeline table (per-actor SQLite)
+### Timeline = the journal (ADR-017 §5)
 
-```sql
-CREATE TABLE timeline (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  cause_type TEXT NOT NULL,
-  cause_data TEXT NOT NULL,       -- JSON-serialized MutationCause (minus the type field)
-  state_snapshot TEXT NOT NULL,   -- Full "after" state as JSON
-  checksum TEXT NOT NULL,         -- State checksum after mutation
-  created_at INTEGER NOT NULL
-);
-CREATE INDEX idx_timeline_created ON timeline(created_at DESC);
-```
+Studio's timeline is read from the actor journal (`events` + `journal_checkpoints`, ADR-013). The
+old `timeline` table is dropped by migration `0015_drop_timeline`. An entry is one journal event:
+
+| Field | Source |
+|---|---|
+| `id`, `seq` | the event's journal seq (also the pagination cursor) |
+| `causeType`, `causeData` | the event's cause, mapped to the `MutationCause` shape above (`runtime/journal-timeline.ts`) |
+| `stateSnapshot` | the persisted after-state: the checkpoint at that seq, or the fold from the newest checkpoint before it (or from init) through the step core, checksum-verified; `null` when it cannot be rebuilt |
+| `checksum`, `createdAt` | the event's `state_checksum` and `created_at` |
 
 ### Retention
 
-Ring buffer with configurable size, default 500 entries. After each INSERT:
-
-```sql
-DELETE FROM timeline WHERE id NOT IN (
-  SELECT id FROM timeline ORDER BY created_at DESC LIMIT ?
-);
-```
-
-Configurable via `actor("counter", { ...def, studio: { timelineSize: 1000 } })`.
+Journal retention (`journal: { keep }`) is the only retention; by default the journal keeps every
+event. `journal: false` means no timeline.
 
 ### State diffs
 
-Diffs are **not computed or stored in the DO**. The timeline stores full "after" snapshots. The studio UI computes `jsonDiff(entry[n-1].state, entry[n].state)` client-side for display. This keeps the hot path fast — one JSON.stringify + INSERT per mutation.
+Diffs are **not computed or stored in the DO**. Each entry carries its full "after" state, rebuilt from the journal when the timeline is read. The studio UI computes `jsonDiff(entry[n-1].state, entry[n].state)` client-side, only when both states are known.
 
 ### Activation
 
@@ -366,7 +357,7 @@ class ActorInstance extends DurableObject {
 - A dropped socket reconnects with backoff (0.5s doubling, capped at 10s). The new snapshot replaces the timeline, and live entries are de-duplicated by id.
 - If the socket cannot open, the UI asks the HTTP API: 404 shows "not created yet" and keeps retrying (the page goes live once the actor exists); 401/403/400 show the error and stop; if the API answers, its data is shown ("Polling") while the socket keeps retrying.
 - Leaving the page closes the socket and cancels retries. The actor answers the close frame (`webSocketClose` calls `ws.close`), so the browser socket doesn't stay in CLOSING.
-- The UI keeps at most 500 timeline entries (the default ring size). Large arrays/objects render 100 children at a time; strings over 200 characters and diffs over 200 rows are truncated with a control to show more.
+- The UI keeps at most 500 timeline entries in memory. Large arrays/objects render 100 children at a time; strings over 200 characters and diffs over 200 rows are truncated with a control to show more.
 
 **State panel**
 - Live-updating JSON tree view of current state
@@ -408,7 +399,7 @@ class ActorInstance extends DurableObject {
 
 ### New SQLite migration
 
-The `timeline` table is added as a new migration in `ACTOR_KIT_MIGRATIONS`. Existing actors pick it up on next `loadState()` → `runMigrations()`.
+The `timeline` table was added by migration `0006_timeline` and is dropped by `0015_drop_timeline` (ADR-017): the timeline is read from the journal.
 
 ### Package dependency
 
@@ -418,7 +409,7 @@ The `@actor-kit/worker` package gains the timeline instrumentation and `__studio
 
 ### No breaking changes
 
-- Actors without the studio package: zero behavioral change, no timeline table created
+- Actors without the studio package: zero behavioral change (the journal is written either way)
 - The `__studio` caller ID is reserved but doesn't affect existing role evaluation
 - New RPC methods (`__inspect`, `__getTimeline`) are internal to the DO class
 
@@ -427,10 +418,10 @@ The `@actor-kit/worker` package gains the timeline instrumentation and `__studio
 Pinned by `tests/integration/studio-instrumentation.test.ts` and `tests/unit/studio-protocol.test.ts`.
 
 - **Opt-out**: `studio: { enabled: false }` disables instrumentation even when a registry is bound: no timeline, no registry registration. `__inspect` / `__getTimeline` throw `Studio is not enabled for this actor`; the studio WebSocket gets `404`.
-- **`timelineSize`** must be a positive integer; `actor()` throws at definition time otherwise. Pruning keeps the newest `timelineSize` entries by `id` (not `created_at`).
+- **Retention** is the journal's: `journal.keep` (a positive integer, validated at definition time) prunes events, and the timeline shows what is left. There is no `timelineSize`.
 - **Migration**: loading a snapshot whose version differs from `version` (with `migrate` defined) persists the migrated state immediately and records a `migrate` timeline entry `{ fromVersion, toVersion }`.
-- **Live pushes**: `studio.timeline.entry` has the same shape as `__getTimeline` entries, including `id`.
-- **`__getTimeline(opts)`**: `limit` (positive integer, default 50) and `before` (positive integer, exclusive entry-ID cursor) are validated; anything else throws `Invalid timeline options: …`. Because the cursor is the unique `id`, equal timestamps never cause duplicates or gaps.
+- **Live pushes**: `studio.timeline.entry` is built from the event just journaled and has the same shape as `__getTimeline` entries, including `id` (= seq). Nothing is pushed with `journal: false`.
+- **`__getTimeline(opts)`**: `limit` (positive integer, default 50) and `before` (positive integer, exclusive seq cursor) are validated; anything else throws `Invalid timeline options: …`. Because the cursor is the unique `id`, equal timestamps never cause duplicates or gaps.
 - **Read-only lookups**: `__inspect` / `__getTimeline` never auto-spawn, persist or register an actor. For an ID that was never persisted, `__inspect` returns `{ initialized: false, state: null, actorId: null, connections: [], outbox: [], activeLinks: [], linkSubscribers: [] }` and `__getTimeline` returns `{ entries: [], hasMore: false }`. `__inspect` always includes `initialized`.
 - **Reserved caller**: `__studio` is honoured only with `callerType: "service"`; a `user` caller with that ID gets `403`.
 - **Connections list** is per socket: two tabs of one caller are two connections, each with its own `connectionId`, its own `studio.connection` `connect`, and its own `disconnect` when that tab closes. The registry `connection_count` counts the same app sockets (from `ctx.getWebSockets()`, so it is correct after hibernation) and excludes studio sockets.

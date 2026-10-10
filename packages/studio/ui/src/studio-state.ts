@@ -121,7 +121,11 @@ function applyTimelineEntry(state: StudioViewState, entry: TimelineItem): Studio
   return {
     ...state,
     timeline: capTimeline([entry, ...state.timeline]),
-    inspect: state.inspect === null ? null : { ...state.inspect, state: entry.state },
+    // An entry whose after-state is unknown says nothing about the current state.
+    inspect:
+      state.inspect === null || entry.stateUnavailable === true
+        ? state.inspect
+        : { ...state.inspect, state: entry.state },
   };
 }
 

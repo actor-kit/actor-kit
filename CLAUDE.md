@@ -36,7 +36,8 @@ actor-kit-2/
 │   ├── counter/           → Minimal counter actor
 │   ├── todo-list/         → Full todo list with roles
 │   ├── chat-room/         → Real-time chat with lifecycle
-│   ├── auction/           → Guards and competitive bidding
+│   ├── auction/           → Guards, competitive bidding, domain events and a published stream
+│   ├── quiz/              → States with typed locals (contract only, ADR-017)
 │   └── tanstack-start-counter/ → TanStack Start SSR + WebSocket
 ├── website/               → Docs site (Astro + Starlight)
 ├── docs/

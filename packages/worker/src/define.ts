@@ -52,7 +52,9 @@ export function defineActor<
   TEnvSchema extends ZodType | undefined = undefined,
 >(
   name: TName,
-  def: TDef & VersionsCheck<TDef> & { env?: TEnvSchema } & TypedServices<TState, TErrors, EnvOf<TEnvSchema>>,
+  def: TDef &
+    VersionsCheck<TDef> &
+    PublishCheck<TDef> & { env?: TEnvSchema } & TypedServices<TState, TErrors, EnvOf<TEnvSchema>>,
 ): ActorContract<TName, TDef> {
   return { name, def };
 }
@@ -126,6 +128,13 @@ type TypedServices<TState, TErrors, TEnv> = {
     disconnect?(state: TState, event: LifecycleEvent, ctx: LifecycleContext<TEnv>): TState;
   };
 };
+
+/** ADR-017 §3: `publish.events` may only name events the actor declares in `events`. */
+type PublishCheck<TDef> = TDef extends { publish: unknown }
+  ? TDef extends { events: infer E }
+    ? { publish: { queue: string; events: readonly (keyof E & string)[] } }
+    : { publish: { queue: string; events: readonly never[] } }
+  : unknown;
 
 type InitState<TDef> = TDef extends { init(...args: never[]): infer S } ? Awaited<S> : never;
 

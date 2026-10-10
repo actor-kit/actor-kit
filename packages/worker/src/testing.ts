@@ -49,6 +49,7 @@ export {
 export { getTokenFromRequest } from "./runtime/get-token";
 // Actor journal (ADR-013): facts, events, replay
 export type {
+  EmittedEvent,
   FactSources,
   Facts,
   FoldOptions,
@@ -78,6 +79,7 @@ export {
   foldEvents,
   foldJournal,
   JournalDivergenceError,
+  JournalEmittedDivergenceError,
   JournalNondeterminismError,
   JournalVersionError,
   journalHighWater,
@@ -86,6 +88,9 @@ export {
   rebuildFromJournal,
   resolveJournalConfig,
 } from "./runtime/journal";
+// Studio timeline read from the journal (ADR-017 §5)
+export type { TimelinePageQuery, TimelineSource } from "./runtime/journal-timeline";
+export { readStudioTimeline, timelineCause, timelineEntry } from "./runtime/journal-timeline";
 // Live app connections from held sockets (pure)
 export type { ConnectionAttachment, LiveConnection, SocketRecord } from "./runtime/live-connections";
 export {
@@ -94,12 +99,15 @@ export {
   readConnectionAttachment,
   toLiveConnections,
 } from "./runtime/live-connections";
+export type { MessageMeta, ParsedMessageMeta } from "./runtime/message-meta";
+export { forwardMeta, parseMessageMeta } from "./runtime/message-meta";
 // Message router
 export type { RouteResult } from "./runtime/message-router";
 export { routeMessage } from "./runtime/message-router";
 export { ACTOR_KIT_MIGRATIONS } from "./runtime/migrations";
 // Outbox
 export type {
+  EmittedEffect,
   ExecutionEntry,
   ForwardCall,
   ForwardEntry,
@@ -133,6 +141,12 @@ export {
   requeueInterrupted,
   startAttempt,
 } from "./runtime/outbox-store";
+// Typed declarations: setup({ events, states }) (ADR-017)
+export type { StepStateDef } from "./runtime/phases";
+export { phasedState } from "./runtime/phases";
+// Outbound event stream (ADR-017 §3)
+export type { PublishConfig, PublishedBody, PublishedMessage, PublishOption } from "./runtime/publish";
+export { PUBLISH_SERVICE, publishedMessages, resolvePublish, sendToQueue } from "./runtime/publish";
 // Namespace resolution
 export { resolveNamespace } from "./runtime/resolve-namespace";
 export type { RestorePlan } from "./runtime/restore";
@@ -187,7 +201,15 @@ export type {
   StepMessageSlot,
   StepResult,
 } from "./runtime/step";
-export { admitMessage, liveStepFacts, liveUnlinkTargets, replayStepFacts, step, stepInit } from "./runtime/step";
+export {
+  admitMessage,
+  admitStepMessage,
+  liveStepFacts,
+  liveUnlinkTargets,
+  replayStepFacts,
+  step,
+  stepInit,
+} from "./runtime/step";
 // Studio protocol (pure): timeline options, timeline rows, studio WebSocket frames
 export type {
   StudioActiveLink,
@@ -200,11 +222,9 @@ export type {
 export {
   handleStudioFrame,
   parseTimelineOptions,
-  resolveTimelineSize,
   toActiveLink,
   toLinkSubscriber,
   toOutboxEntry,
-  toTimelineEntry,
 } from "./runtime/studio-protocol";
 export { findStudioRegistry, looksLikeDONamespace } from "./runtime/studio-registry";
 export type { DueTimer, TimerFailedEvent, TimerRow } from "./runtime/timers-store";
@@ -218,9 +238,35 @@ export {
   timerByKey,
   timerFailedEvent,
 } from "./runtime/timers-store";
+// Causation and correlation ids (ADR-017 §4)
+export type { CauseRef, Trace } from "./runtime/trace";
+export { effectCauseId, eventId, journalTrace, parseCauseId } from "./runtime/trace";
 export { isWebSocketUpgrade } from "./runtime/upgrade";
 // Typed version chain (ADR-015 D5)
 export type { CompiledVersions, RuntimeVersioning, VersionDef, VersionOptions } from "./runtime/versions";
 export { compileVersions, toRuntimeDef, version } from "./runtime/versions";
+export type {
+  EmittingMessageContext,
+  EmittingTimerContext,
+  EventPayloads,
+  EventSchemas,
+  Goto,
+  InputArgs,
+  LocalOf,
+  PhaseContext,
+  PhasedState,
+  PhasedStateOf,
+  PhaseHelpers,
+  PhaseMessageDef,
+  PhaseResult,
+  PhaseTimerDef,
+  Setup,
+  StateDecl,
+  StateDecls,
+  StateDef,
+  StatePart,
+  TypedEmit,
+} from "./setup";
+export { goto, PhaseTransition, setup, stay } from "./setup";
 // Timer helper (ADR-015 D2)
 export { timer } from "./timer";

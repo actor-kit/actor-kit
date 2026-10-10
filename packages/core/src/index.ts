@@ -27,6 +27,7 @@ export type {
   DeliveryInfo,
   DeterministicContext,
   Duration,
+  EmitFn,
   ExecuteFn,
   Execution,
   ForwardCall,

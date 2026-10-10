@@ -60,6 +60,20 @@ services: {
 
 Declared errors are not retried (a declined card is an answer); timeouts and defects are, unless `retry.while` says otherwise.
 
+## Domain events
+
+Declare `events` and emit them with `setup({ events })` helpers (typed `ctx.emit`); they are
+journaled with the transition that emitted them. See the Domain events concept page.
+
+`publish: { queue, events }` sends them to a Queue binding (declare it in `env`) through the outbox, like a
+service: each message's `idempotencyKey` is the effect's (`${actorType}/${actorId}/${seq}:${index}`), each
+try has the default 30-second timeout, and timeouts and defects are retried.
+
+## States
+
+Optional `initial` + `states` with typed locals and `scope: "state"` timers, typed through
+`setup({ events, states })` and `kit.in(phase)`. See the States concept page and `examples/quiz`.
+
 ## Docs
 
 Full documentation at [actorkit.dev](https://actorkit.dev).
