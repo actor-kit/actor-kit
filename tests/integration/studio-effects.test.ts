@@ -217,7 +217,7 @@ describe("links between real actors", () => {
       () => inspect(bulletin),
       (r) => r.linkSubscribers.length > 0,
     );
-    expect(linkSubscribers).toEqual([{ subscriberType: "DESK", subscriberId: deskName }]);
+    expect(linkSubscribers).toEqual([{ subscriberType: "desk", subscriberId: deskName }]);
   });
 });
 
@@ -231,7 +231,7 @@ describe("studio links frames", () => {
     await send(desk, { type: "FOLLOW", id: bulletinName });
     const linked = await studio.next(LinksFrameSchema, (f) => f.activeLinks.length === 1);
     expect(linked.activeLinks[0]).toMatchObject({
-      targetType: "BULLETIN",
+      targetType: "bulletin",
       targetId: bulletinName,
       linkName: "bulletin",
     });
@@ -252,7 +252,7 @@ describe("studio links frames", () => {
 
     await send(desk, { type: "FOLLOW", id: bulletinName });
     const subscribed = await studio.next(LinksFrameSchema, (f) => f.linkSubscribers.length === 1);
-    expect(subscribed.linkSubscribers).toEqual([{ subscriberType: "DESK", subscriberId: deskName }]);
+    expect(subscribed.linkSubscribers).toEqual([{ subscriberType: "desk", subscriberId: deskName }]);
 
     await send(desk, { type: "UNFOLLOW", id: bulletinName });
     await studio.next(LinksFrameSchema, (f) => f.linkSubscribers.length === 0);

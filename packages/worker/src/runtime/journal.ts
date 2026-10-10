@@ -384,9 +384,17 @@ export function journalHighWater(sql: JournalSql): number {
  * snapshot was written by an older deploy or another instance of the object.
  */
 export function nextTransitionSeq(sql: JournalSql): number {
+  return Math.max(snapshotSeq(sql), journalHighWater(sql)) + 1;
+}
+
+/**
+ * The seq of the transition that made the stored state (snapshots.last_seq), 0 before the first.
+ * Kept with or without the journal (ADR-015 D1), so it numbers what a view was made from: a link
+ * push carries it as its version, and a subscriber drops a push whose seq it already has.
+ */
+export function snapshotSeq(sql: JournalSql): number {
   const row = sql.exec("SELECT last_seq FROM snapshots WHERE id = 1").toArray()[0];
-  const snapshotSeq = row === undefined ? 0 : z.object({ last_seq: z.number() }).parse(row).last_seq;
-  return Math.max(snapshotSeq, journalHighWater(sql)) + 1;
+  return row === undefined ? 0 : z.object({ last_seq: z.number() }).parse(row).last_seq;
 }
 
 const EventRowSchema = z.object({

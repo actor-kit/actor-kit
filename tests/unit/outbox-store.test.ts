@@ -12,6 +12,7 @@ import {
   readOutboxRows,
   redriveExecution,
   requeueInterrupted,
+  snapshotSeq,
   startAttempt,
 } from "@actor-kit/worker/testing";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -216,6 +217,27 @@ describe("nextTransitionSeq", () => {
     event();
     sql.exec("INSERT INTO snapshots (id, version, state, last_seq) VALUES (1, 1, '{}', 9)");
     expect(nextTransitionSeq(sql)).toBe(10);
+  });
+});
+
+describe("snapshotSeq", () => {
+  it("is 0 before the first transition", () => {
+    expect(snapshotSeq(sql)).toBe(0);
+  });
+
+  it("is the seq of the transition that made the stored state (journal: false too)", () => {
+    sql.exec("INSERT INTO snapshots (id, version, state, last_seq) VALUES (1, 1, '{}', 7)");
+    expect(snapshotSeq(sql)).toBe(7);
+  });
+
+  it("does not follow journal events past the snapshot", () => {
+    sql.exec("INSERT INTO snapshots (id, version, state, last_seq) VALUES (1, 1, '{}', 2)");
+    for (let i = 0; i < 3; i++) {
+      sql.exec(
+        "INSERT INTO events (cause_type, payload, facts, code_version, state_checksum, created_at) VALUES ('message', '{}', '{}', 1, 'x', 0)",
+      );
+    }
+    expect(snapshotSeq(sql)).toBe(2);
   });
 });
 

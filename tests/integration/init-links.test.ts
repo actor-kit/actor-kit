@@ -57,7 +57,7 @@ describe("ctx.link in init", () => {
 
     const { state, links } = await look(stub);
     expect(state).toEqual({ headline: "Morning edition", linkedRole: "reader" });
-    expect(links).toEqual([{ target_type: "BULLETIN", target_id: target.id, link_name: "bulletin" }]);
+    expect(links).toEqual([{ target_type: "bulletin", target_id: target.id, link_name: "bulletin" }]);
   });
 
   it("subscribes to the target: later changes arrive through onUpdate", async () => {

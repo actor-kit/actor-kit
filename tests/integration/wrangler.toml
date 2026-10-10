@@ -253,3 +253,19 @@ class_name = "LotTyped"
 [[migrations]]
 tag = "v21"
 new_sqlite_classes = ["LotTyped"]
+
+[[durable_objects.bindings]]
+name = "NOTICE"
+class_name = "Notice"
+
+[[durable_objects.bindings]]
+name = "NOTICE_NO_JOURNAL"
+class_name = "NoticeNoJournal"
+
+[[durable_objects.bindings]]
+name = "READER"
+class_name = "Reader"
+
+[[migrations]]
+tag = "v22"
+new_sqlite_classes = ["Notice", "NoticeNoJournal", "Reader"]
