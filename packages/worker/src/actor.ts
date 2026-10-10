@@ -61,6 +61,7 @@ import {
   requeueInterrupted,
   startAttempt,
 } from "./runtime/outbox-store";
+import type { StepStateDef } from "./runtime/phases";
 import { PUBLISH_SERVICE, type PublishOption, publishedMessages, resolvePublish, sendToQueue } from "./runtime/publish";
 import { resolveNamespace } from "./runtime/resolve-namespace";
 import { planRestore } from "./runtime/restore";
@@ -72,7 +73,7 @@ import {
   settleAttempt,
 } from "./runtime/retry";
 import { resolveRole } from "./runtime/roles";
-import { admitMessage, liveStepFacts, type StepCause, type StepResult, step, stepInit } from "./runtime/step";
+import { admitStepMessage, liveStepFacts, type StepCause, type StepResult, step, stepInit } from "./runtime/step";
 import {
   type CallerHasher,
   createCallerHasher,
@@ -189,6 +190,9 @@ interface ActorDef {
   events?: Record<string, z.ZodType>;
   /** Outbound stream (ADR-017 §3): emitted events named here are sent to the Queue binding `queue`. */
   publish?: PublishOption;
+  /** States with typed locals (ADR-017 §1). */
+  initial?: string;
+  states?: Record<string, StepStateDef>;
   /** Durable timers (ADR-015 D2): `timer(schema, handler)` per name. */
   timers?: Record<
     string,
@@ -1594,12 +1598,12 @@ export function actor(
       }
 
       // Get messages
-      if (def.messages === undefined) {
+      if (def.messages === undefined && def.states === undefined) {
         return { ok: false, error: "No messages available" };
       }
 
       // Admit (validate payload, run guard), then run the transition through the step core.
-      const admission = admitMessage(def.messages, role, this.state, event, { caller, callerType, env: this.env });
+      const admission = admitStepMessage(def, role, this.state, event, { caller, callerType, env: this.env });
       if (!admission.ok) return rejected(admission);
       const traced = TraceSchema.safeParse(meta);
       const result = this.runStep({

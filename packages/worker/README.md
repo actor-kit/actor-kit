@@ -42,6 +42,11 @@ export default { fetch: withCallerIdentity(/* ... */) };
 Declare `events` and emit them with `setup({ events })` helpers (typed `ctx.emit`); they are
 journaled with the transition that emitted them. See the Domain events concept page.
 
+## States
+
+Optional `initial` + `states` with typed locals and `scope: "state"` timers, typed through
+`setup({ events, states })` and `kit.in(phase)`. See the States concept page and `examples/quiz`.
+
 ## Docs
 
 Full documentation at [actorkit.dev](https://actorkit.dev).

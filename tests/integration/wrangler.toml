@@ -213,3 +213,11 @@ queue = "lot-events"
 [[queues.producers]]
 binding = "AUCTION_EVENTS"
 queue = "auction-events"
+
+[[durable_objects.bindings]]
+name = "QUIZ_STATES"
+class_name = "QuizStates"
+
+[[migrations]]
+tag = "v18"
+new_sqlite_classes = ["QuizStates"]

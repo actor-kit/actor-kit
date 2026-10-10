@@ -12,7 +12,7 @@ import type { DeterministicContext } from "@actor-kit/core";
 import { xxh64 } from "@actor-kit/core";
 import { z } from "zod";
 import type { TimerOp } from "./outbox";
-import { replayStepFacts, type StepCause, type StepDef, step, stepInit } from "./step";
+import { findTimer, messageSlot, phaseOf, replayStepFacts, type StepCause, type StepDef, step, stepInit } from "./step";
 import type { Trace } from "./trace";
 
 // --- Facts ---
@@ -521,10 +521,10 @@ type ReplayCause = (def: ReplayableDef, state: unknown, event: JournalEvent) => 
 
 /** How each journaled cause becomes a step cause again. Handlers that are gone fail loudly. */
 const REPLAY_CAUSES: Record<Exclude<JournalCauseType, "init" | "restore">, ReplayCause> = {
-  message: (def, _state, event) => {
+  message: (def, state, event) => {
     const name = nameOf(event);
     const role = roleOf(event);
-    required(def.messages?.[role]?.[name], `message "${name}" for role "${role}"`);
+    required(messageSlot(def, state, role, name), `message "${name}" for role "${role}"`);
     return { type: "message", name, payload: event.payload, role, ...callerOf(event) };
   },
   "lifecycle.connect": (def, _state, event) => {
@@ -555,9 +555,9 @@ const REPLAY_CAUSES: Record<Exclude<JournalCauseType, "init" | "restore">, Repla
     required(def.links?.[link]?.onError, `link "${link}" onError`);
     return { type: "link.onError", link, ...LinkErrorPayload.parse(event.payload) };
   },
-  timer: (def, _state, event) => {
+  timer: (def, state, event) => {
     const name = nameOf(event);
-    required(def.timers?.[name], `timer "${name}"`);
+    required(findTimer(def, phaseOf(def, state), name), `timer "${name}"`);
     return { type: "timer", name, ...TimerPayload.parse(event.payload) };
   },
   migrate: (def, state, event) => {

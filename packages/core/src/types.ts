@@ -65,6 +65,11 @@ export interface ScheduleOptions {
   readonly key?: string;
   /** Validated by the timer's schema when scheduled. */
   readonly payload?: unknown;
+  /**
+   * `"state"` (actors with `states`, ADR-017 §1): the timer belongs to the current phase and is
+   * cancelled when the actor leaves it. Its key defaults to `${phase}:${timer}`.
+   */
+  readonly scope?: "state";
 }
 
 /** schedule() starts a durable timer declared in the actor's `timers` block. */

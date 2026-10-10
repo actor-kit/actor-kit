@@ -2,6 +2,7 @@ import { Link } from "@tanstack/react-router";
 import type { ReactNode } from "react";
 import { parseCauseRef } from "../../cause-ref";
 import { formatCauseSummary } from "../../cause-summary";
+import { phaseChange } from "../../phase-change";
 import type { TimelineItem } from "../../protocol";
 import { recentTime } from "../../relative-time";
 import { JsonDiff } from "../json-diff";
@@ -85,6 +86,11 @@ function TimelineRow({ actor, entry, previous, expanded, onToggle, onOpen }: Tim
       >
         <span className={`${cause.color} text-white text-xs px-1.5 py-0.5 rounded`}>{cause.label}</span>
         <span className="flex-1 text-zinc-300 break-all">{formatCauseSummary(entry.causeType, entry.cause)}</span>
+        {phaseChange(entry, previous) !== null && (
+          <span className="text-xs text-fuchsia-300" data-testid={`timeline-phase-${entry.id}`}>
+            → {phaseChange(entry, previous)}
+          </span>
+        )}
         {entry.emitted !== undefined && entry.emitted.length > 0 && (
           <span className="text-xs text-teal-300" data-testid={`timeline-emitted-${entry.id}`}>
             {entry.emitted.map((e) => e.name).join(", ")}

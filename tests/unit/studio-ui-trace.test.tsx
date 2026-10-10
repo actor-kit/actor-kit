@@ -117,10 +117,38 @@ describe("timeline panel: flow and cause", () => {
     expect(screen.getByText("Emitted:")).toBeTruthy();
   });
 
+  it("marks the entries where the phase changed", async () => {
+    const phased = (id: number, phase: string) => ({
+      ...traced(id, "c", null),
+      stateSnapshot: JSON.stringify({ shared: {}, phase, local: null, stateTimers: [] }),
+    });
+    await open("/actors/counter/a1", [phased(3, "round"), phased(2, "lobby"), phased(1, "lobby")]);
+    expect(screen.getByTestId("timeline-phase-3").textContent).toBe("→ round");
+    expect(screen.queryByTestId("timeline-phase-2")).toBeNull();
+  });
+
   it("an entry that emitted nothing shows neither", async () => {
     await open("/actors/counter/a1", [{ ...traced(8, "c", null), emitted: "[]" }]);
     expect(screen.queryByTestId("timeline-emitted-8")).toBeNull();
     fireEvent.click(screen.getByTestId("timeline-entry-8"));
     expect(screen.queryByText("Emitted:")).toBeNull();
+  });
+});
+
+describe("phase changes (ADR-017 §1)", () => {
+  const at = (id: number, state: unknown) => TimelineEntrySchema.parse({ ...timelineEntry(id, state) });
+  it("marks an entry whose phase differs from the previous one", async () => {
+    const { phaseChange } = await import("../../packages/studio/ui/src/phase-change");
+    const lobby = at(1, { shared: {}, phase: "lobby", local: null, stateTimers: [] });
+    const round = at(2, { shared: {}, phase: "round", local: { n: 1 }, stateTimers: [] });
+    expect(phaseChange(round, lobby)).toBe("round");
+    expect(phaseChange(lobby, lobby)).toBeNull();
+    expect(phaseChange(round, undefined)).toBeNull();
+    expect(phaseChange(at(3, { count: 1 }), lobby)).toBeNull();
+    expect(phaseChange(at(3, { phase: 7 }), lobby)).toBeNull();
+    expect(phaseChange(at(3, null), lobby)).toBeNull();
+    expect(phaseChange(round, at(1, 5))).toBeNull();
+    const unknown = TimelineEntrySchema.parse({ ...timelineEntry(4, {}), stateSnapshot: null });
+    expect(phaseChange(unknown, lobby)).toBeNull();
   });
 });

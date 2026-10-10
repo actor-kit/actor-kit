@@ -22,7 +22,7 @@
 
 import type { ContractMessages, Duration } from "@actor-kit/core";
 import {
-  admitMessage,
+  admitStepMessage,
   checksumState,
   createLiveFacts,
   effectCauseId,
@@ -490,7 +490,7 @@ function createSimulation(
     const callerType = options.callerType ?? "user";
     const role = resolveRole(def.roles, actor.state, caller, { callerType });
     if (role === null) return { ok: false, error: "No role matched" };
-    const admission = admitMessage(def.messages ?? {}, role, actor.state, message, { caller, callerType, env });
+    const admission = admitStepMessage(def, role, actor.state, message, { caller, callerType, env });
     if (!admission.ok) return admission;
     const cause: StepCause = {
       type: "message",

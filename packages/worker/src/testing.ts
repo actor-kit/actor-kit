@@ -118,6 +118,9 @@ export {
   requeueInterrupted,
   startAttempt,
 } from "./runtime/outbox-store";
+// Typed declarations: setup({ events, states }) (ADR-017)
+export type { StepStateDef } from "./runtime/phases";
+export { phasedState } from "./runtime/phases";
 // Outbound event stream (ADR-017 §3)
 export type { PublishConfig, PublishedBody, PublishedMessage, PublishOption } from "./runtime/publish";
 export { PUBLISH_SERVICE, publishedMessages, resolvePublish, sendToQueue } from "./runtime/publish";
@@ -151,7 +154,15 @@ export type {
   StepMessageSlot,
   StepResult,
 } from "./runtime/step";
-export { admitMessage, liveStepFacts, liveUnlinkTargets, replayStepFacts, step, stepInit } from "./runtime/step";
+export {
+  admitMessage,
+  admitStepMessage,
+  liveStepFacts,
+  liveUnlinkTargets,
+  replayStepFacts,
+  step,
+  stepInit,
+} from "./runtime/step";
 // Studio protocol (pure): timeline options, timeline rows, studio WebSocket frames
 export type {
   StudioActiveLink,
@@ -187,15 +198,28 @@ export { isWebSocketUpgrade } from "./runtime/upgrade";
 // Typed version chain (ADR-015 D5)
 export type { CompiledVersions, RuntimeVersioning, VersionDef, VersionOptions } from "./runtime/versions";
 export { compileVersions, toRuntimeDef, version } from "./runtime/versions";
-// Typed declarations: setup({ events }) (ADR-017)
 export type {
   EmittingMessageContext,
   EmittingTimerContext,
   EventPayloads,
   EventSchemas,
+  Goto,
+  InputArgs,
+  LocalOf,
+  PhaseContext,
+  PhasedState,
+  PhasedStateOf,
+  PhaseHelpers,
+  PhaseMessageDef,
+  PhaseResult,
+  PhaseTimerDef,
   Setup,
+  StateDecl,
+  StateDecls,
+  StateDef,
+  StatePart,
   TypedEmit,
 } from "./setup";
-export { setup } from "./setup";
+export { goto, PhaseTransition, setup, stay } from "./setup";
 // Timer helper (ADR-015 D2)
 export { timer } from "./timer";
