@@ -396,6 +396,16 @@ await other.call("ACCEPT_TRANSFER", { callerId, playerData });
 
 RPC handlers live in the `rpc` block. They are NOT exposed to WebSocket clients. They don't go through role evaluation (the calling actor is trusted).
 
+### Link pushes (ADR-011)
+
+A subscriber stores each link in `active_links` (`target_type` = the target's actor type, e.g. `lobby`, as in
+event ids and Studio; `version` starts at 0) and registers on the target's `link_subscribers` (again by actor
+type). After every committed transition the source pushes each subscriber its view, skipping one it already sent
+in this instance. The push's `version` is the source's `snapshots.last_seq`, the seq of the transition that made
+the view (kept with `journal: false` too). The subscriber runs `link.onUpdate` only when the version is above the
+one it stored, and stores it in the same commit. A source that wakes with no dedupe memory and pushes its view
+again (on a re-subscribe) sends a seq the subscriber already has, so nothing is run or journaled twice.
+
 ### Timers (ADR-015 D2)
 
 `ctx.schedule(name, { in | at, key, payload })` and `ctx.cancel(key)` are effects of the transition: the step

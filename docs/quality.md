@@ -158,3 +158,9 @@ Surviving mutants that no test can kill, because the mutated program behaves ide
 | studio UI | Malformed known frames lost the failing field path in the error | `studio-ui-state.mutation.test.ts` |
 | worker | `actor.ts` compared `Upgrade` case-sensitively, same as the studio bug (fixed on the ADR-015 branch) | `websocket-upgrade.test.ts` (unit, red before); `websocket.test.ts` (workerd lowercases it, so the integration test passed either way) |
 | worker | A lifecycle connect/disconnect that only scheduled or cancelled a timer was not committed | `timers.test.ts` "lifecycle handlers" (red before) |
+
+## Bugs found in the bug bash (2026-10-10)
+
+| Package | Bug | Test |
+|---|---|---|
+| worker | A link push's version was `Date.now()`, so a source that woke (in-memory dedupe gone) and pushed its unchanged view on a re-subscribe passed the subscriber's monotonic check: `link.onUpdate` ran and was journaled again. The version is now the source's `snapshots.last_seq` (`snapshotSeq()`, journal on or off). Links are also stored and pushed under the actor type (`lobby`), not the binding name (`LOBBY`). | `link-versions.test.ts` (6 red before); `outbox-store.test.ts` "snapshotSeq". Stryker on `journal.ts` `snapshotSeq` / `nextTransitionSeq`: 9/9 killed (100%). `pnpm crap:worker`: no new function ≥ 8 (the 6 at or above 8 are the same before and after the fix). |

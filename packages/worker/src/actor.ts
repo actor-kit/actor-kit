@@ -43,6 +43,7 @@ import {
   readJournal,
   rebuildFromJournal,
   resolveJournalConfig,
+  snapshotSeq,
 } from "./runtime/journal";
 import { readStudioTimeline, timelineEntry } from "./runtime/journal-timeline";
 import {
@@ -291,7 +292,6 @@ const SnapshotSeqSchema = z.object({ version: z.number(), last_seq: z.number() }
 /** A flow carried across actors in forward and link-push metadata (ADR-017 §4), parsed at the RPC boundary. */
 const CorrelationRowSchema = z.object({ correlation_id: z.string().nullable() });
 const LastEventRowSchema = z.object({ seq: z.number(), correlation_id: z.string().nullable() });
-const LastSeqRowSchema = z.object({ last_seq: z.number() });
 /** A recorded service result to redeliver after a restore (journal payloads carry the effect id). */
 const RecordedResultSchema = z.union([
   z.object({ input: z.unknown(), result: z.unknown(), effectId: z.string() }),
@@ -374,9 +374,6 @@ async function trySend(
     return { ok: false, error: classifyFailure(error, undefined) };
   }
 }
-
-/** The binding name for an actor type: upper case, `-` → `_` (e.g. "chat-room" → "CHAT_ROOM"). */
-const bindingName = (name: string): string => name.toUpperCase().replace(/-/g, "_");
 
 /** A transition declared effects to persist: executions, forwards, or timer schedules / cancels. */
 function declaresEffects(result: StepResult): boolean {
@@ -466,8 +463,8 @@ export function actor(
   /** The service an outbox row runs: a declared one, or the publish service for published events. */
   const serviceFor = (name: string) =>
     name === PUBLISH_SERVICE ? (publishService ?? undefined) : def.services?.[name];
-  /** What Studio shows as a link's source type: the linked contract's binding name. */
-  const linkSourceType = (link: string): string => bindingName(def.links?.[link]?.contract.name ?? link);
+  /** What Studio shows as a link's source type: the linked actor's type (as in event ids). */
+  const linkSourceType = (link: string): string => def.links?.[link]?.contract.name ?? link;
 
   const DOClass = class ActorInstance extends DurableObject {
     state: unknown = undefined;
@@ -1054,9 +1051,7 @@ export function actor(
         return { correlationId: last.correlation_id ?? id, causationId: id };
       }
       // journal: false — the snapshot's transition counter still numbers the event.
-      const id = this.eventIdOf(
-        LastSeqRowSchema.parse(sql.exec("SELECT last_seq FROM snapshots WHERE id = 1").one()).last_seq,
-      );
+      const id = this.eventIdOf(snapshotSeq(sql));
       return { correlationId: id, causationId: id };
     }
 
@@ -1341,7 +1336,7 @@ export function actor(
       if (!linkDef) return;
       this.ctx.storage.sql.exec(
         `${insert} INTO active_links (target_type, target_id, link_name, version, created_at) VALUES (?, ?, ?, 0, ?)`,
-        bindingName(linkDef.contract.name),
+        linkDef.contract.name,
         id,
         name,
         Date.now(),
@@ -1358,7 +1353,7 @@ export function actor(
       }
       this.ctx.storage.sql.exec(
         "DELETE FROM active_links WHERE target_type = ? AND target_id = ? AND link_name = ?",
-        bindingName(linkDef.contract.name),
+        linkDef.contract.name,
         id,
         name,
       );
@@ -1385,7 +1380,7 @@ export function actor(
             resolveStub(linkDef.contract.name, call.id, this.ctx, this.env),
             "__linkSubscribe",
           );
-          await subscribe?.(bindingName(_actorName), this.subscriberId());
+          await subscribe?.(_actorName, this.subscriberId());
         } catch (error) {
           // Target unreachable — invoke onError if defined, otherwise retry on restart
           this.linkUnreachable(call.name, call.id, error);
@@ -1435,7 +1430,7 @@ export function actor(
               "__linkUnsubscribe",
             );
             if (unsubscribe !== null) {
-              await unsubscribe(_actorName.toUpperCase().replace(/-/g, "_"), this.subscriberId());
+              await unsubscribe(_actorName, this.subscriberId());
             }
           } catch {
             // Target unreachable — acceptable
@@ -1585,18 +1580,16 @@ export function actor(
 
       // Resolve subscriber namespace and call __receiveLinkUpdate RPC
       // This is fire-and-forget — if unreachable, subscriber re-registers on restart
-      const sourceType = _actorName.toUpperCase().replace(/-/g, "_");
-      const sourceId = this.actorId ?? this.ctx.id.toString();
-      const version = Date.now(); // Monotonic version using timestamp
+      // The version is the seq of the transition that made this view (not the clock): a view pushed
+      // again after a wake (the dedupe map above is in memory only) carries a seq the subscriber
+      // already has, and its monotonic check drops it.
+      const version = snapshotSeq(this.ctx.storage.sql);
 
       try {
-        const receive = rpcMethod(
-          resolveStub(subscriberType.toLowerCase().replace(/_/g, "-"), subscriberId, this.ctx, this.env),
-          "__receiveLinkUpdate",
-        );
+        const receive = rpcMethod(resolveStub(subscriberType, subscriberId, this.ctx, this.env), "__receiveLinkUpdate");
         if (receive !== null) {
           // Fire and forget
-          void receive(sourceType, sourceId, viewData, role, version, this.sourceTrace());
+          void receive(_actorName, this.subscriberId(), viewData, role, version, this.sourceTrace());
         }
       } catch {
         // Subscriber unreachable — skip

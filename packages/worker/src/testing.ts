@@ -87,6 +87,7 @@ export {
   readJournal,
   rebuildFromJournal,
   resolveJournalConfig,
+  snapshotSeq,
 } from "./runtime/journal";
 // Studio timeline read from the journal (ADR-017 §5)
 export type { TimelinePageQuery, TimelineSource } from "./runtime/journal-timeline";
