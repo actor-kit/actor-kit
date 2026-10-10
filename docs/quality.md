@@ -70,6 +70,23 @@ CRAP over `packages/worker/src/runtime`, `packages/test/src`, `packages/core/src
 | 5. Determinism guards (`determinism.ts`, StepFacts.guard, replay/simulate/testActor wiring) | 130 | 90.00% (117/130) first run; message-text, nested-guard and raw-def env tests added | see "Equivalent mutants" (determinism.ts) | see final row |
 | Final re-run of steps 4-5 changed code (`determinism.ts`, simulate `errorOf`/`declaredError`, testActor env) | 127 | **97.64% (124/127)** | 3 equivalent (determinism.ts) | studio UI 7.0; worker (unit + integration, `crap:worker`) **7.8**; runtime 7.0, test 7.0, core 6.0; 0 functions ≥ 8 |
 
+## ADR-017 (states), Stryker on `runtime/phases.ts`, `setup.ts`, `studio/ui/src/phase-change.ts`
+
+| Run | Score | Survivors |
+|---|---|---|
+| First | 89.72% (96/107) | 11 |
+| After | **98.94% (93/94)** | 1, equivalent (setup.ts:226, below) |
+
+- Killed by `states-setup.test.ts`: setup.ts:206-207 (setup's body / returned object; static mutants that broke only
+  module-level setup() calls, which Stryker's Vitest runner reports as survived, now also called inside a test),
+  setup.ts:219 ×2 (`in()` for a phase typed but not declared at runtime), phases.ts:32 (`goto()` has no local),
+  phases.ts:91 `def.messages?.[name]` (wrong_state with states that declare no messages).
+- Removed by simplifying (redundant checks, no behaviour change): phase-change.ts:8 (an entry whose state is
+  unavailable has a null state, so the `stateUnavailable` check is dropped), phase-change.ts:18 (`phase !== null`:
+  a null phase returned null anyway), phases.ts:91 `other !== phase` (the caller asks only after the current
+  state did not declare the message; `declaredInAnotherState` is now `declaredInSomeState`).
+- CRAP after: studio UI max 7.0 (0 ≥ 8); worker with `pnpm crap:worker` max 7.6 (0 ≥ 8).
+
 ## Equivalent mutants
 
 Surviving mutants that no test can kill, because the mutated program behaves identically. One line each.
@@ -145,6 +162,7 @@ Surviving mutants that no test can kill, because the mutated program behaves ide
 | test | simulate.ts:301 | `parseEffectId(effectId)?.seq` → `.seq` | Simulated effect ids are always `seq:index`, so the parse never fails. |
 | worker | journal-timeline.ts:202 | init start `timers: []` → `["Stryker was here"]` | Same as journal.ts:535/750: an init event schedules nothing from its start point, and timeline states never read the pending timers. |
 | worker | journal-timeline.ts:203 | `from === undefined \|\| …` → `false \|\| …` | Folding a non-init event onto no point throws inside the try, which returns null: the same "state not available". |
+| worker | setup.ts:226 | `local === undefined ? def : { ...def, local }` → always spread | Adds `local: undefined` to a state without a local schema; the runtime only reads `def.local === undefined` (phases.ts `parseLocal`, step.ts initial check). |
 
 ## Bugs found while hardening (2026-10-07)
 

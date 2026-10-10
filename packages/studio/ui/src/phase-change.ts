@@ -4,8 +4,9 @@
  */
 import type { TimelineItem } from "./protocol";
 
+/** An entry's phase; null when it has none (an entry whose state is unavailable has a null state). */
 function phaseOf(item: TimelineItem | undefined): string | null {
-  if (item === undefined || item.stateUnavailable === true) return null;
+  if (item === undefined) return null;
   const { state } = item;
   if (typeof state !== "object" || state === null || !("phase" in state)) return null;
   return typeof state.phase === "string" ? state.phase : null;
@@ -15,5 +16,5 @@ function phaseOf(item: TimelineItem | undefined): string | null {
 export function phaseChange(entry: TimelineItem, previous: TimelineItem | undefined): string | null {
   const phase = phaseOf(entry);
   const before = phaseOf(previous);
-  return phase !== null && before !== null && phase !== before ? phase : null;
+  return before !== null && phase !== before ? phase : null;
 }

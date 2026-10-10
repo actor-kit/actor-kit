@@ -19,7 +19,7 @@ import { parseDuration } from "./duration";
 import { createReplayFacts, type Facts, type JournalDraft, type LiveFacts } from "./journal";
 import { createOutbox, type UnlinkCall } from "./outbox";
 import {
-  declaredInAnotherState,
+  declaredInSomeState,
   goto,
   type PhasedState,
   PhaseTransition,
@@ -287,7 +287,7 @@ export function admitStepMessage(
   const inPhase = stateDef(states, current.phase).messages?.[event.type];
   const message = inPhase ?? roleMessages[role]?.[event.type];
   if (message === undefined) {
-    const wrong = declaredInAnotherState(states, current.phase, event.type);
+    const wrong = declaredInSomeState(states, event.type);
     return { ok: false, error: wrong ? "wrong_state" : "message_not_found" };
   }
   const phaseCtx = { ...ctx, phase: current.phase, local: current.local };

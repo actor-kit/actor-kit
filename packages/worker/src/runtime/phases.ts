@@ -86,7 +86,10 @@ export function stateDef(states: Record<string, StepStateDef>, phase: string): S
   return def;
 }
 
-/** Whether any state other than `phase` declares the message (a message sent in the wrong phase). */
-export function declaredInAnotherState(states: Record<string, StepStateDef>, phase: string, name: string): boolean {
-  return Object.entries(states).some(([other, def]) => other !== phase && def.messages?.[name] !== undefined);
+/**
+ * Whether some state declares the message. Asked once the current state and the roles have not:
+ * true means the message was sent in the wrong phase.
+ */
+export function declaredInSomeState(states: Record<string, StepStateDef>, name: string): boolean {
+  return Object.values(states).some((def) => def.messages?.[name] !== undefined);
 }
