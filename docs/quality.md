@@ -115,6 +115,9 @@ Surviving mutants that no test can kill, because the mutated program behaves ide
 | test | simulate.ts:391 | `if (from !== null)` before delivering forwards → `true` | `from` is null only for callbacks (onDone, onError, onUpdate), whose step has an empty outbox: there are no forwards to deliver. |
 | test | simulate.ts:562 (×2, one NoCoverage) | init's unlink targets `() => []` → `undefined` / `["…"]` | `init` gets no `unlink`, so the fact is never read. |
 | worker, studio UI | trace.ts:48, cause-ref.ts:18 (×3 each) | destructuring defaults `= ""` → `"Stryker was here!"` | Groups 1-3 of the id pattern always match when the pattern does; the defaults exist for the type checker. |
+| worker | journal.ts:583, 813 | init `timerOps: []` / rebuild-skipped migrate `emitted: []` → `["Stryker was here"]` | Same family as journal.ts:535/750: init schedules nothing, and a rebuild compares neither checksums nor emitted events. |
+| worker | journal.ts:647 | `i < length` → `i <= length` | Past the end both lists give `undefined`, which describe the same ("nothing"): no difference is found there. |
+| test | test-actor.ts:386 | `if (def.events)` → `true` | Assigns `undefined` when absent; `emit` reads it with `?.` either way. |
 | worker | journal-timeline.ts:202 | init start `timers: []` → `["Stryker was here"]` | Same as journal.ts:535/750: an init event schedules nothing from its start point, and timeline states never read the pending timers. |
 | worker | journal-timeline.ts:203 | `from === undefined \|\| …` → `false \|\| …` | Folding a non-init event onto no point throws inside the try, which returns null: the same "state not available". |
 

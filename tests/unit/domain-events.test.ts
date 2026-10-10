@@ -312,3 +312,77 @@ describe("examples/auction publishes bids and results", () => {
     ]);
   });
 });
+
+describe("edges", () => {
+  it("setup() returns the declared events and helpers", () => {
+    const events = { A: z.object({}) };
+    const kit = setup({ events });
+    expect(kit.events).toBe(events);
+    expect(typeof kit.message).toBe("function");
+    expect(typeof kit.timer).toBe("function");
+  });
+
+  const Plain = defineActor("plain", {
+    input: z.object({}),
+    init: (): S => ({ bids: [] }),
+    roles: { any: () => true },
+    messages: {
+      SAY: message(z.object({}), (s: S, _p, ctx) => {
+        ctx.emit("Anything", {});
+        return s;
+      }),
+    },
+    views: {},
+  });
+
+  it("an actor without events cannot emit (step core and testActor)", async () => {
+    const def = { ...Plain.def, messages: { any: Plain.def.messages } };
+    expect(() =>
+      step(
+        def,
+        { bids: [] },
+        { type: "message", name: "SAY", payload: {}, caller: "a", callerType: "user", role: "any" },
+        liveStepFacts(createLiveFacts(), () => []),
+        {},
+      ),
+    ).toThrow('Event "Anything" is not declared on this actor');
+    await expect(testActor(Plain).send({ bids: [] }, "a", { type: "SAY" })).rejects.toThrow(
+      'Event "Anything" is not declared',
+    );
+  });
+
+  it("testActor parses payloads like the runtime", async () => {
+    const t = testActor(Auction);
+    const error = await t.send({ bids: [] }, "a", { type: "BAD", name: "BidPlaced" }).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(Error);
+    expect(String(error)).toMatch(/Event "BidPlaced": invalid payload: .+/);
+  });
+
+  it("an emit takes an effect index like an execution", async () => {
+    const Order = defineActor("order", {
+      input: z.object({}),
+      init: (): S => ({ bids: [] }),
+      roles: { any: () => true },
+      events: auction.events,
+      messages: {
+        GO: auction.message(z.object({}), (s: S, _p, ctx) => {
+          ctx.emit("BidPlaced", { bidder: "a", amount: 1 });
+          ctx.execute("PAY", {});
+          return s;
+        }),
+      },
+      services: { PAY: { fn: async () => null } },
+      views: {},
+    });
+    const sim = simulate({ contracts: [Order] });
+    const order = await sim.spawn(Order, "o", {});
+    order.send("u", { type: "GO" });
+    expect(sim.pendingEffects().map((p) => p.effectId)).toEqual(["2:1"]);
+  });
+
+  it("the divergence error carries its class name", () => {
+    expect(new JournalEmittedDivergenceError(1, "message", 0, undefined, undefined).name).toBe(
+      "JournalEmittedDivergenceError",
+    );
+  });
+});
