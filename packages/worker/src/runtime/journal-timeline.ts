@@ -26,6 +26,7 @@ import {
   parseJournalEventRow,
   type ReplayableDef,
 } from "./journal";
+import { describeRecordedError } from "./service-error";
 import type { StudioTimelineEntry } from "./studio-protocol";
 
 /** What reading a timeline needs besides storage. */
@@ -41,7 +42,8 @@ export interface TimelineSource {
 const UNKNOWN = "unknown";
 
 const ServiceDone = z.object({ input: z.unknown(), result: z.unknown() });
-const ServiceError = z.object({ input: z.unknown(), error: z.object({ message: z.string() }) });
+// A journaled service error (ADR-016 §2): a tagged value (Defect, Timeout or a declared error).
+const ServiceError = z.object({ input: z.unknown(), error: z.record(z.string(), z.unknown()) });
 const LinkUpdate = z.object({ sourceId: z.string(), view: z.unknown() });
 const LinkError = z.object({ targetId: z.string(), error: z.object({ message: z.string() }) });
 const Timer = z.object({ key: z.string(), payload: z.unknown(), fireAt: z.number(), lateBy: z.number() });
@@ -75,7 +77,7 @@ const CAUSES: { [K in JournalEvent["causeType"]]: CauseOf } = {
   },
   "service.onError": (event) => {
     const { input, error } = ServiceError.parse(event.payload);
-    return { service: event.name ?? UNKNOWN, input, error: error.message };
+    return { service: event.name ?? UNKNOWN, input, error: describeRecordedError(error) };
   },
   "link.onUpdate": (event, sourceType) => {
     const { sourceId, view } = LinkUpdate.parse(event.payload);

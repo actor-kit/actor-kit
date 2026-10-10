@@ -124,6 +124,33 @@ describe("timelineCause: journal events in the Studio cause shapes", () => {
       { service: "PAY", input: 1, error: "boom" },
     ],
     [
+      "service.onError with a journaled Defect (ADR-016 §2)",
+      event({
+        causeType: "service.onError",
+        name: "PAY",
+        payload: { input: 1, error: { _tag: "Defect", message: "boom" }, effectId: "2:0" },
+      }),
+      { service: "PAY", input: 1, error: "boom" },
+    ],
+    [
+      "service.onError with a journaled Timeout (ADR-016 §3)",
+      event({
+        causeType: "service.onError",
+        name: "PAY",
+        payload: { input: 1, error: { _tag: "Timeout", ms: 1500 }, effectId: "2:0" },
+      }),
+      { service: "PAY", input: 1, error: "timed out after 1500ms" },
+    ],
+    [
+      "service.onError with a declared error, which has no message (ADR-016 §2)",
+      event({
+        causeType: "service.onError",
+        name: "PAY",
+        payload: { input: 1, error: { _tag: "CardDeclined", reason: "stolen" }, effectId: "2:0" },
+      }),
+      { service: "PAY", input: 1, error: '{"_tag":"CardDeclined","reason":"stolen"}' },
+    ],
+    [
       "link.onUpdate",
       event({ causeType: "link.onUpdate", name: "room", payload: { sourceId: "r1", view: { role: "x", n: 1 } } }),
       { sourceType: "T_room", sourceId: "r1", viewData: { role: "x", n: 1 } },
