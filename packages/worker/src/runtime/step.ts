@@ -14,7 +14,7 @@
  * run transitions through here, so they cannot drift apart. Nothing here touches storage.
  */
 
-import type { DeterministicContext, GuardContext, ScheduleOptions } from "@actor-kit/core";
+import type { DeliveryInfo, DeterministicContext, GuardContext, ScheduleOptions } from "@actor-kit/core";
 import { parseDuration } from "./duration";
 import { createReplayFacts, type Facts, type JournalDraft, type LiveFacts } from "./journal";
 import { createOutbox, type UnlinkCall } from "./outbox";
@@ -91,7 +91,14 @@ interface LifecycleCallEvent {
 type Caller = { readonly caller: string; readonly callerType: "user" | "service" };
 
 export type StepCause =
-  | ({ readonly type: "message"; readonly name: string; readonly payload: unknown; readonly role: string } & Caller)
+  | ({
+      readonly type: "message";
+      readonly name: string;
+      readonly payload: unknown;
+      readonly role: string;
+      /** The forward that delivered the message (ADR-016 §1): the handler's ctx.delivery, journaled as a fact. */
+      readonly delivery?: DeliveryInfo | undefined;
+    } & Caller)
   | ({
       readonly type: "lifecycle.connect" | "lifecycle.disconnect";
       /** Live only: how many sockets the caller holds after the event. Not journaled. */
@@ -307,6 +314,7 @@ function stepMessage(
     callerType: cause.callerType,
     role: cause.role,
     env,
+    ...(cause.delivery === undefined ? {} : { delivery: cause.delivery }),
     execute: effects.execute,
     link: effects.link,
     unlink: effects.unlink,
@@ -318,15 +326,17 @@ function stepMessage(
     `Message handler for "${cause.name}" returned a Promise. Handlers must be synchronous — use execute() for async side effects.`,
   );
   const next = applyUnlinks(def, handlerState, effects, facts);
+  const event = draft(
+    { causeType: "message", name: cause.name, payload: cause.payload },
+    { caller: cause.caller, callerType: cause.callerType, role: cause.role },
+    facts,
+  );
+  const delivery = cause.delivery;
   return {
     state: next,
     handlerState,
     effects,
-    event: draft(
-      { causeType: "message", name: cause.name, payload: cause.payload },
-      { caller: cause.caller, callerType: cause.callerType, role: cause.role },
-      facts,
-    ),
+    event: delivery === undefined ? event : { ...event, facts: { ...event.facts, delivery } },
   };
 }
 

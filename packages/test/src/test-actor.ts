@@ -9,6 +9,7 @@
 
 import type {
   ContractMessages,
+  DeliveryInfo,
   Execution,
   ForwardCall,
   Infer,
@@ -110,6 +111,12 @@ interface SendResult<TState> {
   timeline: TimelineEntry[];
 }
 
+/** send()'s options: the caller type, and the forward that delivered the message (ctx.delivery, ADR-016 §1). */
+interface SendOptions {
+  callerType?: "user" | "service";
+  delivery?: DeliveryInfo;
+}
+
 interface TestHarness<TState, TInput> {
   init(input: TInput): TState;
   role(state: TState, caller: string, opts?: { callerType?: "user" | "service" }): string | null;
@@ -117,7 +124,7 @@ interface TestHarness<TState, TInput> {
     state: TState,
     caller: string,
     message: { type: string; [key: string]: unknown },
-    opts?: { callerType?: "user" | "service" },
+    opts?: SendOptions,
   ): Promise<SendResult<TState>>;
   view(state: TState, caller: string, opts?: { callerType?: "user" | "service" }): { role: string; data: unknown };
 }
@@ -125,12 +132,7 @@ interface TestHarness<TState, TInput> {
 interface ContractTestHarness<TState, TInput, TMessage, TViewData> {
   init(input: TInput): TState;
   role(state: TState, caller: string, opts?: { callerType?: "user" | "service" }): string | null;
-  send(
-    state: TState,
-    caller: string,
-    message: TMessage,
-    opts?: { callerType?: "user" | "service" },
-  ): Promise<SendResult<TState>>;
+  send(state: TState, caller: string, message: TMessage, opts?: SendOptions): Promise<SendResult<TState>>;
   view(state: TState, caller: string, opts?: { callerType?: "user" | "service" }): { role: string; data: TViewData };
 }
 
@@ -281,7 +283,7 @@ export function testActor(
     state: unknown,
     caller: string,
     event: { type: string; [key: string]: unknown },
-    opts?: { callerType?: "user" | "service" },
+    opts?: SendOptions,
   ): Promise<SendResult<unknown>> {
     const callerType = opts?.callerType ?? "user";
     const role = resolveRole(def.roles, state, caller, { callerType });
@@ -293,6 +295,7 @@ export function testActor(
       caller,
       callerType,
       env: {},
+      ...(opts?.delivery === undefined ? {} : { delivery: opts.delivery }),
       ...effects.ctx,
     });
     if (!result.ok) throw new Error(ROUTE_ERRORS[result.error](event.type, role, result.detail));

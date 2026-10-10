@@ -27,6 +27,13 @@ import { hasActorDefShape } from "./runtime/actor-def";
 import { closeCodeToSend } from "./runtime/close-code";
 import { type ConnectRequest, parseConnectRequest } from "./runtime/connect-request";
 import {
+  type DeliveryInfo,
+  DeliveryInfoSchema,
+  deliveryInfo,
+  type EffectInfo,
+  effectInfo,
+} from "./runtime/effect-info";
+import {
   appendJournalEvent,
   clockedSources,
   createLiveFacts,
@@ -196,8 +203,11 @@ interface ActorDef {
   services?: Record<
     string,
     {
-      /** Third argument: the effect id (`seq:index`, stable across retries) and the try number. */
-      fn(input: unknown, env: unknown, effect: { effectId: string; attempt: number }): Promise<unknown>;
+      /**
+       * Third argument (ADR-016 §1): the actor, the effect id (`seq:index`, stable across retries), the
+       * idempotency key (`${actorType}/${actorId}/${effectId}`), the try number and the try's AbortSignal.
+       */
+      fn(input: unknown, env: unknown, effect: EffectInfo): Promise<unknown>;
       /** Tries and backoff (ADR-015 D1). Default: 3 tries, 1s then 5s apart, ±20% jitter. */
       retry?: unknown;
       onDone?(state: unknown, result: unknown, input: unknown, ctx: DeterministicContext): unknown;
@@ -313,13 +323,13 @@ type ServiceOutcome = { ok: true; result: unknown } | { ok: false; message: stri
 
 /** One try of a service: its result, or the message it failed with. */
 async function tryService(
-  serviceDef: { fn(input: unknown, env: unknown, info: { effectId: string; attempt: number }): unknown },
-  entry: { id: string; input: unknown },
+  serviceDef: { fn(input: unknown, env: unknown, effect: EffectInfo): unknown },
+  input: unknown,
   env: unknown,
-  attempt: number,
+  effect: EffectInfo,
 ): Promise<ServiceOutcome> {
   try {
-    return { ok: true, result: await serviceDef.fn(entry.input, env, { effectId: entry.id, attempt }) };
+    return { ok: true, result: await serviceDef.fn(input, env, effect) };
   } catch (error) {
     return { ok: false, message: error instanceof Error ? error.message : String(error) };
   }
@@ -333,9 +343,10 @@ async function trySend(
   caller: string,
   callerType: "user" | "service",
   message: MessageEnvelope,
+  delivery: DeliveryInfo,
 ): Promise<ServiceOutcome> {
   try {
-    return { ok: true, result: await send(caller, callerType, message) };
+    return { ok: true, result: await send(caller, callerType, message, delivery) };
   } catch (error) {
     return { ok: false, message: error instanceof Error ? error.message : String(error) };
   }
@@ -880,7 +891,14 @@ export function actor(
 
       const attempt = startAttempt(sql, entry.id);
       this.pushStudioOutbox();
-      const outcome = await tryService(serviceDef, entry, this.env, attempt);
+      const effect = effectInfo({
+        actorType: _actorName,
+        actorId: this.subscriberId(),
+        effectId: entry.id,
+        attempt,
+        signal: new AbortController().signal,
+      });
+      const outcome = await tryService(serviceDef, entry.input, this.env, effect);
 
       // A restore may have cancelled this try while it ran: its transition is undone, settle nothing.
       if (!isRunning(sql, entry.id)) {
@@ -1080,7 +1098,13 @@ export function actor(
       const attempt = startAttempt(sql, entry.id, "forwards");
       this.pushStudioOutbox();
       const callerType: "user" | "service" = entry.callerType === "service" ? "service" : "user";
-      const outcome = await trySend(target.send, entry.caller, callerType, target.message);
+      const delivery = deliveryInfo({
+        actorType: _actorName,
+        actorId: this.subscriberId(),
+        effectId: entry.id,
+        attempt,
+      });
+      const outcome = await trySend(target.send, entry.caller, callerType, target.message, delivery);
 
       // A restore may have cancelled this try while it ran: its transition is undone, settle nothing.
       if (isRunning(sql, entry.id, "forwards")) this.settleForward(entry, attempt, outcome);
@@ -1528,11 +1552,18 @@ export function actor(
       return { role: result.role, ...result.snapshot };
     }
 
+    /**
+     * Deliver a message. `delivery` is set when another actor's forward sends it (ADR-016 §1): the
+     * handler reads it as ctx.delivery. It is parsed here, at the RPC boundary.
+     */
     async send(
       caller: string,
       callerType: "user" | "service",
       event: { type: string; [key: string]: unknown },
+      delivery?: unknown,
     ): Promise<{ ok: boolean; error?: string; detail?: string }> {
+      const forwarded = DeliveryInfoSchema.optional().safeParse(delivery);
+      if (!forwarded.success) return { ok: false, error: "invalid_delivery", detail: forwarded.error.message };
       await this.loadState();
       if (!this.initialized) {
         return { ok: false, error: "Actor not initialized" };
@@ -1559,6 +1590,7 @@ export function actor(
         caller,
         callerType,
         role,
+        delivery: forwarded.data,
       });
 
       // Timeline: record message cause
@@ -2486,6 +2518,8 @@ export interface TypedActorClass<TContract> {
       caller: string,
       callerType: "user" | "service",
       event: ContractMessages<TContract>,
+      /** Set by a forward (ADR-016 §1): the target's handler reads it as ctx.delivery. */
+      delivery?: DeliveryInfo,
     ): Promise<{ ok: boolean; error?: string }>;
     getSnapshot(
       caller: string,

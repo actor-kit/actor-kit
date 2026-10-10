@@ -73,11 +73,28 @@ export type ScheduleFn = (timer: string, options: ScheduleOptions) => void;
 /** cancel() removes a pending timer by key. Cancelling a key that is not pending does nothing. */
 export type CancelFn = (key: string) => void;
 
+/**
+ * The effect that delivered a forwarded message (ADR-016 §1): the sending actor, the forward's effect id,
+ * its idempotency key (`${actorType}/${actorId}/${effectId}`, unique across a deployment; retries reuse
+ * it) and the try number. A forward is delivered at least once, so a target dedupes on `idempotencyKey`.
+ */
+export interface DeliveryInfo {
+  readonly actorType: string;
+  readonly actorId: string;
+  /** `seq:index`, unique within the sending actor. */
+  readonly effectId: string;
+  readonly idempotencyKey: string;
+  /** 1-based. */
+  readonly attempt: number;
+}
+
 export interface MessageContext<TEnv = unknown> extends DeterministicContext {
   readonly caller: string;
   readonly callerType: "user" | "service";
   readonly role: string;
   readonly env: TEnv;
+  /** Set when the message came through another actor's `ctx.forward()`; undefined otherwise. */
+  readonly delivery?: DeliveryInfo | undefined;
   readonly execute: ExecuteFn;
   readonly link: LinkFn;
   readonly unlink: UnlinkFn;

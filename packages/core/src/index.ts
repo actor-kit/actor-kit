@@ -24,6 +24,7 @@ export { array, boolean, float32, float64, nullable, schema, string, uint8, uint
 export type {
   CancelFn,
   ContractMessages,
+  DeliveryInfo,
   DeterministicContext,
   Duration,
   ExecuteFn,

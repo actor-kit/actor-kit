@@ -56,7 +56,7 @@ Throws if:
 - Zod validation fails
 - Guard returns false
 
-Options: `{ callerType: "service" }` to override the default "user".
+Options: `{ callerType: "service" }` to override the default "user"; `{ delivery }` to send the message as a forward would (`ctx.delivery`, ADR-016), e.g. to test that a handler ignores a retried delivery.
 
 ### `t.view(state, caller, opts?)`
 
@@ -128,6 +128,7 @@ await replayJournal(AuctionContract, room.journal);           // every simulated
 - **`pendingEffects()`**: service executions as `{ actor, effectId, service, input }`. `resolve` / `reject` take
   the effect, or its effect id when that is unique across actors.
 - **`advance(duration)`**: moves the clock; each due timer fires on its own deadline (`ctx.lateBy` is 0).
-- **Forwards** are delivered at once with the original caller; `failedForwards()` lists those whose target was
+- **Forwards** are delivered at once with the original caller and the forward's effect as the target's
+  `ctx.delivery` (try 1); `failedForwards()` lists those whose target was
   never spawned.
 - Link views are pushed as the runtime pushes them: after every committed transition a source sends each actor linked to it its view (projected for the caller `<source type>:<subscriber id>`, a service), only when it changed; the subscriber runs `link.onUpdate` with the role added. A new link, also one made in `init`, gets the current view at once.

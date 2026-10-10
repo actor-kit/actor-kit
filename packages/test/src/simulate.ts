@@ -25,6 +25,8 @@ import {
   admitMessage,
   checksumState,
   createLiveFacts,
+  type DeliveryInfo,
+  deliveryInfo,
   type Journal,
   type JournalCheckpoint,
   type JournalEvent,
@@ -354,27 +356,28 @@ function createSimulation(
     applyTimers(actor, result);
     appendJournal(actor, def, result.event);
     for (const forward of result.effects.toForwardEntries(actor.seq)) {
-      if (from !== null) deliver(actor, def, forward.linkName, forward.targetId, forward.message, from);
+      if (from !== null) deliver(actor, def, forward, from);
     }
     pushViews(actor);
     for (const link of added) subscribe(actor, def, link);
   }
 
+  /** Deliver a forward at once (its first and only try), carrying its effect to the target (ADR-016 §1). */
   function deliver(
     source: ActorData,
     def: SimDef,
-    linkName: string,
-    targetId: string,
-    message: { type: string; [key: string]: unknown },
+    forward: { id: string; linkName: string; targetId: string; message: { type: string; [key: string]: unknown } },
     as: Caller,
   ): void {
+    const { linkName, targetId, message } = forward;
     const type = def.links?.[linkName]?.contract.name ?? linkName.toLowerCase().replace(/_/g, "-");
     const to = { type, id: targetId };
     if (data.actors[keyOf(to)] === undefined) {
       data.failedForwards.push({ from: { type: source.type, id: source.id }, to, message });
       return;
     }
-    sendTo(to, as.caller, message, { callerType: as.callerType });
+    const delivery = deliveryInfo({ actorType: source.type, actorId: source.id, effectId: forward.id, attempt: 1 });
+    sendTo(to, as.caller, message, { callerType: as.callerType }, delivery);
   }
 
   /** Commit a transition only when it changed something (lifecycle, service, link callbacks). */
@@ -391,6 +394,7 @@ function createSimulation(
     caller: string,
     message: { type: string; [key: string]: unknown },
     options: CallerOptions = {},
+    delivery?: DeliveryInfo,
   ): SendOutcome {
     const actor = record(address);
     const def = defOf(actor.type);
@@ -406,6 +410,7 @@ function createSimulation(
       caller,
       callerType,
       role,
+      delivery,
     };
     const result = step(def, actor.state, cause, factsFor(actor), env);
     def.observe?.onTransition?.(actor.state, result.handlerState, message, { caller, role });

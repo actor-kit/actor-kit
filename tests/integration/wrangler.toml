@@ -192,3 +192,15 @@ class_name = "FlakyInbox"
 [[migrations]]
 tag = "v16"
 new_sqlite_classes = ["Courier", "FlakyInbox"]
+
+[[durable_objects.bindings]]
+name = "TELLER"
+class_name = "Teller"
+
+[[durable_objects.bindings]]
+name = "TILL"
+class_name = "Till"
+
+[[migrations]]
+tag = "v17"
+new_sqlite_classes = ["Teller", "Till"]

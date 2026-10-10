@@ -15,6 +15,7 @@ export { Bulletin, Desk } from "./studio-effects";
 export { StudioOff, StudioProbe } from "./studio-probe";
 export { StudioRedacted } from "./studio-redacted";
 export { Quiz, QuizLifecycle, QuizNoJournal, QuizNoStudio } from "./timers-actors";
+export { Teller, Till } from "./typed-services-actors";
 export { RosterActor } from "./versions-actors";
 export { StudioRegistry };
 

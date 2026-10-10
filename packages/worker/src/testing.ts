@@ -25,6 +25,9 @@ export { parseDuration } from "./runtime/duration";
 // Effect ids, retries, outbox store (ADR-015 D1)
 export type { EffectIdParts } from "./runtime/effect-id";
 export { formatEffectId, parseEffectId } from "./runtime/effect-id";
+// Effect metadata: idempotency keys and forward delivery (ADR-016 §1)
+export type { DeliveryInfo, EffectInfo } from "./runtime/effect-info";
+export { DeliveryInfoSchema, deliveryInfo, effectInfo, idempotencyKey } from "./runtime/effect-info";
 export { getTokenFromRequest } from "./runtime/get-token";
 // Actor journal (ADR-013): facts, events, replay
 export type {

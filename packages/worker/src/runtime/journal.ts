@@ -11,6 +11,7 @@
 import type { DeterministicContext } from "@actor-kit/core";
 import { xxh64 } from "@actor-kit/core";
 import { z } from "zod";
+import { DeliveryInfoSchema } from "./effect-info";
 import type { TimerOp } from "./outbox";
 import { replayStepFacts, type StepCause, type StepDef, step, stepInit } from "./step";
 
@@ -22,6 +23,8 @@ const FactsSchema = z.object({
   randoms: z.array(z.number()).optional(),
   unlinked: z.array(z.object({ name: z.string(), ids: z.array(z.string()) })).optional(),
   linkViews: z.array(z.object({ name: z.string(), id: z.string(), view: z.unknown() })).optional(),
+  /** The forward that delivered a message (ADR-016 §1), handed back to the handler as ctx.delivery. */
+  delivery: DeliveryInfoSchema.optional(),
 });
 
 export type Facts = z.infer<typeof FactsSchema>;
@@ -477,7 +480,7 @@ const REPLAY_CAUSES: Record<Exclude<JournalCauseType, "init" | "restore">, Repla
     const name = nameOf(event);
     const role = roleOf(event);
     required(def.messages?.[role]?.[name], `message "${name}" for role "${role}"`);
-    return { type: "message", name, payload: event.payload, role, ...callerOf(event) };
+    return { type: "message", name, payload: event.payload, role, ...callerOf(event), delivery: event.facts.delivery };
   },
   "lifecycle.connect": (def, _state, event) => {
     required(def.lifecycle?.connect, "lifecycle.connect");

@@ -56,6 +56,15 @@ Notes:
 - Studio's registry Durable Object runs under unit tests through `tests/unit/studio-server-fake-do.ts`, a thin
   `SqlStorage` fake over `node:sqlite`.
 
+## ADR-016 (typed services), per step
+
+Stryker scoped to each step's changed files (new modules whole, changed line ranges of existing ones);
+CRAP over `packages/worker/src/runtime`, `packages/test/src`, `packages/core/src` and `pnpm crap:worker`.
+
+| Step | Mutated | Score | Survivors | Max CRAP |
+|---|---|---|---|---|
+| 1. Idempotency (`effect-info.ts`, delivery in step/journal/simulate/testActor) | 107 | 99.07% (106/107) after killing `step.ts` `delivery === undefined` (first run 98.17%, 2 survivors) | `simulate.ts` `from !== null` before delivering forwards (equivalent, listed below) | 7.0 (runtime, test), 6.0 (core) |
+
 ## Equivalent mutants
 
 Surviving mutants that no test can kill, because the mutated program behaves identically. One line each.

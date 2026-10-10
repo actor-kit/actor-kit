@@ -53,7 +53,7 @@ defineActor("cart", {
 
 A service has these parts:
 
-- **`fn`** — async function that receives the input, the Worker `env` and `{ effectId, attempt }`. Use any library: `fetch`, CF bindings (Queues, KV, R2), third-party SDKs.
+- **`fn`** — async function that receives the input, the Worker `env` and the effect: `{ actorType, actorId, effectId, idempotencyKey, attempt, signal }`. Use any library: `fetch`, CF bindings (Queues, KV, R2), third-party SDKs.
 - **`onDone`** — optional. Pure state transition that receives `(state, result, input)`. The result type is inferred from `fn`'s return type.
 - **`onError`** — optional. Pure state transition that receives `(state, error, input)`. It runs once, after the last try has failed.
 - **`retry`** — optional. `{ attempts, backoff: { baseMs, factor, maxMs, jitter } }`. Default: 3 tries, 1s then 5s apart, ±20% jitter. `{ attempts: 1 }` turns retries off.
@@ -103,15 +103,29 @@ Handlers never `await`. State is never stale. Crashes never lose intent.
 
 - **At-least-once delivery**: if the DO crashes after commit but before the service completes, the outbox entry survives. On restart, the framework re-runs the service from the persisted input.
 - **No interleaving**: handlers are synchronous. State cannot change between read and write.
-- **Idempotency is your responsibility**: at-least-once means duplicates are possible. Every execution has a deterministic **effect id**, `seq:index` (the transition's number and the effect's position in it), passed as `fn`'s third argument. It is the same on every retry and redrive, so use it as the idempotency key downstream:
+- **Idempotency is your responsibility**: at-least-once means duplicates are possible. Every execution has a deterministic **effect id**, `seq:index` (the transition's number and the effect's position in it). An effect id is unique only *within one actor*: two rooms at the same journal position both have effect `812:0`. Downstream, use **`effect.idempotencyKey`**, `${actorType}/${actorId}/${effectId}`, which is unique across the deployment and the same on every retry and redrive:
 
 ```typescript
 charge: {
-  fn: async (input: { orderId: string; cents: number }, env, { effectId }) =>
-    env.PAYMENTS.charge({ ...input, idempotencyKey: effectId }),
+  fn: async (input: { orderId: string; cents: number }, env, effect) =>
+    env.PAYMENTS.charge({ ...input, idempotencyKey: effect.idempotencyKey }),
   retry: { attempts: 5, backoff: { baseMs: 500, factor: 2 } },
 },
 ```
+
+Never use `effectId` alone as an idempotency key.
+
+- **Forwards carry their effect**: a message sent with `ctx.forward()` is delivered at least once too. The target's handler reads the sender's effect as `ctx.delivery` (`{ actorType, actorId, effectId, idempotencyKey, attempt }`; `undefined` for messages that did not come through a forward) and can ignore a retried delivery it has already applied:
+
+```typescript
+DELIVER: message(z.object({ text: z.string() }), (state: Inbox, { text }, ctx) => {
+  const key = ctx.delivery?.idempotencyKey;
+  if (key !== undefined && state.seen.includes(key)) return state;
+  return { ...state, seen: key === undefined ? state.seen : [...state.seen, key], texts: [...state.texts, text] };
+}),
+```
+
+`ctx.delivery` is journaled with the event, so replay hands the same value back.
 
 ## Everything Goes Through execute()
 

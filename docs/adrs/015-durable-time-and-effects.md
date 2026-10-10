@@ -26,7 +26,7 @@ From v6 `DurableEffectMetadata { id, transitionIndex, effectIndex }`.
 - Every effect a transition declares (execution, timer, forward) gets id `${seq}:${index}`. `seq` is the journal sequence of the transition; `index` counts that transition's effects in declaration order.
 - With `journal: false`, `seq` comes from a counter in `snapshots`, so ids stay deterministic.
 - The id is the primary key of `executions`, `timers` and `forwards`. Rows sort by `(seq, index)` as integers.
-- Services receive a third argument `{ effectId }` to use as an idempotency key. Additive.
+- Services receive a third argument `{ effectId }` to use as an idempotency key. Additive. *(Superseded by ADR-016 §1: an effect id is unique only within one actor; services get `effect.idempotencyKey`, `${actorType}/${actorId}/${effectId}`.)*
 - Retries reuse the same id.
 
 ### D2. Timers: a `timers` block, persisted deadlines, one alarm
