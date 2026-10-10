@@ -140,11 +140,11 @@ test.describe("Studio — Links panel", () => {
     const activeLink = roomPage.getByTestId("active-link-row");
     await expect(activeLink).toHaveCount(1);
     await expect(activeLink).toContainText("lobby");
-    await expect(activeLink).toContainText(`LOBBY:${lobbyId}`);
+    await expect(activeLink).toContainText(`lobby:${lobbyId}`);
 
     const subscriber = lobbyPage.getByTestId("link-subscriber-row");
     await expect(subscriber).toHaveCount(1);
-    await expect(subscriber).toContainText("AUCTION_ROOM");
+    await expect(subscriber).toContainText("auction-room");
     // The subscriber is named by its actor ID, not an opaque Durable Object ID.
     await expect(subscriber).toContainText(roomId);
 
