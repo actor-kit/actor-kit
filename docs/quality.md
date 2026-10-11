@@ -219,6 +219,7 @@ Migrations renumbered: `0020_publish_position`, `0021_journal_archive`.
 | 16. Docs: client code's own zod import, `zod/mini` | n/a | docs only (bundle sizes measured with esbuild: 453 KB classic, 13 KB mini) | — | unchanged |
 | 17. `0.3.0-next.0` versions, `scripts/vendor.sh` / `scripts/vendor.mts` | n/a | no package source changed (Stryker mutates `packages/*/src`); the script is pinned by `tests/unit/vendor.test.ts` (versions, names, manifest rewrite, a real pack of all nine packages; file lists identical to `pnpm pack`) | — | unchanged |
 | 18. Typed Durable Object stub (`worker/src/rpc-types.ts`, `TypedActorClass` in `actor.ts`, `core/src/contract-types.ts`) | 0 | types only, no runtime code (nothing for Stryker to mutate); pinned by `typed-stub.types.test.ts` against Cloudflare's `DurableObjectNamespace` / RPC types (every result not `never`, role-narrowed views, the persisted state) | — | unchanged (no functions changed) |
+| 19. Timer latency | n/a | investigated, nothing to fix: `syncAlarm` sets the alarm to `MIN(fire_at)` exactly, `alarm()` fires every due timer in the same invocation with synchronous SQLite reads, and a timer is never re-armed past its deadline; a real-alarm experiment in workerd (300 ms timers, warm and after `evictDurableObject`) measured 0-2 ms from deadline to alarm and 0-1 ms from alarm to handler. Production lateness (243 ms) is alarm delivery and wake; documented in the timers page. No source changed | — | unchanged |
 
 ## Equivalent mutants
 

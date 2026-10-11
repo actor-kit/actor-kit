@@ -51,6 +51,26 @@ quiz.actor("quiz", {
 - A timer whose payload no longer parses (its schema changed in a deploy) or whose transition fails is dropped and logged as an `actor_kit.timer.failed` event.
 - Timers work with `journal: false`: the table is the truth.
 
+## How late they fire
+
+A timer fires when Cloudflare runs the Durable Object's alarm, so expect it **tens to a few hundred
+milliseconds after its deadline** in production (Run Set Jimmy measured a cut timer 243 ms late, against
+28–47 ms for an in-memory `setTimeout`). Nearly all of that is the platform delivering the alarm, and waking
+the object if it was evicted or hibernating; actor-kit adds almost nothing on top:
+
+- The alarm is set to the earliest deadline to the millisecond (no rounding), in the commit that schedules it.
+- When it runs, the due timers are read from SQLite and fired in the same alarm, all of them, with no
+  storage round trip before the handler (Durable Object SQLite is synchronous).
+- Locally (workerd under `@cloudflare/vitest-pool-workers`, 300 ms timers, 16 runs, half of them after
+  `evictDurableObject`), the alarm ran 0-2 ms after the deadline and the handler 0-1 ms after the alarm.
+- Clients see the change once the commit is durable: the Durable Object output gate holds WebSocket frames
+  until storage confirms the write. That wait is what makes the timer survive a crash, and it applies to
+  every transition, not only timers.
+
+`ctx.lateBy` tells the handler how late it is: use it rather than assuming the deadline (for example,
+shorten the next window by `lateBy`). A timer is the wrong tool for sub-100 ms timing; keep that on the
+client and let the timer be the authority that closes the window.
+
 ## Studio
 
 The **Timers** tab lists pending timers (name, key, due in, payload, with `studio.redact` applied). Admins (Studio's `mutate` scope) can **Fire now**, which runs the timer exactly as the alarm would.
