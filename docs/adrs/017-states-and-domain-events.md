@@ -147,9 +147,9 @@ the closest fully type-safe design was chosen:
 - **Guards** in a state get the shared state, with `phase` and `local` in their context; views
   and roles get the whole persisted state (`PhasedStateOf<typeof quiz, Shared>`, a union narrowed
   by `phase`).
-- **Not yet covered:** `ContractMessages` (typed client `send`) lists only top-level messages, not
-  state messages; `testActor` does not run actors with states (use `simulate()`); `versions`
-  migrations of a states actor see the persisted object.
+- **Not yet covered:** `testActor` does not run actors with states (use `simulate()`); `versions`
+  migrations of a states actor see the persisted object. (`ContractMessages` covering state
+  messages landed in 0.3, ADR-018 B.)
 - **Emits take an effect index** (shared with executions, forwards and timers), so a published
   event's effect id is `seq:index` and `idempotencyKey` is stable. Emitting is available in
   message and timer handlers and in `enter`, not in lifecycle, service or link callbacks.

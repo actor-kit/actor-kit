@@ -163,17 +163,26 @@ export interface MessageDef<TState = unknown, TPayload = unknown, TEnv = unknown
  */
 export type MessageEvent<K extends string, P> = string extends keyof P ? { type: K } : { type: K } & P;
 
-/** Discriminated union of every message a contract accepts. */
-export type ContractMessages<T> = T extends {
-  def: { messages: Record<string, { schema: { _output: unknown } }> };
-}
-  ? {
-      [K in keyof T["def"]["messages"] & string]: T["def"]["messages"][K] extends {
-        schema: { _output: infer P };
-      }
-        ? MessageEvent<K, P>
-        : { type: K };
-    }[keyof T["def"]["messages"] & string]
+/** The wire messages of one `messages` record. */
+type MessagesOf<M> = {
+  [K in keyof M & string]: M[K] extends { schema: { _output: infer P } } ? MessageEvent<K, P> : { type: K };
+}[keyof M & string];
+
+/** The messages of every state an actor declares (ADR-017 §1); never without `states`. */
+type StateMessagesOf<TDef> = TDef extends { states: infer SS }
+  ? { [P in keyof SS]: SS[P] extends { messages?: infer M } ? MessagesOf<NonNullable<M>> : never }[keyof SS]
+  : never;
+
+type TopMessagesOf<TDef> = TDef extends { messages: infer M } ? MessagesOf<M> : never;
+
+/**
+ * Discriminated union of every message a contract accepts: its top-level messages and every state's
+ * messages (ADR-018 B). A contract that declares neither accepts any `{ type }`.
+ */
+export type ContractMessages<T> = T extends { def: infer TDef }
+  ? [TopMessagesOf<TDef> | StateMessagesOf<TDef>] extends [never]
+    ? { type: string; [key: string]: unknown }
+    : TopMessagesOf<TDef> | StateMessagesOf<TDef>
   : { type: string; [key: string]: unknown };
 
 // --- Timeline types (studio instrumentation) ---

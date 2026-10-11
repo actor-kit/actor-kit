@@ -139,15 +139,16 @@ export interface PhaseHelpers<SD extends StateDecls, E, P extends keyof SD & str
     schema: z.ZodType<Pay>,
     handler: Handler<S, Pay, PhaseTimerCtx<TEnv, E, SD, P, S>, PhaseResult<S>>,
   ): PhaseTimerDef<S, Pay>;
-  state<S, TEnv = TEnvDefault>(def: {
+  /** The state's messages keep their names and payloads, so the typed client `send` lists them (ADR-018 B). */
+  state<S, TEnv = TEnvDefault, const M extends Record<string, StatePart<S>> = Record<never, never>>(def: {
     enter?: (
       shared: S,
       input: InputArgs<SD[P]> extends [infer I] ? I : undefined,
       ctx: EnterContext<TEnv, E, P>,
     ) => LocalOf<SD[P]>;
-    messages?: Record<string, StatePart<S>>;
+    messages?: M;
     timers?: Record<string, StatePart<S>>;
-  }): StateDef<S>;
+  }): Omit<StateDef<S>, "messages"> & { readonly messages?: M };
 }
 
 /** What handlers see as `ctx.env`: the `env` schema's output (ADR-016 §4), or `unknown` without one. */
