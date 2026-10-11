@@ -22,3 +22,11 @@ names (`initialView.role`); a view without a role must match one role's schema (
 no schema). `actorClient(schema).create()` checks it against the schema. A mismatch throws
 `InitialViewError` with `code: "invalid_initial_view"`, a message naming each wrong field, a `docs` URL
 and the `issues`. Pass the view the server rendered for this caller; a placeholder no longer works.
+
+## Lengths and counts on the wire are varints
+
+String, record-key and JSON lengths and array and record counts used to be a big-endian `uint16`
+(JSON a `uint32`); a string over 65535 bytes wrapped the length and corrupted the frame. They are
+unsigned LEB128 varints now (`docs/binary-protocol.md`), so large values round-trip. Server and client
+must both run 0.3: a 0.2 client cannot decode 0.3 frames. Views with only short strings and small
+arrays get slightly smaller frames.

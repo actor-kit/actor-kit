@@ -6,12 +6,12 @@ Actor Kit v2 replaces JSON Patch with schema-aware binary delta encoding. The `s
 
 ## Frame format
 
-Every WebSocket frame starts with a 4-byte header:
+Every WebSocket frame starts with a 6-byte header (`frame.ts`):
 
 ```
 Byte 0: version (uint8) — schema version, used for version negotiation
 Byte 1: type (uint8) — frame type
-Bytes 2-3: length (uint16, big-endian) — payload length in bytes
+Bytes 2-5: length (uint32, big-endian) — payload length in bytes
 ```
 
 ### Frame types
@@ -44,14 +44,28 @@ Each field is encoded according to its schema type:
 - `float32`: 4 bytes (IEEE 754)
 - `float64`: 8 bytes (IEEE 754)
 - `boolean`: 1 byte (0x00 or 0x01)
-- `string`: [uint16 length][utf-8 bytes]
-- `array(T)`: [uint16 count][element_0][element_1]...
+- `string`: [varint byte length][utf-8 bytes]
+- `array(T)`: [varint count][element_0][element_1]...
 - `schema({...})`: fields encoded in definition order (nested)
 - `nullable(T)`: one bit in the enclosing schema's null bitmask; a null value has no bytes
 - `enumOf([...])` / `literal(v)`: the value's index in the list: 0 bytes for one value (`literal`), 1 byte up to 256 values, 2 bytes (big-endian) up to 65536. Encoding a value outside the list, or decoding an index outside it, throws.
-- `record(T)`: [uint16 count] then per entry [uint16 key length][utf-8 key][T value], in the object's key order. Decoded with `Object.fromEntries`, so a key named `__proto__` stays a key.
+- `record(T)`: [varint count] then per entry [varint key length][utf-8 key][T value], in the object's key order. Decoded with `Object.fromEntries`, so a key named `__proto__` stays a key.
 - `union(tag, { name: schema({...}), ... })`: [uint8 variant index (declaration order)][the variant's fields as a nested schema]. Decodes to `{ [tag]: name, ...fields }`, tag first. At most 256 variants; a variant may not declare the tag field.
-- `json(zodSchema)`: [uint32 length][utf-8 JSON text]. The client parses the text, then the Zod schema (a failure keeps the last good view). `undefined` is sent as `null`.
+- `json(zodSchema)`: [varint length][utf-8 JSON text]. The client parses the text, then the Zod schema (a failure keeps the last good view). `undefined` is sent as `null`.
+
+**Lengths and counts are varints.** Every string byte length, record key length, JSON text length,
+array count and record count is an unsigned LEB128 varint: 7 bits per byte, low bits first, the high
+bit set on every byte but the last (0-127 take one byte, 128-16383 two, ...). A decoder refuses one
+longer than 8 bytes. There is no size limit below what a frame holds. Fixed-width numbers (`uint16`,
+`int32`, `float64`, an enum index, ...) stay big-endian.
+
+| Length | Bytes |
+|---|---|
+| 3 | `03` |
+| 127 | `7f` |
+| 128 | `80 01` |
+| 300 | `ac 02` |
+| 16384 | `80 80 01` |
 
 ### DELTA frame
 
@@ -87,9 +101,9 @@ was taken, except the record mode byte.
 ```
 [mode: uint8]
 mode 1 (patch):
-  [removed count: uint16][removed keys: uint16 length + utf-8 each]
-  [changed count: uint16][per key: key, then T's delta against the old value]
-  [added count: uint16][per key: key, then T's full value]
+  [removed count: varint][removed keys: varint length + utf-8 each]
+  [changed count: varint][per key: key, then T's delta against the old value]
+  [added count: varint][per key: key, then T's full value]
 mode 0 (whole): the record exactly as in a snapshot
 ```
 

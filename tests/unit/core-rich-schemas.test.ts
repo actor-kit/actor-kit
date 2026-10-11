@@ -127,14 +127,14 @@ describe("record", () => {
 
   it("writes a count then each key and value in key order", () => {
     const S = schema({ scores: record(uint8) });
-    expect(encode(S, { scores: { a: 1, bc: 2 } })).toEqual(bytes(0, 2, 0, 1, 0x61, 1, 0, 2, 0x62, 0x63, 2));
-    expect(decode(S, bytes(0, 2, 0, 1, 0x61, 1, 0, 2, 0x62, 0x63, 2))).toEqual({ scores: { a: 1, bc: 2 } });
+    expect(encode(S, { scores: { a: 1, bc: 2 } })).toEqual(bytes(2, 1, 0x61, 1, 2, 0x62, 0x63, 2));
+    expect(decode(S, bytes(2, 1, 0x61, 1, 2, 0x62, 0x63, 2))).toEqual({ scores: { a: 1, bc: 2 } });
   });
 
   it("encodes an empty record as a zero count", () => {
     const S = schema({ scores: record(uint8) });
-    expect(encode(S, { scores: {} })).toEqual(bytes(0, 0));
-    expect(encode(S, untyped('{"scores":null}'))).toEqual(bytes(0, 0));
+    expect(encode(S, { scores: {} })).toEqual(bytes(0));
+    expect(encode(S, untyped('{"scores":null}'))).toEqual(bytes(0));
   });
 
   it("is described by its value type", () => {
@@ -151,7 +151,7 @@ describe("record", () => {
       const next = { scores: { a: 1, c: 9, d: 4 } };
       const delta = encodeDelta(S, prev, next);
       // change mask, mode 1 (patch), removed [b], changed [c=9], added [d=4]
-      expect(delta).toEqual(bytes(0b1, 1, 0, 1, 0, 1, 0x62, 0, 1, 0, 1, 0x63, 9, 0, 1, 0, 1, 0x64, 4));
+      expect(delta).toEqual(bytes(0b1, 1, 1, 1, 0x62, 1, 1, 0x63, 9, 1, 1, 0x64, 4));
       if (delta === null) throw new Error("expected a delta");
       expect(applyDelta(S, prev, delta)).toEqual(next);
     });
@@ -169,7 +169,7 @@ describe("record", () => {
       const next = { scores: { b: 2, a: 1 } };
       const delta = encodeDelta(S, prev, next);
       // change mask, mode 0 (full), then the record as in a snapshot
-      expect(delta).toEqual(bytes(0b1, 0, 0, 2, 0, 1, 0x62, 2, 0, 1, 0x61, 1));
+      expect(delta).toEqual(bytes(0b1, 0, 2, 1, 0x62, 2, 1, 0x61, 1));
       if (delta === null) throw new Error("expected a delta");
       expect(Object.keys(applyDelta(S, prev, delta).scores)).toEqual(["b", "a"]);
     });
@@ -189,7 +189,7 @@ describe("record", () => {
       const next = { scores: { a: 5 } };
       const delta = encodeDelta(N, prev, next);
       // change mask, null mask (not null), mode 1, no removed, no changed, added [a=5]
-      expect(delta).toEqual(bytes(0b1, 0, 1, 0, 0, 0, 0, 0, 1, 0, 1, 0x61, 5));
+      expect(delta).toEqual(bytes(0b1, 0, 1, 0, 0, 1, 1, 0x61, 5));
       if (delta === null) throw new Error("expected a delta");
       expect(applyDelta(N, prev, delta)).toEqual(next);
     });
@@ -200,9 +200,7 @@ describe("record", () => {
       const next = { grid: { row: { x: 1, y: 3 } } };
       const delta = encodeDelta(R, prev, next);
       // mask, patch, 0 removed, 1 changed: "row" -> (patch, 0 removed, 1 changed: y=3, 0 added), 0 added
-      expect(delta).toEqual(
-        bytes(0b1, 1, 0, 0, 0, 1, 0, 3, 0x72, 0x6f, 0x77, 1, 0, 0, 0, 1, 0, 1, 0x79, 3, 0, 0, 0, 0),
-      );
+      expect(delta).toEqual(bytes(0b1, 1, 0, 1, 3, 0x72, 0x6f, 0x77, 1, 0, 1, 1, 0x79, 3, 0, 0));
       if (delta === null) throw new Error("expected a delta");
       expect(applyDelta(R, prev, delta)).toEqual(next);
     });
@@ -224,7 +222,7 @@ describe("union", () => {
     expect(encode(S, { shape: { kind: "circle", r: 4 } })).toEqual(bytes(0, 4));
     // rect: index 1, null mask (label null), w, h
     expect(encode(S, { shape: { kind: "rect", w: 2, h: 3, label: null } })).toEqual(bytes(1, 0b1, 2, 3));
-    expect(decode(S, bytes(1, 0, 2, 3, 0, 1, 0x78))).toEqual({ shape: { kind: "rect", w: 2, h: 3, label: "x" } });
+    expect(decode(S, bytes(1, 0, 2, 3, 1, 0x78))).toEqual({ shape: { kind: "rect", w: 2, h: 3, label: "x" } });
   });
 
   it("decodes with the tag first", () => {
@@ -284,7 +282,7 @@ describe("union", () => {
       const prev = { shape: { kind: "circle" as const, r: 4 }, n: 0 };
       const next = { shape: { kind: "rect" as const, w: 2, h: 3, label: "x" }, n: 0 };
       const delta = encodeDelta(S, prev, next);
-      expect(delta).toEqual(bytes(0b01, 1, 0, 2, 3, 0, 1, 0x78));
+      expect(delta).toEqual(bytes(0b01, 1, 0, 2, 3, 1, 0x78));
       if (delta === null) throw new Error("expected a delta");
       expect(applyDelta(S, prev, delta)).toEqual(next);
     });
@@ -304,7 +302,7 @@ describe("union", () => {
       const next = { shapes: { a: { kind: "circle" as const, r: 2 } } };
       const delta = encodeDelta(R, prev, next);
       // mask, patch, 0 removed, 1 changed: "a" -> variant 0, mask 0b1, r=2, 0 added
-      expect(delta).toEqual(bytes(0b1, 1, 0, 0, 0, 1, 0, 1, 0x61, 0, 0b1, 2, 0, 0));
+      expect(delta).toEqual(bytes(0b1, 1, 0, 1, 1, 0x61, 0, 0b1, 2, 0));
       if (delta === null) throw new Error("expected a delta");
       expect(applyDelta(R, prev, delta)).toEqual(next);
     });
@@ -324,30 +322,30 @@ describe("union", () => {
 describe("json", () => {
   const Meta = z.object({ tags: z.array(z.string()), seen: z.number() });
 
-  it("writes the JSON text with a uint32 byte length", () => {
+  it("writes the JSON text with a varint byte length", () => {
     const S = schema({ meta: json(Meta) });
     const text = '{"tags":["a"],"seen":1}';
     const encoded = encode(S, { meta: { tags: ["a"], seen: 1 } });
-    expect(encoded.subarray(0, 4)).toEqual(bytes(0, 0, 0, text.length));
-    expect(new TextDecoder().decode(encoded.subarray(4))).toBe(text);
+    expect(encoded[0]).toBe(text.length);
+    expect(new TextDecoder().decode(encoded.subarray(1))).toBe(text);
     expect(decode(S, encoded)).toEqual({ meta: { tags: ["a"], seen: 1 } });
   });
 
   it("parses the decoded value with the schema", () => {
     const S = schema({ when: json(z.string().transform((s) => s.length)) });
-    const encoded = new Uint8Array([0, 0, 0, 5, ...new TextEncoder().encode('"abc"')]);
+    const encoded = new Uint8Array([5, ...new TextEncoder().encode('"abc"')]);
     expect(decode(S, encoded)).toEqual({ when: 3 });
   });
 
   it("rejects a decoded value the schema does not accept", () => {
     const S = schema({ meta: json(Meta) });
-    const encoded = new Uint8Array([0, 0, 0, 2, ...new TextEncoder().encode("{}")]);
+    const encoded = new Uint8Array([2, ...new TextEncoder().encode("{}")]);
     expect(() => decode(S, encoded)).toThrow();
   });
 
   it("encodes an undefined value as null", () => {
     const S = schema({ any: json(z.unknown()) });
-    expect(encode(S, { any: undefined })).toEqual(bytes(0, 0, 0, 4, 0x6e, 0x75, 0x6c, 0x6c));
+    expect(encode(S, { any: undefined })).toEqual(bytes(4, 0x6e, 0x75, 0x6c, 0x6c));
   });
 
   it("sends a change smaller than the float tolerance (only float fields have one)", () => {
@@ -373,7 +371,7 @@ describe("float tolerance in deltas", () => {
   it("applies per key inside a record: a float that moved less than 1e-6 is not a changed key", () => {
     const S = schema({ r: record(float32) });
     // The record's JSON changed, so it is patched, with no removed, changed or added keys.
-    expect(encodeDelta(S, { r: { a: 1 } }, { r: { a: 1 + 5e-7 } })).toEqual(bytes(0b1, 1, 0, 0, 0, 0, 0, 0));
+    expect(encodeDelta(S, { r: { a: 1 } }, { r: { a: 1 + 5e-7 } })).toEqual(bytes(0b1, 1, 0, 0, 0));
   });
 
   it("does not make null equal to a small number", () => {

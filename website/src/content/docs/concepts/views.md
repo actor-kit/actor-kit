@@ -102,8 +102,7 @@ const view = PlayerView.parse(JSON.parse(script.textContent ?? "null")); // thro
 const result = PlayerView["~standard"].validate(untrusted); // { value } or { issues: [{ message, path }] }
 ```
 
-Values the wire format cannot hold (a string over 65535 UTF-8 bytes, an array or record over 65535
-entries) are rejected too. Extra keys are allowed (a view may carry its `role`). A `json(zodSchema)`
+Extra keys are allowed (a view may carry its `role`). A `json(zodSchema)`
 field is checked with its Zod schema.
 
 ## Binary Sync

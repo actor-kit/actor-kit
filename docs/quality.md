@@ -149,13 +149,23 @@ Stryker on `packages/projection/src/**` (all but `index.ts`) and `worker/runtime
 - Removed by simplifying: the string byte-length check moved into its own `checkString`; `checkFields` takes the schema, not a meta it did not read; `issuesOf`'s `nullable` has no default.
 - CRAP: core max 7.0 (0 ≥ 8).
 
+## Varint lengths and counts (strings over 65535 bytes corrupted the frame)
+
+Every length and count on the wire is now an unsigned LEB128 varint (`codec.ts` `writeVarint` /
+`readVarint` / `varintSize`; record-delta counts in `delta.ts`). The validator's 65535 limits went with it.
+
+| Run (`codec.ts`, `delta.ts`, `validate.ts`, whole files) | Score | Survivors |
+|---|---|---|
+| First | 99.56% (660/668 + 5 timeouts) | 3: varint bound `<` → `<=` (killed by a 9-byte length ending in `0x01`), and the existing delta.ts fast path and validate.ts module-load rows |
+| After | **99.70% (666/668)** | 2, equivalent: delta.ts:61 fast path and the validate.ts module-load row (`validates` body) |
+
 ## Equivalent mutants
 
 Surviving mutants that no test can kill, because the mutated program behaves identically. One line each.
 
 | Package | Location | Mutant | Why it is equivalent |
 |---|---|---|---|
-| core | delta.ts:58 | `if (a === b) return true` → `if (false)` | Fast path only; the number and JSON comparisons below return the same result. |
+| core | delta.ts:61 | `if (a === b) return true` → `if (false)` | Fast path only; the number and JSON comparisons below return the same result. |
 | client | builder.ts:90 | `"name" in arg && "def" in arg` → `\|\|` | A SchemaDefinition has neither key, a contract has both. |
 | client | builder.ts:99, 103 (×3) | `isRecord` / `isViewSchema` → `true` | A non-schema registered for a role makes decode throw, which the client catches and ignores, the same as having no schema. |
 | client | builder.ts:116 | `if (isViewSchema(...))` → `true` | Registers `undefined` for the role; `viewSchemas[role] ?? viewSchema` falls back exactly as when it is absent. |

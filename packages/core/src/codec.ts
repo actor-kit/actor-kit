@@ -3,7 +3,8 @@
  *
  * A value is laid out by its ValueMeta: fixed-width primitives, length-prefixed
  * strings, count-prefixed arrays, or a nested record (null bitmask + fields).
- * All multi-byte numbers are big-endian. See docs/binary-protocol.md.
+ * Every length and count is an unsigned LEB128 varint; fixed-width numbers are
+ * big-endian. See docs/binary-protocol.md.
  */
 
 import type {
@@ -76,7 +77,7 @@ export function isNullField(field: FieldMeta, value: unknown): boolean {
 // --- Fixed-width primitives ---
 
 type FixedTypeName = Exclude<PrimitiveTypeName, "string">;
-type UintTypeName = "uint8" | "uint16" | "uint32";
+type UintTypeName = "uint8" | "uint16";
 
 interface FixedCodec {
   readonly size: number;
@@ -125,14 +126,47 @@ export function entriesOf(value: unknown): [string, unknown][] {
   return isRecord(value) ? Object.entries(value) : [];
 }
 
-function writeText(c: Cursor, encoded: Uint8Array, lengthType: UintTypeName): void {
-  writeFixed(c, lengthType, encoded.byteLength);
+// --- Lengths and counts: unsigned LEB128 varints (7 bits per byte, low bits first) ---
+
+/** At most 8 bytes: 56 bits, past any length a frame can hold. */
+const MAX_VARINT_BYTES = 8;
+
+export function varintSize(n: number): number {
+  let size = 1;
+  for (let rest = n; rest >= 0x80; rest = Math.floor(rest / 0x80)) size += 1;
+  return size;
+}
+
+export function writeVarint(c: Cursor, n: number): void {
+  let rest = n;
+  while (rest >= 0x80) {
+    c.bytes[c.offset++] = (rest % 0x80) | 0x80;
+    rest = Math.floor(rest / 0x80);
+  }
+  c.bytes[c.offset++] = rest;
+}
+
+export function readVarint(c: Cursor): number {
+  let value = 0;
+  for (let i = 0; i < MAX_VARINT_BYTES; i++) {
+    const byte = c.view.getUint8(c.offset++);
+    value += (byte & 0x7f) * 0x80 ** i;
+    if (byte < 0x80) return value;
+  }
+  throw new Error(`malformed varint: more than ${MAX_VARINT_BYTES} bytes`);
+}
+
+/** Text: a varint byte length, then the UTF-8 bytes. */
+const textSize = (encoded: Uint8Array): number => varintSize(encoded.byteLength) + encoded.byteLength;
+
+function writeText(c: Cursor, encoded: Uint8Array): void {
+  writeVarint(c, encoded.byteLength);
   c.bytes.set(encoded, c.offset);
   c.offset += encoded.byteLength;
 }
 
-function readText(c: Cursor, lengthType: UintTypeName): string {
-  const length = readUint(c, lengthType);
+function readText(c: Cursor): string {
+  const length = readVarint(c);
   const start = c.offset;
   c.offset = start + length;
   return textDecoder.decode(c.bytes.subarray(start, start + length));
@@ -198,12 +232,17 @@ type LeafMeta = Extract<ValueMeta, { type: PrimitiveTypeName | "enum" | "json" }
 export function valueSize(meta: ValueMeta, value: unknown): number {
   switch (meta.type) {
     case "array":
-      return items(value).reduce<number>((size, item) => size + valueSize(meta.element, item), 2);
-    case "record":
-      return entriesOf(value).reduce<number>(
-        (size, [key, item]) => size + 2 + utf8(key).byteLength + valueSize(meta.element, item),
-        2,
+      return items(value).reduce<number>(
+        (size, item) => size + valueSize(meta.element, item),
+        varintSize(items(value).length),
       );
+    case "record": {
+      const entries = entriesOf(value);
+      return entries.reduce<number>(
+        (size, [key, item]) => size + textSize(utf8(key)) + valueSize(meta.element, item),
+        varintSize(entries.length),
+      );
+    }
     case "schema":
       return recordSize(meta.schema, asRecord(value));
     case "union":
@@ -216,9 +255,9 @@ export function valueSize(meta: ValueMeta, value: unknown): number {
 function leafSize(meta: LeafMeta, value: unknown): number {
   switch (meta.type) {
     case "string":
-      return 2 + utf8(value).byteLength;
+      return textSize(utf8(value));
     case "json":
-      return 4 + utf8(jsonText(value)).byteLength;
+      return textSize(utf8(jsonText(value)));
     case "enum":
       return enumIndexSize(meta.values);
     default:
@@ -241,15 +280,15 @@ export function writeValue(meta: ValueMeta, value: unknown, c: Cursor): void {
   switch (meta.type) {
     case "array": {
       const list = items(value);
-      writeFixed(c, "uint16", list.length);
+      writeVarint(c, list.length);
       for (const item of list) writeValue(meta.element, item, c);
       return;
     }
     case "record": {
       const entries = entriesOf(value);
-      writeFixed(c, "uint16", entries.length);
+      writeVarint(c, entries.length);
       for (const [key, item] of entries) {
-        writeText(c, utf8(key), "uint16");
+        writeText(c, utf8(key));
         writeValue(meta.element, item, c);
       }
       return;
@@ -271,10 +310,10 @@ export function writeValue(meta: ValueMeta, value: unknown, c: Cursor): void {
 function writeLeaf(meta: LeafMeta, value: unknown, c: Cursor): void {
   switch (meta.type) {
     case "string":
-      writeText(c, utf8(value), "uint16");
+      writeText(c, utf8(value));
       return;
     case "json":
-      writeText(c, utf8(jsonText(value)), "uint32");
+      writeText(c, utf8(jsonText(value)));
       return;
     case "enum": {
       const index = enumIndex(meta.values, value);
@@ -307,15 +346,13 @@ export function writeRecord(schemaDef: AnySchema, record: Record<string, unknown
 export function readValue(meta: ValueMeta, c: Cursor): unknown {
   switch (meta.type) {
     case "array": {
-      const count = readUint(c, "uint16");
+      const count = readVarint(c);
       return Array.from({ length: count }, () => readValue(meta.element, c));
     }
     case "record": {
-      const count = readUint(c, "uint16");
+      const count = readVarint(c);
       // fromEntries defines own keys, so a key named "__proto__" stays a key.
-      return Object.fromEntries(
-        Array.from({ length: count }, () => [readText(c, "uint16"), readValue(meta.element, c)]),
-      );
+      return Object.fromEntries(Array.from({ length: count }, () => [readText(c), readValue(meta.element, c)]));
     }
     case "schema":
       return readRecord(meta.schema, c);
@@ -331,9 +368,9 @@ export function readValue(meta: ValueMeta, c: Cursor): unknown {
 function readLeaf(meta: LeafMeta, c: Cursor): unknown {
   switch (meta.type) {
     case "string":
-      return readText(c, "uint16");
+      return readText(c);
     case "json":
-      return meta.json.parse(JSON.parse(readText(c, "uint32")));
+      return meta.json.parse(JSON.parse(readText(c)));
     case "enum":
       return readEnum(meta.values, c);
     default:
@@ -341,9 +378,9 @@ function readLeaf(meta: LeafMeta, c: Cursor): unknown {
   }
 }
 
-/** Reads a string key (uint16 length + UTF-8), as record keys are written. */
+/** Reads a string key (varint length + UTF-8), as record keys are written. */
 export function readKey(c: Cursor): string {
-  return readText(c, "uint16");
+  return readText(c);
 }
 
 export function readRecord(schemaDef: AnySchema, c: Cursor): Record<string, unknown> {

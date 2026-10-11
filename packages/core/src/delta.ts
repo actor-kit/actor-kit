@@ -32,11 +32,14 @@ import {
   readUint,
   readValue,
   readVariant,
+  readVarint,
   recordSize,
   valueSize,
   variantOf,
+  varintSize,
   writeRecord,
   writeValue,
+  writeVarint,
 } from "./codec";
 import type { FieldDescriptor, Infer, SchemaDefinition, ValueMeta } from "./schema";
 import { valueMetaOf } from "./schema";
@@ -76,7 +79,11 @@ function encodedRecord(schemaDef: AnySchema, value: unknown): Uint8Array {
 }
 
 const STRING: ValueMeta = { type: "string" };
-const UINT16: ValueMeta = { type: "uint16" };
+function count(n: number): Uint8Array {
+  const bytes = new Uint8Array(varintSize(n));
+  writeVarint(cursorOver(bytes, 0), n);
+  return bytes;
+}
 
 const byte = (n: number): Uint8Array => Uint8Array.of(n);
 
@@ -159,13 +166,13 @@ function recordDelta(element: ValueMeta, prev: unknown, next: unknown, out: Uint
     return;
   }
   const after = new Map(nextEntries);
-  out.push(byte(PATCH), encoded(UINT16, removed.length), ...removed.map((key) => encoded(STRING, key)));
-  out.push(encoded(UINT16, changed.length));
+  out.push(byte(PATCH), count(removed.length), ...removed.map((key) => encoded(STRING, key)));
+  out.push(count(changed.length));
   for (const key of changed) {
     out.push(encoded(STRING, key));
     valueDelta(element, before.get(key), after.get(key), out);
   }
-  out.push(encoded(UINT16, added.length));
+  out.push(count(added.length));
   for (const [key, value] of added) out.push(encoded(STRING, key), encoded(element, value));
 }
 
@@ -217,7 +224,7 @@ function readValueDelta(meta: ValueMeta, current: unknown, c: Cursor): unknown {
 }
 
 function readKeys(c: Cursor): string[] {
-  return Array.from({ length: readUint(c, "uint16") }, () => readKey(c));
+  return Array.from({ length: readVarint(c) }, () => readKey(c));
 }
 
 function readRecordDelta(element: ValueMeta, current: unknown, c: Cursor): unknown {
@@ -227,12 +234,12 @@ function readRecordDelta(element: ValueMeta, current: unknown, c: Cursor): unkno
   // A Map keeps changed keys in place and appends added ones; fromEntries keeps "__proto__" a key.
   const entries = new Map(entriesOf(current));
   for (const key of readKeys(c)) entries.delete(key);
-  const changedCount = readUint(c, "uint16");
+  const changedCount = readVarint(c);
   for (let i = 0; i < changedCount; i++) {
     const key = readKey(c);
     entries.set(key, readValueDelta(element, entries.get(key), c));
   }
-  const addedCount = readUint(c, "uint16");
+  const addedCount = readVarint(c);
   for (let i = 0; i < addedCount; i++) entries.set(readKey(c), readValue(element, c));
   return Object.fromEntries(entries);
 }

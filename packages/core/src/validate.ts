@@ -1,7 +1,6 @@
 /**
  * Validation of decoded view values (StandardSchemaV1): every schema and field type checks a JS
- * value against its wire layout, reporting each problem with its path. Values the wire format cannot
- * hold (a string over 65535 UTF-8 bytes, an array over 65535 items) are rejected too.
+ * value against its wire layout, reporting each problem with its path.
  */
 
 import { valueMetaOf } from "./meta";
@@ -48,8 +47,6 @@ export class SchemaValidationError extends Error {
 
 // --- Checks ---
 
-const MAX_COUNT = 0xffff;
-const encoder = new TextEncoder();
 const show = (value: unknown): string => JSON.stringify(value) ?? String(value);
 const isObject = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
@@ -84,11 +81,7 @@ function checkFixed(type: FixedTypeName, value: unknown, path: Path): Issues {
 }
 
 function checkString(value: unknown, path: Path): Issues {
-  if (typeof value !== "string") return issue("expected a string", path);
-  if (encoder.encode(value).byteLength > MAX_COUNT) {
-    return issue(`expected a string of at most ${MAX_COUNT} UTF-8 bytes`, path);
-  }
-  return [];
+  return typeof value === "string" ? [] : issue("expected a string", path);
 }
 
 function checkEnum(values: readonly EnumValue[], value: unknown, path: Path): Issues {
@@ -97,22 +90,12 @@ function checkEnum(values: readonly EnumValue[], value: unknown, path: Path): Is
 
 function checkArray(element: ValueMeta, value: unknown, path: Path): Issues {
   if (!Array.isArray(value)) return issue("expected an array", path);
-  if (value.length > MAX_COUNT) return issue(`expected at most ${MAX_COUNT} items`, path);
   return value.flatMap((item, i) => checkValue(element, item, [...path, i]));
-}
-
-function checkEntry(element: ValueMeta, key: string, item: unknown, path: Path): Issues {
-  if (encoder.encode(key).byteLength > MAX_COUNT) {
-    return issue(`expected a key of at most ${MAX_COUNT} UTF-8 bytes`, [...path, key]);
-  }
-  return checkValue(element, item, [...path, key]);
 }
 
 function checkEntries(element: ValueMeta, value: unknown, path: Path): Issues {
   if (!isObject(value)) return issue("expected an object", path);
-  const entries = Object.entries(value);
-  if (entries.length > MAX_COUNT) return issue(`expected at most ${MAX_COUNT} entries`, path);
-  return entries.flatMap(([key, item]) => checkEntry(element, key, item, path));
+  return Object.entries(value).flatMap(([key, item]) => checkValue(element, item, [...path, key]));
 }
 
 type AnySchema = Extract<ValueMeta, { type: "schema" }>["schema"];

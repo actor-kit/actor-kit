@@ -152,30 +152,11 @@ describe("field types", () => {
     expect(await issues(Card, "joker")).toEqual([{ message: "expected an object", path: [] }]);
   });
 
-  it("rejects strings, arrays and records the wire format cannot hold", async () => {
-    expect(await issues(string, "é".repeat(32768))).toEqual([
-      { message: "expected a string of at most 65535 UTF-8 bytes", path: [] },
-    ]);
-    expect(
-      await issues(
-        array(boolean),
-        Array.from({ length: 65536 }, () => true),
-      ),
-    ).toEqual([{ message: "expected at most 65535 items", path: [] }]);
-    const big = Object.fromEntries(Array.from({ length: 65536 }, (_, i) => [`k${i}`, true]));
-    expect(await issues(record(boolean), big)).toEqual([{ message: "expected at most 65535 entries", path: [] }]);
-    expect(await issues(record(boolean), { ["k".repeat(65536)]: true })).toEqual([
-      { message: "expected a key of at most 65535 UTF-8 bytes", path: ["k".repeat(65536)] },
-    ]);
-    expect(await issues(string, "é".repeat(32767))).toBeUndefined();
-  });
-
-  it("accepts the largest string, array, record and key the wire format holds", () => {
-    expect(() => string.parse("a".repeat(65535))).not.toThrow();
-    expect(() => array(boolean).parse(Array.from({ length: 65535 }, () => true))).not.toThrow();
-    const most = Object.fromEntries(Array.from({ length: 65535 }, (_, i) => [`k${i}`, true]));
-    expect(() => record(boolean).parse(most)).not.toThrow();
-    expect(() => record(boolean).parse({ ["k".repeat(65535)]: true })).not.toThrow();
+  it("accepts strings, arrays, records and keys of any size (lengths are varints on the wire)", () => {
+    expect(() => string.parse("é".repeat(40000))).not.toThrow();
+    expect(() => array(boolean).parse(Array.from({ length: 70000 }, () => true))).not.toThrow();
+    const many = Object.fromEntries(Array.from({ length: 70000 }, (_, i) => [`k${i}`, true]));
+    expect(() => record(boolean).parse({ ...many, ["k".repeat(70000)]: true })).not.toThrow();
   });
 
   it.each([
