@@ -216,6 +216,8 @@ Migrations renumbered: `0020_publish_position`, `0021_journal_archive`.
 |---|---|---|---|---|
 | 14. Goto with kept locals, enter updating the levels above (`phases.ts` goto and its options; `phase-run.ts` enterLevel, updateAbove, withKeptLocals, descend, gotoPath, settle) | 143 | 93.67% first run (10 survivors: two `i + 1` path slices only a three-level tree tells apart, the option issues' join, and conditions the runtime already implies); then a three-level test (grandchild enter updating both levels above, a goto keeping two levels), the exact options message with two issues, and simplifications (one `goto` constructor call; `updateAbove` parses every level, a level without a local parses to null; kept levels looked up in one map) → **100% (143/143)** | none | runtime 7.0, core 7.0, test 7.1, worker (`crap:worker`) 7.6; 0 ≥ 8 |
 | 15. State-path helpers in core (`core/src/state-paths.ts` whole: `matches`, `localOf`, `mergeLocals`, moved from the worker, which re-exports them) | 38 | **100% (38/38)** | none | core 7.0, runtime 7.0, worker (`crap:worker`) 7.6; 0 ≥ 8 |
+| 16. Docs: client code's own zod import, `zod/mini` | n/a | docs only (bundle sizes measured with esbuild: 453 KB classic, 13 KB mini) | — | unchanged |
+| 17. `0.3.0-next.0` versions, `scripts/vendor.sh` / `scripts/vendor.mts` | n/a | no package source changed (Stryker mutates `packages/*/src`); the script is pinned by `tests/unit/vendor.test.ts` (versions, names, manifest rewrite, a real pack of all nine packages; file lists identical to `pnpm pack`) | — | unchanged |
 
 ## Equivalent mutants
 

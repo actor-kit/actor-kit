@@ -78,6 +78,7 @@ Do NOT load all docs upfront. Load only when relevant to the current task.
 | Feature specs | [docs/specs/](docs/specs/) | Implementing a specific feature |
 | Architecture decisions | [docs/adrs/](docs/adrs/) | Questioning a design choice, making a new one |
 | Quality scores | [docs/quality.md](docs/quality.md) | Mutation scores, CRAP, justified surviving mutants |
+| Vendoring (versions, tarballs) | [docs/vendoring.md](docs/vendoring.md) | Handing a build to an app, bumping `0.3.0-next.N` |
 
 ## Core principles
 

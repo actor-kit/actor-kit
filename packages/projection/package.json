@@ -1,6 +1,6 @@
 {
   "name": "@actor-kit/projection",
-  "version": "0.2.0",
+  "version": "0.3.0-next.0",
   "description": "Read models for Actor Kit: a Cloudflare Queue consumer that applies published events once, in order per actor, into D1, and rebuilds from actor journals",
   "type": "module",
   "exports": {
