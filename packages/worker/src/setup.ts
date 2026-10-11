@@ -88,6 +88,11 @@ export interface PhaseContext<SD extends StateDecls, P extends keyof SD & string
   readonly phase: P;
   readonly local: LocalOf<SD[P]>;
   stay(shared: S, ...local: LocalOf<SD[P]> extends null ? [] : [local?: LocalOf<SD[P]>]): PhaseTransition<S>;
+  /**
+   * Leave the state the actor is in: run its exit (scoped timers cancelled, local dropped)
+   * and its enter again with `input`. `goto(currentPhase, …)` does the same; reenter says it on purpose.
+   */
+  reenter(shared: S, ...input: InputArgs<SD[P]>): PhaseTransition<S>;
   readonly goto: Goto<SD, S>;
 }
 

@@ -99,6 +99,7 @@ CRAP over `packages/worker/src/runtime`, `packages/test/src`, `packages/core/src
 | 7. E determinism in production (`determinism.ts` changed lines: warn mode, nesting, watch, flag, log line, option; `journal.ts` flag column; `journal-timeline.ts`; Studio `protocol.ts` / `timeline-panel.tsx` badge) | 138 | **99.28% (137/138)**; the one survivor (throw-mode watch's empty `violations`) killed by asserting the whole watch | none | runtime 7.0, studio UI 7.0, worker (`crap:worker`) 7.6; 0 ≥ 8 |
 | 8. H docs that ship with the code (`scripts/docs.mts`, `scripts/gen-docs.mts`; generated error pages, package `docs/`, `llms.txt`, `llms-full.txt`) | n/a | no library source changed (Stryker mutates `packages/*/src`); the generator is pinned by `docs-generated.test.ts` (generated files up to date, every code's page exists, every errors URL in the sources resolves, every package publishes `docs/`, llms files complete) | — | unchanged |
 | RSJ 3. Roles on messages (`message-roles.ts` whole; `refusal.ts` wrong_role; `message.ts`; `step.ts` admission) | 120 | 94.32% first run, then edge tests (role-nested and junk entries, a caller-less refusal, `toStrictEqual` on message options, a states-only actor) → **96.67% (112/116)** | 4 equivalent (message-roles.ts:23, :26, :28; step.ts:312, below) | runtime 7.0; 0 ≥ 8 |
+| RSJ 4. `ctx.reenter` (`step.ts` phase context) | 1 | **100% (1/1)** | none | runtime 7.0; 0 ≥ 8 |
 
 ## Equivalent mutants
 

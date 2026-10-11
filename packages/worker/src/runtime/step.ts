@@ -454,6 +454,7 @@ interface PhaseContext {
   readonly local: unknown;
   readonly stay: typeof stay;
   readonly goto: typeof goto;
+  readonly reenter: (shared: unknown, ...input: unknown[]) => PhaseTransition;
   readonly schedule: (name: string, options: ScheduleOptions) => void;
 }
 
@@ -545,6 +546,7 @@ function runHandler(
     local: current.local,
     stay,
     goto,
+    reenter: (shared, ...input) => goto(current.phase, shared, ...input),
     schedule: scopedSchedule(verbs.schedule, current.phase, scoped),
   });
   assertSync(result, "A handler returned a Promise. Handlers must be synchronous.");

@@ -270,3 +270,17 @@ DRAW: playing.message(z.object({}), { guard: (s: S, _p, ctx) => isSeated(s, ctx.
 // After
 DRAW: playing.message(z.object({}), { roles: ["player"], handler: draw }), // others: wrong_role
 ```
+
+## `goto` to the current state re-enters it; `ctx.reenter` says so
+
+Unchanged behaviour, now documented: `ctx.goto(phase, ...)` to the state the actor is in runs its exit
+(scoped timers cancelled, local dropped) and its `enter` again. Use `ctx.reenter(shared, input?)` when you
+mean it, and `ctx.stay(...)` when you don't.
+
+```ts
+// Before: re-arming by goto, and a manual check to avoid resetting the window elsewhere
+return target === ctx.phase && !rearm ? ctx.stay(s) : ctx.goto(target, s, { window });
+
+// After
+return rearm ? ctx.reenter(s, { window }) : ctx.stay(s);
+```
