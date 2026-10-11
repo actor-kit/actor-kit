@@ -422,18 +422,43 @@ describe("JSON messages", () => {
     expect(client.connectionState).toBe("connected");
   });
 
-  it("reports __error with message, then error, then detail, then 'unknown'", async () => {
+  it("reports an __error frame's refusal; a frame it cannot read is invalid_frame", async () => {
     const { client, errors } = jsonClient();
     const socket = await connected(client);
 
-    socket.receiveJson({ type: "__error", message: "Denied", error: "FORBIDDEN", detail: "ignored" });
-    socket.receiveJson({ type: "__error", detail: "Invalid message" });
-    socket.receiveJson({ type: "__error", error: 5, message: 7 });
+    socket.receiveJson({
+      type: "__error",
+      messageType: "ADD",
+      code: "invalid_payload",
+      message: "Validation failed.",
+      expected: ["n"],
+      details: [{ path: ["n"] }],
+      docs: "https://actorkit.dev/errors/invalid_payload/",
+    });
+    socket.receiveJson({ type: "__error", code: "no_role", message: "No role.", docs: "d", expected: ["n", 2] });
+    socket.receiveJson({ type: "__error", messageType: "X", code: "nope", message: "m", docs: "d" });
+    socket.receiveJson({ type: "__error", code: "no_role", message: 5, docs: "d" });
+    socket.receiveJson({ type: "__error", code: "no_role", message: "m" });
 
-    expect(errors).toEqual([
-      { message: "Denied", error: "FORBIDDEN" },
-      { message: "", error: "Invalid message" },
-      { message: "", error: "unknown" },
+    const invalid = {
+      code: "invalid_frame",
+      message:
+        "The server sent an error frame this client cannot read. Use the same @actor-kit version on the client and the Worker.",
+      docs: "https://actorkit.dev/errors/invalid_frame/",
+    };
+    expect(errors).toStrictEqual([
+      {
+        messageType: "ADD",
+        code: "invalid_payload",
+        message: "Validation failed.",
+        expected: ["n"],
+        details: [{ path: ["n"] }],
+        docs: "https://actorkit.dev/errors/invalid_payload/",
+      },
+      { messageType: "", code: "no_role", message: "No role.", docs: "d" },
+      { messageType: "X", ...invalid },
+      { messageType: "", ...invalid },
+      { messageType: "", ...invalid },
     ]);
   });
 

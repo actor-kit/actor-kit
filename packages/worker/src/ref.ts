@@ -10,7 +10,7 @@
  *   await zone.send("service-1", "service", { type: "ACCEPT_TRANSFER", ... });
  */
 
-import type { ContractMessages } from "@actor-kit/core";
+import { ActorKitError, type ContractMessages, type Refusal, refusal } from "@actor-kit/core";
 import type { ActorContract } from "./define";
 import { resolveNamespace } from "./runtime/resolve-namespace";
 
@@ -26,7 +26,7 @@ interface DOId {
 
 interface DOStub {
   spawn?(input: unknown): Promise<void>;
-  send?(caller: string, callerType: string, message: unknown): Promise<{ ok: boolean; error?: string }>;
+  send?(caller: string, callerType: string, message: unknown): Promise<{ ok: true } | Refusal>;
   getSnapshot?(caller: string, callerType: string): Promise<{ snapshot: unknown; role: string; checksum: string }>;
 }
 
@@ -34,7 +34,8 @@ export interface ActorRef<TMessage extends { type: string } = { type: string; [k
   readonly actorType: string;
   readonly actorId: string;
   spawn(input: { actorId?: string; caller: string; callerType: "user" | "service"; input: unknown }): Promise<void>;
-  send(caller: string, callerType: "user" | "service", message: TMessage): Promise<{ ok: boolean; error?: string }>;
+  /** Accepted, or a typed refusal (ADR-018 C). */
+  send(caller: string, callerType: "user" | "service", message: TMessage): Promise<{ ok: true } | Refusal>;
   getSnapshot(
     caller: string,
     callerType: "user" | "service",
@@ -73,9 +74,7 @@ function isDONamespace(value: unknown): value is DONamespace {
 }
 
 /** Contract overload with ctx.exports — resolves namespace from exports, falls back to env. */
-export function createRef<
-  T extends ActorContract<string, { messages: Record<string, { schema: { _output: unknown } }> }>,
->(
+export function createRef<T extends ActorContract>(
   contract: T,
   exports: Record<string, unknown>,
   env: Record<string, unknown>,
@@ -84,9 +83,7 @@ export function createRef<
 ): ActorRef<ContractMessages<T>>;
 
 /** Contract overload — message types inferred from contract messages. */
-export function createRef<
-  T extends ActorContract<string, { messages: Record<string, { schema: { _output: unknown } }> }>,
->(
+export function createRef<T extends ActorContract>(
   contract: T,
   env: Record<string, unknown>,
   actorId: string,
@@ -136,7 +133,7 @@ function contractRef(
     // createRef(contract, exports, env, actorId, locationHint?)
     const actorId = actorIdOrLocationHint;
     if (typeof actorId !== "string") {
-      throw new Error("createRef(contract, exports, env, actorId): actorId must be a string");
+      throw new ActorKitError("invalid_ref", "createRef(contract, exports, env, actorId): actorId must be a string");
     }
     const namespaceValue: unknown = resolveNamespace(contract.name, exportsOrEnv, envOrActorId);
     const error = `Resolved namespace for "${contract.name}" is not a valid DO namespace`;
@@ -154,12 +151,12 @@ function contractRef(
     );
   }
 
-  throw new Error("createRef(contract, ...): second argument must be an env or exports object");
+  throw new ActorKitError("invalid_ref", "createRef(contract, ...): second argument must be an env or exports object");
 }
 
 /** A stub for one actor in a namespace (throws `error` when the value is not a DO namespace). */
 function openStub(namespace: unknown, error: string, actorId: string, locationHint: string | undefined): DOStub {
-  if (!isDONamespace(namespace)) throw new Error(error);
+  if (!isDONamespace(namespace)) throw new ActorKitError("actor_not_found", error);
   return namespace.get(namespace.idFromName(actorId), locationHint ? { locationHint } : undefined);
 }
 
@@ -178,14 +175,20 @@ function buildRef(actorType: string, actorId: string, stub: DOStub): ActorRef {
       if (typeof stub.send === "function") {
         return stub.send(caller, callerType, message);
       }
-      return { ok: false, error: "stub.send not available" };
+      return refusal(
+        "actor_not_found",
+        "stub.send not available: this binding is not an actor-kit Durable Object. Bind the class createActorClass() returns.",
+      );
     },
 
     async getSnapshot(caller, callerType) {
       if (typeof stub.getSnapshot === "function") {
         return stub.getSnapshot(caller, callerType);
       }
-      throw new Error("stub.getSnapshot not available");
+      throw new ActorKitError(
+        "actor_not_found",
+        "stub.getSnapshot not available: this binding is not an actor-kit Durable Object. Bind the class createActorClass() returns.",
+      );
     },
   };
 }

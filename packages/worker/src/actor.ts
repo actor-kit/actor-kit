@@ -12,8 +12,22 @@
  */
 
 import { DurableObject } from "cloudflare:workers";
-import type { ContractMessages, DeterministicContext, FieldDescriptor, SchemaDefinition } from "@actor-kit/core";
-import { createDeltaFrame, createSnapshotFrame, encode, encodeDelta, xxh64 } from "@actor-kit/core";
+import type {
+  ContractMessages,
+  DeterministicContext,
+  FieldDescriptor,
+  Refusal,
+  SchemaDefinition,
+} from "@actor-kit/core";
+import {
+  ActorKitError,
+  createDeltaFrame,
+  createSnapshotFrame,
+  encode,
+  encodeDelta,
+  refusal,
+  xxh64,
+} from "@actor-kit/core";
 import { DOQB } from "workers-qb";
 import { z } from "zod";
 import type { LifecycleEvent } from "./define";
@@ -74,6 +88,7 @@ import {
 } from "./runtime/outbox-store";
 import type { StepStateDef } from "./runtime/phases";
 import { PUBLISH_SERVICE, type PublishOption, publishedMessages, resolvePublish, sendToQueue } from "./runtime/publish";
+import { refuseAdmission, refuseInvalidDelivery, refuseNoRole, refuseNotInitialized } from "./runtime/refusal";
 import { resolveNamespace } from "./runtime/resolve-namespace";
 import { planRestore } from "./runtime/restore";
 import {
@@ -381,22 +396,17 @@ function declaresEffects(result: StepResult): boolean {
   return effects.getExecutions().length > 0 || effects.getForwards().length > 0 || effects.toTimerOps().length > 0;
 }
 
-/** send()'s answer for a message admission refused. */
-function rejected(admission: { error: string; detail?: string | undefined }): {
-  ok: false;
-  error: string;
-  detail?: string;
-} {
-  return admission.detail === undefined
-    ? { ok: false, error: admission.error }
-    : { ok: false, error: admission.error, detail: admission.detail };
+/** The __error frame a socket gets for a message the actor refused (ADR-018 C): the refusal and the message's type. */
+function rejectionFrame(messageType: string, refused: Refusal) {
+  const { ok: _ok, ...fields } = refused;
+  return { type: "__error", messageType, ...fields };
 }
 
-/** The __error frame a socket gets for a message the actor refused. */
-function rejectionFrame(message: string, result: { error?: string | undefined; detail?: string | undefined }) {
-  const frame = { type: "__error", message, error: result.error };
-  return result.detail === undefined ? frame : { ...frame, detail: result.detail };
-}
+/** A text frame that is not a JSON message with a string `type`. */
+const UNREADABLE_MESSAGE = refusal(
+  "invalid_payload",
+  'The message is not JSON with a string "type" field. Send JSON.stringify({ type: "NAME", ...payload }).',
+);
 
 /** ctx.exports itself (not a copy: its bindings may not all be enumerable). */
 function getExports(ctx: unknown): Record<string, unknown> | undefined {
@@ -574,7 +584,7 @@ export function actor(
 
     /** Refuse to serve anything (no handler runs) when the env did not parse (ADR-016 §4). */
     assertEnv(): void {
-      if (this.envError !== null) throw new Error(this.envError);
+      if (this.envError !== null) throw new ActorKitError("invalid_env", this.envError);
     }
 
     /** Put the stored snapshot in memory, migrating it through the step core when its version is older. */
@@ -656,7 +666,10 @@ export function actor(
         {
           env: this.handlerEnv,
           link: async () => {
-            throw new Error("link() not available during auto-spawn");
+            throw new ActorKitError(
+              "link_unavailable",
+              "link() not available during auto-spawn: spawn the actor with spawn({ input }) first, or link from a message.",
+            );
           },
         },
       );
@@ -883,7 +896,8 @@ export function actor(
       const lateBy = Math.max(0, now - due.fireAt);
       const parsed = def.timers?.[due.name]?.schema.safeParse(due.payload);
       try {
-        if (parsed !== undefined && !parsed.success) throw new Error(`invalid payload: ${parsed.error.message}`);
+        if (parsed !== undefined && !parsed.success)
+          throw new ActorKitError("invalid_timer_payload", `invalid payload: ${parsed.error.message}`);
         const payload = parsed?.success ? parsed.data : due.payload;
         const result = this.runStep({ type: "timer", ...due, payload, lateBy, trace: this.effectTrace(due.id) }, now);
         this.commit(result.state, result.event, (seq) => {
@@ -1632,7 +1646,10 @@ export function actor(
       // Validate input
       const parsed = def.input.safeParse(input.input);
       if (!parsed.success) {
-        throw new Error(`Invalid input: ${parsed.error.message}`);
+        throw new ActorKitError(
+          "invalid_input",
+          `Invalid input: ${parsed.error.message}. Spawn the actor with an input that matches its input schema.`,
+        );
       }
 
       // Store actor ID for JWT validation
@@ -1684,11 +1701,19 @@ export function actor(
     /** init()'s link(): the target's current view, with its role as a discriminant. */
     async linkedView(name: string, id: string): Promise<Record<string, unknown>> {
       const linkDef = def.links?.[name];
-      if (!linkDef) throw new Error(`Link "${name}" not declared in actor definition`);
+      if (!linkDef) {
+        throw new ActorKitError(
+          "undeclared_link",
+          `Link "${name}" not declared in actor definition. Declare it in links: { ${name}: link(Contract, { onUpdate }) }.`,
+        );
+      }
 
       const getSnapshot = rpcMethod(resolveStub(linkDef.contract.name, id, this.ctx, this.env), "getSnapshot");
       if (getSnapshot === null) {
-        throw new Error(`Link "${name}": target actor unreachable`);
+        throw new ActorKitError(
+          "link_unavailable",
+          `Link "${name}": target actor unreachable. Check that the target is exported from the Worker and spawned.`,
+        );
       }
       const result = LinkedSnapshotSchema.parse(await getSnapshot("system", "service"));
       return { role: result.role, ...result.snapshot };
@@ -1707,9 +1732,9 @@ export function actor(
        * Without it, the message has no ctx.delivery and starts a new flow.
        */
       meta?: unknown,
-    ): Promise<{ ok: boolean; error?: string; detail?: string }> {
+    ): Promise<{ ok: true } | Refusal> {
       const forwarded = parseMessageMeta(meta);
-      if (!forwarded.ok) return forwarded;
+      if (!forwarded.ok) return refuseInvalidDelivery(forwarded.detail);
       await this.loadState();
       const admitted = this.admit(caller, callerType, event);
       if (!admitted.ok) return admitted;
@@ -1723,21 +1748,11 @@ export function actor(
       caller: string,
       callerType: "user" | "service",
       event: { type: string; [key: string]: unknown },
-    ): { ok: true; role: string; payload: unknown } | { ok: false; error: string; detail?: string } {
-      if (!this.initialized) {
-        return { ok: false, error: "Actor not initialized" };
-      }
+    ): { ok: true; role: string; payload: unknown } | Refusal {
+      if (!this.initialized) return refuseNotInitialized();
 
-      // Resolve role
       const role = resolveRole(def.roles, this.state, caller, { callerType });
-      if (role === null) {
-        return { ok: false, error: "No role matched" };
-      }
-
-      // Get messages
-      if (def.messages === undefined && def.states === undefined) {
-        return { ok: false, error: "No messages available" };
-      }
+      if (role === null) return refuseNoRole(caller, callerType);
 
       // Admit (validate payload, run guard); the transition runs through the step core in applyMessage().
       const admission = admitStepMessage(def, role, this.state, event, {
@@ -1745,7 +1760,7 @@ export function actor(
         callerType,
         env: this.handlerEnv,
       });
-      if (!admission.ok) return rejected(admission);
+      if (!admission.ok) return refuseAdmission(def, this.state, role, event.type, admission, { caller, callerType });
       return { ok: true, role, payload: admission.payload };
     }
 
@@ -1795,17 +1810,15 @@ export function actor(
     ): Promise<{ checksum: string; snapshot: unknown; role: string }> {
       await this.loadState();
       if (!this.initialized) {
-        throw new Error("Actor requires input — call spawn({ input }) before connecting");
+        throw new ActorKitError("invalid_input", "Actor requires input — call spawn({ input }) before connecting");
       }
 
       const role = resolveRole(def.roles, this.state, caller, { callerType });
-      if (role === null) {
-        throw new Error("No role matched");
-      }
+      if (role === null) throw new ActorKitError("no_role", refuseNoRole(caller, callerType).message);
 
       const viewDef = def.views[role];
       if (viewDef === undefined) {
-        throw new Error(`No view for role "${role}"`);
+        throw new ActorKitError("no_view", `No view for role "${role}". Add a view for this role in views.`);
       }
 
       const snapshot = viewDef.fn(this.state, caller);
@@ -2065,7 +2078,7 @@ export function actor(
       try {
         await this.handleAppMessage(ws, info.caller, info.callerType, data);
       } catch {
-        ws.send(JSON.stringify({ type: "__error", detail: "Invalid message" }));
+        ws.send(JSON.stringify(rejectionFrame("", UNREADABLE_MESSAGE)));
       }
     }
 
@@ -2073,7 +2086,7 @@ export function actor(
       // Parse at the boundary: validate the message has at minimum a type field
       const parsed = MessageEnvelopeSchema.safeParse(JSON.parse(data));
       if (!parsed.success) {
-        ws.send(JSON.stringify({ type: "__error", detail: "Message must have a string 'type' field" }));
+        ws.send(JSON.stringify(rejectionFrame("", UNREADABLE_MESSAGE)));
         return;
       }
       const event = parsed.data;
@@ -2207,7 +2220,10 @@ export function actor(
       if (this.callerHasher === null) {
         const key = this.envBindings["STUDIO_CALLER_HASH_KEY"];
         if (typeof key !== "string" || key === "") {
-          throw new Error("STUDIO_CALLER_HASH_KEY is not set: agents cannot use Studio");
+          throw new ActorKitError(
+            "studio_unavailable",
+            "STUDIO_CALLER_HASH_KEY is not set: agents cannot use Studio. Set it as a Worker secret (wrangler secret put STUDIO_CALLER_HASH_KEY).",
+          );
         }
         this.callerHasher = createCallerHasher(key);
       }
@@ -2343,7 +2359,10 @@ export function actor(
     /** Throws when studio instrumentation is off — every studio RPC entry point calls this. */
     assertStudioEnabled(): void {
       if (!this.studioEnabled) {
-        throw new Error("Studio is not enabled for this actor");
+        throw new ActorKitError(
+          "studio_disabled",
+          "Studio is not enabled for this actor. Set studio: true on the actor.",
+        );
       }
     }
 
@@ -2663,7 +2682,7 @@ export interface TypedActorClass<TContract> {
       event: ContractMessages<TContract>,
       /** Set by a forward: ctx.delivery (ADR-016 §1) and the flow it continues (ADR-017 §4). */
       meta?: MessageMeta | DeliveryInfo | Trace,
-    ): Promise<{ ok: boolean; error?: string }>;
+    ): Promise<{ ok: true } | Refusal>;
     getSnapshot(
       caller: string,
       callerType: "user" | "service",
@@ -2748,7 +2767,10 @@ export function createActorClass<TContract extends { readonly name: string; read
   contract: TContract,
 ): TypedActorClass<TContract> {
   if (!isActorDef(contract.def)) {
-    throw new Error("createActorClass: contract.def must have init, roles, and views");
+    throw new ActorKitError(
+      "invalid_actor_definition",
+      "createActorClass: contract.def must have init, roles, and views. Pass the contract kit.actor() or defineActor() returns.",
+    );
   }
 
   const def = contract.def;

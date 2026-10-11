@@ -1,3 +1,4 @@
+import { ActorKitError } from "@actor-kit/core";
 /**
  * Resolve a DO namespace from ctx.exports by contract name.
  * Falls back to env binding if not found in exports.
@@ -16,7 +17,10 @@ export function resolveNamespace(
   const binding: unknown = env[bindingName];
   if (binding) return binding;
 
-  throw new Error(`Actor "${contractName}" not found in ctx.exports or env.${bindingName}`);
+  throw new ActorKitError(
+    "actor_not_found",
+    `Actor "${contractName}" not found in ctx.exports or env.${bindingName}. Export its class from the Worker or bind it in wrangler.jsonc.`,
+  );
 }
 
 /** The ctx.exports entry marked with this contract name. */

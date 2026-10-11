@@ -132,11 +132,22 @@ describe("client protocol handling", () => {
     });
 
     fakeWs?.fireEvent("message", {
-      data: JSON.stringify({ type: "__error", message: "INCREMENT", error: "guard_failed" }),
+      data: JSON.stringify({
+        type: "__error",
+        messageType: "INCREMENT",
+        code: "guard_failed",
+        message: 'Guard rejected "INCREMENT" (role "viewer"). Send it only when the guard allows it.',
+        docs: "https://actorkit.dev/errors/guard_failed/",
+      }),
     });
 
     expect(errors).toHaveLength(1);
-    expect(errors[0]).toEqual({ message: "INCREMENT", error: "guard_failed" });
+    expect(errors[0]).toEqual({
+      messageType: "INCREMENT",
+      code: "guard_failed",
+      message: 'Guard rejected "INCREMENT" (role "viewer"). Send it only when the guard allows it.',
+      docs: "https://actorkit.dev/errors/guard_failed/",
+    });
 
     client.disconnect();
   });

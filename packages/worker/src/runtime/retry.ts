@@ -10,6 +10,7 @@
  * errors are not (a declared error is a domain answer). `retry.while(error)` overrides that per error.
  */
 
+import { ActorKitError } from "@actor-kit/core";
 import { z } from "zod";
 import { describeServiceError, isBuiltInError, type TaggedError } from "./service-error";
 
@@ -54,7 +55,7 @@ export function resolveRetryPolicy(option: unknown): RetryPolicy {
 function parseOption(option: unknown, owner: string) {
   const parsed = RetryOptionSchema.safeParse(option);
   if (!parsed.success) {
-    throw new Error(`Invalid ${owner} retry option: ${parsed.error.message}`);
+    throw new ActorKitError("invalid_retry", `Invalid ${owner} retry option: ${parsed.error.message}`);
   }
   return parsed.data;
 }

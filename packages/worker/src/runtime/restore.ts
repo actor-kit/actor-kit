@@ -13,6 +13,7 @@
  * Nothing here touches storage: the Durable Object reads the journal, plans, then commits.
  */
 
+import { ActorKitError } from "@actor-kit/core";
 import { z } from "zod";
 import { parseEffectId } from "./effect-id";
 import {
@@ -46,7 +47,7 @@ function restoreStart(
     .sort((a, b) => b.seq - a.seq)[0];
   if (checkpoint !== undefined) return { seq: checkpoint.seq, point: checkpointPoint(def, checkpoint) };
   if (firstSeq === 1) return { seq: 0, point: { state: undefined, timers: [] } };
-  throw new Error(`Cannot restore to seq ${toSeq}: the journal is pruned before it`);
+  throw new ActorKitError("restore_out_of_range", `Cannot restore to seq ${toSeq}: the journal is pruned before it`);
 }
 
 /** The effect a service result was journaled for (null for other events and older payloads). */
@@ -75,7 +76,10 @@ function resultsToRedeliver(events: readonly JournalEvent[], toSeq: number): Jou
 function assertInJournal(events: readonly JournalEvent[], toSeq: number): void {
   const lastSeq = Math.max(0, ...events.map((e) => e.seq));
   if (!Number.isInteger(toSeq) || toSeq < 1 || toSeq > lastSeq) {
-    throw new Error(`Cannot restore to seq ${toSeq}: the journal runs from 1 to ${lastSeq}`);
+    throw new ActorKitError(
+      "restore_out_of_range",
+      `Cannot restore to seq ${toSeq}: the journal runs from 1 to ${lastSeq}`,
+    );
   }
 }
 
@@ -85,7 +89,10 @@ function assertCurrentVersion(def: ReplayableDef, events: readonly JournalEvent[
   const current = def.version ?? Number.NEGATIVE_INFINITY;
   const written = events.find((e) => e.seq === toSeq)?.codeVersion ?? current;
   if (written < current) {
-    throw new Error(`Cannot restore to seq ${toSeq}: it was written by version ${written} (current: ${current})`);
+    throw new ActorKitError(
+      "restore_out_of_range",
+      `Cannot restore to seq ${toSeq}: it was written by version ${written} (current: ${current})`,
+    );
   }
 }
 

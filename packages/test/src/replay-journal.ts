@@ -4,6 +4,7 @@
  * DO with readJournal() to catch handlers that aren't deterministic.
  */
 
+import { ActorKitError } from "@actor-kit/core";
 import type { Journal, ReplayableDef } from "@actor-kit/worker/testing";
 import { foldJournal, toRuntimeDef, withDeterminismGuard } from "@actor-kit/worker/testing";
 
@@ -46,7 +47,7 @@ export async function replayJournal(
 ): Promise<{ state: unknown; replayed: number }> {
   const def = contract.def;
   if (!isReplayableDef(def)) {
-    throw new Error(`replayJournal: "${contract.name}" is not an actor contract`);
+    throw new ActorKitError("invalid_actor_definition", `replayJournal: "${contract.name}" is not an actor contract`);
   }
   const flat = roleNestedMessages(def.messages, def.roles);
   // The version chain (ADR-015 D5): events from versions with no path are refused, replay starts at the last bump.

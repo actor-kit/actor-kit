@@ -1,3 +1,4 @@
+import { ActorKitError } from "@actor-kit/core";
 /**
  * Determinism guards for the test harness (ADR-016 §5).
  *
@@ -11,8 +12,11 @@
  * An async init is guarded until its first await.
  */
 
-export class NondeterminismError extends Error {
+export class NondeterminismError extends ActorKitError {
   override name = "NondeterminismError";
+  constructor(message: string) {
+    super("nondeterminism", message);
+  }
 }
 
 const refuse = (what: string, use: string) => (): never => {

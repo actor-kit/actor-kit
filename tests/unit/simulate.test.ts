@@ -112,12 +112,12 @@ describe("simulate: spawn, send, view", () => {
   it("rejects like the runtime: no role, unknown message, invalid payload, guard", async () => {
     const sim = simulate({ contracts });
     const store = await sim.spawn(Store, "s1", { item: "lamp" });
-    expect(store.send("customer", { type: "CHARGE", cents: 5 })).toEqual({ ok: false, error: "guard_failed" });
+    expect(store.send("customer", { type: "CHARGE", cents: 5 })).toMatchObject({ ok: false, code: "guard_failed" });
     expect(store.send("clerk-1", { type: "CHARGE", cents: -1 })).toMatchObject({
       ok: false,
-      error: "validation_failed",
+      code: "invalid_payload",
     });
-    expect(store.send("clerk-1", { type: "NOPE" })).toEqual({ ok: false, error: "message_not_found" });
+    expect(store.send("clerk-1", { type: "NOPE" })).toMatchObject({ ok: false, code: "unknown_message" });
     expect(store.state.status).toBe("new");
     expect(store.journal.events).toHaveLength(1);
   });

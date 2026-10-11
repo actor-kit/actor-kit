@@ -1,3 +1,4 @@
+import { ActorKitError } from "@actor-kit/core";
 /**
  * Durations for ctx.schedule (ADR-015 D2): milliseconds as a number, or a number with a unit,
  * e.g. "500ms", "30s", "5m", "2h", "1d".
@@ -27,7 +28,8 @@ function millisecondsOf(duration: unknown): number {
 export function parseDuration(duration: unknown): number {
   const ms = millisecondsOf(duration);
   if (!Number.isFinite(ms) || ms < 0) {
-    throw new Error(
+    throw new ActorKitError(
+      "invalid_duration",
       `Invalid duration ${JSON.stringify(duration)}: use milliseconds or e.g. "500ms", "30s", "5m", "2h", "1d"`,
     );
   }

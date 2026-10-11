@@ -48,15 +48,15 @@ describe("auction (examples/auction)", () => {
   it("only the auctioneer (a service caller) can close, and only with bids", async () => {
     const { room } = await auction();
     expect(room.role("ops", { callerType: "service" })).toBe("auctioneer");
-    expect(room.send("ops", { type: "CLOSE" }, { callerType: "service" })).toEqual({
+    expect(room.send("ops", { type: "CLOSE" }, { callerType: "service" })).toMatchObject({
       ok: false,
-      error: "guard_failed",
+      code: "guard_failed",
     });
     room.send("alice", { type: "BID", amount: 10 });
-    expect(room.send("alice", { type: "CLOSE" })).toEqual({ ok: false, error: "guard_failed" });
+    expect(room.send("alice", { type: "CLOSE" })).toMatchObject({ ok: false, code: "guard_failed" });
     expect(room.send("ops", { type: "CLOSE" }, { callerType: "service" })).toEqual({ ok: true });
     expect(room.view("alice")).toMatchObject({ closed: true, winner: "alice" });
-    expect(room.send("bob", { type: "BID", amount: 99 })).toEqual({ ok: false, error: "guard_failed" });
+    expect(room.send("bob", { type: "BID", amount: 99 })).toMatchObject({ ok: false, code: "guard_failed" });
   });
 
   it("the bids persist: the journal replays to the same state", async () => {
@@ -109,7 +109,7 @@ describe("chat room (examples/chat-room)", () => {
     const { room } = await chat();
     expect(room.send("alice", { type: "SEND_MESSAGE", text: "" })).toMatchObject({
       ok: false,
-      error: "validation_failed",
+      code: "invalid_payload",
     });
   });
 

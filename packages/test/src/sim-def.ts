@@ -4,6 +4,7 @@
  * this checks the shape at runtime before simulate() uses it.
  */
 
+import { ActorKitError } from "@actor-kit/core";
 import type {
   EnvParser,
   JournalOption,
@@ -62,7 +63,8 @@ function roleNested(
 ): Record<string, Record<string, StepMessageSlot>> {
   const flat: Record<string, StepMessageSlot> = {};
   for (const [name, slot] of Object.entries(isRecord(messages) ? messages : {})) {
-    if (!isMessageSlot(slot)) throw new Error(`simulate: message "${name}" is not a message() definition`);
+    if (!isMessageSlot(slot))
+      throw new ActorKitError("invalid_actor_definition", `simulate: message "${name}" is not a message() definition`);
     flat[name] = slot;
   }
   return Object.fromEntries(Object.keys(roles).map((role) => [role, flat]));
@@ -72,7 +74,10 @@ function roleNested(
 export function toSimDef(contract: { readonly name: string; readonly def: unknown }): SimDef {
   const def = contract.def;
   if (!isSimDef(def)) {
-    throw new Error(`simulate: "${contract.name}" is not an actor contract (input, init, roles and views)`);
+    throw new ActorKitError(
+      "invalid_actor_definition",
+      `simulate: "${contract.name}" is not an actor contract (input, init, roles and views)`,
+    );
   }
   // The version chain (ADR-015 D5) compiles into version, migrate and upcast, as in the runtime.
   return { ...toRuntimeDef(def), messages: roleNested(def.messages, def.roles) };
@@ -87,6 +92,6 @@ export function simEnv(def: SimDef, name: string, env: unknown): unknown {
   if (def.env === undefined) return env;
   const fakes = isRecord(env) ? env[name] : undefined;
   const parsed = parseActorEnv(def.env, fakes);
-  if (!parsed.ok) throw new Error(`simulate: ${envErrorMessage(name, parsed.issues)}`);
+  if (!parsed.ok) throw new ActorKitError("invalid_env", `simulate: ${envErrorMessage(name, parsed.issues)}`);
   return parsed.env;
 }

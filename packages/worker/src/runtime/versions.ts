@@ -20,6 +20,7 @@
  * contract's definition (and refuses the old `version` / `migrate` options: there is no shim).
  */
 
+import { ActorKitError } from "@actor-kit/core";
 import { z } from "zod";
 
 type Payload = Record<string, unknown>;
@@ -100,23 +101,33 @@ export interface CompiledVersions {
 
 function parseAt(step: Step, state: unknown): unknown {
   const parsed = step.schema.safeParse(state);
-  if (!parsed.success) throw new Error(`State does not match version ${step.version}: ${parsed.error.message}`);
+  if (!parsed.success)
+    throw new ActorKitError(
+      "invalid_versions",
+      `State does not match version ${step.version}: ${parsed.error.message}`,
+    );
   return parsed.data;
 }
 
 function validChain(chain: unknown): Step[] {
   const parsed = ChainSchema.safeParse(chain);
-  if (!parsed.success) throw new Error(`Invalid versions: ${parsed.error.message}`);
+  if (!parsed.success) throw new ActorKitError("invalid_versions", `Invalid versions: ${parsed.error.message}`);
   const steps = parsed.data;
   steps.forEach((step, i) => {
     const previous = steps[i - 1];
     if (previous !== undefined && step.version <= previous.version) {
-      throw new Error(`Invalid versions: ${step.version} must come after ${previous.version}, in increasing order`);
+      throw new ActorKitError(
+        "invalid_versions",
+        `Invalid versions: ${step.version} must come after ${previous.version}, in increasing order`,
+      );
     }
   });
   const [first] = steps;
   if (first?.state !== undefined || first?.rebuild !== undefined) {
-    throw new Error("Invalid versions: the first version has no previous state to step from");
+    throw new ActorKitError(
+      "invalid_versions",
+      "Invalid versions: the first version has no previous state to step from",
+    );
   }
   return steps;
 }
@@ -133,11 +144,18 @@ export function compileVersions(chain: unknown): CompiledVersions {
     migrate(persisted, fromVersion) {
       const from = steps.findIndex((s) => s.version === fromVersion);
       const origin = steps[from];
-      if (origin === undefined) throw new Error(`There is no path from version ${fromVersion} to version ${current}`);
+      if (origin === undefined)
+        throw new ActorKitError(
+          "no_version_path",
+          `There is no path from version ${fromVersion} to version ${current}`,
+        );
       let state = parseAt(origin, persisted);
       for (const step of steps.slice(from + 1)) {
         if (step.rebuild === "replay")
-          throw new Error(`Version ${step.version} rebuilds by replay; it cannot be stepped to`);
+          throw new ActorKitError(
+            "no_version_path",
+            `Version ${step.version} rebuilds by replay; it cannot be stepped to`,
+          );
         state = parseAt(step, step.state === undefined ? state : step.state(state));
       }
       return state;
@@ -168,7 +186,8 @@ export interface RuntimeVersioning {
  */
 export function toRuntimeDef<D extends object>(def: D): D & RuntimeVersioning {
   if ("version" in def || "migrate" in def) {
-    throw new Error(
+    throw new ActorKitError(
+      "invalid_versions",
       '"version" and "migrate" are replaced by versions: [version(n, Schema, { state, events, rebuild })] (ADR-015 D5)',
     );
   }
@@ -176,7 +195,7 @@ export function toRuntimeDef<D extends object>(def: D): D & RuntimeVersioning {
   if (chain === undefined) return { ...def, version: 1 };
   const compiled = compileVersions(chain);
   if (compiled.rebuildVersion !== null && Reflect.get(def, "journal") === false) {
-    throw new Error('rebuild: "replay" needs the journal (this actor has journal: false)');
+    throw new ActorKitError("invalid_versions", 'rebuild: "replay" needs the journal (this actor has journal: false)');
   }
   return {
     ...def,

@@ -150,7 +150,7 @@ describe("simulate: contracts", () => {
     const room = await sim.spawn(RoomContract, "r1", { name: "x" });
     const strict = defineActor("strict", { ...RoomContract.def, roles: { member: () => false } });
     const s = await sim.spawn(strict, "s1", { name: "x" });
-    expect(s.send("a", { type: "ANY" })).toEqual({ ok: false, error: "No role matched" });
+    expect(s.send("a", { type: "ANY" })).toMatchObject({ ok: false, code: "no_role" });
     expect(() => s.connect("a")).toThrow(/no role matched/);
     expect(() => s.view("a")).toThrow(/no role matched/);
     expect(s.role("a")).toBeNull();

@@ -46,3 +46,59 @@ await expect(t.send(s, "bob", { type: "END" })).rejects.toThrow("Guard rejected"
 const error = await t.send(s, "bob", { type: "END" }).catch((e) => e);
 expect(error.code).toBe("guard_failed");
 ```
+
+## Refusals are typed values with a code, a sentence and a docs link (ADR-018 C)
+
+`simulate().send`, the Durable Object's `send()` RPC (and `ActorRef.send`) return
+`{ ok: true } | Refusal`, where a `Refusal` is
+`{ ok: false, code, message, expected?, details?, docs }`. The codes are `unknown_message`,
+`invalid_payload`, `guard_failed`, `wrong_state`, `no_role`, `not_initialized`, `invalid_delivery` and
+`actor_not_found`. Two old codes were renamed: `message_not_found` → `unknown_message`,
+`validation_failed` → `invalid_payload`. `detail` is gone: Zod issues are in `details`.
+
+```ts
+// Before
+expect(room.send("bob", { type: "CLOSE" })).toEqual({ ok: false, error: "guard_failed" });
+const r = await stub.send("u", "user", { type: "ADD", n: "x" });
+if (!r.ok && r.error === "validation_failed") console.log(r.detail);
+
+// After
+expect(room.send("bob", { type: "CLOSE" })).toMatchObject({ ok: false, code: "guard_failed" });
+const r = await stub.send("u", "user", { type: "ADD", n: "x" });
+if (!r.ok && r.code === "invalid_payload") console.log(r.message, r.details, r.docs);
+```
+
+A message refused in the wrong state reads, for example, `ANSWER is accepted in round; the actor is in
+lobby.` with `expected: ["round"]` and `details: { phase: "lobby" }`.
+
+## The `__error` frame and the client's `onError` (ADR-018 C)
+
+A refused WebSocket message now gets `{ type: "__error", messageType, code, message, expected?,
+details?, docs }`, and `onError` receives a `ClientError` with the same fields (`code` is
+`"invalid_frame"` for an error frame the client cannot read).
+
+```ts
+// Before
+createActorClient({ ..., onError: ({ message, error }) => toast(`${message}: ${error}`) });
+
+// After
+createActorClient({ ..., onError: (e) => toast(`${e.messageType}: ${e.message}`) });
+```
+
+## Thrown errors carry `code` and `docs` (ADR-018 C)
+
+Every error the library throws is an `ActorKitError` (from `@actor-kit/core`) or a subclass
+(`NondeterminismError`, `JournalDivergenceError`, `RefusalError`, ...), with a stable `code` and a `docs`
+URL (`https://actorkit.dev/errors/<code>/`). Messages are unchanged or extended with how to fix the
+problem, so match on `code` rather than on message text.
+
+```ts
+// Before
+expect(() => run()).toThrow('Timer "tick" is not declared on this actor');
+
+// After
+expect(() => run()).toThrow(expect.objectContaining({ code: "undeclared_timer" }));
+```
+
+`ActorRef.send` on a binding that is not an actor-kit Durable Object resolves with an `actor_not_found`
+refusal (was `{ ok: false, error: "stub.send not available" }`).

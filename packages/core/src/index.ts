@@ -4,6 +4,19 @@
 export { decode, encode } from "./binary";
 // Delta encoding
 export { applyDelta, encodeDelta } from "./delta";
+// Errors that teach (ADR-018 C)
+export type { ErrorCode, ErrorCodeInfo, Refusal, RefusalCode } from "./errors";
+export {
+  ActorKitError,
+  docsUrl,
+  ERROR_CODE_LIST,
+  ERROR_CODES,
+  ERRORS_DOCS_BASE,
+  isRefusalCode,
+  REFUSAL_CODES,
+  RefusalError,
+  refusal,
+} from "./errors";
 export type { ParsedFrame } from "./frame";
 // Frame protocol
 export {

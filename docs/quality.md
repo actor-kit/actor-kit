@@ -92,6 +92,7 @@ CRAP over `packages/worker/src/runtime`, `packages/test/src`, `packages/core/src
 | Step | Mutated | Score | Survivors | Max CRAP |
 |---|---|---|---|---|
 | 2. D testActor over `step()` (`test-actor.ts` whole, `refusal.ts`, `outbox.ts` `getSchedules`, `step.ts` `initialState`) | 171 | 95.95% (166/173) first run; then tests for the `wrong_state` message and `unlink(name)` (testActor has no stored links: targets come from the same transition) and the unreachable `detail ?? "unknown"` fallback removed; re-run of `test-actor.ts`: **98.52% (133/135)** | 2 equivalent (test-actor.ts:171, :190, below) | test 7.1, runtime 7.0, core 6.0, worker (`crap:worker`) 7.6; 0 ≥ 8 |
+| 3. C typed refusals and coded errors (`core/errors.ts`, `worker/runtime/refusal.ts` whole; every changed line of the ~100 throw sites moved to `ActorKitError`, `client.ts` `clientError`, `step.ts` admission issues, simulate/testActor refusals) | 471 | 74.89% first run (106 survivors: nearly all an error code literal → `""` at a throw site no test asked the code of); then `error-codes.test.ts` (one row per throw site: the call and the code it carries), `refusals.test.ts` details (dotted paths, `toStrictEqual` for optional fields) and `refusal.ts` restructured (wrong_state carries its phase and states from `admitStepMessage`; no lookups that could not fail) → **96.39% (454/471)** | 17: 11 error-code literals → `""` at sites only reachable in workerd or the browser (client `getHeaders`, React provider, Studio RPC stub, restore ×3, journal checkpoint/rebuild/restore-coverage ×3, simulate rejection/effect ambiguity ×3): `""` is not an `ErrorCode`, so each mutant is a compile error that Stryker (no TypeScript checker: its checker cannot load TypeScript 7) runs anyway; plus the equivalents below (errors.ts:277, simulate.ts:306 ×3, simulate.ts:725) | client 7.0 (`buildUrl` was 10.0 after the same-origin merge: split into `pageLocation` / `schemeOf`), core 6.0, react 2.0, test 7.1, runtime 7.0, studio 7.0, worker (`crap:worker`) 7.6; 0 ≥ 8 |
 
 ## Equivalent mutants
 
@@ -143,8 +144,8 @@ Surviving mutants that no test can kill, because the mutated program behaves ide
 | worker | studio-redact.ts:59 | `segment.kind === "literal" && …` → `true && …` | Kinds are any / one / literal; with any and one excluded only literal is left. |
 | worker | versions.ts:118 (×2) | `first?.state` / `first?.rebuild` → `first.…` | The chain schema has `.min(1)`, so `first` is always defined; `?.` is for unchecked index access. |
 | test | simulate.ts:179 | `value !== null` → `true` (pushed view spread) | Spreading `null` adds no keys, so `{ role, ...null }` equals `{ role }`. |
-| test | simulate.ts:543 | `issues[0]?.message` → `issues[0].message` | A failed parse always has at least one issue. |
-| test | simulate.ts:211 (×2, one NoCoverage) | unknown-contract guard in `defOf` → removed / message `""` | Unreachable: an actor exists only after `spawn` registered its contract, and every lookup is for an existing actor's type. The guard is for the type checker. |
+| test | simulate.ts:725 | `issues[0]?.message` → `issues[0].message` | A failed parse always has at least one issue. |
+| test | simulate.ts:306 (×3) | unknown-contract guard in `defOf` → removed / message `""` / code `""` | Unreachable: an actor exists only after `spawn` registered its contract, and every lookup is for an existing actor's type. The guard is for the type checker. |
 | test | simulate.ts:257 | undeclared or present link `return false` → `true` | Subscribing such a link pushes nothing: an undeclared link has no source, and a present one's view is already pushed (dedupe). |
 | test | simulate.ts:265 | unlink(name) unsubscribes `[]` → `["Stryker was here"]` | A string has no `name`, so it points at no source and nothing is forgotten. |
 | test | simulate.ts:276 (×2) | `def.links?.[name]?.contract` → without `?.` | Only declared links are ever recorded on an actor, so the link definition always exists. |
@@ -167,6 +168,7 @@ Surviving mutants that no test can kill, because the mutated program behaves ide
 | test | simulate.ts:301 | `parseEffectId(effectId)?.seq` → `.seq` | Simulated effect ids are always `seq:index`, so the parse never fails. |
 | worker | journal-timeline.ts:202 | init start `timers: []` → `["Stryker was here"]` | Same as journal.ts:535/750: an init event schedules nothing from its start point, and timeline states never read the pending timers. |
 | worker | journal-timeline.ts:203 | `from === undefined \|\| …` → `false \|\| …` | Folding a non-init event onto no point throws inside the try, which returns null: the same "state not available". |
+| core | errors.ts:277 | `Object.keys(ERROR_CODES).filter(isErrorCode)` → without the filter | Every key of the registry is an ErrorCode; the filter exists for the type checker. |
 | worker | setup.ts:226 | `local === undefined ? def : { ...def, local }` → always spread | Adds `local: undefined` to a state without a local schema; the runtime only reads `def.local === undefined` (phases.ts `parseLocal`, step.ts initial check). |
 
 ## Bugs found while hardening (2026-10-07)

@@ -20,6 +20,7 @@
 
 import type { ActorClient, ConnectionState, CreateOptions } from "@actor-kit/client";
 import { createActorClient } from "@actor-kit/client";
+import { ActorKitError } from "@actor-kit/core";
 import { createContext, createElement, type ReactNode, useContext, useEffect, useRef, useState } from "react";
 
 // --- Types ---
@@ -50,7 +51,10 @@ export function createActorContext<
   function useClient(): ActorClient<TView, TEvent> {
     const client = useContext(ClientContext);
     if (client === null) {
-      throw new Error("useView/useSend/useRole must be used inside <Provider>");
+      throw new ActorKitError(
+        "missing_provider",
+        "useView/useSend/useRole must be used inside <Provider>: render the component inside its actor context's Provider.",
+      );
     }
     return client;
   }

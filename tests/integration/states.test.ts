@@ -26,7 +26,10 @@ const state = (stub: DurableObjectStub) =>
 describe("quiz in a Durable Object", () => {
   it("a round's state timer fires on the alarm and moves to reveal", async () => {
     const stub = await spawn("states-timer");
-    expect(await stub.send("ann", "user", { type: "ANSWER", text: "42" })).toEqual({ ok: false, error: "wrong_state" });
+    expect(await stub.send("ann", "user", { type: "ANSWER", text: "42" })).toMatchObject({
+      ok: false,
+      code: "wrong_state",
+    });
     await stub.send("ann", "user", { type: "START" });
     await stub.send("ann", "user", { type: "ANSWER", text: "42" });
     expect(await state(stub)).toMatchObject({

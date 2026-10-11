@@ -8,6 +8,7 @@
  * local and cancels the phase's state timers; enter builds the new local with `enter(shared, input, ctx)`.
  */
 
+import { ActorKitError } from "@actor-kit/core";
 import { z } from "zod";
 
 /** What `ctx.stay` / `ctx.goto` return. `S` is the shared state's type (phantom at runtime). */
@@ -45,7 +46,10 @@ export type PhasedState = z.infer<typeof PhasedStateSchema>;
 export function phasedState(state: unknown): PhasedState {
   const parsed = PhasedStateSchema.safeParse(state);
   if (!parsed.success)
-    throw new Error(`The state of an actor with states must be { shared, phase, local, stateTimers }`);
+    throw new ActorKitError(
+      "invalid_phased_state",
+      "The state of an actor with states must be { shared, phase, local, stateTimers }",
+    );
   return parsed.data;
 }
 
@@ -75,21 +79,28 @@ export interface StepStateDef {
 export function parseLocal(phase: string, def: StepStateDef, local: unknown): unknown {
   if (def.local === undefined) return null;
   const parsed = def.local.safeParse(local);
-  if (!parsed.success) throw new Error(`State "${phase}": invalid local: ${parsed.error.message}`);
+  if (!parsed.success) {
+    throw new ActorKitError("invalid_local", `State "${phase}": invalid local: ${parsed.error.message}`);
+  }
   return parsed.data;
 }
 
 /** The declared state for a phase. */
-export function stateDef(states: Record<string, StepStateDef>, phase: string): StepStateDef {
+export function stateDef<D>(states: Readonly<Record<string, D>>, phase: string): D {
   const def = states[phase];
-  if (def === undefined) throw new Error(`State "${phase}" is not declared on this actor`);
+  if (def === undefined) {
+    throw new ActorKitError(
+      "undeclared_state",
+      `State "${phase}" is not declared on this actor. Declare it in setup({ states }) and in the actor's states.`,
+    );
+  }
   return def;
 }
 
 /**
- * Whether some state declares the message. Asked once the current state and the roles have not:
- * true means the message was sent in the wrong phase.
+ * The states that declare the message, in declaration order. Asked once the current state and the
+ * roles have not: any means the message was sent in the wrong phase.
  */
-export function declaredInSomeState(states: Record<string, StepStateDef>, name: string): boolean {
-  return Object.values(states).some((def) => def.messages?.[name] !== undefined);
+export function statesDeclaring(states: Record<string, StepStateDef>, name: string): string[] {
+  return Object.entries(states).flatMap(([phase, def]) => (def.messages?.[name] === undefined ? [] : [phase]));
 }

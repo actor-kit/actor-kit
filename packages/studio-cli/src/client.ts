@@ -16,6 +16,9 @@ export type StudioAuth =
 export type FetchFn = (input: string | URL, init?: RequestInit) => Promise<Response>;
 
 export class StudioClientError extends Error {
+  /** ADR-018 C: a stable code and a docs URL. */
+  readonly code = "studio_request_failed";
+  readonly docs = "https://actorkit.dev/errors/studio_request_failed/";
   readonly status: number | null;
   constructor(message: string, status: number | null) {
     super(message);

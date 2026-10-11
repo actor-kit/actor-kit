@@ -163,13 +163,13 @@ describe("simulate: callers", () => {
     expect(h1.view("bob")).toEqual({ n: 0 });
     h1.send("bob", { type: "WHO" });
     h1.send("ops", { type: "WHO" }, { callerType: "service" });
-    expect(h1.send("blocked", { type: "WHO" })).toEqual({ ok: false, error: "guard_failed" });
+    expect(h1.send("blocked", { type: "WHO" })).toMatchObject({ ok: false, code: "guard_failed" });
     expect(h1.state.log).toEqual(["bob:user:user", "ops:service:svc"]);
   });
 
   it("a guard sees the simulation's env", async () => {
     const sim = await hubs(["h1"], "off");
-    expect(sim.actor(Hub, "h1").send("bob", { type: "WHO" })).toEqual({ ok: false, error: "guard_failed" });
+    expect(sim.actor(Hub, "h1").send("bob", { type: "WHO" })).toMatchObject({ ok: false, code: "guard_failed" });
   });
 
   it("a role without a view is an error", async () => {
@@ -393,10 +393,12 @@ describe("testActor rejections", () => {
     const unknownMessage: { type: string; [key: string]: unknown } = { type: "NOPE" };
     const badPayload: { type: string; [key: string]: unknown } = { type: "LATER", inMs: "x", tag: 1 };
     expect(await rejection(() => t.send(state, "bob", unknownMessage))).toBe(
-      'Message "NOPE" not found for role "user"',
+      'Message "NOPE" not found for role "user". It can send: WHO, FORWARD, LINKS, DROP_FEED_X, DROP_NEWS, LATER, SCHEDULE_THEN_CANCEL, LOOP, SAME.',
     );
     expect(await rejection(() => t.send(state, "bob", badPayload))).toMatch(/^Validation failed for "LATER": .*inMs/s);
-    expect(await rejection(() => t.send(state, "blocked", { type: "WHO" }))).toBe('Guard rejected "WHO"');
+    expect(await rejection(() => t.send(state, "blocked", { type: "WHO" }))).toBe(
+      'Guard rejected "WHO" for caller "blocked" (role "user"). Send it only when the guard allows it.',
+    );
   });
 });
 

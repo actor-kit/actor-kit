@@ -7,6 +7,7 @@
  * outbox's retries, dead letters and redrive (ADR-015 D1). Consumers dedupe on `idempotencyKey`.
  */
 
+import { ActorKitError } from "@actor-kit/core";
 import { formatEffectId } from "./effect-id";
 import { idempotencyKey as effectIdempotencyKey } from "./effect-info";
 import type { EmittedEffect } from "./outbox";
@@ -32,10 +33,13 @@ export function resolvePublish(
   services: Record<string, unknown> | undefined,
 ): PublishConfig | null {
   if (option === undefined) return null;
-  if (option.queue === "") throw new Error("publish.queue must name a Queue binding");
+  if (option.queue === "") throw new ActorKitError("invalid_publish", "publish.queue must name a Queue binding");
   checkDeclared(option.events, events ?? {});
   if (services !== undefined && Object.hasOwn(services, PUBLISH_SERVICE)) {
-    throw new Error(`The service name "${PUBLISH_SERVICE}" is reserved for publish`);
+    throw new ActorKitError(
+      "invalid_publish",
+      `The service name "${PUBLISH_SERVICE}" is reserved for publish. Rename your service.`,
+    );
   }
   return { queue: option.queue, events: new Set(option.events) };
 }
@@ -43,7 +47,11 @@ export function resolvePublish(
 /** Every published name must be a declared event. */
 function checkDeclared(names: readonly string[], events: Record<string, unknown>): void {
   for (const name of names) {
-    if (!Object.hasOwn(events, name)) throw new Error(`publish: event "${name}" is not declared in events`);
+    if (!Object.hasOwn(events, name))
+      throw new ActorKitError(
+        "invalid_publish",
+        `publish: event "${name}" is not declared in events. Declare it in setup({ events }) or remove it from publish.events.`,
+      );
   }
 }
 
@@ -90,7 +98,7 @@ export function publishedMessages(
 export async function sendToQueue(env: unknown, queue: string, body: unknown): Promise<null> {
   const binding: unknown = typeof env === "object" && env !== null ? Reflect.get(env, queue) : undefined;
   const send: unknown = typeof binding === "object" && binding !== null ? Reflect.get(binding, "send") : undefined;
-  if (typeof send !== "function") throw new Error(`Queue binding "${queue}" is not bound`);
+  if (typeof send !== "function") throw new ActorKitError("queue_not_bound", `Queue binding "${queue}" is not bound`);
   await Reflect.apply(send, binding, [body]);
   return null;
 }

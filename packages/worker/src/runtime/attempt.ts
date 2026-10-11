@@ -8,6 +8,7 @@
  * discarded, never applied.
  */
 
+import { ActorKitError } from "@actor-kit/core";
 import { parseEffectId } from "./effect-id";
 import type { TryOutcome } from "./retry";
 import { classifyFailure, timeoutError } from "./service-error";
@@ -18,7 +19,10 @@ export const DEFAULT_TIMEOUT_MS = 30_000;
 export function resolveTimeoutMs(option: unknown, owner: string): number {
   if (option === undefined) return DEFAULT_TIMEOUT_MS;
   if (typeof option !== "number" || !Number.isFinite(option) || option <= 0) {
-    throw new Error(`Invalid ${owner} timeoutMs: expected a positive number of ms, got ${String(option)}`);
+    throw new ActorKitError(
+      "invalid_timeout",
+      `Invalid ${owner} timeoutMs: expected a positive number of ms, got ${String(option)}`,
+    );
   }
   return option;
 }

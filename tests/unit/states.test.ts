@@ -80,12 +80,12 @@ describe("quiz: phases, locals and state timers", () => {
 
   it("a message declared only by other states is rejected with wrong_state, before its guard", async () => {
     const { q } = await quiz();
-    expect(q.send("ann", { type: "ANSWER", text: "x" })).toEqual({ ok: false, error: "wrong_state" });
-    expect(q.send("ann", { type: "END" })).toEqual({ ok: false, error: "wrong_state" });
-    expect(q.send("ann", { type: "NOPE" })).toEqual({ ok: false, error: "message_not_found" });
+    expect(q.send("ann", { type: "ANSWER", text: "x" })).toMatchObject({ ok: false, code: "wrong_state" });
+    expect(q.send("ann", { type: "END" })).toMatchObject({ ok: false, code: "wrong_state" });
+    expect(q.send("ann", { type: "NOPE" })).toMatchObject({ ok: false, code: "unknown_message" });
     q.send("ann", { type: "START" });
-    expect(q.send("ann", { type: "END" })).toEqual({ ok: false, error: "guard_failed" });
-    expect(q.send("ann", { type: "START" })).toEqual({ ok: false, error: "wrong_state" });
+    expect(q.send("ann", { type: "END" })).toMatchObject({ ok: false, code: "guard_failed" });
+    expect(q.send("ann", { type: "START" })).toMatchObject({ ok: false, code: "wrong_state" });
   });
 });
 

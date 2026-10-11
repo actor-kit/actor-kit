@@ -11,6 +11,13 @@ export type {
   InferView,
 } from "./builder";
 export { actorClient } from "./builder";
-export type { ActorClient, ClientOptions, ConnectionState, WebSocketConstructor, WebSocketLike } from "./client";
+export type {
+  ActorClient,
+  ClientError,
+  ClientOptions,
+  ConnectionState,
+  WebSocketConstructor,
+  WebSocketLike,
+} from "./client";
 export { createActorClient } from "./client";
 export { buildUrl, inferProtocol } from "./url";

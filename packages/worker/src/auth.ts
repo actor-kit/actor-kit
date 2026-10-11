@@ -12,6 +12,7 @@
  *   exp = expiry
  */
 
+import { ActorKitError } from "@actor-kit/core";
 import { jwtVerify, SignJWT } from "jose";
 
 // --- Types ---
@@ -65,19 +66,19 @@ export async function getCallerFromToken(
 
   // Validate actor ID
   if (payload.jti !== actorId) {
-    throw new Error(`Token actor ID mismatch: expected "${actorId}", got "${payload.jti}"`);
+    throw new ActorKitError("invalid_token", `Token actor ID mismatch: expected "${actorId}", got "${payload.jti}"`);
   }
 
   // Extract caller identity
   const caller = payload.sub;
   if (typeof caller !== "string") {
-    throw new Error("Token missing subject (caller identity)");
+    throw new ActorKitError("invalid_token", "Token missing subject (caller identity)");
   }
 
   // Extract caller type
   const callerType = payload["act"];
   if (callerType !== "user" && callerType !== "service") {
-    throw new Error(`Invalid callerType in token: "${String(callerType)}"`);
+    throw new ActorKitError("invalid_token", `Invalid callerType in token: "${String(callerType)}"`);
   }
 
   return { caller, callerType };

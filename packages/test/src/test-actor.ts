@@ -17,9 +17,8 @@ import type {
   SchemaDefinition,
   TimelineEntry,
 } from "@actor-kit/core";
-import { xxh64 } from "@actor-kit/core";
+import { ActorKitError, RefusalError, xxh64 } from "@actor-kit/core";
 import type {
-  AdmissionError,
   EnvParser,
   LifecycleEvent,
   LinkCall,
@@ -36,8 +35,8 @@ import {
   initialState,
   liveStepFacts,
   parseActorEnv,
-  RefusalError,
-  refusalCode,
+  refuseAdmission,
+  refuseNoRole,
   resolveRole,
   step,
   withDeterminismGuard,
@@ -222,13 +221,6 @@ function isContract(arg: TestableActorDef<unknown, unknown> | ContractShape): ar
 
 // --- Refusals (ADR-018 C, D) ---
 
-const ROUTE_ERRORS: Record<AdmissionError, (type: string, role: string, detail: string | undefined) => string> = {
-  message_not_found: (type, role) => `Message "${type}" not found for role "${role}"`,
-  validation_failed: (type, _role, detail) => `Validation failed for "${type}": ${detail}`,
-  guard_failed: (type) => `Guard rejected "${type}"`,
-  wrong_state: (type) => `Message "${type}" is not accepted in the actor's current state`,
-};
-
 /** The caller's role, or a `no_role` refusal. */
 function roleOrRefuse(
   roles: Record<string, RolePredicate<unknown>>,
@@ -237,7 +229,7 @@ function roleOrRefuse(
   callerType: "user" | "service",
 ): string {
   const role = resolveRole(roles, state, caller, { callerType });
-  if (role === null) throw new RefusalError("no_role", `No role matched for caller "${caller}"`);
+  if (role === null) throw new RefusalError(refuseNoRole(caller, callerType));
   return role;
 }
 
@@ -260,7 +252,7 @@ export interface TestActorOptions<TContract> {
 function harnessEnv(name: string, schema: EnvParser | undefined, env: unknown): unknown {
   if (schema === undefined) return env ?? {};
   const parsed = parseActorEnv(schema, env);
-  if (!parsed.ok) throw new Error(`testActor: ${envErrorMessage(name, parsed.issues)}`);
+  if (!parsed.ok) throw new ActorKitError("invalid_env", `testActor: ${envErrorMessage(name, parsed.issues)}`);
   return parsed.env;
 }
 
@@ -312,8 +304,7 @@ export function testActor(
     const role = roleOrRefuse(def.roles, state, caller, callerType);
     const admission = admitStepMessage(def, role, state, event, { caller, callerType, env });
     if (!admission.ok) {
-      const detail = "detail" in admission ? admission.detail : undefined;
-      throw new RefusalError(refusalCode(admission.error), ROUTE_ERRORS[admission.error](event.type, role, detail));
+      throw new RefusalError(refuseAdmission(def, state, role, event.type, admission, { caller, callerType }));
     }
     const cause: StepCause = {
       type: "message",
@@ -354,14 +345,17 @@ export function testActor(
     init(input: unknown): unknown {
       const parsed = def.input.safeParse(input);
       if (!parsed.success) {
-        throw new Error(`Invalid input: ${parsed.error.message}`);
+        throw new ActorKitError("invalid_input", `Invalid input: ${parsed.error.message}`);
       }
       const shared = withDeterminismGuard(() =>
         def.init(parsed.data, {
           ...createLiveFacts().ctx,
           env,
           link: async () => {
-            throw new Error("link() not available in test harness init — use send() for link testing");
+            throw new ActorKitError(
+              "link_unavailable",
+              "link() not available in test harness init — use send() for link testing",
+            );
           },
         }),
       );
@@ -380,7 +374,7 @@ export function testActor(
       const role = roleOrRefuse(def.roles, state, caller, opts?.callerType ?? "user");
       const viewDef = def.views[role];
       if (viewDef === undefined) {
-        throw new Error(`No view defined for role "${role}"`);
+        throw new ActorKitError("no_view", `No view defined for role "${role}"`);
       }
       return { role, data: viewDef.fn(state, caller) };
     },

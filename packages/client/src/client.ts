@@ -18,8 +18,17 @@
  * Handles both binary frames and JSON fallback. Browser-safe: no CF deps.
  */
 
-import type { FieldDescriptor, Infer, ParsedFrame, SchemaDefinition } from "@actor-kit/core";
-import { applyDelta, decode, FrameType, parseFrame, xxh64 } from "@actor-kit/core";
+import type { FieldDescriptor, Infer, ParsedFrame, RefusalCode, SchemaDefinition } from "@actor-kit/core";
+import {
+  ActorKitError,
+  applyDelta,
+  decode,
+  docsUrl,
+  FrameType,
+  isRefusalCode,
+  parseFrame,
+  xxh64,
+} from "@actor-kit/core";
 import { buildUrl } from "./url";
 
 export type ConnectionState = "connecting" | "connected" | "disconnected" | "reconnecting";
@@ -59,7 +68,49 @@ interface ClientOptions<TView = unknown> {
   /** WebSocket constructor. Defaults to the global WebSocket; RN/Node implementations also accept { headers }. */
   WebSocketImpl?: WebSocketConstructor | undefined;
   onRedirect?: ((target: { actorType: string; actorId: string }) => void) | undefined;
-  onError?: ((error: { message: string; error: string }) => void) | undefined;
+  /** A message the actor refused (ADR-018 C), or a server error frame this client cannot read (`invalid_frame`). */
+  onError?: ((error: ClientError) => void) | undefined;
+}
+
+/**
+ * What `onError` receives: the refusal the actor sent for a message (`messageType`), with its code, a
+ * message naming the fix, what it expected, details and a docs URL.
+ */
+export interface ClientError {
+  readonly messageType: string;
+  readonly code: RefusalCode | "invalid_frame";
+  readonly message: string;
+  readonly expected?: readonly string[];
+  readonly details?: unknown;
+  readonly docs: string;
+}
+
+function stringList(value: unknown): readonly string[] | undefined {
+  return Array.isArray(value) && value.every((item) => typeof item === "string") ? value : undefined;
+}
+
+function invalidFrame(messageType: string): ClientError {
+  return {
+    messageType,
+    code: "invalid_frame",
+    message:
+      "The server sent an error frame this client cannot read. Use the same @actor-kit version on the client and the Worker.",
+    docs: docsUrl("invalid_frame"),
+  };
+}
+
+/** `expected` and `details`, each only when the frame has it. */
+function optionalFields(expected: unknown, details: unknown): Pick<ClientError, "expected" | "details"> {
+  const list = stringList(expected);
+  return { ...(list === undefined ? {} : { expected: list }), ...(details === undefined ? {} : { details }) };
+}
+
+/** An __error frame as the ClientError it carries; one that does not parse is an `invalid_frame`. */
+function clientError(frame: Record<string, unknown>): ClientError {
+  const { code, message, docs } = frame;
+  const messageType = stringOr(frame["messageType"], "");
+  if (!isRefusalCode(code) || typeof message !== "string" || typeof docs !== "string") return invalidFrame(messageType);
+  return { messageType, code, message, ...optionalFields(frame["expected"], frame["details"]), docs };
 }
 
 /** The part of a WebSocket the client uses. The DOM WebSocket satisfies it. */
@@ -210,10 +261,7 @@ export function createActorClient(options: ClientOptions<unknown>): ActorClient<
         setConnectionState("connected");
         return;
       case "__error":
-        onError?.({
-          message: stringOr(msg["message"], ""),
-          error: stringOr(msg["error"], stringOr(msg["detail"], "unknown")),
-        });
+        onError?.(clientError(msg));
         return;
     }
   }
@@ -305,7 +353,10 @@ export function createActorClient(options: ClientOptions<unknown>): ActorClient<
     if (connectionState === "connecting" || connectionState === "connected") return;
     // getHeaders is native-only: fail loudly in browsers.
     if (getHeaders && isBrowserEnv()) {
-      throw new Error("getHeaders is not supported in browser environments — use getToken instead");
+      throw new ActorKitError(
+        "headers_in_browser",
+        "getHeaders is not supported in browser environments — use getToken instead",
+      );
     }
     clearReconnectTimer();
     if (connectionState === "disconnected") {

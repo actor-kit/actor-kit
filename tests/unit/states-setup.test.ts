@@ -87,8 +87,8 @@ describe("setup() with states", () => {
       },
     });
     const game = await simulate({ contracts: [Game] }).spawn(Game, "g", {});
-    expect(game.send("u", { type: "MOVE" })).toEqual({ ok: false, error: "wrong_state" });
-    expect(game.send("u", { type: "NOPE" })).toEqual({ ok: false, error: "message_not_found" });
+    expect(game.send("u", { type: "MOVE" })).toMatchObject({ ok: false, code: "wrong_state" });
+    expect(game.send("u", { type: "NOPE" })).toMatchObject({ ok: false, code: "unknown_message" });
   });
 
   it("goto() carries no local: the target state's enter builds it", () => {

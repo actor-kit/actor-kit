@@ -16,6 +16,7 @@
  * lookup never creates (auto-spawns) a phantom actor.
  */
 
+import { ActorKitError } from "@actor-kit/core";
 import { z } from "zod";
 import { type AccessDeps, authenticateStudio, hasScope, remoteAccessKeys, type StudioPrincipal } from "./access";
 import { getAsset } from "./ui-assets";
@@ -73,7 +74,7 @@ function hasRpc<K extends string>(stub: object, method: K): stub is RpcTarget<K>
 
 function callRpc<K extends string>(stub: object, method: K, ...args: unknown[]): Promise<unknown> {
   if (!hasRpc(stub, method)) {
-    return Promise.reject(new Error(`RPC method "${method}" not found on stub`));
+    return Promise.reject(new ActorKitError("studio_unavailable", `RPC method "${method}" not found on stub`));
   }
   return stub[method](...args);
 }

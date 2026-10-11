@@ -43,7 +43,7 @@ describe("Error feedback via WebSocket (integration)", () => {
 
     const parsed = JSON.parse(errorMsg);
     expect(parsed.type).toBe("__error");
-    expect(parsed.error).toBe("guard_failed");
+    expect(parsed.code).toBe("guard_failed");
 
     ws.close(1000);
     await new Promise((r) => setTimeout(r, 50));
@@ -89,7 +89,7 @@ describe("Error feedback via WebSocket (integration)", () => {
 
     const parsed = JSON.parse(errorMsg);
     expect(parsed.type).toBe("__error");
-    expect(parsed.error).toBe("validation_failed");
+    expect(parsed.code).toBe("invalid_payload");
 
     ws.close(1000);
     await new Promise((r) => setTimeout(r, 50));

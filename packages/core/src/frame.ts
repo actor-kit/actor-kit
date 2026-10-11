@@ -1,3 +1,4 @@
+import { ActorKitError } from "./errors";
 /**
  * Binary frame format for WebSocket communication.
  *
@@ -78,20 +79,31 @@ export interface ParsedFrame {
 
 function frameTypeOf(byte: number): FrameType {
   const type = Object.values(FrameType).find((t): t is FrameType => t === byte);
-  if (type === undefined) throw new Error(`Unknown frame type: ${byte}`);
+  if (type === undefined)
+    throw new ActorKitError(
+      "invalid_frame",
+      `Unknown frame type: ${byte}. Use the same @actor-kit version on the client and the Worker.`,
+    );
   return type;
 }
 
 function controlTypeOf(byte: number): ControlType {
   const type = Object.values(ControlType).find((t): t is ControlType => t === byte);
-  if (type === undefined) throw new Error(`Unknown control type: ${byte}`);
+  if (type === undefined)
+    throw new ActorKitError(
+      "invalid_frame",
+      `Unknown control type: ${byte}. Use the same @actor-kit version on the client and the Worker.`,
+    );
   return type;
 }
 
 /** Parses a frame. Throws on a short header or an unknown frame or control type. */
 export function parseFrame(frame: Uint8Array): ParsedFrame {
   if (frame.byteLength < HEADER_SIZE) {
-    throw new Error(`Frame too short: ${frame.byteLength} bytes (minimum ${HEADER_SIZE})`);
+    throw new ActorKitError(
+      "invalid_frame",
+      `Frame too short: ${frame.byteLength} bytes (minimum ${HEADER_SIZE}). Use the same @actor-kit version on the client and the Worker.`,
+    );
   }
 
   const view = new DataView(frame.buffer, frame.byteOffset, frame.byteLength);

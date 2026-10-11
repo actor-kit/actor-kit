@@ -9,7 +9,7 @@
  */
 
 import type { DeterministicContext } from "@actor-kit/core";
-import { xxh64 } from "@actor-kit/core";
+import { ActorKitError, xxh64 } from "@actor-kit/core";
 import { z } from "zod";
 import { realSources as guardedRealSources } from "./determinism";
 import { DeliveryInfoSchema } from "./effect-info";
@@ -32,8 +32,11 @@ const FactsSchema = z.object({
 export type Facts = z.infer<typeof FactsSchema>;
 
 /** Thrown on replay when a handler reads a fact the journal never recorded. */
-export class JournalNondeterminismError extends Error {
+export class JournalNondeterminismError extends ActorKitError {
   override name = "JournalNondeterminismError";
+  constructor(message: string) {
+    super("journal_nondeterminism", message);
+  }
 }
 
 export interface FactSources {
@@ -168,7 +171,7 @@ export type JournalOption = false | { keep?: number; checkpointEvery?: number } 
 
 function assertPositiveInteger(value: number, name: string): void {
   if (!Number.isInteger(value) || value < 1) {
-    throw new Error(`${name} must be a positive integer, got ${value}`);
+    throw new ActorKitError("invalid_journal_option", `${name} must be a positive integer, got ${value}`);
   }
 }
 
@@ -512,25 +515,28 @@ const TimerPayload = z.object({
 });
 
 function required<T>(value: T | undefined, what: string): T {
-  if (value === undefined) throw new Error(`Journal replay: ${what} is not defined on this actor`);
+  if (value === undefined)
+    throw new ActorKitError("journal_invalid", `Journal replay: ${what} is not defined on this actor`);
   return value;
 }
 
 function callerOf(event: JournalEvent): { caller: string; callerType: "user" | "service" } {
   if (event.caller === null || event.callerType === null) {
-    throw new Error(`Journal replay: event ${event.seq} (${event.causeType}) has no caller`);
+    throw new ActorKitError("journal_invalid", `Journal replay: event ${event.seq} (${event.causeType}) has no caller`);
   }
   return { caller: event.caller, callerType: event.callerType };
 }
 
 /** The message, service or link name an event was journaled under. */
 function nameOf(event: JournalEvent): string {
-  if (event.name === null) throw new Error(`Journal replay: event ${event.seq} (${event.causeType}) has no name`);
+  if (event.name === null)
+    throw new ActorKitError("journal_invalid", `Journal replay: event ${event.seq} (${event.causeType}) has no name`);
   return event.name;
 }
 
 function roleOf(event: JournalEvent): string {
-  if (event.role === null) throw new Error(`Journal replay: event ${event.seq} (${event.causeType}) has no role`);
+  if (event.role === null)
+    throw new ActorKitError("journal_invalid", `Journal replay: event ${event.seq} (${event.causeType}) has no role`);
   return event.role;
 }
 
@@ -606,7 +612,10 @@ async function replayEvent(
     return { state: (await stepInit(def, cause, facts, io)).state, timerOps: [], emitted: [] };
   }
   if (event.causeType === "restore") {
-    throw new Error("Journal replay: a restore event replays only within its journal (use foldJournal)");
+    throw new ActorKitError(
+      "journal_invalid",
+      "Journal replay: a restore event replays only within its journal (use foldJournal)",
+    );
   }
   const result = step(def, state, REPLAY_CAUSES[event.causeType](def, state, event), facts, env);
   return {
@@ -627,7 +636,7 @@ export async function applyJournalEvent(
 }
 
 /** Thrown when a replayed state's checksum differs from the one recorded when the event was written. */
-export class JournalDivergenceError extends Error {
+export class JournalDivergenceError extends ActorKitError {
   override name = "JournalDivergenceError";
   constructor(
     readonly seq: number,
@@ -638,13 +647,14 @@ export class JournalDivergenceError extends Error {
     readonly actual: string,
   ) {
     super(
+      "journal_divergence",
       `Journal replay diverged at seq ${seq} (${causeType}${causeName === null ? "" : ` ${causeName}`}): expected checksum ${expected}, got ${actual}`,
     );
   }
 }
 
 /** Thrown when replay emits different domain events than the journal recorded (ADR-017 §2). */
-export class JournalEmittedDivergenceError extends Error {
+export class JournalEmittedDivergenceError extends ActorKitError {
   override name = "JournalEmittedDivergenceError";
   constructor(
     readonly seq: number,
@@ -655,6 +665,7 @@ export class JournalEmittedDivergenceError extends Error {
     readonly actual: EmittedEvent | undefined,
   ) {
     super(
+      "journal_emitted_divergence",
       `Journal replay emitted different events at seq ${seq} (${causeType}), event ${index}: expected ${describeEmitted(expected)}, got ${describeEmitted(actual)}`,
     );
   }
@@ -774,7 +785,7 @@ async function foldToEnd(
   let expectedSeq = start.seq + 1;
   for (const event of events) {
     if (event.seq !== expectedSeq) {
-      throw new Error(`Journal replay: expected seq ${expectedSeq}, found ${event.seq}`);
+      throw new ActorKitError("journal_invalid", `Journal replay: expected seq ${expectedSeq}, found ${event.seq}`);
     }
     const folded = await foldEventEmitting(def, point, event, points, options);
     point = folded.point;
@@ -842,7 +853,10 @@ async function foldEventEmitting(
     const { toSeq } = RestorePayload.parse(event.payload);
     const target = points.get(toSeq);
     if (target === undefined) {
-      throw new Error(`Journal replay: event ${event.seq} restores to seq ${toSeq}, which this journal does not cover`);
+      throw new ActorKitError(
+        "journal_invalid",
+        `Journal replay: event ${event.seq} restores to seq ${toSeq}, which this journal does not cover`,
+      );
     }
     return { point: target, emitted: [] };
   }
@@ -858,7 +872,7 @@ async function foldEventEmitting(
 }
 
 /** Thrown when a journal event was written by a version with no path to the current one. */
-export class JournalVersionError extends Error {
+export class JournalVersionError extends ActorKitError {
   override name = "JournalVersionError";
   constructor(
     readonly seq: number,
@@ -866,6 +880,7 @@ export class JournalVersionError extends Error {
     readonly currentVersion: number,
   ) {
     super(
+      "journal_version",
       `Journal replay: event ${seq} was written by version ${codeVersion}, which has no path to version ${currentVersion}`,
     );
   }
@@ -895,7 +910,7 @@ function journalStart(def: ReplayableDef, journal: Journal, first: JournalEvent)
 
 function checkpointStart(def: ReplayableDef, journal: Journal, seq: number, missing: string) {
   const checkpoint = journal.checkpoints.find((c) => c.seq === seq);
-  if (checkpoint === undefined) throw new Error(`Journal replay: ${missing}`);
+  if (checkpoint === undefined) throw new ActorKitError("journal_invalid", `Journal replay: ${missing}`);
   return { seq, point: checkpointPoint(def, checkpoint) };
 }
 
@@ -930,7 +945,10 @@ export async function rebuildFromJournal(
   const events = [...journal.events].sort((a, b) => a.seq - b.seq);
   const first = events[0];
   if (first?.causeType !== "init") {
-    throw new Error(`Rebuilding by replay needs the whole journal: it starts at seq ${first?.seq ?? 0}`);
+    throw new ActorKitError(
+      "journal_invalid",
+      `Rebuilding by replay needs the whole journal: it starts at seq ${first?.seq ?? 0}`,
+    );
   }
   const { end } = await foldToEnd(def, { seq: 0, point: beforeInit() }, events, { ...options, rebuild: true });
   return end.state;

@@ -7,6 +7,7 @@
  * a descriptive error, never coerced.
  */
 
+import { ActorKitError } from "@actor-kit/core";
 import { z } from "zod";
 import { type RolePredicate, resolveRole } from "./roles";
 
@@ -41,7 +42,7 @@ const InspectOptionsSchema = z.object({ viewer: ViewerSchema }).strict().optiona
 export function parseInspectOptions(opts: unknown): { viewer: StudioViewer } {
   const parsed = InspectOptionsSchema.safeParse(opts);
   if (!parsed.success) {
-    throw new Error(`Invalid inspect options: ${parsed.error.message}`);
+    throw new ActorKitError("studio_unavailable", `Invalid inspect options: ${parsed.error.message}`);
   }
   return { viewer: parsed.data?.viewer ?? "human" };
 }
@@ -69,7 +70,7 @@ export interface TimelineQuery {
 export function parseTimelineOptions(opts: unknown): TimelineQuery {
   const parsed = TimelineOptionsSchema.safeParse(opts);
   if (!parsed.success) {
-    throw new Error(`Invalid timeline options: ${parsed.error.message}`);
+    throw new ActorKitError("studio_unavailable", `Invalid timeline options: ${parsed.error.message}`);
   }
   return {
     limit: parsed.data?.limit ?? DEFAULT_TIMELINE_LIMIT,
@@ -194,7 +195,7 @@ export type ViewOptions = z.infer<typeof ViewOptionsSchema>;
 export function parseViewOptions(opts: unknown): ViewOptions & { viewer: StudioViewer } {
   const parsed = ViewOptionsSchema.safeParse(opts);
   if (!parsed.success) {
-    throw new Error(`Invalid view options: ${parsed.error.message}`);
+    throw new ActorKitError("studio_unavailable", `Invalid view options: ${parsed.error.message}`);
   }
   return { ...parsed.data, viewer: parsed.data.viewer ?? "human" };
 }

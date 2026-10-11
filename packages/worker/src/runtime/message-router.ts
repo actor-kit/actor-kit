@@ -7,6 +7,7 @@
  */
 
 import type { GuardContext, MessageContext } from "@actor-kit/core";
+import { ActorKitError } from "@actor-kit/core";
 import type { z } from "zod";
 import { admitMessage } from "./step";
 
@@ -52,7 +53,8 @@ export function routeMessage<TState>(
 
   // Runtime guard: reject async handlers that slip past the type system (JS consumers, structural typing)
   if (nextState instanceof Promise) {
-    throw new Error(
+    throw new ActorKitError(
+      "async_handler",
       `Message handler for "${event.type}" returned a Promise. Handlers must be synchronous — use execute() for async side effects.`,
     );
   }

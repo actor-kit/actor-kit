@@ -37,7 +37,11 @@ Auth (environment):
   (none)                                          localhost dev mode
 `;
 
-class UsageError extends Error {}
+/** A command line the CLI cannot run (ADR-018 C: a stable code and a docs URL). */
+class UsageError extends Error {
+  readonly code = "cli_usage";
+  readonly docs = "https://actorkit.dev/errors/cli_usage/";
+}
 
 function positiveInt(name: string, value: string | undefined): number | undefined {
   if (value === undefined) return undefined;

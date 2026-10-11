@@ -79,7 +79,7 @@ describe("testActor over step(): states", () => {
     const t = testActor(QuizContract);
     const error = await refusalOf(() => t.send(t.init({}), "ann", { type: "ANSWER", text: "1" }));
     expect(error.code).toBe("wrong_state");
-    expect(error.message).toContain('"ANSWER"');
+    expect(error.message).toBe("ANSWER is accepted in round; the actor is in lobby.");
   });
 });
 

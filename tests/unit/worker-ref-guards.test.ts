@@ -161,9 +161,10 @@ describe("ActorRef on a stub without methods", () => {
   it("send reports that the stub has no send", async () => {
     const { namespace } = fakeNamespace({});
     const ref = createRef({ ZONE: namespace }, "ZONE", "z-1");
-    await expect(ref.send("u", "user", { type: "PING" })).resolves.toEqual({
+    await expect(ref.send("u", "user", { type: "PING" })).resolves.toMatchObject({
       ok: false,
-      error: "stub.send not available",
+      code: "actor_not_found",
+      message: expect.stringMatching(/^stub\.send not available: /),
     });
   });
 
@@ -171,6 +172,7 @@ describe("ActorRef on a stub without methods", () => {
     const { namespace } = fakeNamespace({});
     const ref = createRef({ ZONE: namespace }, "ZONE", "z-1");
     const error = await rejection(ref.getSnapshot("u", "user"));
-    expect(error.message).toBe("stub.getSnapshot not available");
+    expect(error.message).toMatch(/^stub\.getSnapshot not available: /);
+    expect(error).toMatchObject({ code: "actor_not_found" });
   });
 });

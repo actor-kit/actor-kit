@@ -15,11 +15,11 @@
  */
 
 import type { DeliveryInfo, DeterministicContext, GuardContext, ScheduleOptions } from "@actor-kit/core";
+import { ActorKitError } from "@actor-kit/core";
 import { parseDuration } from "./duration";
 import { createReplayFacts, type Facts, type JournalDraft, type LiveFacts } from "./journal";
 import { createOutbox, type UnlinkCall } from "./outbox";
 import {
-  declaredInSomeState,
   goto,
   type PhasedState,
   PhaseTransition,
@@ -27,8 +27,10 @@ import {
   phasedState,
   type StepStateDef,
   stateDef,
+  statesDeclaring,
   stay,
 } from "./phases";
+import type { ParseIssue } from "./refusal";
 import { resolveRole } from "./roles";
 import type { ErrorsParser } from "./service-error";
 import type { Trace } from "./trace";
@@ -37,7 +39,11 @@ import type { Trace } from "./trace";
 
 export interface StepMessageSlot {
   readonly schema: {
-    safeParse(data: unknown): { success: true; data: unknown } | { success: false; error: { message: string } };
+    safeParse(
+      data: unknown,
+    ):
+      | { success: true; data: unknown }
+      | { success: false; error: { message: string; issues?: readonly ParseIssue[] | undefined } };
   };
   handler(state: unknown, payload: unknown, ctx: unknown): unknown;
   guard?(state: unknown, payload: unknown, ctx: GuardContext): boolean;
@@ -259,10 +265,13 @@ export interface StepResult {
 
 export type Admission<M = unknown> =
   | { ok: true; payload: unknown; message: M }
-  | { ok: false; error: "message_not_found" | "validation_failed" | "guard_failed"; detail?: string };
+  | { ok: false; error: "message_not_found" | "guard_failed" }
+  | { ok: false; error: "validation_failed"; detail: string; issues?: readonly ParseIssue[] | undefined };
 
-/** Admission for an actor that may have states: also `wrong_state`. */
-export type StepAdmission<M = unknown> = Admission<M> | { ok: false; error: "wrong_state" };
+/** Admission for an actor that may have states: also `wrong_state` (the current phase, the states that accept it). */
+export type StepAdmission<M = unknown> =
+  | Admission<M>
+  | { ok: false; error: "wrong_state"; phase: string; acceptedIn: readonly string[] };
 
 /**
  * Admit a message for an actor, with or without `states` (ADR-017 §1). With states, a message is
@@ -287,8 +296,9 @@ export function admitStepMessage(
   const inPhase = stateDef(states, current.phase).messages?.[event.type];
   const message = inPhase ?? roleMessages[role]?.[event.type];
   if (message === undefined) {
-    const wrong = declaredInSomeState(states, event.type);
-    return { ok: false, error: wrong ? "wrong_state" : "message_not_found" };
+    const acceptedIn = statesDeclaring(states, event.type);
+    if (acceptedIn.length === 0) return { ok: false, error: "message_not_found" };
+    return { ok: false, error: "wrong_state", phase: current.phase, acceptedIn };
   }
   const phaseCtx = { ...ctx, phase: current.phase, local: current.local };
   return admitMessage({ [role]: { [event.type]: message } }, role, current.shared, event, phaseCtx);
@@ -306,7 +316,9 @@ export function admitMessage<M extends Pick<StepMessageSlot, "schema" | "guard">
   if (message === undefined) return { ok: false, error: "message_not_found" };
   const { type: _type, ...payload } = event;
   const parsed = message.schema.safeParse(payload);
-  if (!parsed.success) return { ok: false, error: "validation_failed", detail: parsed.error.message };
+  if (!parsed.success) {
+    return { ok: false, error: "validation_failed", detail: parsed.error.message, issues: parsed.error.issues };
+  }
   if (message.guard !== undefined && !message.guard(state, parsed.data, { ...ctx, role })) {
     return { ok: false, error: "guard_failed" };
   }
@@ -316,7 +328,7 @@ export function admitMessage<M extends Pick<StepMessageSlot, "schema" | "guard">
 // --- step ---
 
 function assertSync(next: unknown, message: string): void {
-  if (next instanceof Promise) throw new Error(message);
+  if (next instanceof Promise) throw new ActorKitError("async_handler", message);
 }
 
 function draft(
@@ -352,10 +364,15 @@ function applyUnlinks(def: StepDef, state: unknown, effects: StepEffects, facts:
 /** When a timer fires: `at`, or ctx.now() + `in`. Exactly one of the two. */
 function fireAtOf(options: ScheduleOptions, det: DeterministicContext): number {
   if ((options.in === undefined) === (options.at === undefined)) {
-    throw new Error("ctx.schedule needs exactly one of `in` and `at`");
+    throw new ActorKitError("invalid_schedule", "ctx.schedule needs exactly one of `in` and `at`");
   }
   if (options.at !== undefined) {
-    if (!Number.isFinite(options.at)) throw new Error(`ctx.schedule: invalid \`at\` ${options.at}`);
+    if (!Number.isFinite(options.at)) {
+      throw new ActorKitError(
+        "invalid_schedule",
+        `ctx.schedule: invalid \`at\` ${options.at}: pass a finite time in ms`,
+      );
+    }
     return options.at;
   }
   return det.now() + parseDuration(options.in);
@@ -365,9 +382,16 @@ function fireAtOf(options: ScheduleOptions, det: DeterministicContext): number {
 function emitVerb(def: StepDef, effects: StepEffects): (name: string, payload: unknown) => void {
   return (name, payload) => {
     const schema = def.events?.[name];
-    if (schema === undefined) throw new Error(`Event "${name}" is not declared on this actor`);
+    if (schema === undefined) {
+      throw new ActorKitError(
+        "undeclared_event",
+        `Event "${name}" is not declared on this actor. Declare it in setup({ events }) and pass the kit's events to the actor.`,
+      );
+    }
     const parsed = schema.safeParse(payload);
-    if (!parsed.success) throw new Error(`Event "${name}": invalid payload: ${parsed.error.message}`);
+    if (!parsed.success) {
+      throw new ActorKitError("invalid_event_payload", `Event "${name}": invalid payload: ${parsed.error.message}`);
+    }
     effects.emit(name, parsed.data);
   };
 }
@@ -383,9 +407,16 @@ function timerVerbs(def: StepDef, effects: StepEffects, det: DeterministicContex
   return {
     schedule: (name: string, options: ScheduleOptions): void => {
       const timer = findTimer(def, phase, name);
-      if (timer === undefined) throw new Error(`Timer "${name}" is not declared on this actor`);
+      if (timer === undefined) {
+        throw new ActorKitError(
+          "undeclared_timer",
+          `Timer "${name}" is not declared on this actor. Declare it in timers: { ${name}: timer(schema, handler) }.`,
+        );
+      }
       const parsed = timer.schema.safeParse(options.payload);
-      if (!parsed.success) throw new Error(`Timer "${name}": invalid payload: ${parsed.error.message}`);
+      if (!parsed.success) {
+        throw new ActorKitError("invalid_timer_payload", `Timer "${name}": invalid payload: ${parsed.error.message}`);
+      }
       effects.schedule(
         { name, key: options.key ?? null, payload: parsed.data ?? null, fireAt: fireAtOf(options, det) },
         { timer: name, options },
@@ -528,7 +559,12 @@ function stepMessage(
   env: unknown,
 ): StepResult {
   const slot = messageSlot(def, state, cause.role, cause.name);
-  if (slot === undefined) throw new Error(`Message "${cause.name}" is not defined for role "${cause.role}"`);
+  if (slot === undefined) {
+    throw new ActorKitError(
+      "unknown_message",
+      `Message "${cause.name}" is not defined for role "${cause.role}". Add it to the role's messages (or a versions step for a removed message).`,
+    );
+  }
   const effects = createOutbox();
   const base = {
     ...facts.ctx,
@@ -788,9 +824,17 @@ export function initialState(def: Pick<StepDef, "states" | "initial">, shared: u
 
 /** An actor with states starts in `initial`, which has no local (nothing to build it from yet). */
 function initialPhase(states: Record<string, StepStateDef>, initial: string | undefined, shared: unknown): PhasedState {
-  if (initial === undefined) throw new Error("An actor with states needs `initial`");
+  if (initial === undefined) {
+    throw new ActorKitError(
+      "missing_initial",
+      'An actor with states needs `initial`: add initial: "<state>" to the definition.',
+    );
+  }
   if (stateDef(states, initial).local !== undefined) {
-    throw new Error(`The initial state "${initial}" cannot have a local: it is entered before any input exists`);
+    throw new ActorKitError(
+      "initial_state_local",
+      `The initial state "${initial}" cannot have a local: it is entered before any input exists`,
+    );
   }
   return { shared, phase: initial, local: null, stateTimers: [] };
 }
@@ -809,7 +853,8 @@ export async function stepInit(
   io: { env: unknown; link: (name: string, id: string) => Promise<unknown> },
 ): Promise<{ state: unknown; event: JournalDraft }> {
   const init = def.init;
-  if (init === undefined) throw new Error("This actor has no init");
+  if (init === undefined)
+    throw new ActorKitError("invalid_actor_definition", "This actor has no init: add init(input) to the definition.");
   // Guarded until init's first await (an async init's later part runs outside the guard).
   const shared = await guarded(facts, () => init(cause.input, { env: io.env, link: io.link, ...facts.ctx }));
   return {

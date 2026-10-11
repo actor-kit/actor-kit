@@ -1,3 +1,4 @@
+import { ActorKitError } from "@actor-kit/core";
 /**
  * Studio redaction (ADR-014): `studio: { redact: ["players.*.name", "**.email"] }`.
  *
@@ -22,13 +23,17 @@ type Pattern = readonly Segment[];
 type Cursor = readonly [number, Pattern, number];
 
 function parsePattern(raw: string): Pattern {
-  if (raw === "") throw new Error("studio.redact patterns must not be empty");
+  if (raw === "") throw new ActorKitError("invalid_redact_pattern", "studio.redact patterns must not be empty");
   return raw.split(".").map((part): Segment => {
-    if (part === "") throw new Error(`studio.redact pattern "${raw}" has an empty segment`);
+    if (part === "")
+      throw new ActorKitError("invalid_redact_pattern", `studio.redact pattern "${raw}" has an empty segment`);
     if (part === "*") return { kind: "one" };
     if (part === "**") return { kind: "any" };
     if (part.includes("*")) {
-      throw new Error(`studio.redact pattern "${raw}": "*" and "**" must be whole segments`);
+      throw new ActorKitError(
+        "invalid_redact_pattern",
+        `studio.redact pattern "${raw}": "*" and "**" must be whole segments`,
+      );
     }
     return { kind: "literal", key: part };
   });

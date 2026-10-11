@@ -20,7 +20,8 @@
  * - `branch()` copies the whole simulation, so alternative futures can be explored.
  */
 
-import type { ContractMessages, Duration } from "@actor-kit/core";
+import type { ContractMessages, Duration, Refusal } from "@actor-kit/core";
+import { ActorKitError } from "@actor-kit/core";
 import {
   admitStepMessage,
   checksumState,
@@ -43,6 +44,8 @@ import {
   parseDuration,
   parseEffectId,
   publishedMessages,
+  refuseAdmission,
+  refuseNoRole,
   resolveJournalConfig,
   resolvePublish,
   resolveRole,
@@ -102,7 +105,8 @@ export interface SimEvent {
   readonly payload: unknown;
 }
 
-export type SendOutcome = { ok: true } | { ok: false; error: string; detail?: string };
+/** A message's outcome: accepted, or a typed refusal (ADR-018 C). */
+export type SendOutcome = { ok: true } | Refusal;
 
 export interface CallerOptions {
   readonly callerType?: "user" | "service";
@@ -233,7 +237,8 @@ function errorOf(
   if (!isTaggedError(error)) return defectError(error.message);
   const builtIn = BuiltInErrorSchema.safeParse(error);
   if (builtIn.success) return builtIn.data;
-  if (isBuiltInError(error)) throw new Error(`simulate: invalid ${error._tag} error: ${builtIn.error.message}`);
+  if (isBuiltInError(error))
+    throw new ActorKitError("invalid_rejection", `simulate: invalid ${error._tag} error: ${builtIn.error.message}`);
   return declaredError(error, service, errors);
 }
 
@@ -244,10 +249,16 @@ function declaredError(
   errors: ErrorsParser | undefined,
 ): Readonly<Record<string, unknown>> {
   if (errors === undefined)
-    throw new Error(`simulate: service "${service}" declares no errors to reject with "${error._tag}"`);
+    throw new ActorKitError(
+      "invalid_rejection",
+      `simulate: service "${service}" declares no errors to reject with "${error._tag}"`,
+    );
   const parsed = errors.safeParse(error);
   if (!parsed.success) {
-    throw new Error(`simulate: "${error._tag}" does not match service "${service}"'s errors: ${parsed.error.message}`);
+    throw new ActorKitError(
+      "invalid_rejection",
+      `simulate: "${error._tag}" does not match service "${service}"'s errors: ${parsed.error.message}`,
+    );
   }
   return isTaggedError(parsed.data) ? { ...parsed.data } : defectError(`"${error._tag}" parsed to an untagged value`);
 }
@@ -292,7 +303,7 @@ function createSimulation(
 
   function defOf(type: string): SimDef {
     const entry = contracts.get(type);
-    if (entry === undefined) throw new Error(`simulate: unknown contract "${type}"`);
+    if (entry === undefined) throw new ActorKitError("not_spawned", `simulate: unknown contract "${type}"`);
     return entry.def;
   }
 
@@ -315,7 +326,7 @@ function createSimulation(
 
   function record(address: ActorAddress): ActorData {
     const actor = data.actors[keyOf(address)];
-    if (actor === undefined) throw new Error(`simulate: ${keyOf(address)} has not been spawned`);
+    if (actor === undefined) throw new ActorKitError("not_spawned", `simulate: ${keyOf(address)} has not been spawned`);
     return actor;
   }
 
@@ -543,13 +554,13 @@ function createSimulation(
     const def = defOf(actor.type);
     const callerType = options.callerType ?? "user";
     const role = resolveRole(def.roles, actor.state, caller, { callerType });
-    if (role === null) return { ok: false, error: "No role matched" };
+    if (role === null) return refuseNoRole(caller, callerType);
     const admission = admitStepMessage(def, role, actor.state, message, {
       caller,
       callerType,
       env: envFor(actor.type),
     });
-    if (!admission.ok) return admission;
+    if (!admission.ok) return refuseAdmission(def, actor.state, role, message.type, admission, { caller, callerType });
     const cause: StepCause = {
       type: "message",
       name: message.type,
@@ -571,7 +582,8 @@ function createSimulation(
     const def = defOf(actor.type);
     const callerType = options.callerType ?? "user";
     const role = resolveRole(def.roles, actor.state, caller, { callerType });
-    if (role === null) throw new Error(`simulate: no role matched for "${caller}" (connection refused)`);
+    if (role === null)
+      throw new ActorKitError("no_role", `simulate: no role matched for "${caller}" (connection refused)`);
     const slot = `${callerType}:${caller}`;
     const lifecycle = (type: "lifecycle.connect" | "lifecycle.disconnect", connectionRole: string | null) => {
       const callerConnections = actor.connections[slot] ?? 0;
@@ -586,7 +598,8 @@ function createSimulation(
     let open = true;
     return {
       disconnect() {
-        if (!open) throw new Error(`simulate: this connection of "${caller}" is already closed`);
+        if (!open)
+          throw new ActorKitError("connection_closed", `simulate: this connection of "${caller}" is already closed`);
         open = false;
         actor.connections[slot] = (actor.connections[slot] ?? 1) - 1;
         lifecycle("lifecycle.disconnect", null);
@@ -601,9 +614,12 @@ function createSimulation(
         : data.pending.filter((p) => p.effectId === effect.effectId && keyOf(p.actor) === keyOf(effect.actor));
     const [match] = matches;
     const id = typeof effect === "string" ? effect : effect.effectId;
-    if (match === undefined) throw new Error(`simulate: No pending effect "${id}"`);
+    if (match === undefined) throw new ActorKitError("unknown_effect", `simulate: No pending effect "${id}"`);
     if (matches.length > 1) {
-      throw new Error(`simulate: effect id "${id}" is ambiguous (${matches.length} actors); pass the pending effect`);
+      throw new ActorKitError(
+        "unknown_effect",
+        `simulate: effect id "${id}" is ambiguous (${matches.length} actors); pass the pending effect`,
+      );
     }
     return match;
   }
@@ -648,7 +664,10 @@ function createSimulation(
       const due = nextDueTimer(until);
       if (due === null) break;
       if (firings >= MAX_TIMER_FIRINGS) {
-        throw new Error(`simulate: more than ${MAX_TIMER_FIRINGS} timers fired in one advance (a timer loop?)`);
+        throw new ActorKitError(
+          "timer_loop",
+          `simulate: more than ${MAX_TIMER_FIRINGS} timers fired in one advance (a timer loop?)`,
+        );
       }
       fire(due.actor, due.timer);
     }
@@ -683,9 +702,9 @@ function createSimulation(
         const actor = record(address);
         const def = defOf(actor.type);
         const role = resolveRole(def.roles, actor.state, caller, { callerType: options.callerType ?? "user" });
-        if (role === null) throw new Error(`simulate: no role matched for "${caller}"`);
+        if (role === null) throw new ActorKitError("no_role", `simulate: no role matched for "${caller}"`);
         const viewDef = def.views[role];
-        if (viewDef === undefined) throw new Error(`simulate: no view for role "${role}"`);
+        if (viewDef === undefined) throw new ActorKitError("no_view", `simulate: no view for role "${role}"`);
         return viewDef.fn(actor.state, caller);
       },
       connect: (caller, options) => connect(address, caller, options),
@@ -694,13 +713,17 @@ function createSimulation(
 
   async function initLink(name: string, id: string, def: SimDef): Promise<unknown> {
     const target = def.links?.[name];
-    if (target === undefined) throw new Error(`Link "${name}" not declared in actor definition`);
+    if (target === undefined)
+      throw new ActorKitError("undeclared_link", `Link "${name}" not declared in actor definition`);
     const linked = handle({ type: target.contract.name, id });
     const role = linked.role("system", { callerType: "service" });
-    if (role === null) throw new Error(`Link "${name}": no role for the linking actor`);
+    if (role === null) throw new ActorKitError("link_unavailable", `Link "${name}": no role for the linking actor`);
     const view = LinkedViewSchema.safeParse(linked.view("system", { callerType: "service" }));
     if (!view.success) {
-      throw new Error(`Link "${name}": the target's view is not an object: ${view.error.issues[0]?.message}`);
+      throw new ActorKitError(
+        "link_unavailable",
+        `Link "${name}": the target's view is not an object: ${view.error.issues[0]?.message}`,
+      );
     }
     return { role, ...view.data };
   }
@@ -714,10 +737,11 @@ function createSimulation(
     const def = register(contract);
     const address = { type: contract.name, id };
     return (async () => {
-      if (data.actors[keyOf(address)] !== undefined) throw new Error(`simulate: ${keyOf(address)} is already spawned`);
+      if (data.actors[keyOf(address)] !== undefined)
+        throw new ActorKitError("already_spawned", `simulate: ${keyOf(address)} is already spawned`);
       publishOf(def);
       const parsed = def.input.safeParse(input);
-      if (!parsed.success) throw new Error(`Invalid input: ${parsed.error.message}`);
+      if (!parsed.success) throw new ActorKitError("invalid_input", `Invalid input: ${parsed.error.message}`);
       const links: Array<{ name: string; id: string }> = [];
       const live = createLiveFacts(sources);
       const facts = { ...liveStepFacts(live, () => []), guard: withDeterminismGuard };

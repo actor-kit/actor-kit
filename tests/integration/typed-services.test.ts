@@ -135,7 +135,7 @@ describe("idempotency (ADR-016 §1)", () => {
         attempt: 1,
       },
     );
-    expect(refused).toMatchObject({ ok: false, error: "invalid_delivery" });
+    expect(refused).toMatchObject({ ok: false, code: "invalid_delivery" });
     const { state } = TillInspect.parse(await target.stub.__inspect());
     expect(state.received).toEqual([{ text: "direct", delivery: null }]);
   });

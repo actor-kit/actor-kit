@@ -43,7 +43,7 @@ describe("Counter DO lifecycle", () => {
 
     const sendResult = await stub.send("user-1", "user", { type: "RESET" });
     expect(sendResult.ok).toBe(false);
-    expect(sendResult.error).toBe("guard_failed");
+    expect(sendResult.ok === false && sendResult.code).toBe("guard_failed");
   });
 
   it("admin can reset", async () => {
@@ -64,7 +64,7 @@ describe("Counter DO lifecycle", () => {
 
     const sendResult = await stub.send("user-1", "user", { type: "INCREMENT", amount: -5 });
     expect(sendResult.ok).toBe(false);
-    expect(sendResult.error).toBe("validation_failed");
+    expect(sendResult.ok === false && sendResult.code).toBe("invalid_payload");
   });
 
   it("persists state across DO restarts", async () => {

@@ -16,7 +16,7 @@ describe("Roles and authorization (integration)", () => {
 
     const resetResult = await stub.send("user-1", "user", { type: "RESET" });
     expect(resetResult.ok).toBe(false);
-    expect(resetResult.error).toBe("guard_failed");
+    expect(resetResult.ok === false && resetResult.code).toBe("guard_failed");
   });
 
   it("service caller gets admin role with full access", async () => {
@@ -61,7 +61,7 @@ describe("Payload validation (integration)", () => {
 
     const result = await stub.send("user-1", "user", { type: "INCREMENT", amount: -5 });
     expect(result.ok).toBe(false);
-    expect(result.error).toBe("validation_failed");
+    expect(result.ok === false && result.code).toBe("invalid_payload");
   });
 
   it("rejects float amount (schema: integer)", async () => {
@@ -70,7 +70,7 @@ describe("Payload validation (integration)", () => {
 
     const result = await stub.send("user-1", "user", { type: "INCREMENT", amount: 1.5 });
     expect(result.ok).toBe(false);
-    expect(result.error).toBe("validation_failed");
+    expect(result.ok === false && result.code).toBe("invalid_payload");
   });
 
   it("rejects missing required field", async () => {
@@ -79,7 +79,7 @@ describe("Payload validation (integration)", () => {
 
     const result = await stub.send("user-1", "user", { type: "INCREMENT" });
     expect(result.ok).toBe(false);
-    expect(result.error).toBe("validation_failed");
+    expect(result.ok === false && result.code).toBe("invalid_payload");
   });
 
   it("rejects unknown message type", async () => {
@@ -88,7 +88,7 @@ describe("Payload validation (integration)", () => {
 
     const result = await stub.send("user-1", "user", { type: "NONEXISTENT" });
     expect(result.ok).toBe(false);
-    expect(result.error).toBe("message_not_found");
+    expect(result.ok === false && result.code).toBe("unknown_message");
   });
 });
 
@@ -104,7 +104,7 @@ describe("Payload guards (integration)", () => {
     // Add 20 — exceeds limit (90 + 20 > 100)
     const r2 = await stub.send("user-1", "user", { type: "GUARDED_ADD", amount: 20 });
     expect(r2.ok).toBe(false);
-    expect(r2.error).toBe("guard_failed");
+    expect(r2.ok === false && r2.code).toBe("guard_failed");
 
     // Add 10 — exactly at limit (90 + 10 = 100)
     const r3 = await stub.send("user-1", "user", { type: "GUARDED_ADD", amount: 10 });

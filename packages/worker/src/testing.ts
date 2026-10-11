@@ -150,8 +150,14 @@ export { phasedState } from "./runtime/phases";
 export type { PublishConfig, PublishedBody, PublishedMessage, PublishOption } from "./runtime/publish";
 export { PUBLISH_SERVICE, publishedMessages, resolvePublish, sendToQueue } from "./runtime/publish";
 // Typed refusals (ADR-018 C, D)
-export type { AdmissionError, RefusalCode } from "./runtime/refusal";
-export { RefusalError, refusalCode } from "./runtime/refusal";
+export type { AdmissionError, ParseIssue, RefusalDef, RefusedAdmission, RefusedCaller } from "./runtime/refusal";
+export {
+  refusalCode,
+  refuseAdmission,
+  refuseInvalidDelivery,
+  refuseNoRole,
+  refuseNotInitialized,
+} from "./runtime/refusal";
 // Namespace resolution
 export { resolveNamespace } from "./runtime/resolve-namespace";
 export type { RestorePlan } from "./runtime/restore";
