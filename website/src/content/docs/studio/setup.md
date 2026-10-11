@@ -86,7 +86,7 @@ Every Studio request logs one `studio.request` JSON line (principal, subject, ro
 Values an actor declares in `studio.redact` are replaced with `"[redacted]"` **inside the Durable Object**, before anything is returned to Studio, for everyone, people included:
 
 ```typescript
-const Game = defineActor("game", {
+const Game = game.actor("game", {
   // ...
   studio: { redact: ["players.*.name", "**.email"] },
 });
@@ -113,7 +113,7 @@ actor-kit studio view game room-7 --role player --caller <id>
 If you want timeline recording without the registry (e.g., for testing), pass `studio: { enabled: true }` in your actor definition:
 
 ```typescript
-const Counter = defineActor("counter", {
+const Counter = counter.actor("counter", {
   // ... your actor definition
   studio: { enabled: true },
 });
@@ -129,7 +129,7 @@ separate timeline table or size. The journal keeps everything by default; to bou
 timeline), set `journal.keep`:
 
 ```typescript
-const Counter = defineActor("counter", {
+const Counter = counter.actor("counter", {
   // ... your actor definition
   journal: { keep: 10_000 }, // roughly the newest 10,000 events
 });

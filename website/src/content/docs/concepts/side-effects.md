@@ -14,10 +14,13 @@ Async handlers inside DOs make this worse: `await` allows message interleaving (
 Actors declare named **services** at the module level. Message handlers trigger them with `execute()`. The framework handles persistence, execution, and crash recovery.
 
 ```typescript
-import { defineActor, message } from "@actor-kit/worker";
+import { queue, setup } from "@actor-kit/worker";
 import { z } from "zod";
 
-defineActor("cart", {
+const cart = setup({ env: z.object({ ANALYTICS: queue<{ event: string }>() }) });
+
+cart.actor("cart", {
+  // input, init, roles, views ...
   services: {
     fetchPrice: {
       fn: async (input: { itemId: string }, env) => {
@@ -32,7 +35,7 @@ defineActor("cart", {
       }),
       onError: (state, error, input) => ({
         ...state,
-        error: `${input.itemId}: ${error.message}`,
+        error: `${input.itemId}: ${error._tag}`,
         status: "failed",
       }),
     },
@@ -43,7 +46,7 @@ defineActor("cart", {
     },
   },
   messages: {
-    FETCH_PRICE: message(z.object({ itemId: z.string() }), (state, { itemId }, { execute }) => {
+    FETCH_PRICE: cart.message(z.object({ itemId: z.string() }), (state: CartState, { itemId }, { execute }) => {
       execute("fetchPrice", { itemId });
       return { ...state, status: "loading" };
     }),
@@ -64,20 +67,23 @@ All three are declared at module level — no closures, fully serializable, cras
 
 ## Typed env
 
-Declare the bindings an actor uses as a Zod object; the runtime parses the Worker env against it once, before the actor serves anything:
+Declare the bindings an actor uses as a Zod object in its kit; the runtime parses the Worker env against it once, before the actor serves anything:
 
 ```typescript
-import { d1, defineActor, durableObject, kv, queue, r2, service } from "@actor-kit/worker";
+import { d1, durableObject, kv, queue, r2, service, setup } from "@actor-kit/worker";
 
-defineActor("checkout", {
+const checkout = setup({
   env: z.object({ PAYMENTS: service<PaymentsApi>(), SESSIONS: kv(), STRIPE_PUBLISHABLE_KEY: z.string().min(1) }),
+});
+
+checkout.actor("checkout", {
   // ...
 });
 ```
 
 - `service<T>()`, `durableObject<T>()`, `queue<T>()`, `kv()`, `r2()` and `d1()` check a binding's runtime shape (its methods) and type it; plain Zod schemas check vars and secrets.
 - If the env does not parse, the actor refuses every request with a **500 naming each missing or wrong binding** (RPC calls throw the same message) and logs one structured line (`actor_kit.env.invalid`, binding names and reasons, never values). It never runs a handler against an unchecked env.
-- Services' `fn(input, env, effect)`, `onDone`/`onError`'s `ctx.env` and lifecycle handlers' `ctx.env` are typed `z.infer<typeof env>` by `defineActor`, and see the parsed env (the declared bindings only). Message and timer handlers are written with `message()` / `timer()`, whose types TypeScript fixes before `defineActor` sees them: annotate `ctx: MessageContext<z.infer<typeof Env>>` there.
+- `ctx.env` is typed `z.infer<typeof env>` everywhere, with no annotations: in `checkout.message()` / `checkout.timer()` / `checkout.in(state)` handlers, services' `fn(input, env, effect)`, `onDone`/`onError`'s `ctx.env` and lifecycle handlers' `ctx.env`. All of them see the parsed env (the declared bindings only).
 - Without `env`, env stays `unknown` and handlers get the Worker env as it is.
 - Tests take fakes typed against the schema and parse them the same way: `testActor(Contract, { env: fakes })`, `simulate({ env: { checkout: fakes } })` (keyed by contract name).
 
@@ -86,7 +92,7 @@ defineActor("checkout", {
 A service fails with a value, not a string. Declare its failures as a tagged union and throw `fail(...)`:
 
 ```typescript
-import { defineActor, fail } from "@actor-kit/worker";
+import { fail } from "@actor-kit/worker";
 
 services: {
   charge: {
@@ -111,7 +117,7 @@ services: {
 ```
 
 - `fail(error)` marks a declared failure. The runtime parses it against `errors`; a value that doesn't parse becomes a `Defect`.
-- Every service's error union also has two built-ins: `{ _tag: "Timeout", ms }` (the try ran out of time) and `{ _tag: "Defect", message }` (anything thrown that isn't `fail(...)`). Without `errors`, the union is just these two.
+- Every service's error union also has three built-ins: `{ _tag: "Timeout", ms }` (the try ran out of time), `{ _tag: "Defect", message }` (anything thrown that isn't `fail(...)`, or a result its `result` schema refuses) and `{ _tag: "Evicted" }` (the actor was evicted while the try ran). Without `errors`, the union is just these three.
 - **Default retry rule: the built-ins are retried, declared errors are not.** A declared error is a domain answer, not a transient fault: a declined card fails at once and `onError` runs. `retry.while(error)` overrides the rule per error (above, a rate limit is retried too).
 - The journal stores the parsed error, so replay and restore deliver the same typed value to `onError`.
 - Studio's Outbox shows the error's `_tag` in the Last error column. A declared error's fields are application values, redacted by `studio.redact` like payloads.
@@ -124,7 +130,56 @@ Every try runs under its service's `timeoutMs` (default 30 seconds), and every f
 - a restore undoes the transition that declared the effect (the row becomes a dead letter);
 - an operator redrives the effect while an earlier try of it is still running.
 
-A result that arrives after its try was aborted is discarded, never applied. A forward's RPC cannot be cancelled mid-flight, but its late answer is discarded the same way. The Workers runtime gives a Durable Object no shutdown hook: tries in flight when an isolate is evicted die with it and run again on wake (delivery is at least once).
+A result that arrives after its try was aborted is discarded, never applied. A forward's RPC cannot be cancelled mid-flight, but its late answer is discarded the same way. The Workers runtime gives a Durable Object no shutdown hook: tries in flight when an isolate is evicted die with it; what happens next depends on the service's delivery mode (below).
+
+## Handles: the effect id, `ctx.cancel` and `ctx.effectId`
+
+`ctx.execute()` returns the call's effect id. Keep it in state to cancel the call later, or to match its result:
+
+```typescript
+const checkout = setup({});
+
+BUY: checkout.message(z.object({ cents: z.number() }), (s: S, { cents }, ctx) => ({
+  ...s,
+  pending: ctx.execute("charge", { cents }), // "812:0"
+})),
+ABANDON: checkout.message(z.object({}), (s: S, _p, ctx) => {
+  if (s.pending !== null) ctx.cancel(s.pending);
+  return { ...s, pending: null };
+}),
+```
+
+`ctx.cancel(effectId)` (the same verb that cancels a timer by key) cancels a call that has not finished: one not yet run never runs, one in flight has its `effect.signal` aborted and its late result discarded. The row ends as `cancelled`; no callback runs. `onDone` and `onError` get the call's id as `ctx.effectId`.
+
+## Results: schemas, size and audit facts
+
+Declare `result` to parse what `fn` returns. Only the parsed value is journaled and passed to `onDone`, live and on replay, and `onDone`'s `result` is typed by it when the service comes from `kit.service()`:
+
+```typescript
+services: {
+  charge: checkout.service({
+    result: z.object({ chargeId: z.string() }),
+    fn: async ({ cents }, env, effect) => {
+      const res = await env.PAYMENTS.charge({ cents, idempotencyKey: effect.idempotencyKey });
+      effect.record("gateway", res.gateway); // an audit fact on the result entry
+      return res; // extra fields are dropped by the schema
+    },
+    onDone: (s: S, { chargeId }, _input, ctx) => ({ ...s, chargeId, pending: null }),
+  }),
+},
+```
+
+- A result that does not parse fails the try as a `Defect` that names the service and the issue.
+- Every result's JSON must fit in `maxResultBytes` (default 128 KiB); a larger one fails the try as a `Defect`. Return a reference (an id or a URL) for large data.
+- `effect.record(name, value)` attaches audit facts to the try's journal entry (`audit` beside `result`). Studio redacts them like any payload; replay ignores them.
+- After every try the runtime logs one structured line, `{ event: "actor_kit.service.attempt", actorType, actorId, service, effectId, idempotencyKey, attempt, durationMs, ok, errorTag? }`. It never logs the input or the result.
+
+## Delivery: at-least-once or at-most-once
+
+- `delivery: "at-least-once"` (the default): tries are retried by the retry policy. A try cut off by an eviction counts as an attempt with error `{ _tag: "Evicted" }`, which is retried by default; when it was the last attempt, `onError` runs with it.
+- `delivery: "at-most-once"`: one try only (`retry` is refused). The row is marked running before `fn` starts; if the actor wakes and finds it still running, the call's outcome is unknown, so it becomes a dead letter with the tag `OutcomeUnknown` and is never sent again. Studio's Outbox shows it; an operator checks the remote system and redrives it if the call did not happen.
+
+Prefer at-least-once with `effect.idempotencyKey` whenever the remote API accepts one.
 
 ## Fire-and-Forget
 
@@ -143,7 +198,7 @@ services: {
 Trigger it the same way:
 
 ```typescript
-ITEM_ADDED: message(z.object({ itemId: z.string() }), (state, { itemId }, { execute }) => {
+ITEM_ADDED: cart.message(z.object({ itemId: z.string() }), (state: CartState, { itemId }, { execute }) => {
   execute("trackEvent", { event: "item_added" });
   return { ...state, items: [...state.items, itemId] };
 }),
@@ -157,9 +212,9 @@ ITEM_ADDED: message(z.object({ itemId: z.string() }), (state, { itemId }, { exec
 4. On success: `onDone(currentState, result, input)` runs, state persisted, views broadcast
 5. On a failure that is retried (by default `Timeout` and `Defect`) with tries left: the row waits as `retrying` and the Durable Object alarm runs it again after the backoff
 6. On a failure that is not retried (by default a declared error), or of the last try: `onError(currentState, error, input)` runs with the typed error, state persisted, views broadcast; the row stays `failed`
-7. On crash: restart, re-run from outbox (service name + input are serialized)
+7. On crash or eviction: restart, settle the interrupted try by the delivery mode (an Evicted attempt, or an OutcomeUnknown dead letter), then run what is due from the outbox (service name + input are serialized)
 
-Outbox rows move through `pending` → `running` → `done`, `retrying` (and back to `running`) or `failed`. A `failed` row is a dead letter: it stays until an admin redrives it from Studio's Outbox panel, which moves it back to `pending` under the same effect id.
+Outbox rows move through `pending` → `running` → `done`, `retrying` (and back to `running`), `failed` or `cancelled` (`ctx.cancel`). A `failed` row is a dead letter: it stays until an admin redrives it from Studio's Outbox panel, which moves it back to `pending` under the same effect id.
 
 Messages sent with `ctx.forward(link, targetId, message)` go through the outbox too, with the same effect ids, statuses, alarm and redrive. Their retry policy belongs to the link: `link(Contract, { onUpdate, retry: { attempts, backoff } })`, same shape and defaults as a service. A send that throws (the target is unreachable) is retried; a target that cannot be resolved is a dead letter straight away. A target that answers, even with a refusal, counts as delivered.
 
@@ -184,7 +239,7 @@ Never use `effectId` alone as an idempotency key.
 - **Forwards carry their effect**: a message sent with `ctx.forward()` is delivered at least once too. The target's handler reads the sender's effect as `ctx.delivery` (`{ actorType, actorId, effectId, idempotencyKey, attempt }`; `undefined` for messages that did not come through a forward) and can ignore a retried delivery it has already applied:
 
 ```typescript
-DELIVER: message(z.object({ text: z.string() }), (state: Inbox, { text }, ctx) => {
+DELIVER: inbox.message(z.object({ text: z.string() }), (state: Inbox, { text }, ctx) => {
   const key = ctx.delivery?.idempotencyKey;
   if (key !== undefined && state.seen.includes(key)) return state;
   return { ...state, seen: key === undefined ? state.seen : [...state.seen, key], texts: [...state.texts, text] };

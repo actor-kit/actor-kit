@@ -20,7 +20,9 @@ The source actor holds all state and runs all transitions. Relay actors subscrib
 The source actor doesn't change. It defines state, messages, and views as usual. Relay DOs appear as linked subscribers — the source treats them the same as any other subscriber.
 
 ```typescript
-const GameContract = defineActor("game", {
+const game = setup({});
+
+const GameContract = game.actor("game", {
   // ... normal actor definition
   roles: {
     service: (state, caller, { callerType }) => callerType === "service",
@@ -49,7 +51,9 @@ The `service` role returns a superset view — all the data any client role migh
 The relay links to the source actor and passes through views to its own clients.
 
 ```typescript
-const RelayContract = defineActor("relay", {
+const relay = setup({});
+
+const RelayContract = relay.actor("relay", {
   input: z.object({ sourceId: z.string() }),
 
   links: {
@@ -66,9 +70,9 @@ const RelayContract = defineActor("relay", {
   roles: { viewer: () => true },
 
   messages: {
-    CONNECT_SOURCE: message(z.object({}), {
-      guard: (_state, _payload, ctx) => ctx.callerType === "service",
-      handler: (state, _payload, { link }) => {
+    CONNECT_SOURCE: relay.message(z.object({}), {
+      guard: (_state: RelayState, _payload, ctx) => ctx.callerType === "service",
+      handler: (state: RelayState, _payload, { link }) => {
         link("source", state.sourceId);
         return state;
       },
@@ -88,7 +92,7 @@ const RelayContract = defineActor("relay", {
 If clients need role-specific views, the relay can re-project from the superset view it receives from the source. The source resolves the relay as a `service` role, so the relay gets all fields. The relay then defines its own roles and projects accordingly:
 
 ```typescript
-const RelayContract = defineActor("relay", {
+const RelayContract = relay.actor("relay", {
   input: z.object({ sourceId: z.string() }),
 
   links: {
@@ -103,9 +107,9 @@ const RelayContract = defineActor("relay", {
   }),
 
   messages: {
-    CONNECT_SOURCE: message(z.object({}), {
-      guard: (_state, _payload, ctx) => ctx.callerType === "service",
-      handler: (state, _payload, { link }) => {
+    CONNECT_SOURCE: relay.message(z.object({}), {
+      guard: (_state: RelayState, _payload, ctx) => ctx.callerType === "service",
+      handler: (state: RelayState, _payload, { link }) => {
         link("source", state.sourceId);
         return state;
       },

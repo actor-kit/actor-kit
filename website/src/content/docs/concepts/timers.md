@@ -8,30 +8,35 @@ Actors schedule work for later with **timers** (ADR-015). A timer is declared on
 ## Declaring timers
 
 ```typescript
-import { defineActor, message, timer } from "@actor-kit/worker";
+import { setup } from "@actor-kit/worker";
 import { z } from "zod";
 
-defineActor("quiz", {
+type QuizState = { round: number; phase: string };
+
+const quiz = setup({});
+
+quiz.actor("quiz", {
+  // input, init, roles, views ...
   messages: {
-    START_ROUND: message(z.object({}), (s, _p, ctx) => {
+    START_ROUND: quiz.message(z.object({}), (s: QuizState, _p, ctx) => {
       const round = s.round + 1;
       ctx.schedule("roundEnd", { in: "30s", key: `round-${round}`, payload: { round } });
       return { ...s, round, phase: "answering" };
     }),
-    SKIP: message(z.object({}), (s, _p, ctx) => {
+    SKIP: quiz.message(z.object({}), (s: QuizState, _p, ctx) => {
       ctx.cancel(`round-${s.round}`);
       return { ...s, phase: "reveal" };
     }),
   },
   timers: {
-    roundEnd: timer(z.object({ round: z.number() }), (s, { round }, ctx) =>
+    roundEnd: quiz.timer(z.object({ round: z.number() }), (s: QuizState, { round }) =>
       s.round === round ? { ...s, phase: "reveal" } : s,
     ),
   },
 });
 ```
 
-- **`timer(schema, handler)`**: the payload schema and a synchronous handler `(state, payload, ctx) => state`. The handler gets `ctx.key`, `ctx.lateBy`, `ctx.now()/id()/random()`, `env`, and `execute`, `forward`, `schedule`, `cancel`. A timer has no caller and no role.
+- **`quiz.timer(schema, handler)`** (the kit's `timer`): the payload schema and a synchronous handler `(state, payload, ctx) => state`. The handler gets `ctx.key`, `ctx.lateBy`, `ctx.now()/id()/random()`, `env`, and `execute`, `forward`, `schedule`, `cancel`. A timer has no caller and no role.
 - **`ctx.schedule(name, { in | at, key?, payload? })`**: available in message, lifecycle and timer handlers. `in` is milliseconds or `"500ms"`, `"30s"`, `"5m"`, `"2h"`, `"1d"`, counted from `ctx.now()`; `at` is an absolute time. Exactly one of them. The name must be declared and the payload must parse, or the handler throws and the transition is rejected.
 - **`key`** is unique per actor: scheduling an existing key replaces that timer (debounce). Without a key, the timer's effect id is its key.
 - **`ctx.cancel(key)`** removes a pending timer; cancelling a key that is not pending does nothing. Schedules and cancels apply in the order the handler made them.
@@ -51,4 +56,4 @@ The **Timers** tab lists pending timers (name, key, due in, payload, with `studi
 
 ## Testing
 
-`testActor()` records `ctx.schedule` and `ctx.cancel` calls in `schedules` and `cancels` without running timers. To run timers on a virtual clock, use `simulate()`.
+`testActor()` records `ctx.schedule` and `ctx.cancel` calls in `schedules` and `cancels` without running timers; scheduling a timer the actor does not declare throws, as in the runtime. To run timers on a virtual clock, use `simulate()`.

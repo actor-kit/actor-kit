@@ -13,7 +13,7 @@ Actor Kit v2 is a framework for building real-time, event-driven applications on
 ```
 packages/
 ├── core/              schema() builder, type primitives, binary codec, shared types
-├── worker/            defineActor(), createActorClass(), message(), DO runtime, identity
+├── worker/            setup() + kit.actor(), createActorClass(), DO runtime, identity
 ├── client/            actorClient(contract).create(), subscribe, send, reconnection
 ├── react/             actorContext(contract), useView(), useSend(), useRole(), Provider
 ├── test/              testActor(contract), send() with effect capture, view assertions
@@ -35,7 +35,7 @@ Critical constraint: `@actor-kit/client`, `@actor-kit/react`, and `@actor-kit/te
 
 Each package is published independently under the `@actor-kit/*` scope:
 - `@actor-kit/core` — schema primitives, types, binary codec
-- `@actor-kit/worker` — `defineActor()`, `createActorClass()`, `message()`, `withCallerIdentity()`
+- `@actor-kit/worker` — `setup()` (the kit: `kit.actor()`, `kit.message()`, `kit.timer()`, `kit.in()`), `createActorClass()`, `withCallerIdentity()`
 - `@actor-kit/client` — `actorClient(contract).create()`, browser-safe WebSocket client
 - `@actor-kit/react` — `actorContext(contract)`, React hooks and Provider
 - `@actor-kit/test` — `testActor(contract)`, test harness
@@ -43,19 +43,24 @@ Each package is published independently under the `@actor-kit/*` scope:
 
 ## Type system
 
-### The `defineActor()` + `createActorClass()` pattern
+### The `setup()` + `kit.actor()` + `createActorClass()` pattern (ADR-018 A)
 
 ```typescript
-import { defineActor, createActorClass, message } from "@actor-kit/worker";
+import { createActorClass, setup } from "@actor-kit/worker";
 
-// defineActor() returns a typed contract (not a DO class)
-const counter = defineActor({
-  init: () => ({ count: 0 }),
+type State = { count: number };
+
+// setup() returns the kit: the actor's declarations ({ events, states, env }, all optional)
+// and the helpers typed by them.
+const kit = setup({});
+
+// kit.actor() returns a typed contract (not a DO class). The kit supplies events, env and states.
+const counter = kit.actor("counter", {
+  input: z.object({}),
+  init: (): State => ({ count: 0 }),
   roles: { anyone: () => true },
   messages: {
-    anyone: {
-      increment: message(z.object({}), (state) => ({ ...state, count: state.count + 1 })),
-    },
+    increment: kit.message(z.object({}), (state: State) => ({ ...state, count: state.count + 1 })),
   },
   views: { /* ... */ },
 });
@@ -63,6 +68,10 @@ const counter = defineActor({
 // createActorClass() converts contract → DO class
 export const Counter = createActorClass(counter);
 ```
+
+`kit.actor(name, def)` is the same as `defineActor(name, kit, def)`. Handlers annotate the state type
+once, on the first parameter; `ctx` (`env`, `emit`, and in a state's handlers `local`, `goto`, `stay`)
+is typed by the kit.
 
 Key type relationships:
 
@@ -76,6 +85,9 @@ TAllMessages ← union of all message types across all roles (what the client se
 ```
 
 ### The `message()` helper
+
+`kit.message()` has this shape, with `ctx.env` and `ctx.emit` typed by the kit's declarations; the
+standalone `message()` is the same for code outside a kit.
 
 ```typescript
 function message<TSchema extends z.ZodType, TState>(

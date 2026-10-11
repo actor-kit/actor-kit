@@ -16,16 +16,19 @@ In Actor Kit, each actor is a Cloudflare Durable Object. DOs are single-threaded
 
 ```typescript
 import { z } from "zod";
-import { defineActor, createActorClass, message } from "@actor-kit/worker";
+import { createActorClass, setup } from "@actor-kit/worker";
 
-export const MyActorContract = defineActor("my-actor", {
+// The kit: what the actor declares up front — events, states, env (all optional).
+const myActor = setup({});
+
+export const MyActorContract = myActor.actor("my-actor", {
   input: z.object({ name: z.string() }),
-  init: (input) => ({
+  init: (input: { name: string }) => ({
     name: input.name,
     count: 0,
   }),
   roles: { /* ... */ },
-  messages: { /* ... */ },
+  messages: { /* myActor.message(...) */ },
   views: { /* ... */ },
 });
 export type MyActorContract = typeof MyActorContract;
@@ -33,7 +36,7 @@ export type MyActorContract = typeof MyActorContract;
 export const MyActor = createActorClass(MyActorContract);
 ```
 
-`defineActor()` returns a typed contract — not a DO class. The contract preserves all type information (state, messages, views, roles) for downstream consumers (`actorClient`, `actorContext`, `testActor`). `createActorClass()` converts the contract into a Durable Object class.
+`setup()` returns the kit: the actor's declarations (`events`, `states`, `env`) and the helpers typed by them (`myActor.message()`, `myActor.timer()`, `myActor.in(state)`). `myActor.actor()` returns a typed contract — not a DO class. The contract preserves all type information (state, messages, views, roles) for downstream consumers (`actorClient`, `actorContext`, `testActor`). `createActorClass()` converts the contract into a Durable Object class.
 
 ### `input`
 

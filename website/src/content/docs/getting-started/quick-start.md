@@ -13,25 +13,30 @@ The contract lives in its own file. It defines state, messages, roles, and views
 // src/counter.contract.ts
 import { z } from "zod";
 import { schema, view, uint32, string } from "@actor-kit/core";
-import { defineActor, message } from "@actor-kit/worker";
+import { setup } from "@actor-kit/worker";
+
+type CounterState = { count: number; lastUpdatedBy: string };
 
 const CounterView = schema({ count: uint32, lastUpdatedBy: string });
 
-export const CounterContract = defineActor("counter", {
+// The kit: what the actor declares up front (events, states, env). A counter declares none.
+const counter = setup({});
+
+export const CounterContract = counter.actor("counter", {
   input: z.object({}),
-  init: () => ({ count: 0, lastUpdatedBy: null as string | null }),
+  init: (): CounterState => ({ count: 0, lastUpdatedBy: "" }),
 
   roles: {
     user: () => true,
   },
 
   messages: {
-    INCREMENT: message(z.object({}), (state, _payload, { caller }) => ({
+    INCREMENT: counter.message(z.object({}), (state: CounterState, _payload, { caller }) => ({
       ...state,
       count: state.count + 1,
       lastUpdatedBy: caller,
     })),
-    DECREMENT: message(z.object({}), (state, _payload, { caller }) => ({
+    DECREMENT: counter.message(z.object({}), (state: CounterState, _payload, { caller }) => ({
       ...state,
       count: Math.max(0, state.count - 1),
       lastUpdatedBy: caller,
@@ -39,7 +44,7 @@ export const CounterContract = defineActor("counter", {
   },
 
   views: {
-    user: view.shared(CounterView, (state) => ({
+    user: view.shared(CounterView, (state: CounterState) => ({
       count: state.count,
       lastUpdatedBy: state.lastUpdatedBy,
     })),
@@ -59,9 +64,10 @@ export const Counter = createActorClass(CounterContract);
 ```
 
 Key things happening:
-- **`defineActor()`** returns a typed contract — not a DO class. Everything derives from it.
+- **`setup()`** returns the kit: it holds what the actor declares up front (events, states, env — all optional) and the helpers typed by them
+- **`counter.actor()`** returns a typed contract — not a DO class. Everything derives from it.
 - **`createActorClass()`** converts the contract into a Durable Object class
-- **`message()`** pairs a Zod schema with a handler — payload is validated before the handler runs
+- **`counter.message()`** pairs a Zod schema with a handler — payload is validated before the handler runs. Annotate the state type once, on the handler's first parameter; the payload and `ctx` are typed for you
 - **Messages are flat** — no nesting by role. Guards handle authorization (see [Todo List](/examples/todo-list/))
 - **Handlers are synchronous** — they return new state, no `async`/`await`
 - **`schema()`** defines the view shape for binary encoding and TypeScript inference

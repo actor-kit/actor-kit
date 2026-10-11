@@ -3,38 +3,68 @@ title: "@actor-kit/core & @actor-kit/worker"
 description: Server-side API reference.
 ---
 
-The server-side API is split across two packages: `@actor-kit/core` (schema, view, type primitives) and `@actor-kit/worker` (defineActor, createActorClass, message, identity). Use both in your Cloudflare Worker.
+The server-side API is split across two packages: `@actor-kit/core` (schema, view, type primitives, errors) and `@actor-kit/worker` (setup, createActorClass, identity). Use both in your Cloudflare Worker.
 
-## `defineActor(name, def)`
+## `setup(declarations)`
 
-Creates a typed contract from an actor definition. The contract preserves all type information for downstream consumers.
+Declares what an actor has up front and returns its **kit**: `setup({ events?, states?, env? })`, every field optional. `setup({})` is the kit of an actor with none of them.
+
+```typescript
+import { z } from "zod";
+import { queue, setup } from "@actor-kit/worker";
+
+const quiz = setup({
+  env: z.object({ QUIZ_EVENTS: queue() }),                     // ctx.env, typed everywhere
+  events: { RoundStarted: z.object({ n: z.number() }) },        // ctx.emit, typed
+  states: { lobby: {}, round: { local: RoundLocal, input: z.object({ n: z.number() }) } },
+});
+```
+
+| Field | Description |
+|-------|-------------|
+| `events` | Domain events: a Zod schema per event name. `ctx.emit` is typed by them. See [Domain Events](/concepts/domain-events/) |
+| `states` | Each state's optional `local` and `enter` `input` schemas. See [States](/concepts/states/) |
+| `env` | Zod object of the Worker bindings the actor uses (`service<T>()`, `durableObject<T>()`, `queue<T>()`, `kv()`, `r2()`, `d1()`, or any schema). Parsed once; a mismatch refuses every request with a 500 naming each binding |
+
+The kit's helpers:
+
+- **`kit.message(schema, handler | { guard, handler })`** and **`kit.timer(schema, handler)`** — messages and timers whose `ctx.env` and `ctx.emit` are typed by the declarations.
+- **`kit.in(state)`** — `.message()`, `.timer()` and `.state({ enter?, messages?, timers? })` for one declared state; their `ctx` adds a typed `phase`, `local`, `stay` and `goto`.
+- **`kit.actor(name, def)`** — defines the actor (below).
+
+## `kit.actor(name, def)`
+
+Creates a typed contract from an actor definition. The kit supplies the events, env and state declarations, so the definition holds only behaviour (it never repeats `events` or `env`). The contract preserves all type information for downstream consumers. `defineActor(name, kit, def)` is the same call.
 
 ```typescript
 import { z } from "zod";
 import { schema, view, uint32, string } from "@actor-kit/core";
-import { defineActor, message } from "@actor-kit/worker";
+import { setup } from "@actor-kit/worker";
+
+type CounterState = { count: number; lastUpdatedBy: string };
 
 const CounterView = schema({ count: uint32, lastUpdatedBy: string });
+const counter = setup({});
 
-export const CounterContract = defineActor("counter", {
+export const CounterContract = counter.actor("counter", {
   input: z.object({}),
-  init: () => ({ count: 0, lastUpdatedBy: null as string | null }),
+  init: (): CounterState => ({ count: 0, lastUpdatedBy: "" }),
   roles: { user: () => true },
   messages: {
-    INCREMENT: message(z.object({}), (state, _payload, { caller }) => ({
+    INCREMENT: counter.message(z.object({}), (state: CounterState, _payload, { caller }) => ({
       ...state, count: state.count + 1, lastUpdatedBy: caller,
     })),
   },
-  views: { user: view.shared(CounterView, (state) => ({ count: state.count, lastUpdatedBy: state.lastUpdatedBy ?? "" })) },
+  views: { user: view.shared(CounterView, (state: CounterState) => state) },
 });
 export type CounterContract = typeof CounterContract;
 ```
 
 **Parameters:**
 - `name: string` — actor type name (normalized to UPPER_SNAKE_CASE for env binding lookup)
-- `def` — the actor definition object (must have `input` and `init`)
+- `def` — the actor definition object (must have `input` and `init`). With declared states it must name `initial` among them and define every one in `states`; without, it has neither.
 
-**Returns:** `ActorContract<TName, TDef>` — a typed contract with `{ name, def }`.
+**Returns:** `ActorContract<TName, TDef>` — a typed contract with `{ name, def }` (`def` includes the kit's `events` and `env`).
 
 ## `createActorClass(contract)`
 
@@ -55,35 +85,58 @@ For flat messages, wraps them so every role has access — guards handle authori
 | `input` | Yes | Zod schema for spawn input |
 | `init(input)` | Yes | Returns initial state |
 | `roles` | Yes | `Record<string, (state, caller, claims) => boolean>` |
-| `messages` | Yes | Flat message handlers |
+| `messages` | Yes | Flat message handlers (`kit.message(...)`); in an actor with states, accepted in every state |
 | `views` | Yes | Per-role view definitions |
-| `version` | No | Number for migration |
+| `initial` / `states` | With declared states | The first state, and each declared state's definition (`kit.in(name).state({ enter?, messages?, timers? })`) |
+| `timers` | No | Declared timers (`kit.timer(...)`). See [Timers](/concepts/timers/) |
+| `publish` | No | `{ queue, events }`: send emitted events to a Queue binding. See [Domain Events](/concepts/domain-events/) |
+| `versions` | No | Typed chain of state versions (`version(n, schema, options?)`). See [Actors & State](/concepts/actors-and-state/) |
 | `lifecycle` | No | Connection handlers (`connect`, `disconnect`) |
-| `env` | No | Zod object of the Worker bindings the actor uses (`service<T>()`, `durableObject<T>()`, `queue<T>()`, `kv()`, `r2()`, `d1()`, or any schema). Parsed once; a mismatch refuses every request with a 500 naming each binding |
 | `services` | No | Async work run through the outbox: `{ fn(input, env, effect), errors?, retry?, timeoutMs?, onDone?, onError? }` per name. `effect` is `{ actorType, actorId, effectId, idempotencyKey, attempt, signal }`; `onError` gets a typed error. See [Side Effects](/concepts/side-effects/) |
 | `observe` | No | `{ onTransition }` hook |
-| `migrate` | No | `(persisted, fromVersion) => newState` |
 | `serialize` | No | Custom state serializer |
 | `restore` | No | Custom state deserializer |
 
-## `message(zodSchema, handler | { guard, handler })`
+## `kit.message(zodSchema, handler | { guard, handler })`
 
-Pairs a Zod validation schema with a message handler. Handlers are synchronous.
+Pairs a Zod validation schema with a message handler. Handlers are synchronous. Annotate the state type on the first parameter; the payload and `ctx` are typed by the schema and the kit.
 
 ```typescript
 // Simple handler
-const increment = message(z.object({}), (state, _payload, { caller }) => ({
+const increment = counter.message(z.object({}), (state: CounterState, _payload, { caller }) => ({
   ...state, count: state.count + 1, lastUpdatedBy: caller,
 }));
 
 // With guard
-const reset = message(z.object({}), {
-  guard: (_state, _payload, ctx) => ctx.role === "admin",
-  handler: () => ({ count: 0, lastUpdatedBy: null }),
+const reset = counter.message(z.object({}), {
+  guard: (_state: CounterState, _payload, ctx) => ctx.role === "admin",
+  handler: () => ({ count: 0, lastUpdatedBy: "" }),
 });
 ```
 
 Guard receives `(state, payload, ctx)` where ctx has `{ role, caller, callerType, env }`.
+
+The standalone `message()` and `timer()` exported by `@actor-kit/worker` take the same arguments, for code outside a kit; their `ctx.emit` accepts no events.
+
+## Refusals and errors
+
+`send()` — the Durable Object's RPC `stub.send(caller, callerType, message)`, `ActorRef.send` and `simulate()`'s `send` — returns `{ ok: true }` or a `Refusal`:
+
+```typescript
+type Refusal = {
+  ok: false;
+  code: RefusalCode;          // unknown_message | invalid_payload | guard_failed | wrong_state
+                              // | no_role | not_initialized | invalid_delivery | actor_not_found
+  message: string;            // a full sentence naming the fix
+  expected?: readonly string[]; // what would have been accepted (message names, state names)
+  details?: unknown;          // e.g. the Zod issues for invalid_payload
+  docs: string;               // https://actorkit.dev/errors/<code>/
+};
+```
+
+A WebSocket client receives the same fields in an `__error` frame, `{ type: "__error", messageType, code, message, expected?, details?, docs }`. `testActor()` throws a refusal as a `RefusalError` (`.code`, `.refusal`).
+
+Every error the library throws is an `ActorKitError` (exported from `@actor-kit/core`) with a stable `code`, a `message` that names the fix, optional `details`, and a `docs` URL (`https://actorkit.dev/errors/<code>/`). `RefusalError` extends it.
 
 ## `fail(error)`
 

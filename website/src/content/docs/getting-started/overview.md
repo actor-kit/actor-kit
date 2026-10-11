@@ -27,7 +27,7 @@ Not a good fit:
 - **Role** — a predicate that determines what a caller can see and do
 - **Lifecycle** — `connect` and `disconnect` handlers that fire on WebSocket open/close
 - **Guard** — a predicate on a message that checks authorization or preconditions before the handler runs
-- **Contract** — the typed object returned by `defineActor()`, from which clients, tests, and refs derive types
+- **Contract** — the typed object returned by `kit.actor()` (the kit comes from `setup()`), from which clients, tests, and refs derive types
 
 ## How it works
 

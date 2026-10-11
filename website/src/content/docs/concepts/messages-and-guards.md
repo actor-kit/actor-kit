@@ -5,20 +5,24 @@ description: How messages are validated and how guards work.
 
 ## Messages
 
-Every message handler is wrapped in `message()` — pairing a Zod schema with a handler function.
+Every message handler is wrapped in the kit's `message()` — pairing a Zod schema with a handler function. The kit comes from `setup()`, which holds what the actor declares up front (events, states, env); an actor with none of them uses `setup({})`.
 
 ```typescript
-import { message } from "@actor-kit/worker";
+import { setup } from "@actor-kit/worker";
 import { z } from "zod";
 
-const addTodo = message(
+const todo = setup({});
+
+const addTodo = todo.message(
   z.object({ text: z.string().min(1).max(200) }),
-  (state, { text }, { caller }) => ({
+  (state: TodoState, { text }, ctx) => ({
     ...state,
-    todos: [...state.todos, { id: crypto.randomUUID(), text, done: false }],
+    todos: [...state.todos, { id: ctx.id(), text, done: false }],
   }),
 );
 ```
+
+Annotate the state type once, on the handler's first parameter. The payload is inferred from the schema, and `ctx` (including `env` and a typed `emit`) is typed by the kit.
 
 ### Flat Messages
 
@@ -27,9 +31,9 @@ Messages are defined at the top level — not nested by role. Authorization goes
 ```typescript
 messages: {
   ADD_TODO: addTodo,                          // No guard = open to all roles
-  DELETE_TODO: message(z.object({ id: z.string() }), {
-    guard: (_state, _payload, ctx) => ctx.role === "owner",
-    handler: (state, { id }) => ({
+  DELETE_TODO: todo.message(z.object({ id: z.string() }), {
+    guard: (_state: TodoState, _payload, ctx) => ctx.role === "owner",
+    handler: (state: TodoState, { id }) => ({
       ...state,
       todos: state.todos.filter(t => t.id !== id),
     }),
@@ -41,7 +45,7 @@ messages: {
 
 The Zod schema runs `safeParse` on every incoming payload **before** the handler executes. If validation fails:
 - The handler never runs
-- The client receives an `__error` frame with `"validation_failed"`
+- The message is refused with code `invalid_payload` (the client receives an `__error` frame; `details` holds the Zod issues)
 - State is unchanged
 
 ### Handler Signature
@@ -52,7 +56,7 @@ The Zod schema runs `safeParse` on every incoming payload **before** the handler
 
 - **`state`** — current actor state (immutable — return a new object)
 - **`payload`** — Zod-validated payload
-- **`ctx`** — context with `caller`, `callerType`, `role`, `env`, `execute`
+- **`ctx`** — context with `caller`, `callerType`, `role`, `env`, `execute`, `emit`, `schedule`, `now()`/`id()`/`random()` (and `phase`, `local`, `stay`, `goto` in a state's message)
 
 Handlers are synchronous — they return new state, not a Promise. External I/O goes through `execute()` → services. See [Side Effects](/concepts/side-effects/).
 
@@ -61,11 +65,11 @@ Handlers are synchronous — they return new state, not a Promise. External I/O 
 Guards are optional conditions on messages. If the guard returns `false`, the message is rejected before the handler runs.
 
 ```typescript
-const placeBid = message(
+const placeBid = auction.message(
   z.object({ amount: z.number().positive() }),
   {
-    guard: (state) => !state.closed,
-    handler: (state, { amount }, { caller }) => ({
+    guard: (state: AuctionState) => !state.closed,
+    handler: (state: AuctionState, { amount }, { caller }) => ({
       ...state,
       bids: [...state.bids, { bidder: caller, amount }],
     }),
@@ -82,21 +86,24 @@ Guards receive `(state, payload, ctx)` where `ctx` includes `role`, `caller`, an
 ### Evaluation Order
 
 ```
-1. Resolve role → reject if no match (403)
-2. Validate payload with Zod → reject if invalid
-3. Evaluate guard(state, payload, ctx) → reject if false
-4. Run handler
+1. Resolve role → reject if no match (403 on connect, no_role on send)
+2. Find the message for the role (and the current state) → unknown_message or wrong_state if none
+3. Validate payload with Zod → invalid_payload if invalid
+4. Evaluate guard(state, payload, ctx) → guard_failed if false
+5. Run handler
 ```
 
-## Error Handling
+## Refusals
 
-When a message is rejected, the client receives an `__error` JSON message with the reason:
+A rejected message is a refusal: `{ ok: false, code, message, expected?, details?, docs }`. `message` is a full sentence naming the fix, `expected` lists what would have been accepted, `details` carries the specifics, and `docs` links to `https://actorkit.dev/errors/<code>/`. RPC `send()` returns it; over WebSocket the client receives an `__error` frame, `{ type: "__error", messageType, code, message, expected?, details?, docs }`, and `onError` gets those fields.
 
-| Step | Failure | Client receives |
-|------|---------|----------------|
-| Role resolution | No role matches | Connection rejected (403) |
-| Zod validation | Payload doesn't match schema | `{ type: "__error", error: "validation_failed", detail: "..." }` |
-| Guard | Guard returns false | `{ type: "__error", error: "guard_failed" }` |
+| Step | Failure | `code` |
+|------|---------|--------|
+| Role resolution | No role matches | Connection rejected (403); `no_role` on `send()` |
+| Message lookup | The role has no message of that name | `unknown_message` (`expected`: the names it can send) |
+| Message lookup | Only other states accept it | `wrong_state` (`expected`: those states, `details.phase`: the current one) |
+| Zod validation | Payload doesn't match schema | `invalid_payload` (`details`: the Zod issues) |
+| Guard | Guard returns false | `guard_failed` |
 | Handler | Handler throws | Error logged server-side; state unchanged |
 
 The actor's state is never modified when a message is rejected.

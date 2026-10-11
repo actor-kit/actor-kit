@@ -34,7 +34,7 @@ tag = "v2"
 new_sqlite_classes = ["StudioRegistry"]
 ```
 
-Enable it per actor with `studio: { enabled: true }` in `defineActor`, and redact values with path globs such as `studio: { enabled: true, redact: ["players.*.name", "**.email"] }`.
+Enable it per actor with `studio: { enabled: true }` in the actor definition (`kit.actor(name, { ..., studio })`), and redact values with path globs such as `studio: { enabled: true, redact: ["players.*.name", "**.email"] }`.
 
 ## Production
 

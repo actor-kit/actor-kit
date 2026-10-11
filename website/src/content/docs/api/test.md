@@ -7,7 +7,7 @@ The test package (`@actor-kit/test`) provides a test harness that runs actor tra
 
 ## `testActor(contract)` / `testActor(def)`
 
-Creates a test harness for an actor. Accepts either a contract (from `defineActor()`) or a raw definition object.
+Creates a test harness for an actor. Accepts either a contract (from `kit.actor()`) or a raw definition object. It runs the runtime's own step core (admission, handlers, states, declared-timer and declared-event checks), so a test behaves like the Durable Object.
 
 ### Contract-derived (recommended)
 
@@ -29,11 +29,11 @@ const state = t.init({});
 // state: { count: 0, lastUpdatedBy: null }
 ```
 
-Throws if input is invalid.
+Throws if input is invalid. For an actor with states, `init` returns the persisted state `{ shared, phase, local, stateTimers }`, typed per phase.
 
 ### `t.send(state, caller, message, opts?)`
 
-Resolves the caller's role, validates the message, runs the handler. Returns `{ state, executions, links, unlinks, forwards, schedules, cancels, timeline }` (`schedules` and `cancels` record `ctx.schedule` / `ctx.cancel` calls; timers do not run, use `simulate()`).
+Resolves the caller's role, validates the message, runs the handler. Returns `{ state, executions, links, unlinks, forwards, schedules, cancels, emitted, timeline }` (`schedules` and `cancels` record `ctx.schedule` / `ctx.cancel` calls, including the scoped timers a phase change cancels; timers do not run, use `simulate()`). Scheduling a timer the actor does not declare throws, as in the runtime.
 
 ```typescript
 let state = t.init({});
@@ -51,10 +51,19 @@ expect(executions).toHaveLength(1);
 expect(executions[0]).toEqual({ service: "EMAIL", input: { ... } });
 ```
 
-Throws if:
-- No role matches the caller
-- Zod validation fails
-- Guard returns false
+A refused message throws a `RefusalError` (from `@actor-kit/core`): `.code` is the refusal code and `.refusal` the whole `{ ok: false, code, message, expected?, details?, docs }` value. The codes:
+- `no_role` — no role matches the caller
+- `unknown_message` — the caller's role has no message of that name
+- `wrong_state` — only other states accept the message
+- `invalid_payload` — Zod validation fails
+- `guard_failed` — guard returns false
+
+```typescript
+import { RefusalError } from "@actor-kit/core";
+
+await expect(t.send(state, "alice", { type: "RESET" })).rejects.toThrow(RefusalError);
+await expect(t.send(state, "alice", { type: "RESET" })).rejects.toMatchObject({ code: "guard_failed" });
+```
 
 `testActor(contract, { env })` takes fakes typed against the contract's `env` schema and parses them like the runtime parses the Worker env (a mismatch throws, naming each binding); handlers see the parsed env.
 
@@ -106,7 +115,7 @@ import { replayJournal, simulate } from "@actor-kit/test";
 const sim = simulate({ contracts: [AuctionContract, LobbyContract], seed: 42, now: Date.UTC(2026, 0, 1) });
 const room = await sim.spawn(AuctionContract, "lamp-sale", { item: "lamp" });
 
-room.send("alice", { type: "BID", amount: 10 });             // { ok: true } or { ok: false, error, detail? }
+room.send("alice", { type: "BID", amount: 10 });             // { ok: true } or a Refusal { ok: false, code, message, ... }
 room.send("ops", { type: "CLOSE" }, { callerType: "service" });
 room.view("alice");                                           // the caller's role view
 room.state;                                                   // typed from the contract

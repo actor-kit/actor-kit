@@ -9,7 +9,7 @@ The auction demonstrates guards — conditions that reject messages before the h
 
 ## What it demonstrates
 
-- Guards on `message()` to enforce business rules
+- Guards on `auction.message()` to enforce business rules
 - Guards checking both state and `ctx.role` for authorization
 - Competitive real-time bidding between users
 - Service-only actions (close auction) via `callerType` role
@@ -18,35 +18,42 @@ The auction demonstrates guards — conditions that reject messages before the h
 ## Guards
 
 ```typescript
-export const AuctionContract = defineActor("auction", {
+type Bid = { bidder: string; amount: number; timestamp: number };
+type AuctionState = { item: string; bids: Bid[]; closed: boolean; winner: string | null; winningBid: number };
+
+// The kit. The full example also declares domain events here (see Domain Events).
+const auction = setup({});
+
+export const AuctionContract = auction.actor("auction", {
   input: z.object({ item: z.string() }),
-  init: (input) => ({
+  init: (input: { item: string }): AuctionState => ({
     item: input.item, bids: [], closed: false, winner: null, winningBid: 0,
   }),
 
   roles: {
-    auctioneer: (_state, _caller, { callerType }) => callerType === "service",
+    auctioneer: (_state: AuctionState, _caller: string, { callerType }: { callerType: "user" | "service" }) =>
+      callerType === "service",
     bidder: () => true,
   },
 
   messages: {
-    BID: message(z.object({ amount: z.number().int().positive() }), {
-      guard: (state) => !state.closed,
-      handler: (state, { amount }, { caller }) => {
+    BID: auction.message(z.object({ amount: z.number().int().positive() }), {
+      guard: (state: AuctionState) => !state.closed,
+      handler: (state: AuctionState, { amount }, { caller, now }) => {
         const highest = state.bids.length > 0
           ? Math.max(...state.bids.map(b => b.amount))
           : 0;
         if (amount <= highest) return state;  // Reject lower bids silently
         return {
           ...state,
-          bids: [...state.bids, { bidder: caller, amount, timestamp: Date.now() }],
+          bids: [...state.bids, { bidder: caller, amount, timestamp: now() }],
         };
       },
     }),
-    CLOSE: message(z.object({}), {
-      guard: (state, _payload, ctx) =>
+    CLOSE: auction.message(z.object({}), {
+      guard: (state: AuctionState, _payload, ctx) =>
         ctx.role === "auctioneer" && !state.closed && state.bids.length > 0,
-      handler: (state) => {
+      handler: (state: AuctionState) => {
         const winner = state.bids.reduce((best, b) =>
           b.amount > best.amount ? b : best, state.bids[0]!
         );
@@ -57,7 +64,7 @@ export const AuctionContract = defineActor("auction", {
 
   views: {
     // Auctioneer sees all bids with bidder names + revenue
-    auctioneer: view.shared(AuctioneerView, (state) => ({
+    auctioneer: view.shared(AuctioneerView, (state: AuctionState) => ({
       item: state.item,
       bids: state.bids,
       bidCount: state.bids.length,
@@ -67,7 +74,7 @@ export const AuctionContract = defineActor("auction", {
       winner: state.winner ?? "",
     })),
     // Bidders see bid count and highest bid — not who bid
-    bidder: view.shared(BidderView, (state) => ({
+    bidder: view.shared(BidderView, (state: AuctionState) => ({
       item: state.item,
       bidCount: state.bids.length,
       highestBid: Math.max(0, ...state.bids.map(b => b.amount)),
@@ -93,7 +100,7 @@ export const Auction = createActorClass(AuctionContract);
 Key points:
 - **BID guard** checks state only: `!state.closed` — any role can bid when open
 - **CLOSE guard** checks both state and role: `ctx.role === "auctioneer" && !state.closed && state.bids.length > 0`
-- Guards run before the handler. If the guard returns `false`, the framework sends a `guard_failed` error — the handler never executes
+- Guards run before the handler. If the guard returns `false`, the message is refused with code `guard_failed` — the handler never executes
 - Inside the BID handler, the amount check is business logic (not a guard) — it returns unchanged state instead of throwing
 
 ## The Client

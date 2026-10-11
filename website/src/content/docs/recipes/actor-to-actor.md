@@ -12,9 +12,11 @@ Use `link()` when one actor needs to stay in sync with another actor's view. Lin
 ### Declare links
 
 ```typescript
-import { link } from "@actor-kit/worker";
+import { link, setup } from "@actor-kit/worker";
 
-const PlayerContract = defineActor("player", {
+const player = setup({});
+
+const PlayerContract = player.actor("player", {
   input: z.object({ profileId: z.string() }),
 
   links: {
@@ -44,25 +46,25 @@ const PlayerContract = defineActor("player", {
   }),
 
   messages: {
-    SETUP: message(z.object({}), {
-      guard: (_state, _payload, ctx) => ctx.callerType === "service",
-      handler: (state, _payload, { link }) => {
+    SETUP: player.message(z.object({}), {
+      guard: (_state: PlayerState, _payload, ctx) => ctx.callerType === "service",
+      handler: (state: PlayerState, _payload, { link }) => {
         link("profile", state.profileId);  // view arrives via onUpdate
         return state;
       },
     }),
-    JOIN_GAME: message(z.object({ gameId: z.string() }), (state, { gameId }, { link }) => {
+    JOIN_GAME: player.message(z.object({ gameId: z.string() }), (state: PlayerState, { gameId }, { link }) => {
       link("game", gameId);   // fire-and-forget, view arrives via onUpdate
       return { ...state, gameStatus: "connecting" };
     }),
-    LEAVE_GAME: message(z.object({ gameId: z.string() }), (state, { gameId }, { unlink }) => {
+    LEAVE_GAME: player.message(z.object({ gameId: z.string() }), (state: PlayerState, { gameId }, { unlink }) => {
       unlink("game", gameId);
       return state;
     }),
   },
 
   views: {
-    user: view.shared(PlayerView, (state) => ({
+    user: view.shared(PlayerView, (state: PlayerState) => ({
       profileName: state.profile?.name ?? "",
       games: Object.keys(state.games),
     })),
@@ -140,15 +142,19 @@ Each target resolves the subscriber's role independently — you can be admin on
 Use `execute()` with a named service when you need to call an external API, send to a Queue, or write to KV/D1/R2. The service runs asynchronously after the state change commits.
 
 ```typescript
-defineActor("zone", {
+const zone = setup({});
+
+zone.actor("zone", {
   services: {
     transferPlayer: {
       fn: async ({ targetZone, playerId, health, inventory }, env) => {
         const stub = env.ZONE.get(env.ZONE.idFromName(targetZone));
-        await stub.send("system", "service", {
+        const result = await stub.send("system", "service", {
           type: "PLAYER_ARRIVED",
           playerId, health, inventory,
         });
+        // send() resolves to { ok: true } or a refusal { ok: false, code, message, ... }
+        if (!result.ok) throw new Error(result.message);
       },
       onDone: (state, result, input) => ({
         ...state,
@@ -157,15 +163,15 @@ defineActor("zone", {
       onError: (state, error, input) => ({
         ...state,
         transferStatus: "failed",
-        error: error.message,
+        error: error._tag,
       }),
     },
   },
 
   messages: {
-    TRANSFER_PLAYER: message(
+    TRANSFER_PLAYER: zone.message(
       z.object({ playerId: z.string(), targetZone: z.string() }),
-      (state, { playerId, targetZone }, { execute }) => {
+      (state: ZoneState, { playerId, targetZone }, { execute }) => {
         execute("transferPlayer", {
           targetZone,
           playerId,
@@ -202,10 +208,11 @@ export default {
       input: { biome: "forest" },
     });
 
-    await stub.send("system", "service", {
+    const sent = await stub.send("system", "service", {
       type: "SPAWN_NPC",
       npcType: "merchant",
     });
+    if (!sent.ok) return Response.json(sent, { status: 409 }); // a Refusal: code, message, docs
 
     const { snapshot, role } = await stub.getSnapshot("system", "service");
     return Response.json(snapshot);
@@ -249,7 +256,7 @@ import { createRef } from "@actor-kit/worker";
 
 // Inside a message handler (ctx.exports is NOT available on message ctx):
 const ref = createRef(ProfileContract, env, profileId);
-await ref.send("system", "service", { type: "UPDATE_NAME", name: "Alice" });
+await ref.send("system", "service", { type: "UPDATE_NAME", name: "Alice" }); // { ok: true } or a Refusal
 ```
 
 > **Note:** `ctx.exports`-based resolution happens automatically inside the framework's `link()` and `resolveNamespace()` internals. Message handlers do not have access to `ctx.exports` — use the `createRef(contract, env, actorId)` overload which looks up the env binding directly.
@@ -292,7 +299,7 @@ All actors must be declared as Durable Object classes in your `wrangler.jsonc` (
 }
 ```
 
-The binding name (e.g., `"ZONE"`) is derived from the actor's contract name: `defineActor("zone", ...)` → binding `ZONE`. It must match the key in your Worker's `Env` type.
+The binding name (e.g., `"ZONE"`) is derived from the actor's contract name: `zone.actor("zone", ...)` → binding `ZONE`. It must match the key in your Worker's `Env` type.
 
 ## Related
 

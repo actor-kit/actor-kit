@@ -59,6 +59,7 @@ describe("schema encoder", () => {
 
 ```typescript
 import { describe, it, expect } from "vitest";
+import { RefusalError } from "@actor-kit/core";
 import { testActor } from "@actor-kit/test";
 import { todoContract } from "./todo-contract";
 
@@ -66,41 +67,37 @@ describe("TodoList actor", () => {
   const t = testActor(todoContract);
 
   it("initializes with empty todos", () => {
-    t.init({ creator: "alice" });
-    const view = t.view("alice");
-    expect(view.todos).toEqual([]);
+    const state = t.init({ creator: "alice" });
+    expect(t.view(state, "alice").data.todos).toEqual([]);
   });
 
-  it("owner can add todo", () => {
-    t.init({ creator: "alice" });
-    t.send("ADD_TODO", { text: "Buy milk" });
-    const view = t.view("alice");
-    expect(view.todos).toHaveLength(1);
-    expect(view.todos[0].text).toBe("Buy milk");
+  it("owner can add todo", async () => {
+    const { state } = await t.send(t.init({ creator: "alice" }), "alice", { type: "ADD_TODO", text: "Buy milk" });
+    const view = t.view(state, "alice");
+    expect(view.data.todos).toHaveLength(1);
+    expect(view.data.todos[0].text).toBe("Buy milk");
   });
 
   it("resolves owner role for creator", () => {
-    t.init({ creator: "alice" });
-    expect(t.role("alice")).toBe("owner");
+    expect(t.role(t.init({ creator: "alice" }), "alice")).toBe("owner");
   });
 
   it("resolves viewer role for unknown caller", () => {
-    t.init({ creator: "alice" });
-    expect(t.role("stranger")).toBe("viewer");
+    expect(t.role(t.init({ creator: "alice" }), "stranger")).toBe("viewer");
   });
 
-  it("rejects messages not in caller's role", () => {
-    t.init({ creator: "alice" });
-    expect(() => {
-      t.send("ADD_TODO", { text: "Nope" });
-    }).toThrow(); // "stranger" is "viewer", viewer has no ADD_TODO
+  it("refuses messages the caller's guard rejects", async () => {
+    const state = t.init({ creator: "alice" });
+    // "stranger" is "viewer"; ADD_TODO's guard admits owners and members only
+    await expect(t.send(state, "stranger", { type: "ADD_TODO", text: "Nope" })).rejects.toThrow(RefusalError);
+    await expect(t.send(state, "stranger", { type: "ADD_TODO", text: "Nope" })).rejects.toMatchObject({
+      code: "guard_failed",
+    });
   });
 
-  it("captures emissions from emit()", () => {
-    t.init({ creator: "alice" });
-    const { state, emissions } = t.send("NOTIFY_ALL", {});
-    expect(emissions).toHaveLength(1);
-    expect(emissions[0].type).toBe("queue");
+  it("captures service executions", async () => {
+    const { executions } = await t.send(t.init({ creator: "alice" }), "alice", { type: "NOTIFY_ALL" });
+    expect(executions).toHaveLength(1);
   });
 });
 ```
@@ -136,7 +133,7 @@ describe("TodoList DO lifecycle", () => {
     const stub = env.TODO_LIST.get(id);
 
     await stub.spawn({ creator: "alice" });
-    await stub.send("alice", { type: "ADD_TODO", text: "Persist me" });
+    await stub.send("alice", "user", { type: "ADD_TODO", text: "Persist me" });
 
     // Simulate DO restart by getting a new stub (vitest-pool-workers handles this)
     const stub2 = env.TODO_LIST.get(id);
@@ -152,8 +149,8 @@ describe("TodoList DO lifecycle", () => {
     await stub.spawn({ creator: "alice" });
 
     // "stranger" is viewer role — cannot ADD_TODO
-    const result = await stub.send("stranger", { type: "ADD_TODO", text: "Nope" });
-    expect(result.error).toBeDefined();
+    const result = await stub.send("stranger", "user", { type: "ADD_TODO", text: "Nope" });
+    expect(result).toMatchObject({ ok: false, code: "guard_failed" });
 
     const snapshot = await stub.getSnapshot("alice");
     expect(snapshot.state.todos).toHaveLength(0);

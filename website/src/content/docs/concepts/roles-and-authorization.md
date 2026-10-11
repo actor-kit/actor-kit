@@ -31,9 +31,9 @@ Roles are not cached. When the state changes, a caller's role can change too. Th
 
 ```typescript
 // A todo list where anyone who adds a todo becomes a member
-ADD_TODO: message(z.object({ text: z.string() }), {
-  guard: (_state, _payload, ctx) => ctx.role === "owner" || ctx.role === "member",
-  handler: (state, { text }, { caller }) => ({
+ADD_TODO: todo.message(z.object({ text: z.string() }), {
+  guard: (_state: TodoState, _payload, ctx) => ctx.role === "owner" || ctx.role === "member",
+  handler: (state: TodoState, { text }, { caller }) => ({
     ...state,
     todos: [...state.todos, { text, done: false }],
     memberIds: [...new Set([...state.memberIds, caller])],
@@ -49,7 +49,8 @@ The caller identity includes a `callerType` field — either `"user"` or `"servi
 
 ```typescript
 roles: {
-  service: (_state, _caller, { callerType }) => callerType === "service",
+  service: (_state: State, _caller: string, { callerType }: { callerType: "user" | "service" }) =>
+    callerType === "service",
   user: () => true,
 },
 ```
@@ -58,24 +59,24 @@ Use `callerType` to distinguish backend services from browser users. Use roles f
 
 ## Flat Messages with Guards
 
-Messages are flat — not nested by role. Authorization is enforced through guards:
+Messages are flat — not nested by role. Authorization is enforced through guards (`todo` is the actor's kit, `setup({})`):
 
 ```typescript
 messages: {
-  ADD_TODO: message(z.object({ text: z.string() }), {
-    guard: (_state, _payload, ctx) => ctx.role === "owner" || ctx.role === "member",
-    handler: (state, { text }) => ({ ...state, todos: [...state.todos, { text, done: false }] }),
+  ADD_TODO: todo.message(z.object({ text: z.string() }), {
+    guard: (_state: TodoState, _payload, ctx) => ctx.role === "owner" || ctx.role === "member",
+    handler: (state: TodoState, { text }) => ({ ...state, todos: [...state.todos, { text, done: false }] }),
   }),
-  DELETE_TODO: message(z.object({ id: z.string() }), {
-    guard: (_state, _payload, ctx) => ctx.role === "owner",
-    handler: (state, { id }) => ({ ...state, todos: state.todos.filter(t => t.id !== id) }),
+  DELETE_TODO: todo.message(z.object({ id: z.string() }), {
+    guard: (_state: TodoState, _payload, ctx) => ctx.role === "owner",
+    handler: (state: TodoState, { id }) => ({ ...state, todos: state.todos.filter(t => t.id !== id) }),
   }),
   // No guard = open to all roles
-  VIEW_COUNT: message(z.object({}), (state) => state),
+  VIEW_COUNT: todo.message(z.object({}), (state: TodoState) => state),
 },
 ```
 
-If a `viewer` sends `DELETE_TODO`, the guard returns `false` and the framework rejects with `guard_failed` — the handler never runs. Messages without guards are open to all roles.
+If a `viewer` sends `DELETE_TODO`, the guard returns `false` and the message is refused with code `guard_failed` — the handler never runs. Messages without guards are open to all roles.
 
 ## Per-Role Views
 
@@ -83,8 +84,8 @@ Each role sees a different projection of the state:
 
 ```typescript
 views: {
-  owner: view.shared(OwnerView, (state) => ({ todos: state.todos, settings: state.settings })),
-  viewer: view.shared(ViewerView, (state) => ({ todoCount: state.todos.length })),
+  owner: view.shared(OwnerView, (state: TodoState) => ({ todos: state.todos, settings: state.settings })),
+  viewer: view.shared(ViewerView, (state: TodoState) => ({ todoCount: state.todos.length })),
 },
 ```
 

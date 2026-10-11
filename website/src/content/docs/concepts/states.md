@@ -7,13 +7,12 @@ An actor may declare `states` (ADR-017). Data that only matters in one phase liv
 **local**, and timers scheduled with `scope: "state"` are cancelled when the actor leaves it.
 
 ```typescript
-import { defineActor, setup } from "@actor-kit/worker";
+import { setup } from "@actor-kit/worker";
 import { z } from "zod";
 
 type Shared = { scores: Record<string, number> };
 
 const quiz = setup({
-  events: {},
   states: {
     lobby: {},
     round: { local: z.object({ n: z.number(), answers: z.record(z.string(), z.string()) }), input: z.object({ n: z.number() }) },
@@ -23,11 +22,10 @@ const quiz = setup({
 const lobby = quiz.in("lobby");
 const round = quiz.in("round");
 
-export const Quiz = defineActor("quiz", {
+export const Quiz = quiz.actor("quiz", {
   input: z.object({}),
   init: (): Shared => ({ scores: {} }),
   roles: { any: () => true },
-  events: quiz.events,
   initial: "lobby",
   states: {
     lobby: lobby.state({
@@ -50,6 +48,9 @@ export const Quiz = defineActor("quiz", {
 });
 ```
 
+- The states are declared once, in `setup({ states })`: each one's optional `local` and `enter`
+  `input` schemas. `quiz.actor()` takes them from the kit, so `initial` must name a declared state
+  and `states` must define every one (each with `quiz.in(name).state({ ... })`), or it is a type error.
 - The persisted state is `{ shared, phase, local, stateTimers }`. Views and roles get it
   (`PhasedStateOf<typeof quiz, Shared>`, narrowed by `phase`).
 - A handler returns `ctx.stay(shared, local?)`, `ctx.goto(phase, shared, input?)`, or `shared`

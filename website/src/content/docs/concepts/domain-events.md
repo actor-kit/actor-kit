@@ -9,7 +9,7 @@ means (ADR-017): `BidPlaced`, or `BidIgnored` for a bid that changed nothing.
 ## Declaring and emitting
 
 ```typescript
-import { defineActor, setup } from "@actor-kit/worker";
+import { setup } from "@actor-kit/worker";
 import { z } from "zod";
 
 const auction = setup({
@@ -19,9 +19,8 @@ const auction = setup({
   },
 });
 
-export const Auction = defineActor("auction", {
+export const Auction = auction.actor("auction", {
   // ...input, init, roles, views
-  events: auction.events,
   messages: {
     BID: auction.message(z.object({ amount: z.number() }), (s: State, { amount }, ctx) => {
       if (amount <= highest(s)) {
@@ -36,8 +35,8 @@ export const Auction = defineActor("auction", {
 ```
 
 - `setup({ events })` gives `message()` and `timer()` helpers whose `ctx.emit` is typed by the
-  declared events: an unknown name or a wrong payload is a type error. A plain `message()` handler
-  also has `ctx.emit(name, payload)`, checked only at runtime.
+  declared events: an unknown name or a wrong payload is a type error. `auction.actor()` takes the
+  events from the kit, so the definition does not repeat them.
 - The payload is parsed by the event's schema when emitted. An undeclared event or an invalid
   payload fails the transition.
 - Emitted events are stored on the journal row of the transition that emitted them (`emitted`).
@@ -57,8 +56,14 @@ The timeline lists each entry's emitted events (payloads redacted like message p
 ## Publishing to a queue
 
 ```typescript
-defineActor("auction", {
-  events: auction.events,
+import { queue, setup } from "@actor-kit/worker";
+
+const auction = setup({
+  env: z.object({ AUCTION_EVENTS: queue() }),
+  events: { /* BidPlaced, AuctionClosed, ... */ },
+});
+
+auction.actor("auction", {
   publish: { queue: "AUCTION_EVENTS", events: ["BidPlaced", "AuctionClosed"] },
   // ...
 });
@@ -71,7 +76,8 @@ binding = "AUCTION_EVENTS"
 queue = "auction-events"
 ```
 
-Each emitted event named in `publish.events` (a type error if it is not declared in `events`)
+Each emitted event named in `publish.events` (a type error if it is not declared in the kit's
+`events`; with an `env`, `publish.queue` must be one of its bindings)
 gets an outbox row under its effect id, in the same transaction as the state, and is sent to the
 Queue binding after commit, with the outbox's retries, dead letters and redrive. Studio's Outbox
 panel lists the rows under the service `__publish`. The message body:

@@ -34,7 +34,7 @@ export const CounterClient = actorClient(CounterContract);
 
 ### Why type-only?
 
-The contract object returned by `defineActor()` carries Zod schemas, message handlers, and references to `@actor-kit/worker` internals. Importing it as a value pulls all of that into your client bundle — even though the client only needs the *types* for view shapes and message unions. Using `import type` ensures the bundler tree-shakes everything the client doesn't need.
+The contract object returned by `kit.actor()` carries Zod schemas, message handlers, and references to `@actor-kit/worker` internals. Importing it as a value pulls all of that into your client bundle — even though the client only needs the *types* for view shapes and message unions. Using `import type` ensures the bundler tree-shakes everything the client doesn't need.
 
 ### `.create(options)`
 
@@ -52,7 +52,19 @@ const client = CounterClient.create({
 | `url` | `string` | Yes | Full WebSocket URL (routed through your Worker) |
 | `initialView` | `TView` | Yes | Initial view from server (SSR snapshot). The client starts with this view immediately. |
 | `onRedirect` | `(target: { actorType: string; actorId: string }) => void` | No | Called on redirect |
-| `onError` | `(error: { message: string; error: string }) => void` | No | Called on error |
+| `onError` | `(error: ClientError) => void` | No | Called when the actor refuses a message (or sends a frame the client cannot read). See below |
+
+`ClientError` is the refusal from the actor's `__error` frame: `{ messageType, code, message, expected?, details?, docs }`. `messageType` is the refused message's `type`; `code` is a refusal code (`unknown_message`, `invalid_payload`, `guard_failed`, `wrong_state`, `no_role`, …) or `invalid_frame` for an error frame the client cannot read; `message` names the fix; `docs` links to `https://actorkit.dev/errors/<code>/`.
+
+```typescript
+const client = CounterClient.create({
+  path: `/api/counter/${counterId}`,
+  initialView: snapshot,
+  onError: (error) => {
+    if (error.code === "guard_failed") showToast(error.message);
+  },
+});
+```
 
 Reconnection is automatic and never gives up: after an unexpected close the client retries with exponential backoff (1 s, 2 s, 4 s … capped at 30 s), and retries at once when the browser fires `online` or the page becomes visible again. `disconnect()` cancels any pending retry.
 

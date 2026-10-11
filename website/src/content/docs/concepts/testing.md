@@ -68,7 +68,7 @@ import { CounterContract } from "./counter.contract";
 const t = testActor(CounterContract);
 ```
 
-`testActor()` accepts a contract (from `defineActor()`) — types for `init()`, `send()`, `view()`, and `role()` are all inferred from the contract.
+`testActor()` accepts a contract (from `kit.actor()`) — types for `init()`, `send()`, `view()`, and `role()` are all inferred from the contract.
 
 **Initialize state** from input:
 
@@ -95,6 +95,17 @@ const { role, data } = t.view(state, "alice");
 expect(role).toBe("user");
 expect(data.count).toBe(0);
 ```
+
+**Refused messages throw** a `RefusalError` (from `@actor-kit/core`) carrying the refusal's `code` (`unknown_message`, `invalid_payload`, `guard_failed`, `wrong_state`, `no_role`) and the whole value as `.refusal`:
+
+```typescript
+import { RefusalError } from "@actor-kit/core";
+
+await expect(t.send(state, "alice", { type: "RESET" })).rejects.toThrow(RefusalError);
+await expect(t.send(state, "alice", { type: "RESET" })).rejects.toMatchObject({ code: "guard_failed" });
+```
+
+Actors with states work the same way: `init()` returns the persisted state `{ shared, phase, local, stateTimers }`, and `send()` moves between phases as the runtime does.
 
 **Capture service calls** without executing them:
 
@@ -123,7 +134,8 @@ const id = env.COUNTER.idFromName("test-1");
 const stub = env.COUNTER.get(id);
 
 await stub.spawn({ actorId: "test-1", caller: "u1", callerType: "user", input: {} });
-await stub.send("u1", "user", { type: "INCREMENT", amount: 5 });
+const result = await stub.send("u1", "user", { type: "INCREMENT", amount: 5 });
+// { ok: true }, or a refusal: { ok: false, code, message, expected?, details?, docs }
 
 const snapshot = await stub.getSnapshot("u1", "user");
 expect(snapshot.snapshot.count).toBe(5);

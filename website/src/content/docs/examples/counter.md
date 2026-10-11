@@ -9,9 +9,9 @@ The counter is the simplest actor — it demonstrates the contract-first API, fl
 
 ## What it demonstrates
 
-- `defineActor()` + `createActorClass()` — contract-first API
+- `setup()` + `kit.actor()` + `createActorClass()` — contract-first API
 - Flat messages with optional guards
-- `message()` with Zod validation
+- `kit.message()` with Zod validation
 - `schema()` and `view.shared()` for typed view projections
 - Real-time sync: two browsers sharing the same counter
 - Admin vs user roles via `callerType`
@@ -25,23 +25,27 @@ The contract defines state, messages, roles, and views in a single file:
 // counter.contract.ts
 import { z } from "zod";
 import { schema, view, uint32, string, nullable } from "@actor-kit/core";
-import { defineActor, message } from "@actor-kit/worker";
+import { setup } from "@actor-kit/worker";
 
 type CounterState = { count: number; lastUpdatedBy: string | null };
 
 const CounterView = schema({ count: uint32, lastUpdatedBy: nullable(string) });
 
-export const CounterContract = defineActor("counter", {
+// The kit: this actor declares no events, states or env, so it is empty.
+const counter = setup({});
+
+export const CounterContract = counter.actor("counter", {
   input: z.object({}),
   init: (): CounterState => ({ count: 0, lastUpdatedBy: null }),
 
   roles: {
-    admin: (_state, _caller, { callerType }) => callerType === "service",
+    admin: (_state: CounterState, _caller: string, { callerType }: { callerType: "user" | "service" }) =>
+      callerType === "service",
     user: () => true,
   },
 
   messages: {
-    INCREMENT: message(
+    INCREMENT: counter.message(
       z.object({}),
       (state: CounterState, _payload, { caller }) => ({
         ...state,
@@ -49,7 +53,7 @@ export const CounterContract = defineActor("counter", {
         lastUpdatedBy: caller,
       }),
     ),
-    DECREMENT: message(
+    DECREMENT: counter.message(
       z.object({}),
       (state: CounterState, _payload, { caller }) => ({
         ...state,
@@ -57,15 +61,15 @@ export const CounterContract = defineActor("counter", {
         lastUpdatedBy: caller,
       }),
     ),
-    RESET: message(z.object({}), {
-      guard: (_state, _payload, ctx) => ctx.role === "admin",
+    RESET: counter.message(z.object({}), {
+      guard: (_state: CounterState, _payload, ctx) => ctx.role === "admin",
       handler: () => ({ count: 0, lastUpdatedBy: null }),
     }),
   },
 
   views: {
-    admin: view.shared(CounterView, (state) => ({ count: state.count, lastUpdatedBy: state.lastUpdatedBy })),
-    user: view.shared(CounterView, (state) => ({ count: state.count, lastUpdatedBy: state.lastUpdatedBy })),
+    admin: view.shared(CounterView, (state: CounterState) => ({ count: state.count, lastUpdatedBy: state.lastUpdatedBy })),
+    user: view.shared(CounterView, (state: CounterState) => ({ count: state.count, lastUpdatedBy: state.lastUpdatedBy })),
   },
 });
 export type CounterContract = typeof CounterContract;
@@ -85,7 +89,7 @@ export const Counter = createActorClass(CounterContract);
 
 Key points:
 - **Messages are flat** — not nested by role. `RESET` uses a guard to restrict to admin
-- **`defineActor()`** returns a typed contract — `createActorClass()` converts it to a DO class
+- **`counter.actor()`** returns a typed contract — `createActorClass()` converts it to a DO class
 - **Both roles** can see `INCREMENT` and `DECREMENT` — guards are only needed for restricted actions
 - **Views** are the same shape for both roles — in more complex actors, roles would see different projections
 - **The contract is separate from the DO class** — server imports the value, client imports only the type

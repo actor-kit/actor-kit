@@ -67,8 +67,8 @@ restore: (s) => ({
 Define a message with a guard to restrict access:
 
 ```typescript
-RESET: message(z.object({}), {
-  guard: (_state, _payload, ctx) => ctx.role === "admin",
+RESET: counter.message(z.object({}), {
+  guard: (_state: CounterState, _payload, ctx) => ctx.role === "admin",
   handler: () => ({ count: 0, lastUpdatedBy: null }),
 }),
 ```

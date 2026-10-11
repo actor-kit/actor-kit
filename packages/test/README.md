@@ -11,22 +11,29 @@ pnpm add -D @actor-kit/test
 ## Usage
 
 ```ts
+import { RefusalError } from "@actor-kit/core";
 import { testActor } from "@actor-kit/test";
-import { counterContract } from "./contract";
+import { CounterContract } from "./contract"; // from counter.actor(...)
 
-const t = testActor(counterContract);
+const t = testActor(CounterContract);
 
-// Initialize with default state
-t.init();
+// Initialize from input
+let state = t.init({});
 
-// Send a message and assert the resulting state
-t.send("increment", {});
-expect(t.view("anyone").count).toBe(1);
+// Send a message and assert the resulting state and view
+({ state } = await t.send(state, "alice", { type: "INCREMENT" }));
+expect(t.view(state, "alice").data.count).toBe(1);
 
-// send() always returns { state, executions, links, unlinks, forwards }
-const { state } = t.send("increment", {});
-expect(state.count).toBe(2);
+// send() returns { state, executions, links, unlinks, forwards, schedules, cancels, emitted, timeline }
+
+// A refused message throws a RefusalError with the refusal's code
+await expect(t.send(state, "alice", { type: "RESET" })).rejects.toThrow(RefusalError);
 ```
+
+`testActor` runs the runtime's own step core: actors with states work (`init` returns
+`{ shared, phase, local, stateTimers }`), and undeclared timers and events are refused as in the
+Durable Object. `simulate()`'s `send` returns `{ ok: true }` or the refusal
+(`{ ok: false, code, message, expected?, details?, docs }`) instead of throwing.
 
 ## Typed env and determinism (ADR-016)
 

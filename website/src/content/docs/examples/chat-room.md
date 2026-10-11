@@ -18,7 +18,10 @@ The chat room demonstrates WebSocket lifecycle events and real-time broadcast to
 ## Lifecycle Events
 
 ```typescript
-export const ChatRoomContract = defineActor("chat-room", {
+// The kit: this actor declares no events, states or env, so it is empty.
+const chat = setup({});
+
+export const ChatRoomContract = chat.actor("chat-room", {
   input: z.object({}),
   init: (): ChatState => ({ messages: [], onlineUsers: [] }),
 
@@ -27,31 +30,31 @@ export const ChatRoomContract = defineActor("chat-room", {
   },
 
   messages: {
-    SEND_MESSAGE: message(
+    SEND_MESSAGE: chat.message(
       z.object({ text: z.string().min(1).max(500) }),
-      (state: ChatState, { text }, { caller }) => ({
+      (state: ChatState, { text }, { caller, id, now }) => ({
         ...state,
         messages: [
           ...state.messages.slice(-49),
-          { id: crypto.randomUUID(), author: caller, text, timestamp: Date.now() },
+          { id: id(), author: caller, text, timestamp: now() },
         ],
       }),
     ),
   },
 
   views: {
-    user: view.shared(ChatViewSchema, (state) => ({
+    user: view.shared(ChatViewSchema, (state: ChatState) => ({
       messages: state.messages.map((m) => ({ id: m.id, author: m.author, text: m.text })),
       onlineCount: state.onlineUsers.length,
     })),
   },
 
   lifecycle: {
-    connect: (state, { caller }) => {
+    connect: (state: ChatState, { caller }: LifecycleEvent) => {
       if (state.onlineUsers.includes(caller)) return state;
       return { ...state, onlineUsers: [...state.onlineUsers, caller] };
     },
-    disconnect: (state, { caller, callerConnections }) => {
+    disconnect: (state: ChatState, { caller, callerConnections }: LifecycleEvent) => {
       if (callerConnections > 0) return state; // another tab is still open
       return { ...state, onlineUsers: state.onlineUsers.filter((u) => u !== caller) };
     },

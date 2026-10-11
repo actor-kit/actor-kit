@@ -21,8 +21,8 @@ The todo list demonstrates the role system in depth — different users see diff
 
 ```typescript
 roles: {
-  owner: (state, caller) => caller === state.ownerId,
-  member: (state, caller) => state.memberIds.includes(caller),
+  owner: (state: TodoState, caller: string) => caller === state.ownerId,
+  member: (state: TodoState, caller: string) => state.memberIds.includes(caller),
   viewer: () => true,  // catch-all
 },
 ```
@@ -31,43 +31,45 @@ Roles evaluate top-to-bottom. First match wins. If the caller is the owner, they
 
 ## Flat Messages with Guards
 
+The actor declares no events, states or env, so its kit is empty: `const todo = setup({})`, and the contract is `todo.actor("todo-list", { ... })`. Messages come from the kit:
+
 ```typescript
 messages: {
-  ADD_TODO: message(
+  ADD_TODO: todo.message(
     z.object({ text: z.string().min(1).max(200) }),
     {
-      guard: (_state, _payload, ctx) => ctx.role === "owner" || ctx.role === "member",
-      handler: (state, { text }) => ({
+      guard: (_state: TodoState, _payload, ctx) => ctx.role === "owner" || ctx.role === "member",
+      handler: (state: TodoState, { text }, ctx) => ({
         ...state,
-        todos: [...state.todos, { id: crypto.randomUUID(), text, done: false }],
+        todos: [...state.todos, { id: ctx.id(), text, done: false }],
       }),
     },
   ),
-  DELETE_TODO: message(
+  DELETE_TODO: todo.message(
     z.object({ id: z.string() }),
     {
-      guard: (_state, _payload, ctx) => ctx.role === "owner",
-      handler: (state, { id }) => ({
+      guard: (_state: TodoState, _payload, ctx) => ctx.role === "owner",
+      handler: (state: TodoState, { id }) => ({
         ...state,
         todos: state.todos.filter((t) => t.id !== id),
       }),
     },
   ),
-  TOGGLE: message(
+  TOGGLE: todo.message(
     z.object({ id: z.string() }),
     {
-      guard: (_state, _payload, ctx) => ctx.role === "owner" || ctx.role === "member",
-      handler: (state, { id }) => ({
+      guard: (_state: TodoState, _payload, ctx) => ctx.role === "owner" || ctx.role === "member",
+      handler: (state: TodoState, { id }) => ({
         ...state,
         todos: state.todos.map((t) => (t.id === id ? { ...t, done: !t.done } : t)),
       }),
     },
   ),
-  INVITE: message(
+  INVITE: todo.message(
     z.object({ userId: z.string() }),
     {
-      guard: (_state, _payload, ctx) => ctx.role === "owner",
-      handler: (state, { userId }) => ({
+      guard: (_state: TodoState, _payload, ctx) => ctx.role === "owner",
+      handler: (state: TodoState, { userId }) => ({
         ...state,
         memberIds: [...state.memberIds, userId],
       }),
@@ -76,21 +78,21 @@ messages: {
 },
 ```
 
-Messages are flat — all defined at the top level. Guards check `ctx.role` to enforce authorization. A viewer sending `DELETE_TODO` gets a `guard_failed` error without the handler running.
+Messages are flat — all defined at the top level. Guards check `ctx.role` to enforce authorization. A viewer sending `DELETE_TODO` is refused with code `guard_failed` without the handler running.
 
 ## Per-Role Views
 
 ```typescript
 views: {
-  owner: view.shared(OwnerViewSchema, (state) => ({
+  owner: view.shared(OwnerViewSchema, (state: TodoState) => ({
     todos: state.todos,
     memberCount: state.memberIds.length,
   })),
-  member: view.shared(OwnerViewSchema, (state) => ({
+  member: view.shared(OwnerViewSchema, (state: TodoState) => ({
     todos: state.todos,
     memberCount: state.memberIds.length,
   })),
-  viewer: view.shared(ViewerViewSchema, (state) => ({
+  viewer: view.shared(ViewerViewSchema, (state: TodoState) => ({
     todoCount: state.todos.length,
     doneCount: state.todos.filter(t => t.done).length,
   })),

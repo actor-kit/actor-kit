@@ -12,28 +12,33 @@ pnpm add @actor-kit/core @actor-kit/worker zod
 
 ```ts
 import { nullable, schema, string, uint32, view } from "@actor-kit/core";
-import { createActorClass, defineActor, message } from "@actor-kit/worker";
+import { createActorClass, setup } from "@actor-kit/worker";
 import { z } from "zod";
+
+type State = { count: number; lastUpdatedBy: string | null };
 
 const CounterView = schema({ count: uint32, lastUpdatedBy: nullable(string) });
 
-export const Counter = defineActor("counter", {
+// The kit: what the actor declares up front ({ events, states, env }, all optional).
+const counter = setup({});
+
+export const Counter = counter.actor("counter", {
   input: z.object({}),
-  init: () => ({ count: 0, lastUpdatedBy: null as string | null }),
+  init: (): State => ({ count: 0, lastUpdatedBy: null }),
   roles: {
-    admin: (_s, _caller, { callerType }) => callerType === "service",
+    admin: (_s: State, _caller: string, { callerType }: { callerType: "user" | "service" }) => callerType === "service",
     user: () => true,
   },
   messages: {
-    INCREMENT: message(z.object({}), (state, _p, { caller }) => ({ count: state.count + 1, lastUpdatedBy: caller })),
-    RESET: message(z.object({}), {
-      guard: (_s, _p, ctx) => ctx.role === "admin",
+    INCREMENT: counter.message(z.object({}), (s: State, _p, { caller }) => ({ count: s.count + 1, lastUpdatedBy: caller })),
+    RESET: counter.message(z.object({}), {
+      guard: (_s: State, _p, ctx) => ctx.role === "admin",
       handler: () => ({ count: 0, lastUpdatedBy: null }),
     }),
   },
   views: {
-    admin: view.shared(CounterView, (s) => s),
-    user: view.shared(CounterView, (s) => s),
+    admin: view.shared(CounterView, (s: State) => s),
+    user: view.shared(CounterView, (s: State) => s),
   },
 });
 
@@ -41,8 +46,18 @@ export const Counter = defineActor("counter", {
 export const CounterDO = createActorClass(Counter);
 ```
 
+`counter.actor(name, def)` (the same as `defineActor(name, counter, def)`) is the one way to define an
+actor: the kit supplies `events`, `env` and the state declarations, and its helpers (`message`, `timer`,
+`in(state)`) type `ctx.env`, `ctx.emit` and a state's `local` / `goto` / `stay`. Annotate the state type
+once, on each handler's first parameter.
+
 Handlers are synchronous reducers. Read time and randomness through `ctx.now()`, `ctx.id()` and
 `ctx.random()`; the runtime records them so the journal can be replayed.
+
+`stub.send(caller, callerType, message)` returns `{ ok: true }` or a refusal,
+`{ ok: false, code, message, expected?, details?, docs }` (codes such as `unknown_message`,
+`invalid_payload`, `guard_failed`, `wrong_state`, `no_role`). Every error the library throws is an
+`ActorKitError` with a stable `code` and a `docs` URL.
 
 ## Timers
 
@@ -51,7 +66,7 @@ ctx.schedule("roundEnd", { in: "30s", key: "round-1", payload: { round: 1 } }); 
 ctx.cancel("round-1");
 ```
 
-Declared in a `timers` block with `timer(schema, handler)`, saved to SQLite and fired by the Durable
+Declared in a `timers` block with `kit.timer(schema, handler)`, saved to SQLite and fired by the Durable
 Object alarm, so they survive hibernation and deploys.
 
 ## Services
@@ -79,10 +94,10 @@ Declared errors are not retried (a declined card is an answer); timeouts and def
 
 ## Domain events
 
-Declare `events` and emit them with `setup({ events })` helpers (typed `ctx.emit`); they are
-journaled with the transition that emitted them. See the Domain events concept page.
+Declare `events` in `setup({ events })` and emit them from the kit's handlers (typed `ctx.emit`); they
+are journaled with the transition that emitted them. See the Domain events concept page.
 
-`publish: { queue, events }` sends them to a Queue binding (declare it in `env`) through the outbox, like a
+`publish: { queue, events }` sends them to a Queue binding (declare it in the kit's `env`) through the outbox, like a
 service: each message's `idempotencyKey` is the effect's (`${actorType}/${actorId}/${seq}:${index}`), each
 try has the default 30-second timeout, and timeouts and defects are retried.
 

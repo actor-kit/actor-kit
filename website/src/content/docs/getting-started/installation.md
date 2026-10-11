@@ -20,7 +20,7 @@ pnpm add @actor-kit/core @actor-kit/client
 | Package | Usage |
 |---------|-------|
 | `@actor-kit/core` | Shared: `schema`, `view`, type primitives (`uint32`, `string`, etc.), `encode`, `decode` |
-| `@actor-kit/worker` | Server: `defineActor`, `createActorClass`, `message`, `withCallerIdentity` |
+| `@actor-kit/worker` | Server: `setup` (the kit, with `kit.actor`), `createActorClass`, `withCallerIdentity` |
 | `@actor-kit/client` | Browser: `actorClient` — WebSocket connection with binary decoding |
 | `@actor-kit/react` | React: `actorContext` — hooks for view, send, role |
 | `@actor-kit/test` | Testing: `testActor` — fast unit tests without Wrangler |
@@ -71,7 +71,7 @@ See the [Quick Start](/getting-started/quick-start/) for a complete example.
 
 ## TypeScript
 
-Actor Kit is written in TypeScript with strict mode. Types are inferred from your actor definition — no manual type annotations needed. `defineActor()` returns a typed contract that preserves all generic information for downstream consumers.
+Actor Kit is written in TypeScript with strict mode. Types are inferred from your actor definition — annotate the state type once on each handler, and the kit types the rest. `kit.actor()` returns a typed contract that preserves all generic information for downstream consumers.
 
 Wrangler generates Worker types for you — no manual type package needed:
 
