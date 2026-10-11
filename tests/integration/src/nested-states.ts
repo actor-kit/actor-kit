@@ -4,3 +4,8 @@ import { Rounds } from "./rounds";
 
 export { Rounds };
 export const RoundsActor = createActorClass(Rounds);
+
+import { ScopedCalls } from "./scoped-calls";
+
+export { ScopedCalls };
+export const ScopedCallsActor = createActorClass(ScopedCalls);

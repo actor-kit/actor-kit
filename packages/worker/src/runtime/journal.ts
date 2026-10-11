@@ -194,6 +194,7 @@ export const JOURNAL_CAUSE_TYPES = [
   "lifecycle.disconnect",
   "service.onDone",
   "service.onError",
+  "service.stale",
   "link.onUpdate",
   "link.onError",
   "migrate",
@@ -582,6 +583,12 @@ const REPLAY_CAUSES: Record<Exclude<JournalCauseType, "init" | "restore">, Repla
     required(def.services?.[service]?.onError, `service "${service}" onError`);
     return { type: "service.onError", service, ...ServiceErrorPayload.parse(event.payload) };
   },
+  // A late result (ADR-019 B): onStale is optional, so nothing is required to replay it.
+  "service.stale": (_def, _state, event) => ({
+    type: "service.stale",
+    service: nameOf(event),
+    ...ServicePayload.parse(event.payload),
+  }),
   "link.onUpdate": (def, _state, event) => {
     const link = nameOf(event);
     required(def.links?.[link], `link "${link}"`);

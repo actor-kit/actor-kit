@@ -14,7 +14,13 @@
  * run transitions through here, so they cannot drift apart. Nothing here touches storage.
  */
 
-import type { DeliveryInfo, DeterministicContext, GuardContext, ScheduleOptions } from "@actor-kit/core";
+import type {
+  DeliveryInfo,
+  DeterministicContext,
+  ExecuteOptions,
+  GuardContext,
+  ScheduleOptions,
+} from "@actor-kit/core";
 import { ActorKitError } from "@actor-kit/core";
 import { parseDuration } from "./duration";
 import { createReplayFacts, type Facts, type JournalDraft, type LiveFacts } from "./journal";
@@ -57,6 +63,8 @@ export interface StepDef {
       onDone?(state: unknown, result: unknown, input: unknown, ctx: ServiceCallbackCtx): unknown;
       /** `error`: the typed service error (ADR-016 §2): a declared error, a Timeout, a Defect or Evicted. */
       onError?(state: unknown, error: unknown, input: unknown, ctx: ServiceCallbackCtx): unknown;
+      /** A result that arrived after the state that owned the call was left (ADR-019 B). */
+      onStale?(state: unknown, result: unknown, input: unknown, ctx: ServiceCallbackCtx): unknown;
     }
   >;
   links?: Record<
@@ -145,6 +153,14 @@ export type StepCause = Traced &
         readonly effectId?: string | undefined;
         /** Audit facts the try recorded with effect.record() (ADR-018 G): journaled, never replayed. */
         readonly audit?: Readonly<Record<string, unknown>> | undefined;
+      }
+    | {
+        /** A result that arrived after the state owning its call was left (ADR-019 B): onStale, or nothing. */
+        readonly type: "service.stale";
+        readonly service: string;
+        readonly input: unknown;
+        readonly result: unknown;
+        readonly effectId?: string | undefined;
       }
     | {
         readonly type: "service.onError";
@@ -262,6 +278,8 @@ export interface StepResult {
   readonly handlerState: unknown;
   readonly effects: StepEffects;
   readonly event: JournalDraft;
+  /** Journal this transition even when it changes nothing (a late result, ADR-019 B). */
+  readonly alwaysJournal?: true;
 }
 
 // --- Message admission (live only: replay never asks again) ---
@@ -379,6 +397,22 @@ function fireAtOf(options: ScheduleOptions, det: DeterministicContext): number {
   return det.now() + parseDuration(options.in);
 }
 
+/**
+ * ctx.execute where no state can own the call (an actor without states, lifecycle, top-level helpers'
+ * base context): a `scope: "state"` call is refused (ADR-019 B).
+ */
+function plainExecute(effects: StepEffects): (service: string, input: unknown, options?: ExecuteOptions) => string {
+  return (service, input, options) => {
+    if (options?.scope === "state") {
+      throw new ActorKitError(
+        "invalid_scope",
+        `ctx.execute("${service}", ..., { scope: "state" }) needs a state to belong to: call it from a state's message, timer or enter, in an actor with states.`,
+      );
+    }
+    return effects.execute(service, input);
+  };
+}
+
 /** ctx.emit for a transition: the event must be declared and its payload must parse (ADR-017 §2). */
 function emitVerb(def: StepDef, effects: StepEffects): (name: string, payload: unknown) => void {
   return (name, payload) => {
@@ -460,11 +494,13 @@ function phaseRun(
     base: {
       ...facts.ctx,
       env,
-      execute: effects.execute,
+      execute: plainExecute(effects),
       forward: effects.forward,
       emit: emitVerb(def, effects),
     },
     verbs: (path) => timerVerbs(def, effects, facts.ctx, path),
+    execute: effects.execute,
+    leave: (key) => effects.cancel(key, true),
   };
 }
 
@@ -536,7 +572,7 @@ function stepMessage(
     role: cause.role,
     env,
     ...(cause.delivery === undefined ? {} : { delivery: cause.delivery }),
-    execute: effects.execute,
+    execute: plainExecute(effects),
     link: effects.link,
     unlink: effects.unlink,
     forward: effects.forward,
@@ -593,7 +629,7 @@ function stepLifecycle(
               ...facts.ctx,
               ...who,
               env,
-              execute: effects.execute,
+              execute: plainExecute(effects),
               forward: effects.forward,
               emit: emitVerb(def, effects),
               ...timerVerbs(def, effects, facts.ctx),
@@ -652,21 +688,74 @@ function callbackCtx(
   return { ...det, env, effectId: cause.effectId ?? "" };
 }
 
-function serviceDone(def: StepDef, state: unknown, cause: On<"service.onDone">, det: ServiceCallbackCtx) {
-  const onDone = def.services?.[cause.service]?.onDone;
+/** What a service callback needs to run in a state tree. */
+interface CallbackRun {
+  readonly def: StepDef;
+  readonly effects: StepEffects;
+  readonly facts: StepFacts;
+  readonly env: unknown;
+}
+
+type ServiceCallback = (state: unknown, value: unknown, input: unknown, ctx: ServiceCallbackCtx) => unknown;
+
+/**
+ * Run a service callback (ADR-019 B). Without states, on the state as it is. With states, at the level
+ * that owns its call (the leaf when none does), with the phase context, so it may stay or goto; the
+ * call's effect id leaves the owner's list. A missing callback changes nothing but that.
+ */
+function atCallLevel(
+  run: CallbackRun,
+  state: unknown,
+  effectId: string | undefined,
+  value: { readonly callback: ServiceCallback | undefined; readonly arg: unknown; readonly input: unknown },
+  det: ServiceCallbackCtx,
+): unknown {
+  const call = (shared: unknown, phase: PhaseContext | null) =>
+    value.callback === undefined ? shared : value.callback(shared, value.arg, value.input, { ...det, ...phase });
+  const states = run.def.states;
+  if (states === undefined) return call(state, null);
+  const owner = phasedState(state).stateTimers.findIndex((keys) => keys.some((key) => key === effectId));
+  const returnedAsIs: boolean[] = [];
+  const next = runAtLevel(
+    phaseRun(run.def, states, run.effects, run.facts, run.env),
+    state,
+    owner < 0 ? null : owner + 1,
+    (shared, phase) => {
+      const result = call(shared, phase);
+      returnedAsIs.push(result === shared);
+      return result;
+    },
+    effectId ?? null,
+  );
+  // The shared state returned as it was, for a call no state owned: nothing changed.
+  return returnedAsIs[0] === true && owner < 0 ? state : next;
+}
+
+function serviceDone(run: CallbackRun, state: unknown, cause: On<"service.onDone">, det: ServiceCallbackCtx) {
+  const callback = run.def.services?.[cause.service]?.onDone;
   return {
-    next: onDone === undefined ? state : onShared(def, state, (s) => onDone(s, cause.result, cause.input, det)),
+    next: atCallLevel(run, state, cause.effectId, { callback, arg: cause.result, input: cause.input }, det),
     name: cause.service,
     payload: resultPayload({ input: cause.input, result: cause.result }, cause),
   };
 }
 
-function serviceError(def: StepDef, state: unknown, cause: On<"service.onError">, det: ServiceCallbackCtx) {
-  const onError = def.services?.[cause.service]?.onError;
+function serviceError(run: CallbackRun, state: unknown, cause: On<"service.onError">, det: ServiceCallbackCtx) {
+  const callback = run.def.services?.[cause.service]?.onError;
   return {
-    next: onError === undefined ? state : onShared(def, state, (s) => onError(s, cause.error, cause.input, det)),
+    next: atCallLevel(run, state, cause.effectId, { callback, arg: cause.error, input: cause.input }, det),
     name: cause.service,
     payload: resultPayload({ input: cause.input, error: cause.error }, cause),
+  };
+}
+
+/** A late result (ADR-019 B): the owning state is gone, so onStale runs at the leaf, or nothing does. */
+function serviceStale(run: CallbackRun, state: unknown, cause: On<"service.stale">, det: ServiceCallbackCtx) {
+  const callback = run.def.services?.[cause.service]?.onStale;
+  return {
+    next: atCallLevel(run, state, cause.effectId, { callback, arg: cause.result, input: cause.input }, det),
+    name: cause.service,
+    payload: resultPayload({ input: cause.input, result: cause.result }, cause),
   };
 }
 
@@ -698,18 +787,15 @@ function migrate(def: StepDef, cause: On<"migrate">) {
   };
 }
 
-function runCallback(
-  def: StepDef,
-  state: unknown,
-  cause: CallbackCause,
-  det: LinkCallbackCtx,
-  env: unknown,
-): CallbackOutcome {
+function runCallback(run: CallbackRun, state: unknown, cause: CallbackCause, det: LinkCallbackCtx): CallbackOutcome {
+  const { def, env } = run;
   switch (cause.type) {
     case "service.onDone":
-      return serviceDone(def, state, cause, callbackCtx(det, env, cause));
+      return serviceDone(run, state, cause, callbackCtx(det, env, cause));
     case "service.onError":
-      return serviceError(def, state, cause, callbackCtx(det, env, cause));
+      return serviceError(run, state, cause, callbackCtx(det, env, cause));
+    case "service.stale":
+      return serviceStale(run, state, cause, callbackCtx(det, env, cause));
     case "link.onUpdate":
       return linkUpdate(def, state, cause, det);
     case "link.onError":
@@ -722,13 +808,16 @@ function runCallback(
 function stepCallback(def: StepDef, state: unknown, cause: CallbackCause, facts: StepFacts, env: unknown): StepResult {
   const effects = createOutbox(facts.seq);
   const det = { ...facts.ctx, emit: emitVerb(def, effects) };
-  const { next, name, payload } = guarded(facts, () => runCallback(def, state, cause, det, env));
-  return {
+  const run = { def, effects, facts, env };
+  const { next, name, payload } = guarded(facts, () => runCallback(run, state, cause, det));
+  const result = {
     state: next,
     handlerState: next,
     effects,
     event: draft({ causeType: cause.type, name, payload }, NOBODY, facts),
   };
+  // A late result is journaled even when it changes nothing, so the history shows it arrived (ADR-019 B).
+  return cause.type === "service.stale" ? { ...result, alwaysJournal: true } : result;
 }
 
 /** A timer fires: its handler runs with no caller and no role; a timer no longer declared is a no-op. */
@@ -746,7 +835,7 @@ function stepTimer(
     env,
     key: cause.key,
     lateBy: cause.lateBy,
-    execute: effects.execute,
+    execute: plainExecute(effects),
     forward: effects.forward,
     emit: emitVerb(def, effects),
     ...timerVerbs(def, effects, facts.ctx),

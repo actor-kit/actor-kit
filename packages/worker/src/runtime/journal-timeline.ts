@@ -79,6 +79,10 @@ const CAUSES: { [K in JournalEvent["causeType"]]: CauseOf } = {
     const { input, error } = ServiceError.parse(event.payload);
     return { service: event.name ?? UNKNOWN, input, error: describeRecordedError(error) };
   },
+  "service.stale": (event) => {
+    const { input, result } = ServiceDone.parse(event.payload);
+    return { service: event.name ?? UNKNOWN, input, result };
+  },
   "link.onUpdate": (event, sourceType) => {
     const { sourceId, view } = LinkUpdate.parse(event.payload);
     return { sourceType: linkType(event, sourceType), sourceId, viewData: view };

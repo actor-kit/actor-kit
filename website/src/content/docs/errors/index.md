@@ -38,6 +38,7 @@ Every error actor-kit throws is an `ActorKitError` with a stable `code` and a `d
 | [`undeclared_state`](/errors/undeclared_state/) | `goto` (or a persisted phase) names a state the actor does not declare. |
 | [`invalid_local`](/errors/invalid_local/) | A state's local does not match its schema. |
 | [`missing_state_input`](/errors/missing_state_input/) | A state that declares an enter `input` was entered on the way to another state (or as an `initial` child). |
+| [`invalid_scope`](/errors/invalid_scope/) | `ctx.execute(..., { scope: "state" })` was called where no state can own the call. |
 | [`invalid_transition`](/errors/invalid_transition/) | `enter` or `exit` returned a `goto` (or `exit` returned `stay`). |
 | [`invalid_phased_state`](/errors/invalid_phased_state/) | The persisted state of an actor with states is not `{ shared, phase, locals, stateTimers }`. |
 | [`nondeterminism`](/errors/nondeterminism/) | A handler read the clock or randomness directly (Date.now, new Date(), Math.random, crypto.randomUUID, ...). |

@@ -15,6 +15,7 @@ const SUMMARIES = new Map<string, (f: Field) => string>([
   ["lifecycle.disconnect", (f) => `${f("caller")} disconnected`],
   ["service.onDone", (f) => `${f("service")} completed`],
   ["service.onError", (f) => `${f("service")} failed: ${f("error")}`],
+  ["service.stale", (f) => `${f("service")} answered after its state was left`],
   ["link.onUpdate", (f) => `${f("sourceType")}:${f("sourceId")} updated`],
   ["link.onError", (f) => `${f("sourceType")}:${f("sourceId")} failed: ${f("error")}`],
   ["link.onUnlink", (f) => `${f("sourceType")}:${f("sourceId")} unlinked`],

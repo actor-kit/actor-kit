@@ -93,6 +93,7 @@ import {
   readOutboxRows,
   redriveExecution,
   requeueInterrupted,
+  STALE_CANCEL_REASON,
   startAttempt,
 } from "./runtime/outbox-store";
 import { type StepStateDef, upgradePhased } from "./runtime/phases";
@@ -1013,19 +1014,30 @@ export function actor(
       }
     }
 
-    /** One try of one execution: settle the row and, on the outcome that ends it, run onDone/onError. */
-    async runExecution(entry: { id: string; service: string; input: unknown }): Promise<void> {
+    /**
+     * Start a try of an execution: its service and retry policy, and the try's number. Null when the
+     * service is not defined (the row fails) or the row no longer waits (cancelled since the drain listed it).
+     */
+    startExecution(entry: { id: string; service: string }) {
       const sql = this.ctx.storage.sql;
       const serviceDef = serviceFor(entry.service);
       const policy = retryPolicies.get(entry.service);
       if (serviceDef === undefined || policy === undefined) {
         finishAttempt(sql, entry.id, { status: "failed" }, `Service "${entry.service}" is not defined`);
         this.pushStudioOutbox();
-        return;
+        return null;
       }
-
       const attempt = startAttempt(sql, entry.id);
       this.pushStudioOutbox();
+      return attempt === null ? null : { serviceDef, policy, attempt };
+    }
+
+    /** One try of one execution: settle the row and, on the outcome that ends it, run onDone/onError. */
+    async runExecution(entry: { id: string; service: string; input: unknown }): Promise<void> {
+      const sql = this.ctx.storage.sql;
+      const started = this.startExecution(entry);
+      if (started === null) return;
+      const { serviceDef, policy, attempt } = started;
       const { outcome, audit } = await this.tryExecution(entry, serviceDef, attempt);
 
       // Aborted (a restore undid its transition, or a redrive replaced it): discard the result, settle nothing.
@@ -1065,6 +1077,10 @@ export function actor(
         (signal) => tryService(serviceDef, entry.input, this.handlerEnv, effectInfo({ ...fields, signal, audit })),
         ms,
         controller,
+        // A scoped call whose state was left (ADR-019 B): its late result goes to onStale.
+        (late) => {
+          if (controller.signal.reason === STALE_CANCEL_REASON) this.applyLateResult(entry, late);
+        },
       );
       this.inFlight.finish("executions", entry.id, controller);
       const outcome = parsedOutcome(entry.service, optionsFor(entry.service), tried);
@@ -1117,9 +1133,11 @@ export function actor(
         settle();
         return;
       }
+      // With states, a callback may goto (ADR-019 B): the states it enters and leaves schedule, execute
+      // and cancel, so every effect is written, not only emitted events.
       this.commit(result.state, result.event, (seq) => {
         settle();
-        this.writeEmitted(result, seq);
+        this.writeEffects(result, seq, `service:${service}`, "service");
       });
       this.afterEffects(result);
     }
@@ -1317,6 +1335,7 @@ export function actor(
       }
 
       const attempt = startAttempt(sql, entry.id, "forwards");
+      if (attempt === null) return; // cancelled (a restore) since the drain listed it
       this.pushStudioOutbox();
       const callerType: "user" | "service" = entry.callerType === "service" ? "service" : "user";
       const delivery = deliveryInfo({
@@ -1436,13 +1455,55 @@ export function actor(
         applyTimerOps(this.ctx.storage.sql, timerOps, Date.now());
         this.timersChanged = true;
       }
-      this.cancelExecutions(timerOps.flatMap((op) => (op.op === "cancel" ? [op.key] : [])));
+      const cancels = timerOps.flatMap((op) => (op.op === "cancel" ? [op] : []));
+      this.cancelExecutions(cancels.flatMap((op) => (op.stale === true ? [] : [op.key])));
+      this.cancelExecutions(
+        cancels.flatMap((op) => (op.stale === true ? [op.key] : [])),
+        STALE_CANCEL_REASON,
+      );
     }
 
-    /** ctx.cancel(effectId) (ADR-018 G): calls not yet finished end as cancelled; a try in flight is aborted. */
-    cancelExecutions(effectIds: readonly string[]): void {
-      for (const effectId of cancelExecutionRows(this.ctx.storage.sql, effectIds)) {
-        this.inFlight.abort("executions", effectId, "cancelled");
+    /**
+     * ctx.cancel(effectId) (ADR-018 G), or leaving the state that owned a scoped call (ADR-019 B, `reason`
+     * STALE_CANCEL_REASON): calls not yet finished end as cancelled; a try in flight is aborted.
+     */
+    cancelExecutions(effectIds: readonly string[], reason = "cancelled"): void {
+      const rowReason = reason === STALE_CANCEL_REASON ? reason : undefined;
+      for (const effectId of cancelExecutionRows(this.ctx.storage.sql, effectIds, rowReason)) {
+        this.inFlight.abort("executions", effectId, reason);
+      }
+    }
+
+    /**
+     * A scoped call's result that arrived after its state was left (ADR-019 B): parsed like any result,
+     * then a `service.stale` transition (onStale, or journaled and ignored). A late failure is dropped.
+     */
+    applyLateResult(entry: { id: string; service: string; input: unknown }, late: TryOutcome): void {
+      const outcome = parsedOutcome(entry.service, optionsFor(entry.service), late);
+      if ("aborted" in outcome || !outcome.ok) return;
+      try {
+        const cause: StepCause = {
+          type: "service.stale",
+          service: entry.service,
+          input: entry.input,
+          result: outcome.result,
+          effectId: entry.id,
+        };
+        const result = this.runStep({ ...cause, trace: this.effectTrace(entry.id) });
+        this.commit(result.state, result.event, (seq) =>
+          this.writeEffects(result, seq, `service:${entry.service}`, "service"),
+        );
+        this.afterEffects(result);
+      } catch (error) {
+        console.error(
+          JSON.stringify({
+            event: "actor_kit.service.stale_failed",
+            actorType: _actorName,
+            actorId: this.subscriberId(),
+            effectId: entry.id,
+            message: error instanceof Error ? error.message : String(error),
+          }),
+        );
       }
     }
 

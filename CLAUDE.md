@@ -38,6 +38,7 @@ actor-kit-2/
 │   ├── chat-room/         → Real-time chat with lifecycle
 │   ├── auction/           → Guards, competitive bidding, domain events and a published stream
 │   ├── quiz/              → States with typed locals (contract only, ADR-017)
+│   ├── checkout-saga/     → Saga recipe: scoped calls, compensation in reverse (contract only, ADR-019 B)
 │   └── tanstack-start-counter/ → TanStack Start SSR + WebSocket
 ├── website/               → Docs site (Astro + Starlight)
 ├── docs/

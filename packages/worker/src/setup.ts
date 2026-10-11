@@ -44,6 +44,7 @@ import type {
   DeclAt,
   InputArgs,
   InputOf,
+  LeafPathsOf,
   LocalOf,
   MergedLocal,
   ParentOf,
@@ -265,8 +266,16 @@ export interface Setup<ES extends EventSchemas, SD extends StateDecls, TEnvSchem
    * output), onError's error union (its `errors` plus the built-ins) and both callbacks' ctx (env, effectId).
    */
   service<S, TResult = unknown, TDeclared = unknown>(
-    def: KitServiceDef<S, TResult, TDeclared, SetupEnv<TEnvSchema>, EventPayloads<ES>>,
-  ): ServiceDef<S, TDeclared, SetupEnv<TEnvSchema>, TResult, EventPayloads<ES>>;
+    def: KitServiceDef<S, TResult, TDeclared, SetupEnv<TEnvSchema>, EventPayloads<ES>, SD>,
+  ): ServiceDef<
+    S,
+    TDeclared,
+    SetupEnv<TEnvSchema>,
+    TResult,
+    EventPayloads<ES>,
+    KitCallbackResult<SD, S>,
+    KitCallbackContext<SetupEnv<TEnvSchema>, EventPayloads<ES>, SD, S>
+  >;
   /** A link (ADR-011) whose callbacks' ctx.emit is typed by the kit's events (ADR-018 F). */
   link<
     TContract extends { readonly name: string; readonly def: Record<string, unknown> },
@@ -311,13 +320,41 @@ export type KitActorDef<TDef, TState, TErrors, ES extends EventSchemas, SD, TEnv
   KitDefCheck<SD> &
   VersionsCheck<TDef> &
   PublishCheck<KitContractDef<TDef, ES, TEnvSchema>> &
-  TypedServices<TState, TErrors, SetupEnv<TEnvSchema>, EventPayloads<ES>>;
+  TypedServices<TState, TErrors, SetupEnv<TEnvSchema>, EventPayloads<ES>, KitCallbackResult<SD, TState>>;
 
 /** The contract's definition: the actor's own, plus the kit's events and env. */
 export type KitContractDef<TDef, ES, TEnvSchema> = TDef & { readonly events: ES; readonly env: TEnvSchema };
 
 /** What `kit.service()` takes: a service definition whose callbacks are typed by the kit. */
-export interface KitServiceDef<S, TResult, TDeclared, TEnv, E = Record<never, never>> {
+/**
+ * What a service callback of a kit with states sees besides its usual ctx (ADR-019 B): the active path,
+ * and `stay` / `goto`. It runs at the state that owns its call (the leaf when none does).
+ */
+export type StateCallbackContext<SD extends StateDecls, S> = [keyof SD] extends [never]
+  ? unknown
+  : {
+      readonly phase: LeafPathsOf<SD>;
+      /** The merged local of the owning level (its type depends on which level owns the call). */
+      readonly local: unknown;
+      stay(shared: S): PhaseTransition<S>;
+      readonly goto: Goto<SD, S>;
+    };
+
+/** A kit's service callback ctx: the usual one, plus the states part when the kit has states. */
+export type KitCallbackContext<TEnv, E, SD extends StateDecls, S> = ServiceCallbackContext<TEnv, E> &
+  StateCallbackContext<SD, S>;
+
+/** What a kit's service callbacks return: the state, or (with states) also stay/goto. */
+export type KitCallbackResult<SD, S> = [keyof SD] extends [never] ? S : S | PhaseTransition<S>;
+
+export interface KitServiceDef<
+  S,
+  TResult,
+  TDeclared,
+  TEnv,
+  E = Record<never, never>,
+  SD extends StateDecls = Record<never, never>,
+> {
   readonly errors?: z.ZodType<TDeclared>;
   readonly result?: z.ZodType<TResult>;
   readonly maxResultBytes?: number;
@@ -325,8 +362,20 @@ export interface KitServiceDef<S, TResult, TDeclared, TEnv, E = Record<never, ne
   fn(input: unknown, env: TEnv, effect: EffectInfo): Promise<unknown>;
   readonly retry?: ServiceRetry<ServiceErrorOf<TDeclared>>;
   readonly timeoutMs?: number;
-  onDone?(state: S, result: TResult, input: unknown, ctx: ServiceCallbackContext<TEnv, E>): S;
-  onError?(state: S, error: ServiceErrorOf<TDeclared>, input: unknown, ctx: ServiceCallbackContext<TEnv, E>): S;
+  onDone?(state: S, result: TResult, input: unknown, ctx: KitCallbackContext<TEnv, E, SD, S>): KitCallbackResult<SD, S>;
+  onError?(
+    state: S,
+    error: ServiceErrorOf<TDeclared>,
+    input: unknown,
+    ctx: KitCallbackContext<TEnv, E, SD, S>,
+  ): KitCallbackResult<SD, S>;
+  /** A late result of a call whose owning state was left (ADR-019 B). */
+  onStale?(
+    state: S,
+    result: TResult,
+    input: unknown,
+    ctx: KitCallbackContext<TEnv, E, SD, S>,
+  ): KitCallbackResult<SD, S>;
 }
 
 /** The persisted state of an actor declared with `kit`, for views and roles: `PhasedStateOf<typeof kit, Shared>`. */

@@ -158,15 +158,17 @@ export function dueExecutions(sql: JournalSql, now: number): DueExecution[] {
 
 const AttemptsRow = z.object({ attempts: z.number() });
 
-/** Mark a row `running` and count the try. Returns the try's number (1 = first). */
-export function startAttempt(sql: JournalSql, id: string, table: EffectTable = "executions"): number {
+/** Mark a waiting row `running` and count the try. Returns the try's number (1 = first), or null when the row no longer waits. */
+export function startAttempt(sql: JournalSql, id: string, table: EffectTable = "executions"): number | null {
+  // Only a row still waiting starts: one cancelled (ctx.cancel, a left state, a restore) after the drain
+  // listed it stays as it is.
   const row = sql
     .exec(
-      `UPDATE ${table} SET status = 'running', attempts = attempts + 1, next_attempt_at = NULL WHERE id = ? RETURNING attempts`,
+      `UPDATE ${table} SET status = 'running', attempts = attempts + 1, next_attempt_at = NULL WHERE id = ? AND status IN ('pending', 'retrying') RETURNING attempts`,
       id,
     )
     .toArray()[0];
-  return AttemptsRow.parse(row).attempts;
+  return row === undefined ? null : AttemptsRow.parse(row).attempts;
 }
 
 /**
@@ -208,15 +210,24 @@ export function interruptedExecutions(sql: JournalSql): DueExecution[] {
 
 const IdRow = z.object({ id: z.string() });
 
+/** Why a scoped call was cancelled (ADR-019 B): its row's last_error, and its try's abort reason. */
+export const STALE_CANCEL_REASON = "cancelled: the state that made the call was left (a late result goes to onStale)";
+
 /**
- * ctx.cancel(effectId) (ADR-018 G): executions with these ids that have not finished (pending, retrying,
- * running) end as `cancelled`. Returns the ids it cancelled (a running one's try is then aborted).
+ * ctx.cancel(effectId) (ADR-018 G), or leaving the state that owned a scoped call (ADR-019 B): executions
+ * with these ids that have not finished (pending, retrying, running) end as `cancelled`, with `reason`.
+ * Returns the ids it cancelled (a running one's try is then aborted).
  */
-export function cancelExecutionRows(sql: JournalSql, effectIds: readonly string[]): string[] {
+export function cancelExecutionRows(
+  sql: JournalSql,
+  effectIds: readonly string[],
+  reason = "cancelled by ctx.cancel()",
+): string[] {
   return effectIds.flatMap((id) =>
     sql
       .exec(
-        "UPDATE executions SET status = 'cancelled', next_attempt_at = NULL, last_error = 'cancelled by ctx.cancel()' WHERE id = ? AND status IN ('pending', 'retrying', 'running') RETURNING id",
+        "UPDATE executions SET status = 'cancelled', next_attempt_at = NULL, last_error = ? WHERE id = ? AND status IN ('pending', 'retrying', 'running') RETURNING id",
+        reason,
         id,
       )
       .toArray()

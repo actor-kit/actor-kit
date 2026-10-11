@@ -133,6 +133,10 @@ export const ERROR_CODES = {
     title: "A state that declares an enter `input` was entered on the way to another state (or as an `initial` child).",
     fix: "Goto that state itself (a goto's input goes to its target only), or drop its `input` and build its local from `ctx.local`.",
   },
+  invalid_scope: {
+    title: '`ctx.execute(..., { scope: "state" })` was called where no state can own the call.',
+    fix: "Make scoped calls from a state's message, timer or `enter` (not `exit`, not a top-level handler of an actor without states).",
+  },
   invalid_transition: {
     title: "`enter` or `exit` returned a `goto` (or `exit` returned `stay`).",
     fix: "`enter` returns its local or `ctx.stay(shared, local)`; `exit` returns the next shared state. Move to another state from a message or timer.",

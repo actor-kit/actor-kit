@@ -52,6 +52,9 @@ importers:
       '@vitest/coverage-v8':
         specifier: ~4.1.11
         version: 4.1.11(vitest@4.1.11)
+      fast-check:
+        specifier: ^4.10.2
+        version: 4.10.2
       husky:
         specifier: ^9.1.7
         version: 9.1.7
@@ -225,6 +228,25 @@ importers:
       wrangler:
         specifier: ^4.141.0
         version: 4.141.0(@cloudflare/workers-types@5.20260927.1)(@types/node@26.6.4)
+
+  examples/checkout-saga:
+    dependencies:
+      '@actor-kit/core':
+        specifier: workspace:*
+        version: link:../../packages/core
+      '@actor-kit/worker':
+        specifier: workspace:*
+        version: link:../../packages/worker
+      zod:
+        specifier: ^4.6.5
+        version: 4.6.5
+    devDependencies:
+      '@cloudflare/workers-types':
+        specifier: ^5.20260927.1
+        version: 5.20260927.1
+      typescript:
+        specifier: ^7.0.2
+        version: 7.0.2
 
   examples/counter:
     dependencies:
@@ -4293,6 +4315,10 @@ packages:
   extend@3.0.2:
     resolution: {integrity: sha512-fjquC59cD7CyW6urNXK0FBufkZcoiGG80wTuPujX590cB5Ttln20E2UB4S/WARVqhXffZl2LNgS+gQdPIIim/g==}
 
+  fast-check@4.10.2:
+    resolution: {integrity: sha512-iK2f+YrcmoeGqk6fA0ea2bptcu/itMIm4NfEozq6N25+aG6h7s5HZbB/k1aV7b5w5sFLMCbbtRUsTVR+BgC3xw==}
+    engines: {node: '>=12.17.0'}
+
   fast-deep-equal@3.1.3:
     resolution: {integrity: sha512-f3qQ9oQy9j2AhBe/H9VC91wLmKBCCU/gDOnKNAYG5hswO7BLKj09Hc5HYNz9cGI++xlpDCIgDaitVs03ATR84Q==}
 
@@ -5272,6 +5298,9 @@ packages:
   punycode@2.3.1:
     resolution: {integrity: sha512-vYt7UD1U9Wg6138shLtLOvdAu+8DsC/ilFtEVHcH+wydcSpNE20AfSOduf6MkRFahL5FY7X1oU7nKVZFtfq8Fg==}
     engines: {node: '>=6'}
+
+  pure-rand@8.4.2:
+    resolution: {integrity: sha512-vvuOGgcuPJAirlHvuQw1TrOiw7ptaIXXmIbNuiNOY6lNGJJH49PQ1Kj4nd783nPdQhQdicgOjVI2yI/9BD6/Ng==}
 
   qs@6.15.1:
     resolution: {integrity: sha512-6YHEFRL9mfgcAvql/XhwTvf5jKcOiiupt2FiJxHkiX1z4j7WL8J/jRHYLluORvc1XxB5rV20KoeK00gVJamspg==}
@@ -9558,6 +9587,10 @@ snapshots:
 
   extend@3.0.2: {}
 
+  fast-check@4.10.2:
+    dependencies:
+      pure-rand: 8.4.2
+
   fast-deep-equal@3.1.3: {}
 
   fast-string-truncated-width@3.0.3: {}
@@ -10678,6 +10711,8 @@ snapshots:
       ipaddr.js: 1.9.1
 
   punycode@2.3.1: {}
+
+  pure-rand@8.4.2: {}
 
   qs@6.15.1:
     dependencies:

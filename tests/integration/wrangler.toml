@@ -313,3 +313,12 @@ class_name = "RoundsActor"
 [[migrations]]
 tag = "v26"
 new_sqlite_classes = ["RoundsActor"]
+
+# Scoped invocations (ADR-019 B)
+[[durable_objects.bindings]]
+name = "SCOPED_CALLS"
+class_name = "ScopedCallsActor"
+
+[[migrations]]
+tag = "v27"
+new_sqlite_classes = ["ScopedCallsActor"]

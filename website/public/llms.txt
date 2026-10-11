@@ -92,6 +92,7 @@ For agents: define actors only with `setup()` and `kit.actor()`; handlers are sy
 - [undeclared_state](https://actorkit.dev/errors/undeclared_state/): `goto` (or a persisted phase) names a state the actor does not declare.
 - [invalid_local](https://actorkit.dev/errors/invalid_local/): A state's local does not match its schema.
 - [missing_state_input](https://actorkit.dev/errors/missing_state_input/): A state that declares an enter `input` was entered on the way to another state (or as an `initial` child).
+- [invalid_scope](https://actorkit.dev/errors/invalid_scope/): `ctx.execute(..., { scope: "state" })` was called where no state can own the call.
 - [invalid_transition](https://actorkit.dev/errors/invalid_transition/): `enter` or `exit` returned a `goto` (or `exit` returned `stay`).
 - [invalid_phased_state](https://actorkit.dev/errors/invalid_phased_state/): The persisted state of an actor with states is not `{ shared, phase, locals, stateTimers }`.
 - [nondeterminism](https://actorkit.dev/errors/nondeterminism/): A handler read the clock or randomness directly (Date.now, new Date(), Math.random, crypto.randomUUID, ...).

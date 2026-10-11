@@ -234,6 +234,14 @@ Docs: https://actorkit.dev/errors/invalid_local/
 
 Docs: https://actorkit.dev/errors/missing_state_input/
 
+## `invalid_scope`
+
+**What happened:** `ctx.execute(..., { scope: "state" })` was called where no state can own the call.
+
+**How to fix it:** Make scoped calls from a state's message, timer or `enter` (not `exit`, not a top-level handler of an actor without states).
+
+Docs: https://actorkit.dev/errors/invalid_scope/
+
 ## `invalid_transition`
 
 **What happened:** `enter` or `exit` returned a `goto` (or `exit` returned `stay`).

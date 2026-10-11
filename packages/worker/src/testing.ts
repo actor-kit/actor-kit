@@ -2,7 +2,7 @@
 // Used by @actor-kit/test and unit tests that run outside CF runtime
 
 // Contract builder
-export type { ActorContract, LifecycleEvent } from "./define";
+export type { ActorContract, LifecycleEvent, ServiceCallbackContext, ServiceDef } from "./define";
 export { defineActor } from "./define";
 // Identity (Worker-trust model)
 export { CALLER_ID_HEADER, CALLER_TYPE_HEADER, withCallerIdentity } from "./identity";
@@ -154,6 +154,7 @@ export {
   readOutboxRows,
   redriveExecution,
   requeueInterrupted,
+  STALE_CANCEL_REASON,
   startAttempt,
 } from "./runtime/outbox-store";
 // Typed declarations: setup({ events, states }) (ADR-017)
@@ -306,6 +307,8 @@ export type {
   Goto,
   InputArgs,
   KitActorDef,
+  KitCallbackContext,
+  KitCallbackResult,
   KitContractDef,
   KitDefCheck,
   KitServiceDef,
@@ -318,6 +321,7 @@ export type {
   PhaseResult,
   PhaseTimerDef,
   Setup,
+  StateCallbackContext,
   StateDecl,
   StateDecls,
   StateDef,

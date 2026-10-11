@@ -141,7 +141,19 @@ export interface ServiceRetry<TError> {
  * A service in the `services` block, as defineActor types it. Methods (not function properties), so a
  * handler may annotate a narrower input or result.
  */
-export interface ServiceDef<TState, TDeclared = unknown, TEnv = unknown, TResult = unknown, E = Record<never, never>> {
+/**
+ * A service. `R` is what its callbacks return (the state; for a kit with states, also stay/goto) and `C`
+ * their ctx (for a kit with states, it adds the active path, `stay` and `goto`, ADR-019 B).
+ */
+export interface ServiceDef<
+  TState,
+  TDeclared = unknown,
+  TEnv = unknown,
+  TResult = unknown,
+  E = Record<never, never>,
+  R = TState,
+  C = ServiceCallbackContext<TEnv, E>,
+> {
   /** Declared failures: a `z.discriminatedUnion("_tag", [...])`. `throw fail(error)` values parse against it. */
   readonly errors?: ZodType<TDeclared>;
   /**
@@ -161,23 +173,23 @@ export interface ServiceDef<TState, TDeclared = unknown, TEnv = unknown, TResult
   readonly retry?: ServiceRetry<ServiceErrorOf<TDeclared>>;
   /** Time limit per try, in ms (default 30 000). On expiry `effect.signal` is aborted and the try is a Timeout. */
   readonly timeoutMs?: number;
-  onDone?(state: TState, result: TResult, input: unknown, ctx: ServiceCallbackContext<TEnv, E>): TState;
+  onDone?(state: TState, result: TResult, input: unknown, ctx: C): R;
   /** Runs once, after the last try failed (or at once for an error `retry.while` does not retry). */
-  onError?(
-    state: TState,
-    error: ServiceErrorOf<TDeclared>,
-    input: unknown,
-    ctx: ServiceCallbackContext<TEnv, E>,
-  ): TState;
+  onError?(state: TState, error: ServiceErrorOf<TDeclared>, input: unknown, ctx: C): R;
+  /**
+   * A result that arrived after the state owning the call (`execute(..., { scope: "state" })`) was left
+   * (ADR-019 B). Without it, the late result is journaled as `service.stale` and ignored.
+   */
+  onStale?(state: TState, result: TResult, input: unknown, ctx: C): R;
 }
 
 /**
  * The typed parts of a definition: the state comes from init, each service's error union from its
  * `errors` (inferred per service, so every onError sees its own).
  */
-export type TypedServices<TState, TErrors, TEnv, E = Record<never, never>> = {
+export type TypedServices<TState, TErrors, TEnv, E = Record<never, never>, R = TState> = {
   init(...args: never[]): TState | PromiseLike<TState>;
-  services?: { [K in keyof TErrors]: ServiceDef<TState, TErrors[K], TEnv, unknown, E> };
+  services?: { [K in keyof TErrors]: ServiceDef<TState, TErrors[K], TEnv, unknown, E, R> };
   lifecycle?: {
     connect?(state: TState, event: LifecycleEvent, ctx: LifecycleContext<TEnv, E>): TState;
     disconnect?(state: TState, event: LifecycleEvent, ctx: LifecycleContext<TEnv, E>): TState;

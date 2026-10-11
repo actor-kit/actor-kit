@@ -86,3 +86,27 @@ local is passed as it is; none gives `null`. Paths are absolute: `"round"` means
 Views and roles get the persisted state. `matches(state, path)` narrows it by a path prefix
 (`matches(s, "playing")`, `matches(s, ["playing", "window"])`) and `localOf(state)` returns the merged
 local of the active path, typed. Studio's timeline marks phase changes with the dotted path.
+
+## B as built: scoped invocations (2026-10-11)
+
+- `ctx.execute(service, input, { scope: "state" })` in a state's message, timer or `enter` adds the call's
+  effect id to that level's `stateTimers` list (the list of what leaving the level cancels: scoped timer
+  keys and scoped call ids). Leaving the level records a cancel marked `stale`; the Durable Object ends an
+  unfinished row `cancelled` (reason "the state that made the call was left") and aborts a try in flight.
+  From `exit`, an actor without states or a lifecycle callback, `scope: "state"` fails (`invalid_scope`).
+- A try aborted this way still hands its outcome over when `fn` settles (`runAttempt`'s `onLate`): a result
+  is parsed like any result and becomes a `service.stale` journal entry (new cause type), which runs
+  `onStale(state, result, input, ctx)` or changes nothing; it is journaled either way. A late failure is
+  dropped. A call cancelled before it started has no late result.
+- **Service callbacks in actors with states** (onDone, onError, onStale) run at the level that owns the
+  call (the leaf for an unscoped or stale call) with `ctx.phase`, `ctx.stay(shared)` and `ctx.goto`, and the
+  call's id leaves the owner's list. This lifts ADR-017's "callbacks cannot goto" for services, which the
+  saga recipe needs (`onError` goes to `compensating`). Their transitions now write every effect
+  (timers, executions, cancels of the states they leave and enter), not only emitted events.
+- Found and fixed on the way: the drain started rows from a snapshot, so a row cancelled after it was listed
+  (ctx.cancel, a left state, a restore) was still started. `startAttempt` now starts only `pending` or
+  `retrying` rows.
+- `simulate()` keeps scoped calls cancelled by a state exit aside: `resolve()` on one is the `service.stale`
+  transition, `reject()` drops it.
+- Saga recipe: `examples/checkout-saga` (reserve → charge → confirm; compensation in reverse in
+  `compensating`, one undo call per entry; a late charge refunded through `onStale`), website recipe "Sagas".

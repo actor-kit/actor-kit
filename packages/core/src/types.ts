@@ -20,7 +20,16 @@ export interface Execution {
  * execute() triggers a named service with a typed input. It returns the call's effect id (`seq:index`,
  * ADR-018 G): keep it to `cancel(effectId)` the call, or to match it in onDone/onError (`ctx.effectId`).
  */
-export type ExecuteFn = (service: string, input: unknown) => string;
+export type ExecuteFn = (service: string, input: unknown, options?: ExecuteOptions) => string;
+
+/**
+ * `scope: "state"` (actors with states, ADR-019 B): the call belongs to the state whose handler or `enter`
+ * made it. Leaving that state cancels it (its AbortSignal is aborted); a result that still arrives goes to
+ * the service's `onStale`, or is journaled as `service.stale` and ignored.
+ */
+export interface ExecuteOptions {
+  readonly scope?: "state";
+}
 
 // --- Message context ---
 
@@ -228,6 +237,7 @@ export type MutationCause =
     }
   | { readonly type: "service.onDone"; readonly service: string; readonly input: unknown; readonly result: unknown }
   | { readonly type: "service.onError"; readonly service: string; readonly input: unknown; readonly error: string }
+  | { readonly type: "service.stale"; readonly service: string; readonly input: unknown; readonly result: unknown }
   | {
       readonly type: "link.onUpdate";
       readonly sourceType: string;

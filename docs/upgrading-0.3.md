@@ -289,3 +289,22 @@ Handlers are unchanged: `ctx.local`, `ctx.stay`, `ctx.goto("round", ...)` and `k
 before (a name is the one-element path). Refusals still name states as text (`playing.window`).
 `enter` may now return `ctx.stay(shared, local)` to change the shared state, and a state may declare
 `exit(shared, ctx)`, `initial` and child `states`.
+
+## Service callbacks in actors with states run in a state (ADR-019 B)
+
+In an actor with states, `onDone`, `onError` and the new `onStale` run at the state that owns their call
+(the active leaf for a call made without `scope: "state"`). Their ctx gains `phase`, `stay` and `goto`
+(typed through `kit.service()`), and their transition writes every effect, so a callback can move the
+actor on. A callback that returned the state unchanged behaves as before.
+
+```ts
+// Before: onDone could only change the shared state; a message had to move the actor on
+charge: saga.service({ fn, onDone: (s: S, { id }) => ({ ...s, payment: id, next: "confirming" }) }),
+
+// After
+charge: saga.service({ fn, onDone: (s: S, { id }, _input, ctx) => ctx.goto("confirming", { ...s, payment: id }) }),
+```
+
+`ServiceDef` has two more type parameters (what callbacks return and their ctx), with defaults; code that
+names `ServiceDef<S, E, Env, R, Events>` is unchanged. `startAttempt()` (from `@actor-kit/worker/testing`)
+returns `null` for a row that is no longer `pending` or `retrying`.

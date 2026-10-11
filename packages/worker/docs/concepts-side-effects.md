@@ -152,6 +152,29 @@ ABANDON: checkout.message(z.object({}), (s: S, _p, ctx) => {
 
 `ctx.cancel(effectId)` (the same verb that cancels a timer by key) cancels a call that has not finished: one not yet run never runs, one in flight has its `effect.signal` aborted and its late result discarded. The row ends as `cancelled`; no callback runs. `onDone` and `onError` get the call's id as `ctx.effectId`.
 
+## Calls scoped to a state
+
+In an actor with [states](https://actorkit.dev/concepts/states/), a call can belong to the state that made it (ADR-019):
+
+```typescript
+loading: loading.state({
+  enter: (_s: S, { q }, ctx) => {
+    ctx.execute("lookup", { q }, { scope: "state" });
+    return { q };
+  },
+}),
+```
+
+- Leaving that state (a goto, or a parent's exit) cancels the call: one not yet run never runs, one in
+  flight has its `effect.signal` aborted. The row ends `cancelled` with the reason.
+- A result that still arrives goes to the service's `onStale(state, result, input, ctx)`, or is journaled
+  as `service.stale` and ignored. A late failure is dropped.
+- A call's callbacks run at the state that owns it (the leaf when none does), with `ctx.phase`,
+  `ctx.stay` and `ctx.goto`, so `onDone` can move the actor on: that is how a
+  [saga](https://actorkit.dev/recipes/sagas/) steps forward and `onError` starts compensating.
+- `scope: "state"` from `exit`, from an actor without states or from a lifecycle callback is refused
+  (`invalid_scope`): nothing could own the call.
+
 ## Results: schemas, size and audit facts
 
 Declare `result` to parse what `fn` returns. Only the parsed value is journaled and passed to `onDone`, live and on replay, and `onDone`'s `result` is typed by it when the service comes from `kit.service()`:

@@ -5,7 +5,7 @@
  * The step core (`step.ts`) supplies the effect verbs; nothing here touches storage.
  */
 
-import { ActorKitError, type ScheduleOptions } from "@actor-kit/core";
+import { ActorKitError, type ExecuteOptions, type ScheduleOptions } from "@actor-kit/core";
 import {
   dotted,
   goto,
@@ -39,6 +39,10 @@ export interface PhaseRun {
   /** The context enter and exit share: now/id/random, env, execute, forward, emit. */
   readonly base: Readonly<Record<string, unknown>>;
   verbs(path: readonly string[]): TimerVerbs;
+  /** Record a service call (the outbox's execute): its effect id. */
+  execute(service: string, input: unknown): string;
+  /** Cancel what a level owned as it is left: a timer key, or a call whose late result is then stale. */
+  leave(key: string): void;
 }
 
 /** What a handler of an actor with states sees besides the usual context. */
@@ -48,6 +52,7 @@ export interface PhaseContext {
   readonly stay: typeof stay;
   readonly goto: typeof goto;
   readonly schedule: (name: string, options: ScheduleOptions) => void;
+  readonly execute: (service: string, input: unknown, options?: ExecuteOptions) => string;
 }
 
 /**
@@ -74,6 +79,29 @@ function scopedSchedule(
   };
 }
 
+/**
+ * ctx.execute at a level (ADR-019 B): a `scope: "state"` call belongs to the level (recorded in `owned`
+ * by its effect id), so leaving the level cancels it. `owned` is null in `exit`.
+ */
+function scopedExecute(
+  run: PhaseRun,
+  path: readonly string[],
+  owned: string[] | null,
+): (service: string, input: unknown, options?: ExecuteOptions) => string {
+  return (service, input, options) => {
+    if (options?.scope !== "state") return run.execute(service, input);
+    if (owned === null) {
+      throw new ActorKitError(
+        "invalid_scope",
+        `State "${dotted(path)}": exit cannot make a scope: "state" call, because its state is being left. Make it in the next state's enter.`,
+      );
+    }
+    const effectId = run.execute(service, input);
+    owned.push(effectId);
+    return effectId;
+  };
+}
+
 function invalidTransition(path: readonly string[], hook: "enter" | "exit", allowed: string): ActorKitError {
   return new ActorKitError("invalid_transition", `State "${dotted(path)}": ${hook} ${allowed}; it cannot goto.`);
 }
@@ -91,12 +119,13 @@ function exitLevel(run: PhaseRun, state: PhasedState): PhasedState {
       local: mergeLocals(state.locals),
       cancel: verbs.cancel,
       schedule: scopedSchedule(verbs, path, null),
+      execute: scopedExecute(run, path, null),
     });
     assertSync(result, `State "${dotted(path)}": exit returned a Promise. Handlers must be synchronous.`);
     if (result instanceof PhaseTransition) throw invalidTransition(path, "exit", "returns the next shared state");
     shared = result;
   }
-  for (const key of state.stateTimers.slice(-1).flat()) verbs.cancel(key);
+  for (const key of state.stateTimers.slice(-1).flat()) run.leave(key);
   return {
     shared,
     phase: path.slice(0, -1),
@@ -133,6 +162,7 @@ function enterLevel(
       local: mergeLocals(state.locals),
       cancel: verbs.cancel,
       schedule: scopedSchedule(verbs, path, owned),
+      execute: scopedExecute(run, path, owned),
       stay,
       goto,
     });
@@ -225,6 +255,7 @@ export function runAtLevel(
     stay,
     goto,
     schedule: scopedSchedule(run.verbs(levelPath), levelPath, owned),
+    execute: scopedExecute(run, levelPath, owned),
   });
   // `call` checks the handler returned synchronously (it names the message or timer).
   return settle(run, current, result, level, owned);
