@@ -41,6 +41,12 @@ The type argument types `view` and `send` from the contract; passing anything bu
 `roles` and `views` is a type error. (In React, `actorContext<typeof CounterContract>()` needs no runtime
 value at all.)
 
+Your own client code must not import classic zod either: `import { z } from "zod"` bundles the whole `z`
+namespace and its locales (about 450 KB minified) even for one small check. Use `zod/mini` in the browser
+(`import * as z from "zod/mini"`; `z.safeParse(Schema, data)`): the same check bundles to about 13 KB. Views
+and roles of an actor with states import `matches()` / `localOf()` from `@actor-kit/core`, not the worker.
+See the upgrade note "Keep zod out of the client bundle" for the measurement.
+
 ### Value import (server-side, tests, or when bundle size doesn't matter)
 
 ```typescript

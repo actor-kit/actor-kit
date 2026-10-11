@@ -302,6 +302,29 @@ import { roomRoles, roomViews } from "./room.views"; // no zod
 const RoomClient = actorClient<typeof RoomContract>({ roles: roomRoles, views: roomViews });
 ```
 
+**Your own `import { z } from "zod"` counts too.** Keeping the contract out is not enough if client code
+imports zod itself: `import { z } from "zod"` loads zod's classic build, whose `z` namespace keeps every
+schema type and the locales, about 450 KB minified, for even one small check. One port's join page stayed
+at ~840 KB with a zod-free client because of a single 3-field check, and dropped to ~410 KB when that check
+moved to `zod/mini`, zod 4's tree-shakable build (functions instead of methods; only what you call is
+bundled). Use `zod/mini` for client-side checks, and keep classic `zod` on the server:
+
+```ts
+// Before: ~450 KB of zod in the browser for one check
+import { z } from "zod";
+const Saved = z.object({ name: z.string(), seat: z.number(), at: z.number() });
+const saved = Saved.safeParse(JSON.parse(raw));
+
+// After: only object/string/number and safeParse are bundled
+import * as z from "zod/mini";
+const Saved = z.object({ name: z.string(), seat: z.number(), at: z.number() });
+const saved = z.safeParse(Saved, JSON.parse(raw));
+```
+
+Measured with esbuild (`--bundle --minify`) on that check alone: 453 KB with `zod`, 13 KB with `zod/mini`.
+To check a build, search the bundle for one of classic zod's other locales (`grep -l "Trop grand" dist/*.js`
+finds the French one) or open it in your bundler's analyzer.
+
 Views and roles of an actor with states narrow with `matches()` and `localOf()`; import them (and the
 types `PathsOf`, `MergedLocal`, `PhasedState`) from `@actor-kit/core`, which imports no zod at runtime,
 rather than from `@actor-kit/worker`, whose runtime does:
