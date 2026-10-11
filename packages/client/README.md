@@ -18,9 +18,10 @@ import { actorClient } from "@actor-kit/client";
 import { counterContract } from "./contract";
 
 const client = actorClient(counterContract).create({
-  url: "wss://my-worker.example.com",
-  actorId: "counter-1",
+  path: "/api/counter/counter-1", // through your Worker; host defaults to the page's
+  initialView: { count: 0 },
 });
+client.connect();
 
 // Subscribe to view updates
 client.subscribe((view) => {
@@ -28,7 +29,7 @@ client.subscribe((view) => {
 });
 
 // Send typed messages
-client.send("increment", {});
+client.send({ type: "INCREMENT" });
 
 // Disconnect when done
 client.disconnect();

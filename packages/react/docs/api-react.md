@@ -58,7 +58,8 @@ function App({ counterId, callerId }: { counterId: string; callerId: string }) {
 
   useEffect(() => {
     const c = CounterClient.create({
-      url: `wss://${location.host}/api/counter/${encodeURIComponent(counterId)}?callerId=${encodeURIComponent(callerId)}`,
+      path: `/api/counter/${encodeURIComponent(counterId)}?callerId=${encodeURIComponent(callerId)}`,
+      initialView: { count: 0, lastUpdatedBy: "" },
     });
     setClient(c);
     return () => c.disconnect();  // Clean up on unmount or prop change

@@ -43,14 +43,16 @@ Creates a runtime WebSocket connection. The client SDK does not handle authentic
 
 ```typescript
 const client = CounterClient.create({
-  url: `wss://${location.host}/api/counter/${encodeURIComponent(counterId)}`,
-  initialView: snapshot,  // from server loader / getSnapshot()
+  path: `/api/counter/${encodeURIComponent(counterId)}`, // through your Worker
+  initialView: snapshot, // from server loader / getSnapshot()
 });
 ```
 
 | Option | Type | Required | Description |
 |--------|------|----------|-------------|
-| `url` | `string` | Yes | Full WebSocket URL (routed through your Worker) |
+| `path` | `string` | Yes | Path on your Worker, e.g. `/api/counter/counter-1` (the scheme follows the page: https → wss) |
+| `host` | `string` | No | Host with optional port. Defaults to `window.location.host`; required outside a browser |
+| `getToken` | `() => string \| Promise<string>` | No | Token sent on every (re)connect via `Sec-WebSocket-Protocol` |
 | `initialView` | `TView` | Yes | Initial view from server (SSR snapshot). The client starts with this view immediately. |
 | `onRedirect` | `(target: { actorType: string; actorId: string }) => void` | No | Called on redirect |
 | `onError` | `(error: ClientError) => void` | No | Called when the actor refuses a message (or sends a frame the client cannot read). See below |
@@ -131,8 +133,10 @@ For cases where you don't need the builder pattern, `createActorClient()` is the
 import { createActorClient } from "@actor-kit/client";
 
 const client = createActorClient({
-  url: "wss://example.com/counter/test",
-  viewSchema: CounterView,  // optional — enables binary decoding + typed view
+  path: "/counter/test",
+  host: "example.com",
+  initialView: { count: 0 },
+  viewSchema: CounterView, // optional — enables binary decoding + typed view
 });
 ```
 
