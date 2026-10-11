@@ -112,7 +112,7 @@ async function decodeWith(
   const client = factory.create({
     path: "/a/b",
     host: "example.com",
-    initialView: { start: true },
+    initialView: { count: 0 },
     WebSocketImpl: RecordingSocket,
   });
   client.connect();
@@ -152,7 +152,7 @@ describe("actorClient(contract)", () => {
     const factory = actorClient(contract({ roles, views: { owner: { schema: OwnerView }, viewer: { fn: () => 1 } } }));
 
     expect(await decodeWith(factory, createSnapshotFrame(1, 1, encode(ViewerView, { count: 2 })))).toEqual({
-      view: { start: true },
+      view: { count: 0 },
       role: undefined,
     });
   });
@@ -160,9 +160,9 @@ describe("actorClient(contract)", () => {
   it("ignores binary frames when the contract has no roles or no views", async () => {
     const frame = createSnapshotFrame(1, 0, encode(OwnerView, { count: 1, secret: "s" }));
 
-    expect((await decodeWith(actorClient(contract({ views })), frame)).view).toEqual({ start: true });
-    expect((await decodeWith(actorClient(contract({ roles })), frame)).view).toEqual({ start: true });
-    expect((await decodeWith(actorClient(contract({ roles, views: "nope" })), frame)).view).toEqual({ start: true });
+    expect((await decodeWith(actorClient(contract({ views })), frame)).view).toEqual({ count: 0 });
+    expect((await decodeWith(actorClient(contract({ roles })), frame)).view).toEqual({ count: 0 });
+    expect((await decodeWith(actorClient(contract({ roles, views: "nope" })), frame)).view).toEqual({ count: 0 });
   });
 });
 

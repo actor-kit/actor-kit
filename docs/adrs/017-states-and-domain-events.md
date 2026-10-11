@@ -85,7 +85,7 @@ publish: { queue: "GAME_EVENTS", events: ["BidPlaced", "AuctionClosed"] },
 ```
 
 - Each emitted event in `publish.events` gets an outbox row, with an effect id, retries, dead letters and redrive (ADR-015), and is sent to the Queue binding (declared in `env`, ADR-016) after commit.
-- Message body: `{ actorType, actorId, seq, index, name, payload, at, causationId, correlationId, idempotencyKey }`. Consumers dedupe on `idempotencyKey`.
+- Message body: `{ actorType, actorId, seq, index, name, payload, at, causationId, correlationId, idempotencyKey }`. Consumers dedupe on `idempotencyKey`. (ADR-019 E adds `position`, a gap-free per-actor number.)
 - `simulate()` collects published messages per queue (`sim.published("GAME_EVENTS")`).
 
 ### 4. Causation and correlation ids

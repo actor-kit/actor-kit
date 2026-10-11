@@ -93,3 +93,19 @@ describe("journal archive to R2", () => {
     expect(await segments(stub)).toEqual([]);
   });
 });
+
+describe("the journal query over the archive (ADR-019 F with D)", () => {
+  it("__journal pages through archived seqs as if nothing were pruned", async () => {
+    const stub = await tally("ARCHIVED_TALLY", "archive-query", 12);
+    await until(
+      () => segments(stub),
+      (s) => s.length > 0,
+    );
+    const oldest = await stub.__journal({ order: "asc", limit: 3 });
+    expect(oldest.entries.map((e) => e.seq)).toEqual([1, 2, 3]);
+    expect(oldest.hasMore).toBe(true);
+    const all = await stub.__journal({ order: "desc", limit: 100 });
+    expect(all.entries.map((e) => e.seq)).toEqual(Array.from({ length: 13 }, (_, i) => 13 - i));
+    expect(all.entries.at(-1)).toMatchObject({ seq: 1, causeType: "init" });
+  });
+});

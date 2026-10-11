@@ -419,6 +419,16 @@ importers:
         specifier: ^4.6.5
         version: 4.6.5
 
+  packages/projection:
+    dependencies:
+      zod:
+        specifier: ^4.6.5
+        version: 4.6.5
+    devDependencies:
+      '@cloudflare/workers-types':
+        specifier: ^5.20260927.1
+        version: 5.20260927.1
+
   packages/react:
     dependencies:
       '@actor-kit/client':
@@ -587,6 +597,9 @@ importers:
       '@actor-kit/core':
         specifier: workspace:*
         version: link:../../packages/core
+      '@actor-kit/projection':
+        specifier: workspace:*
+        version: link:../../packages/projection
       '@actor-kit/studio':
         specifier: workspace:*
         version: link:../../packages/studio

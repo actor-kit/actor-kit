@@ -206,4 +206,11 @@ const data = decode(PlayerView, bytes);
 
 ## Schema primitives
 
-`uint8`, `uint16`, `uint32`, `float32`, `float64`, `string`, `boolean`, `array(T)`
+`uint8`, `uint16`, `uint32`, `int8`, `int16`, `int32`, `float32`, `float64`, `string`, `boolean`.
+
+## Schema combinators
+
+`array(T)`, `nullable(T)`, nested `schema({...})`, `enumOf([...values])`, `literal(value)`, `record(T)`,
+`union(tag, { variant: schema({...}) })` and `json(zodSchema)`. Every one is inferred by `Infer<>`.
+See [Views](/concepts/views/#combinators) for examples and
+[the wire protocol](https://github.com/actor-kit/actor-kit/blob/main/docs/binary-protocol.md) for their layout.

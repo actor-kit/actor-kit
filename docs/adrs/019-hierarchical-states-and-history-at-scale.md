@@ -34,6 +34,7 @@ Flat states drop data on every switch between sibling phases (Run Set Jimmy's `p
 
 ### E. Read models: `@actor-kit/projection`
 - `projection({ queue, db, apply })` wraps a Queue consumer: dedupes on `idempotencyKey`, keeps `last_seq` per actor (D1), applies events in `seq` order per actor (buffers or defers out-of-order ones), and exposes `rebuild()` that replays journals (via the Studio journal API) into a fresh read model.
+- **Amended 2026-10-11 (approved by Jon):** `seq` has gaps (a transition that publishes nothing still takes a seq), so a consumer cannot tell a late message from one that never existed. Every published body gains `position`: the actor's published events numbered 1, 2, 3... with no gaps, assigned in the commit transaction (`publish_position` table), never reused or rewound (a restore keeps counting up), and assigned identically by `simulate()`. The projection orders and dedupes on `position` (`idempotencyKey` names the same event); `rebuild()` recomputes positions by counting published events through the journal, in seq order, which matches the live numbering as long as the journal is complete from `init` and `publish.events` has not changed.
 
 ### F. Journal query API
 - `__journal({ from?, to?, causeType?, event?, correlationId?, limit })` RPC (redacted per ADR-014), exposed through Studio's API, the CLI (`actor-kit studio journal`) and MCP.
@@ -132,5 +133,7 @@ local of the active path, typed. Studio's timeline marks phase changes with the 
 - Tests: unit tests with an in-memory bucket on node:sqlite, fast-check properties (random journals,
   checkpoint intervals, `keep`, archive points and restore points give the same events, checkpoints, final
   state, checksums and restored states as a journal never pruned), and workerd tests with an R2 binding.
-- The journal query (`__journal`, ADR-019 F) is built on another branch; when the branches meet it reads
-  through `readFullJournal` like restore does.
+- The journal query (`__journal`, ADR-019 F, merged from the parallel branch) reads archived rows too:
+  `readArchivedJournalPage` fetches the segments that overlap the query's seq window and filters them like the
+  SQL query (`matchesJournalQuery`); a newest-first page that local rows fill fetches nothing. A fast-check
+  property checks pages over archived and local rows against the same query on a journal never pruned.

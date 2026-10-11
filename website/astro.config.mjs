@@ -55,6 +55,7 @@ export default defineConfig({
             { slug: "concepts/side-effects" },
             { slug: "concepts/timers" },
             { slug: "concepts/domain-events" },
+            { slug: "concepts/projections" },
             { slug: "concepts/states" },
             { slug: "concepts/journal" },
             { slug: "concepts/testing" },

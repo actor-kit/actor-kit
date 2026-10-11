@@ -45,19 +45,19 @@ describe("encode — primitive layout", () => {
 
   it("prefixes strings with their UTF-8 byte length", () => {
     const S = schema({ s: string });
-    expect(encode(S, { s: "hé" })).toEqual(bytes(0, 3, 0x68, 0xc3, 0xa9));
+    expect(encode(S, { s: "hé" })).toEqual(bytes(3, 0x68, 0xc3, 0xa9));
   });
 
   it("prefixes arrays with their element count", () => {
     const S = schema({ l: array(uint16) });
-    expect(encode(S, { l: [1, 0x0102] })).toEqual(bytes(0, 2, 0, 1, 1, 2));
+    expect(encode(S, { l: [1, 0x0102] })).toEqual(bytes(2, 0, 1, 1, 2));
   });
 
   it("encodes arrays of arrays with a count per level", () => {
     const S = schema({ l: array(array(uint8)) });
     const data = { l: [[1], [2, 3]] };
     const encoded = encode(S, data);
-    expect(encoded).toEqual(bytes(0, 2, 0, 1, 1, 0, 2, 2, 3));
+    expect(encoded).toEqual(bytes(2, 1, 1, 2, 2, 3));
     expect(decode(S, encoded)).toEqual(data);
   });
 
@@ -72,7 +72,7 @@ describe("encode — primitive layout", () => {
       n: 9,
     };
     const encoded = encode(S, data);
-    expect(encoded).toEqual(bytes(0, 2, 1, 0, 1, 0x61, 2, 0, 0, 9));
+    expect(encoded).toEqual(bytes(2, 1, 1, 0x61, 2, 0, 9));
     expect(decode(S, encoded)).toEqual(data);
   });
 
@@ -95,7 +95,7 @@ describe("encode — values that do not match the schema", () => {
       n: Inner,
       u: uint32,
     });
-    expect(encode(S, untyped("{}"))).toEqual(new Uint8Array(1 + 4 + 8 + 2 + 2 + 1 + 1 + 4));
+    expect(encode(S, untyped("{}"))).toEqual(new Uint8Array(1 + 4 + 8 + 1 + 1 + 1 + 1 + 4));
   });
 
   it("writes zero for null numbers", () => {
@@ -120,18 +120,18 @@ describe("encode — values that do not match the schema", () => {
 
   it("treats a non-array value in an array field as empty", () => {
     const S = schema({ l: array(uint8), n: uint8 });
-    expect(encode(S, untyped('{"l":"abc","n":4}'))).toEqual(bytes(0, 0, 4));
+    expect(encode(S, untyped('{"l":"abc","n":4}'))).toEqual(bytes(0, 4));
   });
 
   it("treats a non-object value in a nested schema field as empty", () => {
     const S = schema({ p: schema({ x: uint8, s: string }), n: uint8 });
-    expect(encode(S, untyped('{"p":5,"n":4}'))).toEqual(bytes(0, 0, 0, 4));
-    expect(encode(S, untyped('{"p":null,"n":4}'))).toEqual(bytes(0, 0, 0, 4));
+    expect(encode(S, untyped('{"p":5,"n":4}'))).toEqual(bytes(0, 0, 4));
+    expect(encode(S, untyped('{"p":null,"n":4}'))).toEqual(bytes(0, 0, 4));
   });
 
   it("treats non-object array elements of a schema array as empty", () => {
     const S = schema({ l: array(schema({ x: uint8 })) });
-    expect(encode(S, untyped('{"l":[3,null]}'))).toEqual(bytes(0, 2, 0, 0));
+    expect(encode(S, untyped('{"l":[3,null]}'))).toEqual(bytes(2, 0, 0));
   });
 });
 
@@ -139,10 +139,10 @@ describe("encode — nullable fields", () => {
   const S = schema({ a: nullable(uint8), b: uint8, c: nullable(string) });
 
   it("prepends a null bitmask with one bit per nullable field, in order", () => {
-    expect(encode(S, { a: null, b: 2, c: "x" })).toEqual(bytes(0b01, 2, 0, 1, 0x78));
+    expect(encode(S, { a: null, b: 2, c: "x" })).toEqual(bytes(0b01, 2, 1, 0x78));
     expect(encode(S, { a: 1, b: 2, c: null })).toEqual(bytes(0b10, 1, 2));
     expect(encode(S, { a: null, b: 2, c: null })).toEqual(bytes(0b11, 2));
-    expect(encode(S, { a: 1, b: 2, c: "" })).toEqual(bytes(0, 1, 2, 0, 0));
+    expect(encode(S, { a: 1, b: 2, c: "" })).toEqual(bytes(0, 1, 2, 0));
   });
 
   it("uses a second bitmask byte for the ninth nullable field", () => {
@@ -174,7 +174,7 @@ describe("encode — nullable fields", () => {
     const T = schema({ l: nullable(array(uint8)), p: nullable(Inner) });
     const data = { l: [5, 6], p: { x: 7 } };
     const encoded = encode(T, data);
-    expect(encoded).toEqual(bytes(0, 0, 2, 5, 6, 7));
+    expect(encoded).toEqual(bytes(0, 2, 5, 6, 7));
     expect(decode(T, encoded)).toEqual(data);
     expect(encode(T, { l: null, p: null })).toEqual(bytes(0b11));
     expect(decode(T, bytes(0b11))).toEqual({ l: null, p: null });
@@ -234,7 +234,7 @@ describe("encodeDelta — layout", () => {
   it("writes a change bitmask and only the changed fields", () => {
     const S = schema({ a: uint8, b: uint16, c: string });
     expect(encodeDelta(S, { a: 1, b: 2, c: "x" }, { a: 1, b: 0x0304, c: "x" })).toEqual(bytes(0b010, 3, 4));
-    expect(encodeDelta(S, { a: 1, b: 2, c: "x" }, { a: 5, b: 2, c: "yz" })).toEqual(bytes(0b101, 5, 0, 2, 0x79, 0x7a));
+    expect(encodeDelta(S, { a: 1, b: 2, c: "x" }, { a: 5, b: 2, c: "yz" })).toEqual(bytes(0b101, 5, 2, 0x79, 0x7a));
   });
 
   it("uses a second change-bitmask byte from the ninth field on", () => {
@@ -277,7 +277,7 @@ describe("encodeDelta — layout", () => {
     const prev = { p: { x: 1, y: 2 }, l: [] };
     const next = { p: { x: 3, y: 4 }, l: [[7]] };
     const delta = encodeDelta(S, prev, next);
-    expect(delta).toEqual(bytes(0b11, 3, 0, 4, 0, 1, 0, 1, 7));
+    expect(delta).toEqual(bytes(0b11, 3, 0, 4, 1, 1, 7));
     if (delta === null) return;
     expect(applyDelta(S, prev, delta)).toEqual(next);
   });
@@ -287,7 +287,7 @@ describe("encodeDelta — layout", () => {
     const prev = { l: null, p: null };
     const next = { l: [5], p: { x: 7 } };
     const delta = encodeDelta(T, prev, next);
-    expect(delta).toEqual(bytes(0b11, 0, 0, 1, 5, 7));
+    expect(delta).toEqual(bytes(0b11, 0, 1, 5, 7));
     if (delta === null) return;
     expect(applyDelta(T, prev, delta)).toEqual(next);
     expect(applyDelta(T, next, bytes(0b11, 0b11))).toEqual(prev);
@@ -295,9 +295,7 @@ describe("encodeDelta — layout", () => {
 
   it("writes zero values for missing fields", () => {
     const S = schema({ f: float32, s: string, l: array(uint8) });
-    expect(encodeDelta(S, untyped('{"f":1,"s":"a","l":[1]}'), untyped("{}"))).toEqual(
-      bytes(0b111, 0, 0, 0, 0, 0, 0, 0, 0),
-    );
+    expect(encodeDelta(S, untyped('{"f":1,"s":"a","l":[1]}'), untyped("{}"))).toEqual(bytes(0b111, 0, 0, 0, 0, 0, 0));
   });
 });
 
@@ -320,7 +318,7 @@ describe("applyDelta", () => {
 
   it("reads a changed non-null nullable value after the bitmasks", () => {
     const current = { a: 1, b: null, c: "x", d: null };
-    expect(applyDelta(S, current, bytes(0b1010, 0b00, 4, 0, 1, 0x7a))).toEqual({ a: 1, b: 4, c: "x", d: "z" });
+    expect(applyDelta(S, current, bytes(0b1010, 0b00, 4, 1, 0x7a))).toEqual({ a: 1, b: 4, c: "x", d: "z" });
   });
 
   it("finds the null bit of the ninth nullable field in the second byte", () => {

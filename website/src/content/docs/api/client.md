@@ -66,7 +66,7 @@ const client = CounterClient.create({
 | `path` | `string` | Yes | Path on your Worker, e.g. `/api/counter/counter-1` (the scheme follows the page: https → wss) |
 | `host` | `string` | No | Host with optional port. Defaults to `window.location.host`; required outside a browser |
 | `getToken` | `() => string \| Promise<string>` | No | Token sent on every (re)connect via `Sec-WebSocket-Protocol` |
-| `initialView` | `TView` | Yes | Initial view from server (SSR snapshot). The client starts with this view immediately. |
+| `initialView` | `TView` | Yes | Initial view from server (SSR snapshot). The client starts with this view immediately. Validated against the view schema (the role the view names, for a contract): a mismatch throws `InitialViewError` (`code: "invalid_initial_view"`, `issues` with paths). |
 | `onRedirect` | `(target: { actorType: string; actorId: string }) => void` | No | Called on redirect |
 | `onError` | `(error: ClientError) => void` | No | Called when the actor refuses a message (or sends a frame the client cannot read). See below |
 

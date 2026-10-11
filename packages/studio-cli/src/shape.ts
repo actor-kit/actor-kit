@@ -10,7 +10,7 @@
  */
 
 import { z } from "zod";
-import type { TimelineEntry } from "./client";
+import type { JournalEntry, TimelineEntry } from "./client";
 import { defined } from "./present";
 
 export interface TimelineShapeEntry {
@@ -91,7 +91,11 @@ type CauseShape = Pick<
 
 /** Names and keys from a cause, never its values. Unparsable cause data gives nothing. */
 function causeShape(causeData: string): CauseShape {
-  const cause = CauseSchema.safeParse(parseJson(causeData));
+  return causeFieldsShape(parseJson(causeData));
+}
+
+function causeFieldsShape(value: unknown): CauseShape {
+  const cause = CauseSchema.safeParse(value);
   if (!cause.success) return {};
   const { messageType, service, role, callerType, payload, input } = cause.data;
   return defined({ messageType, service, role, callerType, payloadKeys: keysOf(payload), inputKeys: keysOf(input) });
@@ -116,4 +120,30 @@ export function timelineShape(entries: readonly TimelineEntry[]): TimelineShapeE
     changedPaths: pathsSince(ordered[index - 1], entry),
     ...causeShape(entry.causeData),
   }));
+}
+
+export interface JournalShapeEntry extends CauseShape {
+  seq: number;
+  at: number;
+  causeType: string;
+  checksum: string;
+  emitted: Array<{ name: string; published: boolean; payloadKeys?: string[] }>;
+}
+
+/** Shape of a journal page (ADR-019 F), oldest first: names, keys and published flags; no values, callers or ids. */
+export function journalShape(entries: readonly JournalEntry[]): JournalShapeEntry[] {
+  return [...entries]
+    .sort((a, b) => a.seq - b.seq)
+    .map((entry) => ({
+      seq: entry.seq,
+      at: entry.createdAt,
+      causeType: entry.causeType,
+      checksum: entry.checksum,
+      emitted: entry.emitted.map((e) => ({
+        name: e.name,
+        published: e.published,
+        ...defined({ payloadKeys: keysOf(e.payload) }),
+      })),
+      ...causeFieldsShape(entry.cause),
+    }));
 }

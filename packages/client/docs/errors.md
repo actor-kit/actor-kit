@@ -458,6 +458,30 @@ Docs: https://actorkit.dev/errors/studio_request_failed/
 
 Docs: https://actorkit.dev/errors/cli_usage/
 
+## `invalid_journal_query`
+
+**What happened:** A journal query (`__journal`, Studio's journal route, `actor-kit studio journal`) has invalid options.
+
+**How to fix it:** Pass seq bounds as non-negative integers, a known cause type, a limit from 1 to 1000 and order asc or desc.
+
+Docs: https://actorkit.dev/errors/invalid_journal_query/
+
+## `invalid_schema`
+
+**What happened:** A view schema is declared wrongly (`enumOf`, `union`, or a field not built by `schema()`).
+
+**How to fix it:** Give `enumOf` 1 to 65536 distinct values, give `union` 1 to 255 variants that do not declare the tag, and build fields with the schema helpers.
+
+Docs: https://actorkit.dev/errors/invalid_schema/
+
+## `invalid_view_value`
+
+**What happened:** A view's value does not fit its schema (an enum value or a union tag that is not declared).
+
+**How to fix it:** Return only the values the view schema declares, or add them to its `enumOf` / `union`.
+
+Docs: https://actorkit.dev/errors/invalid_view_value/
+
 ## `invalid_frame`
 
 **What happened:** A frame from the server could not be read.

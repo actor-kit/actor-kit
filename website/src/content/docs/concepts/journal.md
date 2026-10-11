@@ -38,7 +38,8 @@ starts from, the checkpoints inside it, then its events. Only once the segment i
 locally. If R2 is down (or the binding is missing) nothing is deleted, and the next transition tries again.
 
 Readers fetch segments on demand: a restore to an old transition reads the segment that holds it, a rebuild
-reads them all, and `readFullJournal(sql, bucket, { from })` (`@actor-kit/worker/testing`) gives you the
+reads them all, the journal query (Studio, `actor-kit studio journal`, MCP) reads the segments its range
+reaches, and `readFullJournal(sql, bucket, { from })` (`@actor-kit/worker/testing`) gives you the
 archived and local journal as one, for `replayJournal()` or your own analysis.
 
 Studio's actor header shows where the history lives: the archived ranges and their size, the local range, and

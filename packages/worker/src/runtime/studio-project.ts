@@ -6,6 +6,7 @@
  * callers are replaced with a keyed hash so they can be correlated but not read.
  */
 
+import type { JournalEntry } from "./journal-query";
 import type { LiveConnection } from "./live-connections";
 import type { OutboxRow } from "./outbox-store";
 import { isBuiltInError } from "./service-error";
@@ -102,6 +103,15 @@ export async function projectTimelineEntry(
     causeData: await projectCause(entry.causeData, projection),
     stateSnapshot: entry.stateSnapshot === null ? null : projectJson(entry.stateSnapshot, projection),
     emitted: entry.emitted === null ? null : projectEmitted(entry.emitted, projection),
+  };
+}
+
+/** A journal query entry (ADR-019 F): its cause like a timeline cause, each emitted payload from its own root. */
+export async function projectJournalEntry(entry: JournalEntry, projection: StudioProjection): Promise<JournalEntry> {
+  return {
+    ...entry,
+    cause: await projectCauseFields(entry.cause, projection),
+    emitted: entry.emitted.map((event) => ({ ...event, payload: projection.redactor.apply(event.payload) })),
   };
 }
 

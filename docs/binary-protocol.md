@@ -6,12 +6,12 @@ Actor Kit v2 replaces JSON Patch with schema-aware binary delta encoding. The `s
 
 ## Frame format
 
-Every WebSocket frame starts with a 4-byte header:
+Every WebSocket frame starts with a 6-byte header (`frame.ts`):
 
 ```
 Byte 0: version (uint8) — schema version, used for version negotiation
 Byte 1: type (uint8) — frame type
-Bytes 2-3: length (uint16, big-endian) — payload length in bytes
+Bytes 2-5: length (uint32, big-endian) — payload length in bytes
 ```
 
 ### Frame types
@@ -40,12 +40,32 @@ Each field is encoded according to its schema type:
 - `uint8`: 1 byte
 - `uint16`: 2 bytes (big-endian)
 - `uint32`: 4 bytes (big-endian)
+- `int8`, `int16`, `int32`: 1, 2, 4 bytes, two's complement, big-endian
 - `float32`: 4 bytes (IEEE 754)
 - `float64`: 8 bytes (IEEE 754)
 - `boolean`: 1 byte (0x00 or 0x01)
-- `string`: [uint16 length][utf-8 bytes]
-- `array(T)`: [uint16 count][element_0][element_1]...
+- `string`: [varint byte length][utf-8 bytes]
+- `array(T)`: [varint count][element_0][element_1]...
 - `schema({...})`: fields encoded in definition order (nested)
+- `nullable(T)`: one bit in the enclosing schema's null bitmask; a null value has no bytes
+- `enumOf([...])` / `literal(v)`: the value's index in the list: 0 bytes for one value (`literal`), 1 byte up to 256 values, 2 bytes (big-endian) up to 65536. Encoding a value outside the list, or decoding an index outside it, throws.
+- `record(T)`: [varint count] then per entry [varint key length][utf-8 key][T value], in the object's key order. Decoded with `Object.fromEntries`, so a key named `__proto__` stays a key.
+- `union(tag, { name: schema({...}), ... })`: [uint8 variant index (declaration order)][the variant's fields as a nested schema]. Decodes to `{ [tag]: name, ...fields }`, tag first. At most 256 variants; a variant may not declare the tag field.
+- `json(zodSchema)`: [varint length][utf-8 JSON text]. The client parses the text, then the Zod schema (a failure keeps the last good view). `undefined` is sent as `null`.
+
+**Lengths and counts are varints.** Every string byte length, record key length, JSON text length,
+array count and record count is an unsigned LEB128 varint: 7 bits per byte, low bits first, the high
+bit set on every byte but the last (0-127 take one byte, 128-16383 two, ...). A decoder refuses one
+longer than 8 bytes. There is no size limit below what a frame holds. Fixed-width numbers (`uint16`,
+`int32`, `float64`, an enum index, ...) stay big-endian.
+
+| Length | Bytes |
+|---|---|
+| 3 | `03` |
+| 127 | `7f` |
+| 128 | `80 01` |
+| 300 | `ac 02` |
+| 16384 | `80 80 01` |
 
 ### DELTA frame
 
@@ -68,6 +88,42 @@ Total: 4 (header) + 8 (checksum) + 2 (bitmask) + 4 (data) = 18 bytes
 ```
 
 Compared to JSON Patch for the same change: `[{"op":"replace","path":"/x","value":1.5}]` = ~48 bytes + JSON encoding overhead.
+
+### Values inside a delta
+
+A changed field's value is encoded as in a snapshot, except records and unions, which send what
+changed inside them. The decoder takes the same branch from the value it already holds (the
+checksum protocol guarantees it holds the server's previous view), so no flag says which branch
+was taken, except the record mode byte.
+
+**record(T)**
+
+```
+[mode: uint8]
+mode 1 (patch):
+  [removed count: varint][removed keys: varint length + utf-8 each]
+  [changed count: varint][per key: key, then T's delta against the old value]
+  [added count: varint][per key: key, then T's full value]
+mode 0 (whole): the record exactly as in a snapshot
+```
+
+Patching keeps kept keys in their old order and appends added keys, so the encoder sends the whole
+record when that would not reproduce the next value's key order (the client's checksum is computed
+over the view's JSON). A `null` previous value patches as an empty record.
+
+**union(tag, variants)**
+
+```
+[variant index: uint8]
+same variant as the previous value: [change bitmask][null bitmask][changed fields] (the top-level layout, over the variant's fields)
+another variant (or previous null):  the variant's fields as in a snapshot
+```
+
+Nested records and unions inside a record value or a variant field recurse the same way. Arrays,
+nested `schema()` values, `json` and primitives are resent whole.
+
+**Change detection**: float32/float64 values within 1e-6 are equal (float32 precision loss);
+every other value compares exactly (objects and arrays as JSON text).
 
 ### Array delta strategy
 

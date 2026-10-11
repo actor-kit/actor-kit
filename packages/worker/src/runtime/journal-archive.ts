@@ -23,6 +23,14 @@ import {
   parseJournalEventRow,
   readJournal,
 } from "./journal";
+import {
+  type JournalPage,
+  type JournalQuery,
+  type JournalReadContext,
+  journalEntry,
+  matchesJournalQuery,
+  readJournalPage,
+} from "./journal-query";
 
 /** The part of an R2 bucket the archive uses (structural, so tests use an in-memory one). */
 export interface ArchiveBucket {
@@ -264,4 +272,37 @@ export const STORAGE_CAP_BYTES = 10 * 1024 ** 3;
 /** What Studio shows of the journal's storage: where it lives, the object's size, and whether it nears the cap. */
 export function journalStorage(stats: ReturnType<typeof journalStats>, storageBytes: number) {
   return { ...stats, storageBytes, capBytes: STORAGE_CAP_BYTES, nearCap: storageBytes >= 0.8 * STORAGE_CAP_BYTES };
+}
+
+/** The archived segments that overlap a query's seq window (`from` to the lower of `to` and `before - 1`). */
+function segmentsFor(sql: JournalSql, query: JournalQuery): ArchivedSegment[] {
+  const low = query.from ?? 0;
+  const high = Math.min(query.to ?? Number.POSITIVE_INFINITY, (query.before ?? Number.POSITIVE_INFINITY) - 1);
+  return archivedSegments(sql).filter((segment) => segment.to >= low && segment.from <= high);
+}
+
+/**
+ * The journal query (ADR-019 F) over archived and local rows: the segments that overlap the query's seq
+ * window are fetched and filtered like the SQL query filters local rows. Newest-first pages that local
+ * rows fill fetch nothing (archived rows are all older).
+ */
+export async function readArchivedJournalPage(
+  sql: JournalSql,
+  bucket: ArchiveBucket,
+  query: JournalQuery,
+  ctx: JournalReadContext,
+): Promise<JournalPage> {
+  const local = readJournalPage(sql, query, ctx);
+  const overlapping = segmentsFor(sql, query);
+  // Newest first, a full local page needs nothing older; with no segment in the window, local rows are all.
+  if ((query.order === "desc" && local.hasMore) || overlapping.length === 0) return local;
+  const archived = (await Promise.all(overlapping.map((segment) => fetchSegment(bucket, segment)))).flatMap(
+    (part) => part.events,
+  );
+  const events = [...archived, ...readJournal(sql).events].filter((event) => matchesJournalQuery(event, query));
+  const ordered = query.order === "asc" ? events : events.reverse();
+  return {
+    entries: ordered.slice(0, query.limit).map((event) => journalEntry(event, ctx)),
+    hasMore: ordered.length > query.limit,
+  };
 }

@@ -26,6 +26,10 @@ export type { DeliveryInfo, EffectInfo } from "./runtime/effect-info";
 export type { EnvIssue } from "./runtime/env";
 export { d1, durableObject, kv, queue, r2, service } from "./runtime/env";
 export { getTokenFromRequest } from "./runtime/get-token";
+// Journal query (ADR-019 F)
+export type { JournalEntry, JournalEntryEmitted, JournalOptions, JournalPage } from "./runtime/journal-query";
+// Published event bodies (ADR-017 §3)
+export type { PublishedBody } from "./runtime/publish";
 // Namespace resolution
 export { resolveNamespace } from "./runtime/resolve-namespace";
 export type { ActorRoute } from "./runtime/route-to-actor";

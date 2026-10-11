@@ -66,6 +66,9 @@ Every error actor-kit throws is an `ActorKitError` with a stable `code` and a `d
 | [`studio_unavailable`](/errors/studio_unavailable/) | Studio is missing a secret or got invalid options. |
 | [`studio_request_failed`](/errors/studio_request_failed/) | The Studio API answered with an error or something that is not Studio. |
 | [`cli_usage`](/errors/cli_usage/) | The `actor-kit studio` command line is incomplete or invalid. |
+| [`invalid_journal_query`](/errors/invalid_journal_query/) | A journal query (`__journal`, Studio's journal route, `actor-kit studio journal`) has invalid options. |
+| [`invalid_schema`](/errors/invalid_schema/) | A view schema is declared wrongly (`enumOf`, `union`, or a field not built by `schema()`). |
+| [`invalid_view_value`](/errors/invalid_view_value/) | A view's value does not fit its schema (an enum value or a union tag that is not declared). |
 | [`invalid_frame`](/errors/invalid_frame/) | A frame from the server could not be read. |
 | [`missing_host`](/errors/missing_host/) | The client has no host to connect to (no window.location). |
 | [`headers_in_browser`](/errors/headers_in_browser/) | `getHeaders` was used in a browser, which cannot set WebSocket upgrade headers. |

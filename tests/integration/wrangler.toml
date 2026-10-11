@@ -339,3 +339,23 @@ class_name = "UnboundArchiveActor"
 [[migrations]]
 tag = "v28"
 new_sqlite_classes = ["ArchivedTallyActor", "UnboundArchiveActor"]
+
+# ADR-019 C: richer view schemas
+[[durable_objects.bindings]]
+name = "SCOREBOARD"
+class_name = "Scoreboard"
+
+[[migrations]]
+tag = "adr019-rich-views"
+new_sqlite_classes = ["Scoreboard"]
+
+# ADR-019 E: @actor-kit/projection consumes lot-events into D1
+[[d1_databases]]
+binding = "PROJECTION_DB"
+database_name = "projection"
+database_id = "00000000-0000-4000-8000-000000000019"
+
+[[queues.consumers]]
+queue = "lot-events"
+max_batch_size = 10
+max_batch_timeout = 1

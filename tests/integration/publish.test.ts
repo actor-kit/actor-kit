@@ -57,6 +57,26 @@ describe("publish", () => {
     });
   });
 
+  it("numbers published events per actor with a position that never rewinds, even across a restore", async () => {
+    const id = `lot-pos-${Date.now()}`;
+    const stub = env.LOT.get(env.LOT.idFromName(id));
+    await stub.spawn({ actorId: id, caller: "u", callerType: "user", input: {} });
+    await stub.send("u", "user", { type: "PLACE", n: 1 });
+    await stub.send("u", "user", { type: "PLACE", n: 2 });
+    expect(await stub.__restore({ toSeq: 2 })).toEqual({ ok: true });
+    await stub.send("u", "user", { type: "PLACE", n: 3 });
+    const sent = await until(
+      () => rows(stub),
+      (r) => r.length === 3 && r.every((row) => row.status === "done"),
+    );
+    const bodies = sent.map((r) => z.object({ seq: z.number(), position: z.number() }).parse(JSON.parse(r.payload)));
+    expect(bodies).toEqual([
+      { seq: 2, position: 1 },
+      { seq: 3, position: 2 },
+      { seq: 5, position: 3 },
+    ]);
+  });
+
   it("a queue that is not bound retries the row with the reason", async () => {
     const id = `lot-unbound-${Date.now()}`;
     const stub = env.LOT_UNBOUND.get(env.LOT_UNBOUND.idFromName(id));

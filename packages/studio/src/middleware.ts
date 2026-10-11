@@ -7,6 +7,7 @@
  * - Actor listing from StudioRegistry
  * - Actor inspection via __inspect() RPC
  * - Timeline retrieval via __getTimeline() RPC
+ * - Journal queries via __journal() RPC (ADR-019 F)
  * - Actions (mutate scope only): POST .../actions — redrive a dead letter, fire a timer now, restore (ADR-015)
  * - WebSocket upgrade for live studio connections
  * - Serving the bundled SPA
@@ -129,6 +130,34 @@ const TimelineQuery = z.object({
   before: nonNegativeInt.optional(),
 });
 
+/** Kept in step with the worker's JOURNAL_CAUSE_TYPES (a unit test compares them). */
+export const JOURNAL_CAUSE_TYPES = [
+  "init",
+  "message",
+  "lifecycle.connect",
+  "lifecycle.disconnect",
+  "service.onDone",
+  "service.onError",
+  "service.stale",
+  "link.onUpdate",
+  "link.onError",
+  "migrate",
+  "restore",
+  "timer",
+] as const;
+
+const JournalQuery = z.object({
+  from: nonNegativeInt.optional(),
+  to: nonNegativeInt.optional(),
+  before: nonNegativeInt.optional(),
+  causeType: z.enum(JOURNAL_CAUSE_TYPES).optional(),
+  event: z.string().min(1).max(256).optional(),
+  correlationId: z.string().min(1).max(1024).optional(),
+  limit: nonNegativeInt.pipe(z.number().min(1).max(MAX_LIMIT)).optional(),
+  order: z.enum(["asc", "desc"]).optional(),
+});
+const JOURNAL_PARAMS = ["from", "to", "before", "causeType", "event", "correlationId", "limit", "order"] as const;
+
 const ViewQuery = z.object({
   role: z.string().min(1).max(MAX_ROLE_LENGTH),
   caller: z.string().min(1).max(MAX_ID_LENGTH).optional(),
@@ -178,7 +207,17 @@ function parseActorParams(rawType: string, rawId: string): Parsed<ActorParams> {
 
 // --- Audit ---
 
-export type StudioRoute = "ui" | "list" | "types" | "inspect" | "timeline" | "view" | "action" | "ws" | "unknown";
+export type StudioRoute =
+  | "ui"
+  | "list"
+  | "types"
+  | "inspect"
+  | "timeline"
+  | "journal"
+  | "view"
+  | "action"
+  | "ws"
+  | "unknown";
 
 /** One line per studio request (ADR-014). Never carries bodies, query values or the JWT. */
 export interface StudioAuditEvent {
@@ -207,7 +246,7 @@ interface RouteInfo {
   actorId?: string;
 }
 
-type ActorRoute = "inspect" | "timeline" | "view" | "action" | "ws";
+type ActorRoute = "inspect" | "timeline" | "journal" | "view" | "action" | "ws";
 
 /** A request below the studio prefix, matched once and shared by routing and the audit event. */
 type RouteMatch = { route: Exclude<StudioRoute, ActorRoute> } | { route: ActorRoute; rawType: string; rawId: string };
@@ -215,6 +254,7 @@ type RouteMatch = { route: Exclude<StudioRoute, ActorRoute> } | { route: ActorRo
 /** Routes addressing one actor; the first matching pattern wins. */
 const ACTOR_ROUTES: ReadonlyArray<readonly [RegExp, ActorRoute]> = [
   [/^\/api\/actors\/([^/]+)\/([^/]+)\/timeline$/, "timeline"],
+  [/^\/api\/actors\/([^/]+)\/([^/]+)\/journal$/, "journal"],
   [/^\/api\/actors\/([^/]+)\/([^/]+)\/view$/, "view"],
   [/^\/api\/actors\/([^/]+)\/([^/]+)\/actions$/, "action"],
   [/^\/api\/actors\/([^/]+)\/([^/]+)$/, "inspect"],
@@ -343,6 +383,7 @@ type ActorHandler = (req: StudioRequest, rawType: string, rawId: string) => Resp
 const ACTOR_HANDLERS: Record<ActorRoute, ActorHandler> = {
   inspect: handleInspect,
   timeline: handleTimeline,
+  journal: handleJournal,
   view: handleView,
   action: routeAction,
   ws: handleStudioWebSocket,
@@ -499,6 +540,25 @@ function handleTimeline(
 
   return withExistingActor(env, actor, params.value, () =>
     asyncJson(() => callRpc(actor.stub, "__getTimeline", { ...query.value, ...viewerArg(principal) })),
+  );
+}
+
+function handleJournal(
+  { url, env, principal }: StudioRequest,
+  rawType: string,
+  rawId: string,
+): Response | Promise<Response> {
+  const params = parseActorParams(rawType, rawId);
+  if (!params.ok) return params.response;
+
+  const query = parseQuery(JournalQuery, url, JOURNAL_PARAMS);
+  if (!query.ok) return query.response;
+
+  const actor = resolveActor(env, params.value);
+  if (actor instanceof Response) return actor;
+
+  return withExistingActor(env, actor, params.value, () =>
+    asyncJson(() => callRpc(actor.stub, "__journal", { ...query.value, ...viewerArg(principal) })),
   );
 }
 

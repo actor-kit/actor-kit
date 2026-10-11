@@ -75,6 +75,35 @@ export type TimelineEntry = z.infer<typeof TimelineEntrySchema>;
 const TimelineSchema = z.object({ entries: z.array(TimelineEntrySchema), hasMore: z.boolean() });
 export type TimelinePage = z.infer<typeof TimelineSchema>;
 
+export const JournalEntrySchema = z.object({
+  id: z.string(),
+  seq: z.number().int(),
+  causeType: z.string(),
+  cause: z.record(z.string(), z.unknown()),
+  emitted: z.array(z.object({ name: z.string(), payload: z.unknown(), published: z.boolean() })),
+  correlationId: z.string().nullable(),
+  causationId: z.string().nullable(),
+  createdAt: z.number(),
+  codeVersion: z.number(),
+  checksum: z.string(),
+});
+export type JournalEntry = z.infer<typeof JournalEntrySchema>;
+
+const JournalSchema = z.object({ entries: z.array(JournalEntrySchema), hasMore: z.boolean() });
+export type JournalPage = z.infer<typeof JournalSchema>;
+
+/** Journal query filters (ADR-019 F); every one is optional. */
+export interface JournalQuery {
+  from?: number;
+  to?: number;
+  before?: number;
+  causeType?: string;
+  event?: string;
+  correlationId?: string;
+  limit?: number;
+  order?: "asc" | "desc";
+}
+
 const ActorEntrySchema = z.looseObject({ actorType: z.string(), actorId: z.string() });
 const ActorsSchema = z.object({ actors: z.array(ActorEntrySchema) });
 const TypesSchema = z.object({ types: z.array(z.string()) });
@@ -101,6 +130,7 @@ export interface StudioClient {
   types(): Promise<string[]>;
   inspect(actorType: string, actorId: string): Promise<z.infer<typeof InspectSchema>>;
   timeline(actorType: string, actorId: string, opts?: { limit?: number; before?: number }): Promise<TimelinePage>;
+  journal(actorType: string, actorId: string, opts?: JournalQuery): Promise<JournalPage>;
   view(
     actorType: string,
     actorId: string,
@@ -177,6 +207,20 @@ export function createStudioClient(options: { baseUrl: string; auth: StudioAuth;
       get(
         `${actorPath(actorType, actorId)}/timeline${query({ limit: opts.limit, before: opts.before })}`,
         TimelineSchema,
+      ),
+    journal: (actorType, actorId, opts = {}) =>
+      get(
+        `${actorPath(actorType, actorId)}/journal${query({
+          from: opts.from,
+          to: opts.to,
+          before: opts.before,
+          causeType: opts.causeType,
+          event: opts.event,
+          correlationId: opts.correlationId,
+          limit: opts.limit,
+          order: opts.order,
+        })}`,
+        JournalSchema,
       ),
     view: (actorType, actorId, opts) =>
       get(`${actorPath(actorType, actorId)}/view${query({ role: opts.role, caller: opts.caller })}`, ViewSchema),

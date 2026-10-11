@@ -22,6 +22,7 @@
     "packages/studio/src/**/*.ts",
     "packages/studio/ui/src/**/*.{ts,tsx}",
     "packages/studio-cli/src/**/*.ts",
+    "packages/projection/src/**/*.ts",
     "!packages/*/src/index.ts",
     "!packages/worker/src/actor.ts",
     "!packages/studio/src/ui-assets.ts",

@@ -16,7 +16,11 @@ export { RoundsActor, ScopedCallsActor } from "./nested-states";
 export { Retrier, RetrierNoJournal } from "./outbox-retry";
 export { Lot, LotTyped, LotUnbound } from "./publish-actors";
 export { QuizStates } from "./quiz-states";
+
+import { ensureLotReadModel, lotProjection, type ProjectionEnv } from "./lot-projection";
+
 export { Ledger, LedgerNoJournal, LedgerNoStudio } from "./restore-actors";
+export { Scoreboard } from "./rich-view-actors";
 export { CashierActor } from "./service-handles-actors";
 export { Bulletin, Desk } from "./studio-effects";
 export { StudioOff, StudioProbe } from "./studio-probe";
@@ -165,6 +169,12 @@ export const ChatRoom = createActorClass(ChatRoomContract);
 // --- Worker entrypoint ---
 
 export default {
+  /** ADR-019 E: the lot-events consumer keeps a D1 read model (lot-projection.ts). */
+  async queue(batch: MessageBatch<unknown>, env: ProjectionEnv): Promise<void> {
+    await ensureLotReadModel(env.PROJECTION_DB);
+    await lotProjection.queue(batch, env);
+  },
+
   async fetch(request: Request): Promise<Response> {
     const url = new URL(request.url);
     if (url.pathname === "/health") {

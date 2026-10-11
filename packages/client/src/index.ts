@@ -20,4 +20,5 @@ export type {
   WebSocketLike,
 } from "./client";
 export { createActorClient } from "./client";
+export { InitialViewError } from "./initial-view";
 export { buildUrl, inferProtocol } from "./url";

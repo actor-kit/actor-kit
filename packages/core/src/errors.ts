@@ -250,6 +250,19 @@ export const ERROR_CODES = {
     title: "The `actor-kit studio` command line is incomplete or invalid.",
     fix: "Run `actor-kit studio --help` and pass the arguments it lists.",
   },
+  invalid_journal_query: {
+    title: "A journal query (`__journal`, Studio's journal route, `actor-kit studio journal`) has invalid options.",
+    fix: "Pass seq bounds as non-negative integers, a known cause type, a limit from 1 to 1000 and order asc or desc.",
+  },
+  // --- View schemas ---
+  invalid_schema: {
+    title: "A view schema is declared wrongly (`enumOf`, `union`, or a field not built by `schema()`).",
+    fix: "Give `enumOf` 1 to 65536 distinct values, give `union` 1 to 255 variants that do not declare the tag, and build fields with the schema helpers.",
+  },
+  invalid_view_value: {
+    title: "A view's value does not fit its schema (an enum value or a union tag that is not declared).",
+    fix: "Return only the values the view schema declares, or add them to its `enumOf` / `union`.",
+  },
   // --- Client and React ---
   invalid_frame: {
     title: "A frame from the server could not be read.",

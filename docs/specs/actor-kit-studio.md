@@ -291,6 +291,7 @@ All routes prefixed with `/__studio/`.
 | `/__studio/api/actors/types` | GET | List distinct actor types |
 | `/__studio/api/actors/:type/:id` | GET | Get actor snapshot via `__inspect()` RPC |
 | `/__studio/api/actors/:type/:id/timeline` | GET | Get timeline entries via `__getTimeline()` RPC |
+| `/__studio/api/actors/:type/:id/journal` | GET | Query journal entries via `__journal()` RPC (ADR-019 F; query params: `from`, `to`, `before`, `causeType`, `event`, `correlationId`, `limit`, `order`) |
 | `/__studio/actors/:type/:id/ws` | GET | WebSocket upgrade to actor's studio connection |
 
 Request handling rules:
@@ -326,8 +327,43 @@ class ActorInstance extends DurableObject {
     entries: TimelineEntry[];
     hasMore: boolean;
   }>;
+
+  // Studio RPC (ADR-019 F) — journal entries matching a query, redacted like the timeline
+  __journal(opts?: {
+    from?: number;          // inclusive lowest seq
+    to?: number;            // inclusive highest seq
+    before?: number;        // exclusive seq cursor (older pages)
+    causeType?: JournalCauseType;
+    event?: string;         // only entries that emitted a domain event with this name
+    correlationId?: string; // only entries in this flow
+    limit?: number;         // 1-1000, default 100
+    order?: "asc" | "desc"; // default "desc" (newest first); page asc with `from`
+    viewer?: "human" | "agent";
+  }): Promise<{ entries: JournalEntry[]; hasMore: boolean }>;
 }
 ```
+
+### Journal query (ADR-019 F)
+
+`__journal()` reads the `events` table (`runtime/journal-query.ts`); unlike the timeline it does not
+rebuild after-states, so any range is cheap. An entry is:
+
+| Field | Meaning |
+|---|---|
+| `id` | `${actorType}/${actorId}/${seq}`: what an effect's or a published event's `causationId` names |
+| `seq`, `causeType`, `createdAt`, `codeVersion`, `checksum` | the journal event (checksum of the state after it) |
+| `cause` | the cause in the timeline's `MutationCause` shape (message type, caller, role, payload; service input/result; timer key; ...) |
+| `emitted` | the domain events it emitted, in order: `{ name, payload, published }`; `published` is true when the actor's `publish` sends that event |
+| `correlationId`, `causationId` | ADR-017 §4 trace ids (`null` for events written before ADR-017) |
+
+Every entry is projected through `studio-project.ts` (`projectJournalEntry`): cause values (`payload`,
+`input`, `result`, `viewData`) and each emitted payload are redacted by `studio.redact` from their own
+roots, and callers are hashed for agents (ADR-014). Like every Studio RPC it never creates an actor (an
+actor that was never persisted returns an empty page) and throws `Studio is not enabled for this actor`
+when Studio is off. Invalid options throw `Invalid journal query: ...`; the HTTP route answers them with
+`400` before contacting anything. The CLI (`actor-kit studio journal <type> <id>`) and the MCP tool
+`studio_journal` expose it; both have a `shape` mode (the MCP default) that keeps names, payload keys,
+published flags and checksums only.
 
 ## Studio UI
 

@@ -18,12 +18,15 @@ import {
   type Journal,
   journalStats,
   journalStorage,
+  matchesJournalQuery,
   message,
   parseSegment,
   planRestore,
   prunableRange,
+  readArchivedJournalPage,
   readFullJournal,
   readJournal,
+  readJournalPage,
   rebuildFromJournal,
   resolveJournalConfig,
   STORAGE_CAP_BYTES,
@@ -441,5 +444,151 @@ describe("archive edges", () => {
     for (const env of ["x", { JOURNAL: null }, { JOURNAL: { put: 1, get: fn } }, { JOURNAL: { put: fn, get: 1 } }]) {
       expect(() => archiveBucket(env, "JOURNAL")).toThrow(noBucket);
     }
+  });
+});
+
+describe("the journal query reads archived segments (ADR-019 D with F)", () => {
+  const ctx = {
+    published: new Set<string>(),
+    eventId: (seq: number) => `tally/t1/${seq}`,
+    sourceType: (l: string) => l,
+  };
+  const query = fc.record(
+    {
+      from: fc.integer({ min: 0, max: 30 }),
+      to: fc.integer({ min: 0, max: 30 }),
+      before: fc.integer({ min: 0, max: 30 }),
+      causeType: fc.constantFrom("init" as const, "message" as const),
+      limit: fc.integer({ min: 1, max: 12 }),
+      order: fc.constantFrom("asc" as const, "desc" as const),
+    },
+    { requiredKeys: ["limit", "order"] },
+  );
+
+  it("a page over archived and local rows equals the page over a journal never pruned", async () => {
+    await fc.assert(
+      fc.asyncProperty(
+        fc.array(fc.integer({ min: 1, max: 9 }), { minLength: 1, maxLength: 25 }),
+        fc.integer({ min: 1, max: 4 }),
+        fc.uniqueArray(fc.integer({ min: 1, max: 26 }), { maxLength: 8 }),
+        query,
+        async (adds, every, archiveAt, q) => {
+          const journal = await tallyJournal(adds, every);
+          const sql = sqlite();
+          const bucket = memoryBucket();
+          await writeArchiving(sql, bucket, journal, 2, new Set(archiveAt));
+          const whole = sqlite();
+          for (const e of journal.events) insertEvent(whole, e);
+          expect(await readArchivedJournalPage(sql, bucket, q, ctx)).toEqual(readJournalPage(whole, q, ctx));
+        },
+      ),
+      { numRuns: 80 },
+    );
+  });
+
+  it("fetches no segment when the page is all local", async () => {
+    const sql = sqlite();
+    const bucket = memoryBucket();
+    const journal = await tallyJournal([1, 2, 3, 4, 5, 6], 2);
+    await writeArchiving(sql, bucket, journal, 2, new Set([7])); // archived 1-4, local 5-7
+    const page = await readArchivedJournalPage(sql, bucket, { limit: 1, order: "desc" }, ctx);
+    expect(page.entries.map((e) => e.seq)).toEqual([7]);
+    expect(page.hasMore).toBe(true);
+    expect(bucket.reads).toEqual([]);
+  });
+});
+
+describe("journal query filters on events read from R2", () => {
+  const base = {
+    seq: 5,
+    causeType: "message" as const,
+    name: "ADD",
+    payload: {},
+    caller: null,
+    callerType: null,
+    role: null,
+    facts: {},
+    codeVersion: 1,
+    stateChecksum: "c",
+    createdAt: 0,
+    correlationId: "a/1/5",
+    emitted: [{ name: "Added", payload: {} }],
+  };
+  const q = { limit: 10, order: "asc" as const };
+
+  it.each([
+    [{}, true],
+    [{ from: 5 }, true],
+    [{ from: 6 }, false],
+    [{ to: 5 }, true],
+    [{ to: 4 }, false],
+    [{ before: 6 }, true],
+    [{ before: 5 }, false],
+    [{ causeType: "message" as const }, true],
+    [{ causeType: "timer" as const }, false],
+    [{ correlationId: "a/1/5" }, true],
+    [{ correlationId: "a/1/4" }, false],
+    [{ event: "Added" }, true],
+    [{ event: "Removed" }, false],
+  ])("%j matches: %s", (filter, expected) => {
+    expect(matchesJournalQuery(base, { ...q, ...filter })).toBe(expected);
+  });
+
+  it("an event that emitted nothing matches no event filter", () => {
+    const { emitted: _emitted, ...silent } = base;
+    expect(matchesJournalQuery(silent, { ...q, event: "Added" })).toBe(false);
+    expect(matchesJournalQuery(silent, q)).toBe(true);
+  });
+
+  it("pages oldest first across archived and local rows, and says when more remain", async () => {
+    const sql = sqlite();
+    const bucket = memoryBucket();
+    const journal = await tallyJournal([1, 2, 3, 4, 5, 6], 2);
+    await writeArchiving(sql, bucket, journal, 2, new Set([7])); // archived 1-4, local 5-7
+    const ctx = { published: new Set<string>(), eventId: (seq: number) => `t/${seq}`, sourceType: (l: string) => l };
+    const first = await readArchivedJournalPage(sql, bucket, { limit: 3, order: "asc" }, ctx);
+    expect(first.entries.map((e) => e.seq)).toEqual([1, 2, 3]);
+    expect(first.hasMore).toBe(true);
+    const newest = await readArchivedJournalPage(sql, bucket, { limit: 5, order: "desc" }, ctx);
+    expect(newest.entries.map((e) => e.seq)).toEqual([7, 6, 5, 4, 3]);
+    expect(newest.entries[0]).toMatchObject({ id: "t/7", causeType: "message", checksum: expect.any(String) });
+    const rest = await readArchivedJournalPage(sql, bucket, { limit: 5, order: "desc", before: 3 }, ctx);
+    expect(rest).toMatchObject({ hasMore: false });
+    expect(rest.entries.map((e) => e.seq)).toEqual([2, 1]);
+    bucket.reads.length = 0;
+    await readArchivedJournalPage(sql, bucket, { limit: 5, order: "asc", from: 5 }, ctx);
+    await readArchivedJournalPage(sql, bucket, { limit: 5, order: "asc", to: 0 }, ctx);
+    expect(bucket.reads).toEqual([]);
+    await readArchivedJournalPage(sql, bucket, { limit: 5, order: "asc", to: 4, before: 9 }, ctx);
+    expect(bucket.reads).toEqual(["tally/t1/1-4.ndjson"]);
+  });
+});
+
+describe("journal query windows", () => {
+  const ctx = { published: new Set<string>(), eventId: (seq: number) => `t/${seq}`, sourceType: (l: string) => l };
+  async function twoSegments() {
+    const sql = sqlite();
+    const bucket = memoryBucket();
+    const journal = await tallyJournal([1, 2, 3, 4, 5, 6], 2);
+    await writeArchiving(sql, bucket, journal, 1, new Set([4, 6])); // archived 1-2, 3-4; local 5-7
+    bucket.reads.length = 0;
+    return { sql, bucket };
+  }
+
+  it("fetches only the segments the window reaches", async () => {
+    const { sql, bucket } = await twoSegments();
+    await readArchivedJournalPage(sql, bucket, { limit: 9, order: "asc", before: 3 }, ctx);
+    expect(bucket.reads).toEqual(["tally/t1/1-2.ndjson"]);
+    const fromTwo = await readArchivedJournalPage(sql, bucket, { limit: 1, order: "asc", from: 2 }, ctx);
+    expect(fromTwo.entries.map((e) => e.seq)).toEqual([2]);
+  });
+
+  it("oldest first never stops at a full local page; hasMore is exact", async () => {
+    const { sql, bucket } = await twoSegments();
+    const oldest = await readArchivedJournalPage(sql, bucket, { limit: 2, order: "asc" }, ctx);
+    expect(oldest.entries.map((e) => e.seq)).toEqual([1, 2]);
+    const exact = await readArchivedJournalPage(sql, bucket, { limit: 2, order: "desc", before: 3 }, ctx);
+    expect(exact).toMatchObject({ hasMore: false });
+    expect(exact.entries.map((e) => e.seq)).toEqual([2, 1]);
   });
 });

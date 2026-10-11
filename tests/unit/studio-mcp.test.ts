@@ -49,6 +49,7 @@ describe("actor-kit-studio-mcp", () => {
     expect(tools.map((t) => t.name).sort()).toEqual([
       "studio_actor_types",
       "studio_inspect",
+      "studio_journal",
       "studio_list_actors",
       "studio_timeline",
       "studio_view",
