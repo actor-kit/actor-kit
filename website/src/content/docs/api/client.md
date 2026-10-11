@@ -50,7 +50,7 @@ const client = CounterClient.create({
 | Option | Type | Required | Description |
 |--------|------|----------|-------------|
 | `url` | `string` | Yes | Full WebSocket URL (routed through your Worker) |
-| `initialView` | `TView` | Yes | Initial view from server (SSR snapshot). The client starts with this view immediately. |
+| `initialView` | `TView` | Yes | Initial view from server (SSR snapshot). The client starts with this view immediately. Validated against the view schema (the role the view names, for a contract): a mismatch throws `InitialViewError` (`code: "invalid_initial_view"`, `issues` with paths). |
 | `onRedirect` | `(target: { actorType: string; actorId: string }) => void` | No | Called on redirect |
 | `onError` | `(error: { message: string; error: string }) => void` | No | Called on error |
 

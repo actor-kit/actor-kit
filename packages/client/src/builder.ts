@@ -19,6 +19,7 @@
 
 import type { ContractMessages, FieldDescriptor, Infer, SchemaDefinition } from "@actor-kit/core";
 import { type ActorClient, createActorClient, type WebSocketConstructor } from "./client";
+import { checkContractView, checkViewAgainst } from "./initial-view";
 
 /** Runtime options for creating a client connection. */
 export interface CreateOptions<TView = unknown> {
@@ -127,6 +128,7 @@ function buildContractFactory(contract: {
   function build<TEvent extends { type: string }>(): ActorClientFactory<unknown, TEvent> {
     return {
       create(options: CreateOptions<unknown>): ActorClient<unknown, TEvent> {
+        checkContractView(contract.name, roleNames, viewSchemas, options.initialView);
         return createActorClient<unknown, TEvent>({
           ...options,
           viewSchemas,
@@ -154,6 +156,7 @@ function buildSchemaFactory<TShape extends Record<string, FieldDescriptor>>(
   function buildFactory<TEvent extends { type: string }>(): ActorClientFactory<TView, TEvent> {
     return {
       create(options: CreateOptions<TView>): ActorClient<TView, TEvent> {
+        checkViewAgainst(viewSchema, options.initialView);
         return createActorClient<TShape, TEvent>({
           ...options,
           viewSchema,

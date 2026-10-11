@@ -14,3 +14,11 @@ ordering should use `@actor-kit/projection`, which applies events in `position` 
 
 Deltas used to treat any two numbers within 1e-6 as unchanged. Only `float32` and `float64` fields do
 now; a `json`, enum or integer value that changes by less than 1e-6 is sent.
+
+## `create({ initialView })` now validates the view against the role's schema
+
+`actorClient(contract).create()` checks `initialView` against the view schema of the role the view
+names (`initialView.role`); a view without a role must match one role's schema (unless some role has
+no schema). `actorClient(schema).create()` checks it against the schema. A mismatch throws
+`InitialViewError` with `code: "invalid_initial_view"`, a message naming each wrong field, a `docs` URL
+and the `issues`. Pass the view the server rendered for this caller; a placeholder no longer works.

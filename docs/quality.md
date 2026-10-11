@@ -143,6 +143,9 @@ Stryker on `packages/projection/src/**` (all but `index.ts`) and `worker/runtime
 | First | 94.95% (339/357) | 18: messages (array, object, number, boolean), the 65535 boundaries (`>` vs `>=`), the `or null` path of a top-level nullable, `SchemaValidationError` name and path separator, nullable array elements, and checks that did not read their argument |
 | After | **99.73% (365/366)** | 1: validate.ts `validates` body emptied, which leaves every descriptor without a validator at module load; Stryker's Vitest runner reports a module-load failure as survived (same family as retry.ts:64) |
 
+- `client/src/initial-view.ts` (create() validating `initialView`): 92.31% first run (issue formatting duplicated from
+  core, `null` and non-string roles, a contract with neither roles nor schemas); after reusing core's
+  `describeIssues` and adding those tests, 100% (69/69). Run together with `validate.ts`: 99.65% (282/283).
 - Removed by simplifying: the string byte-length check moved into its own `checkString`; `checkFields` takes the schema, not a meta it did not read; `issuesOf`'s `nullable` has no default.
 - CRAP: core max 7.0 (0 ≥ 8).
 

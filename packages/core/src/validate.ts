@@ -32,13 +32,15 @@ export interface Validates<Output> {
   parse(value: unknown): Output;
 }
 
+/** Issues as one line: `path.to.field: message; ...` (`(root)` for the value itself). */
+export function describeIssues(issues: readonly StandardIssue[]): string {
+  return issues.map((i) => `${i.path.length === 0 ? "(root)" : i.path.map(String).join(".")}: ${i.message}`).join("; ");
+}
+
 export class SchemaValidationError extends Error {
   readonly issues: readonly StandardIssue[];
   constructor(issues: readonly StandardIssue[]) {
-    const described = issues.map(
-      (i) => `${i.path.length === 0 ? "(root)" : i.path.map(String).join(".")}: ${i.message}`,
-    );
-    super(`Invalid value: ${described.join("; ")}`);
+    super(`Invalid value: ${describeIssues(issues)}`);
     this.name = "SchemaValidationError";
     this.issues = issues;
   }

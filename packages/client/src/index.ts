@@ -13,4 +13,5 @@ export type {
 export { actorClient } from "./builder";
 export type { ActorClient, ClientOptions, ConnectionState, WebSocketConstructor, WebSocketLike } from "./client";
 export { createActorClient } from "./client";
+export { InitialViewError } from "./initial-view";
 export { buildUrl, inferProtocol } from "./url";

@@ -77,7 +77,7 @@ export type {
 } from "./types";
 // Validation (StandardSchemaV1)
 export type { StandardIssue, StandardProps, StandardResult, Validates } from "./validate";
-export { SchemaValidationError } from "./validate";
+export { describeIssues, SchemaValidationError } from "./validate";
 
 // View
 export type { PerCallerViewDef, SharedViewDef, ViewDef } from "./view";
