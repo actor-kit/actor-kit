@@ -113,6 +113,12 @@ export interface PhaseContext<SD extends StateDecls, P, S> {
   /** The merged local of P and its ancestors. */
   readonly local: MergedLocal<SD, P>;
   readonly stay: StayAt<SD, P, S>;
+  /**
+   * Leave the state this handler is declared in and enter it again with `input`: its exit runs (scoped
+   * timers and calls cancelled, local dropped), then its enter. `goto(<this state's path>, …)` does the
+   * same; reenter says it on purpose (Run Set Jimmy feedback 4).
+   */
+  reenter(shared: S, ...input: InputArgs<DeclAt<SD, P>>): PhaseTransition<S>;
   readonly goto: Goto<SD, S>;
 }
 
@@ -127,6 +133,8 @@ export interface PhaseMessageDef<S, P> {
   readonly schema: z.ZodType<P>;
   handler(state: S, payload: P, ctx: never): PhaseResult<S>;
   guard?(state: S, payload: P, ctx: never): boolean;
+  /** The roles that may send it; any other role is refused with `wrong_role` (all roles when absent). */
+  readonly roles?: readonly string[];
 }
 
 export interface PhaseTimerDef<S, P> {
@@ -205,7 +213,9 @@ export interface PhaseHelpers<SD extends StateDecls, E, P, TEnvDefault = unknown
     handler:
       | Handler<S, Pay, PhaseCtx<TEnv, E, SD, P, S>, PhaseResult<S>>
       | {
-          guard: Guard<S, Pay, PhaseGuardCtx<TEnv, SD, P>>;
+          guard?: Guard<S, Pay, PhaseGuardCtx<TEnv, SD, P>>;
+          /** The roles that may send it; any other role is refused with `wrong_role`. */
+          roles?: readonly string[];
           handler: Handler<S, Pay, PhaseCtx<TEnv, E, SD, P, S>, PhaseResult<S>>;
         },
   ): PhaseMessageDef<S, Pay>;
@@ -253,7 +263,9 @@ export interface Setup<ES extends EventSchemas, SD extends StateDecls, TEnvSchem
     handler:
       | Handler<S, P, EmittingMessageContext<TEnv, EventPayloads<ES>>>
       | {
-          guard: Guard<S, P, GuardContext<TEnv>>;
+          guard?: Guard<S, P, GuardContext<TEnv>>;
+          /** The roles that may send it; any other role is refused with `wrong_role`. */
+          roles?: readonly string[];
           handler: Handler<S, P, EmittingMessageContext<TEnv, EventPayloads<ES>>>;
         },
   ): MessageDef<S, P, TEnv>;
@@ -383,6 +395,15 @@ export type PhasedStateOf<K, S> = K extends { states: infer SD extends StateDecl
   ? PhasedState<Exclude<SD, undefined>, S>
   : never;
 
+/** A message's guard and roles, each only when given. */
+function options<G>(config: { readonly guard?: G; readonly roles?: readonly string[] }): {
+  guard?: G;
+  roles?: readonly string[];
+} {
+  const { guard, roles } = config;
+  return { ...(guard === undefined ? {} : { guard }), ...(roles === undefined ? {} : { roles }) };
+}
+
 /** Bind a handler to a typed emit over the runtime's (checked) one. */
 function typed<S, P, Ctx extends { readonly emit: (name: string, payload: unknown) => void }, E>(
   handler: Handler<S, P, Omit<Ctx, "emit"> & { readonly emit: TypedEmit<E> }>,
@@ -422,7 +443,7 @@ function kitOf<ES extends EventSchemas, SD extends StateDecls, TEnvSchema>(
     env,
     message(schema, handler) {
       if (typeof handler === "function") return { schema, handler: typed(handler) };
-      return { schema, handler: typed(handler.handler), guard: handler.guard };
+      return { schema, handler: typed(handler.handler), ...options(handler) };
     },
     timer(schema, handler) {
       return { schema, handler: typed(handler) };
@@ -439,7 +460,7 @@ function kitOf<ES extends EventSchemas, SD extends StateDecls, TEnvSchema>(
         message: (schema, handler) =>
           typeof handler === "function"
             ? { schema, handler }
-            : { schema, handler: handler.handler, guard: handler.guard },
+            : { schema, handler: handler.handler, ...options(handler) },
         timer: (schema, handler) => ({ schema, handler }),
         state: (def) => ({ ...def, ...declared }),
       };

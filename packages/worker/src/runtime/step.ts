@@ -44,6 +44,8 @@ export interface StepMessageSlot {
   };
   handler(state: unknown, payload: unknown, ctx: unknown): unknown;
   guard?(state: unknown, payload: unknown, ctx: GuardContext): boolean;
+  /** The roles that may send it (all when absent); any other is refused with `wrong_role`. */
+  readonly roles?: readonly string[] | undefined;
 }
 
 export interface StepDef {
@@ -287,6 +289,7 @@ export interface StepResult {
 export type Admission<M = unknown> =
   | { ok: true; payload: unknown; message: M }
   | { ok: false; error: "message_not_found" | "guard_failed" }
+  | { ok: false; error: "wrong_role"; roles: readonly string[] }
   | { ok: false; error: "validation_failed"; detail: string; issues?: readonly ParseIssue[] | undefined };
 
 /** Admission for an actor that may have states: also `wrong_state` (the current phase, the states that accept it). */
@@ -327,7 +330,7 @@ export function admitStepMessage(
 }
 
 /** Find the message for the role, parse its payload (the event minus `type`) and run its guard. */
-export function admitMessage<M extends Pick<StepMessageSlot, "schema" | "guard">>(
+export function admitMessage<M extends Pick<StepMessageSlot, "schema" | "guard" | "roles">>(
   roleMessages: Record<string, Record<string, M>>,
   role: string,
   state: unknown,
@@ -336,6 +339,10 @@ export function admitMessage<M extends Pick<StepMessageSlot, "schema" | "guard">
 ): Admission<M> {
   const message = roleMessages[role]?.[event.type];
   if (message === undefined) return { ok: false, error: "message_not_found" };
+  // Roles on the message come first: a role that may not send it learns nothing about its payload.
+  if (message.roles !== undefined && !message.roles.includes(role)) {
+    return { ok: false, error: "wrong_role", roles: message.roles };
+  }
   const { type: _type, ...payload } = event;
   const parsed = message.schema.safeParse(payload);
   if (!parsed.success) {
@@ -919,6 +926,31 @@ export async function stepInit(
     throw new ActorKitError("invalid_actor_definition", "This actor has no init: add init(input) to the definition.");
   // Guarded until init's first await (an async init's later part runs outside the guard).
   const shared = await guarded(facts, () => init(cause.input, { env: io.env, link: io.link, ...facts.ctx }));
+  return initResult(def, cause, facts, shared);
+}
+
+/**
+ * The first transition when init is synchronous (simulate().spawnSync). `async` names the actor in the
+ * error when init returns a Promise.
+ */
+export function stepInitSync(
+  def: StepDef,
+  cause: InitCause,
+  facts: StepFacts,
+  io: { env: unknown; link: (name: string, id: string) => Promise<unknown>; onAsync: () => Error },
+): { state: unknown; event: JournalDraft } {
+  const init = def.init;
+  if (init === undefined)
+    throw new ActorKitError("invalid_actor_definition", "This actor has no init: add init(input) to the definition.");
+  const shared = guarded(facts, () => init(cause.input, { env: io.env, link: io.link, ...facts.ctx }));
+  if (shared instanceof Promise) {
+    shared.catch(() => {});
+    throw io.onAsync();
+  }
+  return initResult(def, cause, facts, shared);
+}
+
+function initResult(def: StepDef, cause: InitCause, facts: StepFacts, shared: unknown) {
   return {
     state: initialState(def, shared),
     event: draft(

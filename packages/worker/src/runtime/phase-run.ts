@@ -51,6 +51,8 @@ export interface PhaseContext {
   readonly local: unknown;
   readonly stay: typeof stay;
   readonly goto: typeof goto;
+  /** goto the handler's own level: leave it and enter it again (ADR-019 A row 10/11). */
+  readonly reenter: (shared: unknown, ...input: unknown[]) => PhaseTransition;
   readonly schedule: (name: string, options: ScheduleOptions) => void;
   readonly execute: (service: string, input: unknown, options?: ExecuteOptions) => string;
 }
@@ -254,6 +256,7 @@ export function runAtLevel(
     local: mergeLocals(current.locals.slice(0, level)),
     stay,
     goto,
+    reenter: (shared, ...input) => goto(levelPath, shared, ...input),
     schedule: scopedSchedule(run.verbs(levelPath), levelPath, owned),
     execute: scopedExecute(run, levelPath, owned),
   });

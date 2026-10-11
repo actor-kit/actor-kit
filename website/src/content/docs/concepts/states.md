@@ -58,11 +58,16 @@ export const Quiz = quiz.actor("quiz", {
   with `localOf(state)`.
 - A handler returns `ctx.stay(shared, local?)`, `ctx.goto(state, shared, input?)`, or `shared`
   (stay, same local). `goto` checks the target and its `enter` input; `ctx.local` is typed per
-  state; the local is parsed by its schema. `goto` to the current state leaves and re-enters it.
+  state; the local is parsed by its schema.
 - Exit drops the local and cancels the state's `scope: "state"` timers; `enter` builds the next
   local and may schedule, execute and emit.
+- **`goto` to the state the actor is already in re-enters it**: exit runs (its `scope: "state"` timers
+  are cancelled, its local dropped) and `enter` runs again with the new input. Say it on purpose with
+  `ctx.reenter(shared, input?)` (for example to re-arm a window's timer); to keep the local and the
+  timers, return `ctx.stay(...)` instead.
 - A message is accepted only in the states that declare it, plus the top-level `messages`;
-  otherwise it is rejected with `wrong_state`, before its guard.
+  otherwise it is rejected with `wrong_state`, before its guard. A message is accepted from every role
+  unless it names `roles` (then other roles get `wrong_role`).
 - Studio's State panel names the active path; the timeline marks phase changes.
 
 ## Nested states

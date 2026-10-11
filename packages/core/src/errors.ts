@@ -27,6 +27,10 @@ export const ERROR_CODES = {
     title: "The message's guard returned false for this caller in the current state.",
     fix: "Send the message only when its guard holds, or change the guard.",
   },
+  wrong_role: {
+    title: "The message names the roles that may send it, and the caller's role is not one of them.",
+    fix: "Send it as one of the roles in `expected`, or add the caller's role to the message's `roles`.",
+  },
   wrong_state: {
     title: "The message is declared only by other states than the one the actor is in.",
     fix: "Send it while the actor is in one of the states in `expected`, or declare it in the current state or at the top level.",
@@ -327,6 +331,7 @@ export const REFUSAL_CODES = [
   "invalid_payload",
   "guard_failed",
   "wrong_state",
+  "wrong_role",
   "no_role",
   "not_initialized",
   "invalid_delivery",

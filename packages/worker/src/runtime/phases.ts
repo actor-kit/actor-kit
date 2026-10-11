@@ -103,6 +103,7 @@ export interface StepStateDef {
       readonly schema: SafeParser;
       handler(state: unknown, payload: unknown, ctx: unknown): unknown;
       guard?(state: unknown, payload: unknown, ctx: unknown): boolean;
+      readonly roles?: readonly string[] | undefined;
     }
   >;
   readonly timers?: Record<

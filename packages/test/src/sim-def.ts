@@ -13,7 +13,13 @@ import type {
   StepDef,
   StepMessageSlot,
 } from "@actor-kit/worker/testing";
-import { envErrorMessage, parseActorEnv, resolveServiceOptions, toRuntimeDef } from "@actor-kit/worker/testing";
+import {
+  checkMessageRoles,
+  envErrorMessage,
+  parseActorEnv,
+  resolveServiceOptions,
+  toRuntimeDef,
+} from "@actor-kit/worker/testing";
 
 export interface SimDef extends StepDef {
   readonly input: {
@@ -79,7 +85,8 @@ export function toSimDef(contract: { readonly name: string; readonly def: unknow
       `simulate: "${contract.name}" is not an actor contract (input, init, roles and views)`,
     );
   }
-  // Service options are validated like the runtime does when it defines the actor (ADR-018 G).
+  // Message roles and service options are validated like the runtime does when it defines the actor.
+  checkMessageRoles(def);
   for (const [name, service] of Object.entries(def.services ?? {})) resolveServiceOptions(name, service);
   // The version chain (ADR-015 D5) compiles into version, migrate and upcast, as in the runtime.
   return { ...toRuntimeDef(def), messages: roleNested(def.messages, def.roles) };

@@ -26,6 +26,14 @@ Docs: https://actorkit.dev/errors/invalid_payload/
 
 Docs: https://actorkit.dev/errors/guard_failed/
 
+## `wrong_role`
+
+**What happened:** The message names the roles that may send it, and the caller's role is not one of them.
+
+**How to fix it:** Send it as one of the roles in `expected`, or add the caller's role to the message's `roles`.
+
+Docs: https://actorkit.dev/errors/wrong_role/
+
 ## `wrong_state`
 
 **What happened:** The message is declared only by other states than the one the actor is in.

@@ -98,6 +98,10 @@ CRAP over `packages/worker/src/runtime`, `packages/test/src`, `packages/core/src
 | 6. F journal format (`rejections.ts` whole; changed lines of `versions.ts`, `journal.ts`, `step.ts`, `define.ts`, `link.ts`, `setup.ts`, `simulate.ts`, Studio `protocol.ts` / `studio-state.ts` / `actor-detail.tsx`) | 91 | 93.41% (85/91) first run; then a version-2 event kept out of step 2's rename, an onUnlink that emits, and the chain compiled inside each test (a schema mutant failed the file's collection) → re-run of those lines **100% (37/37)** | 1 equivalent (studio-state.ts:111, below) | runtime 7.0, test 7.1, studio UI 7.0, worker (`crap:worker`) 7.6; 0 ≥ 8 |
 | 7. E determinism in production (`determinism.ts` changed lines: warn mode, nesting, watch, flag, log line, option; `journal.ts` flag column; `journal-timeline.ts`; Studio `protocol.ts` / `timeline-panel.tsx` badge) | 138 | **99.28% (137/138)**; the one survivor (throw-mode watch's empty `violations`) killed by asserting the whole watch | none | runtime 7.0, studio UI 7.0, worker (`crap:worker`) 7.6; 0 ≥ 8 |
 | 8. H docs that ship with the code (`scripts/docs.mts`, `scripts/gen-docs.mts`; generated error pages, package `docs/`, `llms.txt`, `llms-full.txt`) | n/a | no library source changed (Stryker mutates `packages/*/src`); the generator is pinned by `docs-generated.test.ts` (generated files up to date, every code's page exists, every errors URL in the sources resolves, every package publishes `docs/`, llms files complete) | — | unchanged |
+| RSJ 3. Roles on messages (`message-roles.ts` whole; `refusal.ts` wrong_role; `message.ts`; `step.ts` admission) | 120 | 94.32% first run, then edge tests (role-nested and junk entries, a caller-less refusal, `toStrictEqual` on message options, a states-only actor) → **96.67% (112/116)** | 4 equivalent (message-roles.ts:23, :26, :28; step.ts:312, below) | runtime 7.0; 0 ≥ 8 |
+| RSJ 4. `ctx.reenter` (`step.ts` phase context) | 1 | **100% (1/1)** | none | runtime 7.0; 0 ≥ 8 |
+| RSJ 2. `simulate().spawnSync` (`simulate.ts` spawn refactor, `step.ts` `stepInitSync`) | 52 | 86.79% first run; then tests for the handle's links, an async init that rejects (no unhandled rejection) and a missing init → **96.15%** | 2 equivalent (simulate.ts:783, init's unlink targets, listed below) | test 7.1, runtime 7.0; 0 ≥ 8 |
+| RSJ 6. `actorClient<typeof Contract>({ roles, views })` (`builder.ts` whole) | 51 | **88.24% (45/51)** on the whole file; all 6 survivors are the existing equivalents (renumbered, plus the roles-and-views twin of the name-and-def check, below) | 6 equivalent (5 existing, renumbered; 1 new: builder.ts:108) | client 7.0; 0 ≥ 8 |
 
 ## ADR-019 (hierarchical states, scoped invocations, journal archive), per step
 
@@ -114,9 +118,9 @@ Surviving mutants that no test can kill, because the mutated program behaves ide
 | Package | Location | Mutant | Why it is equivalent |
 |---|---|---|---|
 | core | delta.ts:28 | `if (a === b) return true` → `if (false)` | Fast path only; the number and JSON comparisons below return the same result. |
-| client | builder.ts:90 | `"name" in arg && "def" in arg` → `\|\|` | A SchemaDefinition has neither key, a contract has both. |
-| client | builder.ts:99, 103 (×3) | `isRecord` / `isViewSchema` → `true` | A non-schema registered for a role makes decode throw, which the client catches and ignores, the same as having no schema. |
-| client | builder.ts:116 | `if (isViewSchema(...))` → `true` | Registers `undefined` for the role; `viewSchemas[role] ?? viewSchema` falls back exactly as when it is absent. |
+| client | builder.ts:107, :108 | `"name" in arg && "def" in arg` / `"roles" in arg && "views" in arg` → `\|\|` | A SchemaDefinition has none of these keys; a contract has both name and def, the roles-and-views form both roles and views. |
+| client | builder.ts:115, 119 (×3) | `isRecord` / `isViewSchema` → `true` | A non-schema registered for a role makes decode throw, which the client catches and ignores, the same as having no schema. |
+| client | builder.ts:131 | `if (isViewSchema(...))` → `true` | Registers `undefined` for the role; `viewSchemas[role] ?? viewSchema` falls back exactly as when it is absent. |
 | client | client.ts:155, 156, 164 | `roleIndex === undefined ? …` / `roleName === undefined ? …` → `false` | parseFrame always sets roleIndex on snapshots, and indexing with `undefined` yields `undefined` anyway. |
 | client | client.ts:179 | `onRedirect?.(…)` → `onRedirect(…)` | Binary path only: the TypeError is caught by handleBinaryMessage's try/catch, same as doing nothing. |
 | client | client.ts:267 | `typeof data === "string"` → `true` | Non-string data fails JSON.parse (or parses to a non-object) and is ignored either way. |
@@ -170,7 +174,7 @@ Surviving mutants that no test can kill, because the mutated program behaves ide
 | worker | determinism.ts:44 (×2) | the temporary replacement's `writable` / `enumerable` flags flipped | Handlers only call the replaced functions; whether they are writable or enumerable for the length of a handler is not observable, and the original descriptor is put back exactly. |
 | worker | determinism.ts:75 | `saved.reverse()` → `saved` | Every saved entry is a different (target, key) pair, so the restore order does not matter. |
 | test | simulate.ts:248 | `if (!envs.has(type))` → `true` | Only a memo: parsing the same fakes again gives the same env. |
-| test | simulate.ts:620 | init's unlink targets `() => []` → `() => undefined` / `["…"]` | Same as the existing simulate.ts:562 row (moved): `init` has no unlink. |
+| test | simulate.ts:620, :783 | init's unlink targets `() => []` → `() => undefined` / `["…"]` | Same as the existing simulate.ts:562 row (moved): `init` has no unlink. |
 | worker | service-error.ts:39 | `Symbol.for("actor-kit.service-failure")` → `Symbol.for("")` | The same registered symbol is used to mark and to read a failure, so any key works. |
 | worker | service-error.ts:68 | whole `if (!(thrown instanceof Error) \|\| !(FAILURE in thrown))` → `false` | A thrown value that is not a failure has no `[FAILURE]`, so it reads `undefined`, which isTaggedError rejects: still null. |
 | worker | retry.ts:64 | `parseOption(...)?.while` → `.while` | Kills by throwing a TypeError while test modules load (resolveRetryRule(undefined) via defineActor/link at module level), which Stryker's Vitest runner reports as survived (testing-strategy gotcha); run by hand it fails `service-errors.test.ts`. |
@@ -187,6 +191,8 @@ Surviving mutants that no test can kill, because the mutated program behaves ide
 | worker | service-options.ts:139 | `"aborted" in tried \|\| !tried.ok` → `"" in tried \|\| …` | An aborted try has no `ok`, so `!tried.ok` is already true for it. |
 | test | simulate.ts:485 | non-cancel op → `["Stryker was here"]` | That string is never an effect id, so no pending effect is removed. |
 | studio UI | studio-state.ts:111 | `frame.rejections === undefined ? {} : { rejections }` → always the spread | A `rejections: undefined` key renders the same nothing as an absent one. |
+| worker | message-roles.ts:23, :26, :28 | an empty list → `["Stryker was here"]` | Destructuring a string gives a one-letter "slot" with no `roles`, which names no role, so nothing is refused. |
+| worker | step.ts:312 | `roleMessages[role]?.[type]` → without `?.` | Every contract's messages are nested under every role (createActorClass, toSimDef, testActor), so the role's entry always exists. |
 | core | errors.ts:277 | `Object.keys(ERROR_CODES).filter(isErrorCode)` → without the filter | Every key of the registry is an ErrorCode; the filter exists for the type checker. |
 | worker | setup.ts:278 | `local === undefined ? def : { ...def, local }` → always spread | Adds `local: undefined` to a state without a local schema; the runtime only reads `def.local === undefined` (phases.ts `parseLocal`, step.ts initial check). |
 

@@ -16,6 +16,7 @@ export interface ParseIssue {
 /** A refused admission from the step core (`admitStepMessage`). */
 export type RefusedAdmission =
   | { readonly ok: false; readonly error: "message_not_found" | "guard_failed" }
+  | { readonly ok: false; readonly error: "wrong_role"; readonly roles: readonly string[] }
   | {
       readonly ok: false;
       readonly error: "wrong_state";
@@ -37,6 +38,7 @@ const ADMISSION_CODES = {
   validation_failed: "invalid_payload",
   guard_failed: "guard_failed",
   wrong_state: "wrong_state",
+  wrong_role: "wrong_role",
 } as const satisfies Record<AdmissionError, RefusalCode>;
 
 export function refusalCode(error: AdmissionError): RefusalCode {
@@ -120,16 +122,37 @@ export function refuseAdmission(
         details: { phase },
       });
     }
+    case "wrong_role":
+      return wrongRole(admission.roles, name, role, who);
     case "validation_failed":
       return invalidPayload(admission, name);
-    case "guard_failed": {
-      const caller = who === undefined ? "" : ` for caller "${who.caller}"`;
-      return refusal(
-        "guard_failed",
-        `Guard rejected "${name}"${caller} (role "${role}"). Send it only when the guard allows it.`,
-      );
-    }
+    case "guard_failed":
+      return guardFailed(name, role, who);
   }
+}
+
+/** Who sent it, for a refusal's sentence: `the caller "ann"`, or `the caller` when unknown. */
+function callerText(who: RefusedCaller | undefined): string {
+  return who === undefined ? "the caller" : `the caller "${who.caller}"`;
+}
+
+function wrongRole(roles: readonly string[], name: string, role: string, who: RefusedCaller | undefined): Refusal {
+  return refusal(
+    "wrong_role",
+    `${name} is accepted from role ${roles.join(" or ")}; ${callerText(who)} has role ${role}.`,
+    {
+      expected: roles,
+      details: { role },
+    },
+  );
+}
+
+function guardFailed(name: string, role: string, who: RefusedCaller | undefined): Refusal {
+  const caller = who === undefined ? "" : ` for caller "${who.caller}"`;
+  return refusal(
+    "guard_failed",
+    `Guard rejected "${name}"${caller} (role "${role}"). Send it only when the guard allows it.`,
+  );
 }
 
 /** No role matched the caller. */

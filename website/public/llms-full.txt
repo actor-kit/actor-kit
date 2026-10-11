@@ -1938,6 +1938,24 @@ messages: {
 },
 ```
 
+### Roles on messages
+
+**A message without `roles` is accepted from every role** (flat top-level messages and state messages
+alike: a state message is found by the actor's current state, not by the caller's role). To limit who
+may send one, name the roles; any other role is refused with `wrong_role` before the payload is parsed or
+the guard runs:
+
+```typescript
+DRAW: playing.message(z.object({}), {
+  roles: ["player"],                 // a guest or the TV cannot draw
+  guard: (s: Shared, _p, ctx) => isTheirTurn(s, ctx.caller),
+  handler: (s: Shared, _p, ctx) => draw(s, ctx.caller),
+}),
+```
+
+Every name in `roles` must be one of the actor's roles: a typo is a definition error
+(`invalid_actor_definition`) when the actor is created, in the Worker, `simulate()` and `testActor()`.
+
 ### Validation at the Boundary
 
 The Zod schema runs `safeParse` on every incoming payload **before** the handler executes. If validation fails:
@@ -1985,6 +2003,7 @@ Guards receive `(state, payload, ctx)` where `ctx` includes `role`, `caller`, an
 ```
 1. Resolve role → reject if no match (403 on connect, no_role on send)
 2. Find the message for the role (and the current state) → unknown_message or wrong_state if none
+   Check the message's roles, if it names any → wrong_role
 3. Validate payload with Zod → invalid_payload if invalid
 4. Evaluate guard(state, payload, ctx) → guard_failed if false
 5. Run handler
@@ -1999,6 +2018,7 @@ A rejected message is a refusal: `{ ok: false, code, message, expected?, details
 | Role resolution | No role matches | Connection rejected (403); `no_role` on `send()` |
 | Message lookup | The role has no message of that name | `unknown_message` (`expected`: the names it can send) |
 | Message lookup | Only other states accept it | `wrong_state` (`expected`: those states, `details.phase`: the current one) |
+| Message roles | The message names roles, and the caller's is not one | `wrong_role` (`expected`: those roles, `details.role`: the caller's) |
 | Zod validation | Payload doesn't match schema | `invalid_payload` (`details`: the Zod issues) |
 | Guard | Guard returns false | `guard_failed` |
 | Handler | Handler throws | Error logged server-side; state unchanged |
@@ -2869,11 +2889,16 @@ export const Quiz = quiz.actor("quiz", {
   with `localOf(state)`.
 - A handler returns `ctx.stay(shared, local?)`, `ctx.goto(state, shared, input?)`, or `shared`
   (stay, same local). `goto` checks the target and its `enter` input; `ctx.local` is typed per
-  state; the local is parsed by its schema. `goto` to the current state leaves and re-enters it.
+  state; the local is parsed by its schema.
 - Exit drops the local and cancels the state's `scope: "state"` timers; `enter` builds the next
   local and may schedule, execute and emit.
+- **`goto` to the state the actor is already in re-enters it**: exit runs (its `scope: "state"` timers
+  are cancelled, its local dropped) and `enter` runs again with the new input. Say it on purpose with
+  `ctx.reenter(shared, input?)` (for example to re-arm a window's timer); to keep the local and the
+  timers, return `ctx.stay(...)` instead.
 - A message is accepted only in the states that declare it, plus the top-level `messages`;
-  otherwise it is rejected with `wrong_state`, before its guard.
+  otherwise it is rejected with `wrong_state`, before its guard. A message is accepted from every role
+  unless it names `roles` (then other roles get `wrong_role`).
 - Studio's State panel names the active path; the timeline marks phase changes.
 
 ## Nested states
@@ -4685,25 +4710,43 @@ Source: https://actorkit.dev/api/client/
 
 The client package (`@actor-kit/client`) provides the browser-side SDK. No Cloudflare or React dependencies.
 
-## `actorClient(contract)` / `actorClient<Contract>()`
+## `actorClient(contract)` / `actorClient<typeof Contract>({ roles, views })`
 
-Creates a typed client factory. Accepts either a contract value or a contract type parameter.
+Creates a typed client factory, from the contract value or from just its roles and views.
 
-### Type-only import (recommended for client bundles)
+### Keep zod out of the client bundle (recommended)
 
-Use `import type` to keep Zod, handlers, and Cloudflare dependencies out of the browser bundle. The contract is used purely as a type — no runtime value crosses the boundary:
+The contract value carries Zod schemas and message handlers; importing it into the browser pulls all of
+Zod in (zod 4's classic build brings its locales: one port measured ~395 KB → ~860 KB). The client needs
+only two zod-free parts: the **roles** (their order numbers the binary frames) and the **view schemas**.
+Put them in their own module, have the contract use those same objects, and import the contract as a
+type only:
 
 ```typescript
-// counter.client.ts
+// counter.views.ts — no zod here
+import { nullable, schema, string, uint32, view } from "@actor-kit/core";
+export type CounterState = { count: number; lastUpdatedBy: string | null };
+export const CounterView = schema({ count: uint32, lastUpdatedBy: nullable(string) });
+export const counterRoles = { user: () => true };
+export const counterViews = { user: view.shared(CounterView, (s: CounterState) => s) };
+
+// counter.contract.ts — server and tests
+import { counterRoles, counterViews } from "./counter.views";
+export const CounterContract = counter.actor("counter", { roles: counterRoles, views: counterViews, /* … */ });
+
+// counter.client.ts — browser
 import { actorClient } from "@actor-kit/client";
 import type { CounterContract } from "./counter.contract";
+import { counterRoles, counterViews } from "./counter.views";
 
-export const CounterClient = actorClient<CounterContract>();
+export const CounterClient = actorClient<typeof CounterContract>({ roles: counterRoles, views: counterViews });
 ```
 
-### Value import (server-side or when bundle size doesn't matter)
+The type argument types `view` and `send` from the contract; passing anything but the contract's own
+`roles` and `views` is a type error. (In React, `actorContext<typeof CounterContract>()` needs no runtime
+value at all.)
 
-When running on the server (SSR, tests, scripts), you can pass the contract directly:
+### Value import (server-side, tests, or when bundle size doesn't matter)
 
 ```typescript
 import { actorClient } from "@actor-kit/client";
@@ -4711,10 +4754,6 @@ import { CounterContract } from "./counter.contract";
 
 export const CounterClient = actorClient(CounterContract);
 ```
-
-### Why type-only?
-
-The contract object returned by `kit.actor()` carries Zod schemas, message handlers, and references to `@actor-kit/worker` internals. Importing it as a value pulls all of that into your client bundle — even though the client only needs the *types* for view shapes and message unions. Using `import type` ensures the bundler tree-shakes everything the client doesn't need.
 
 ### `.create(options)`
 
@@ -4756,7 +4795,7 @@ Reconnection is automatic and never gives up: after an unexpected close the clie
 interface ActorClient<TView, TMessage> {
   readonly connectionState: ConnectionState;
   readonly view: TView;              // always defined — initialView guarantees it
-  readonly role: string | undefined;
+  readonly role: string | undefined; // the caller's role; the view object itself carries no role
   subscribe(listener: (view: TView) => void): () => void;
   onStateChange(listener: (state: ConnectionState) => void): () => void;
   send(message: TMessage): void;
@@ -4764,6 +4803,10 @@ interface ActorClient<TView, TMessage> {
   disconnect(): void;
 }
 ```
+
+A decoded view is the role's view data only: it carries no `role` field. Read the role from
+`client.role` (or `useRole()` in React); the server's `getSnapshot()` likewise returns `role` beside
+the snapshot. If a component needs both in one object, add a `role` field to the view schema.
 
 ## Using the client
 
@@ -5170,6 +5213,9 @@ await replayJournal(AuctionContract, room.journal);           // every simulated
   name, `{ checkout: { PAYMENTS: fake } }`, parsed against it when the actor is spawned; other contracts get `env` as is).
 - **`spawn(contract, id, input, { caller, callerType }?)`**: parses the input and runs `init` (async). Init links
   read the linked actor's view as a service caller.
+- **`spawnSync(contract, id, input, { caller, callerType }?)`**: `spawn` without `await`, for an actor whose
+  `init` is synchronous and makes no init links (an async init throws `async_handler`, a `link()` in init
+  throws `link_unavailable`: use `spawn`). Same journal and handle; handy with `branch()` for templates.
 - **`actor(contract, id)`**: a handle with `state`, `journal`, `timers`, `links`, `send`, `role`, `view` and
   `connect(caller)`, which runs `lifecycle.connect` and returns `{ disconnect() }`. `callerConnections` counts the
   caller's open simulated connections, as the runtime counts sockets.
@@ -5863,6 +5909,92 @@ PLACE: game.message(z.object({}), (s: S, _p, ctx) => ({ ...s, at: ctx.now(), id:
 To catch these before tests run, enable the Biome plugin:
 `"plugins": ["./node_modules/@actor-kit/worker/biome/no-nondeterminism.grit"]`.
 
+## State messages take any role unless they say otherwise
+
+Unchanged behaviour, now documented, with a new way out: a message (top-level or in a state) without
+`roles` is accepted from every role. A state message is found by the actor's phase, not by the caller's
+role, so in 0.2 a guest could send a player's move unless a guard checked. Name the roles instead:
+
+```ts
+// Before
+DRAW: playing.message(z.object({}), { guard: (s: S, _p, ctx) => isSeated(s, ctx.caller), handler: draw }),
+
+// After
+DRAW: playing.message(z.object({}), { roles: ["player"], handler: draw }), // others: wrong_role
+```
+
+## `goto` to the current state re-enters it; `ctx.reenter` says so
+
+Unchanged behaviour, now documented: `ctx.goto(phase, ...)` to the state the actor is in runs its exit
+(scoped timers cancelled, local dropped) and its `enter` again. Use `ctx.reenter(shared, input?)` when you
+mean it, and `ctx.stay(...)` when you don't.
+
+```ts
+// Before: re-arming by goto, and a manual check to avoid resetting the window elsewhere
+return target === ctx.phase && !rearm ? ctx.stay(s) : ctx.goto(target, s, { window });
+
+// After
+return rearm ? ctx.reenter(s, { window }) : ctx.stay(s);
+```
+
+## Keep zod out of the client bundle
+
+0.3 needs zod 4 (a peer of `@actor-kit/worker`). Importing a contract value into the browser pulls zod's
+classic build in, locales included (one port: ~395 KB → ~860 KB). Move the roles and view schemas into a
+zod-free module the contract imports, and give the client just those:
+
+```ts
+// Before: the whole contract, and zod, in the browser
+const RoomClient = actorClient(RoomContract);
+
+// After
+import type { RoomContract } from "./room";
+import { roomRoles, roomViews } from "./room.views"; // no zod
+const RoomClient = actorClient<typeof RoomContract>({ roles: roomRoles, views: roomViews });
+```
+
+A decoded view carries no `role`; read `client.role` (React: `useRole()`).
+
+## A new Durable Object class blocks `wrangler rollback`
+
+Not an actor-kit change, but every v1 → v2 port meets it: Cloudflare refuses `wrangler rollback` to a
+version from before a Durable Object class was added, renamed or deleted (a class lifecycle migration).
+If you need rollback, keep your class name (export the v2 class under the old name); otherwise roll back
+by deploying a prepared branch (the old code plus the new migration and a placeholder class).
+
+```toml
+# Before: a new class, and no rollback past this deploy
+[[migrations]]
+tag = "v3"
+new_sqlite_classes = ["RoomActor"]
+
+# After: keep the old name, no class migration
+# export const Room = createActorClass(RoomContract); // was the v1 class name
+```
+
+## Reading a journal from `wrangler dev` without vitest-pool-workers
+
+`@cloudflare/vitest-pool-workers` needs Vitest 4. On Vitest 5 you can still check a real journal: stop
+`wrangler dev`, open the Durable Object's SQLite file with `node:sqlite`, and hand it to `readJournal`
+(it needs only `exec(...).toArray()`), then `replayJournal`:
+
+```ts
+import { DatabaseSync } from "node:sqlite";
+import { readJournal } from "@actor-kit/worker/testing";
+import { replayJournal } from "@actor-kit/test";
+import { RoomContract } from "../src/room";
+
+// .wrangler/state/v3/do/<worker>-<Class>/<id>.sqlite (or your --persist-to folder)
+const db = new DatabaseSync(path, { readOnly: true });
+const sql = {
+  exec: (query: string, ...bindings: Array<string | number | null>) => {
+    const rows = db.prepare(query).all(...bindings).map((row) => ({ ...row }));
+    return { toArray: () => rows, one: () => rows[0] ?? {} };
+  },
+};
+await replayJournal(RoomContract, readJournal(sql)); // throws at the first diverging event
+```
+
 ## The phase is a path; locals and scoped timers are per level (ADR-019 A)
 
 States nest, so the persisted state of an actor with states is now
@@ -5943,6 +6075,14 @@ Docs: https://actorkit.dev/errors/invalid_payload/
 **How to fix it:** Send the message only when its guard holds, or change the guard.
 
 Docs: https://actorkit.dev/errors/guard_failed/
+
+## `wrong_role`
+
+**What happened:** The message names the roles that may send it, and the caller's role is not one of them.
+
+**How to fix it:** Send it as one of the roles in `expected`, or add the caller's role to the message's `roles`.
+
+Docs: https://actorkit.dev/errors/wrong_role/
 
 ## `wrong_state`
 

@@ -78,6 +78,7 @@ import {
   toLiveConnections,
 } from "./runtime/live-connections";
 import { forwardMeta, type MessageMeta, parseMessageMeta, TraceSchema } from "./runtime/message-meta";
+import { checkMessageRoles } from "./runtime/message-roles";
 import { ACTOR_KIT_MIGRATIONS } from "./runtime/migrations";
 import {
   cancelExecutionRows,
@@ -487,6 +488,7 @@ export function actor(
   // The version chain (ADR-015 D5) compiles into version, migrate and upcast; the old `version` /
   // `migrate` options are refused.
   const def = toRuntimeDef(actorDef);
+  checkMessageRoles(def);
   // Validate studio config at definition time, not on the first mutation.
   const studioRedactor = compileRedaction(def.studio?.redact);
   const journalConfig = resolveJournalConfig(def.journal);

@@ -4,14 +4,32 @@
   "compilerOptions": {
     "noEmit": true,
     "rootDir": "../..",
-    "lib": ["ES2022", "DOM"],
-    "types": ["@cloudflare/workers-types"],
+    "lib": [
+      "ES2022",
+      "DOM"
+    ],
+    "types": [
+      "@cloudflare/workers-types"
+    ],
     "paths": {
-      "@actor-kit/core": ["../../packages/core/src/index.ts"],
-      "@actor-kit/worker": ["../../packages/worker/src/index.ts"],
-      "@actor-kit/worker/testing": ["../../packages/worker/src/testing.ts"],
-      "@actor-kit/test": ["../../packages/test/src/index.ts"]
+      "@actor-kit/core": [
+        "../../packages/core/src/index.ts"
+      ],
+      "@actor-kit/worker": [
+        "../../packages/worker/src/index.ts"
+      ],
+      "@actor-kit/worker/testing": [
+        "../../packages/worker/src/testing.ts"
+      ],
+      "@actor-kit/test": [
+        "../../packages/test/src/index.ts"
+      ],
+      "@actor-kit/client": [
+        "../../packages/client/src/index.ts"
+      ]
     }
   },
-  "include": ["./*.types.test.ts"]
+  "include": [
+    "./*.types.test.ts"
+  ]
 }

@@ -628,3 +628,41 @@ describe("admission with states", () => {
     expect(admission).toEqual({ ok: false, error: "message_not_found" });
   });
 });
+
+describe("ctx.reenter in a tree (ADR-019 A with Run Set Jimmy feedback 4)", () => {
+  it("re-enters the handler's own level: from a child's message, the child; from the parent's, the parent", async () => {
+    type S = { log: string[] };
+    const kit = setup({ states: { p: { states: { a: {} } } } });
+    const p = kit.in("p");
+    const a = kit.in(["p", "a"]);
+    const add = (s: S, line: string): S => ({ log: [...s.log, line] });
+    const Tree = kit.actor("tree", {
+      input: z.object({}),
+      init: (): S => ({ log: [] }),
+      roles: { any: () => true },
+      views: {},
+      initial: "p",
+      states: {
+        p: p.state({
+          initial: "a",
+          enter: (s: S, _i, ctx) => ctx.stay(add(s, "enter p")),
+          exit: (s: S) => add(s, "exit p"),
+          messages: { AGAIN_P: p.message(z.object({}), (s: S, _p, ctx) => ctx.reenter(s)) },
+          states: {
+            a: a.state({
+              enter: (s: S, _i, ctx) => ctx.stay(add(s, "enter a")),
+              exit: (s: S) => add(s, "exit a"),
+              messages: { AGAIN_A: a.message(z.object({}), (s: S, _p, ctx) => ctx.reenter(s)) },
+            }),
+          },
+        }),
+      },
+    });
+    const tree = await simulate({ contracts: [Tree] }).spawn(Tree, "t", {});
+    tree.send("u", { type: "AGAIN_A" });
+    tree.send("u", { type: "AGAIN_P" });
+    expect(phasedState(tree.state).shared).toEqual({
+      log: ["exit a", "enter a", "exit a", "exit p", "enter p", "enter a"],
+    });
+  });
+});

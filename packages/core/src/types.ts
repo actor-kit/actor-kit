@@ -167,6 +167,8 @@ export interface MessageDef<TState = unknown, TPayload = unknown, TEnv = unknown
   readonly schema: z.ZodType<TPayload>;
   readonly handler: (state: TState, payload: TPayload, ctx: MessageContext<TEnv>) => TState;
   readonly guard?: (state: TState, payload: TPayload, ctx: GuardContext<TEnv>) => boolean;
+  /** The roles that may send it; any other role is refused with `wrong_role` (all roles when absent). */
+  readonly roles?: readonly string[];
 }
 
 // --- Contract message union ---
