@@ -165,9 +165,11 @@ export interface JournalConfig {
   /** Prune to roughly this many events (never past the newest needed checkpoint). null = keep all. */
   readonly keep: number | null;
   readonly checkpointEvery: number;
+  /** The R2 binding pruned rows are archived to first (ADR-019 D); absent = pruning deletes. */
+  readonly archive?: string;
 }
 
-export type JournalOption = false | { keep?: number; checkpointEvery?: number } | undefined;
+export type JournalOption = false | { keep?: number; checkpointEvery?: number; archive?: string } | undefined;
 
 function assertPositiveInteger(value: number, name: string): void {
   if (!Number.isInteger(value) || value < 1) {
@@ -182,7 +184,21 @@ export function resolveJournalConfig(option: JournalOption): JournalConfig {
   const checkpointEvery = option?.checkpointEvery ?? 100;
   if (keep !== undefined) assertPositiveInteger(keep, "journal.keep");
   assertPositiveInteger(checkpointEvery, "journal.checkpointEvery");
-  return { enabled: true, keep: keep ?? null, checkpointEvery };
+  const archive = archiveOption(option?.archive, keep);
+  return { enabled: true, keep: keep ?? null, checkpointEvery, ...(archive === null ? {} : { archive }) };
+}
+
+/** `journal.archive` (ADR-019 D): an R2 binding's name, and only with `keep` (archiving happens on pruning). */
+function archiveOption(archive: string | undefined, keep: number | undefined): string | null {
+  if (archive === undefined) return null;
+  if (archive === "") throw new ActorKitError("invalid_journal_option", "journal.archive must name an R2 binding");
+  if (keep === undefined) {
+    throw new ActorKitError(
+      "invalid_journal_option",
+      "journal.archive needs journal.keep: archiving happens when the journal is pruned",
+    );
+  }
+  return archive;
 }
 
 // --- Events ---
@@ -314,7 +330,8 @@ export function appendJournalEvent(
     );
   }
 
-  if (config.keep !== null) pruneJournal(sql, seq - config.keep);
+  // With an archive, pruning waits for the segment to be in R2 (async, after the commit: ADR-019 D).
+  if (config.keep !== null && config.archive === undefined) pruneJournal(sql, seq - config.keep);
   return seq;
 }
 

@@ -40,6 +40,9 @@ Every error actor-kit throws is an `ActorKitError` with a stable `code` and a `d
 | [`missing_state_input`](/errors/missing_state_input/) | A state that declares an enter `input` was entered on the way to another state (or as an `initial` child). |
 | [`invalid_scope`](/errors/invalid_scope/) | `ctx.execute(..., { scope: "state" })` was called where no state can own the call. |
 | [`invalid_transition`](/errors/invalid_transition/) | `enter` or `exit` returned a `goto` (or `exit` returned `stay`). |
+| [`archive_missing`](/errors/archive_missing/) | An archived journal segment recorded by the actor is not in its R2 bucket. |
+| [`archive_unbound`](/errors/archive_unbound/) | `journal.archive` names a binding that is not an R2 bucket in the Worker env. |
+| [`invalid_archive_segment`](/errors/invalid_archive_segment/) | An archived journal segment in R2 is not NDJSON of journal rows. |
 | [`invalid_phased_state`](/errors/invalid_phased_state/) | The persisted state of an actor with states is not `{ shared, phase, locals, stateTimers }`. |
 | [`nondeterminism`](/errors/nondeterminism/) | A handler read the clock or randomness directly (Date.now, new Date(), Math.random, crypto.randomUUID, ...). |
 | [`invalid_result`](/errors/invalid_result/) | A service's result does not match its `result` schema, or is larger than the size limit. |

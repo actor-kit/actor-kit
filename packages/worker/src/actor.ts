@@ -56,6 +56,7 @@ import {
   clockedSources,
   createLiveFacts,
   foldJournal,
+  type Journal,
   type JournalDraft,
   type JournalEvent,
   type JournalOption,
@@ -66,6 +67,7 @@ import {
   resolveJournalConfig,
   snapshotSeq,
 } from "./runtime/journal";
+import { archiveBucket, archiveDue, journalStats, journalStorage, readFullJournal } from "./runtime/journal-archive";
 import { readStudioTimeline, timelineEntry } from "./runtime/journal-timeline";
 import {
   isStudioSocket,
@@ -488,6 +490,8 @@ export function actor(
   // Validate studio config at definition time, not on the first mutation.
   const studioRedactor = compileRedaction(def.studio?.redact);
   const journalConfig = resolveJournalConfig(def.journal);
+  // ADR-019 D: the R2 binding pruned journal rows are archived to first (null: pruning deletes).
+  const archiveName = journalConfig.archive ?? null;
   const determinism = resolveDeterminism(def.determinism);
   // Delivery mode, result schema and size limit, retries (ADR-016, ADR-018 G), validated at definition time.
   const serviceOptions = new Map<string, ServiceOptions>(
@@ -544,6 +548,7 @@ export function actor(
     timersChanged = false; // A commit scheduled or cancelled timers: push them to Studio after it
     journalAhead = false; // The snapshot lags the journal (same code version): rebuild it on wake
     rebuildFrom: number | null = null; // Stored version to rebuild from by replay (ADR-015 D5), on wake
+    archiving = false; // An archive run (ADR-019 D) is in progress
     previousSubscriberViews = new Map<string, string>(); // dedupe: "type:id" → "role:json"
 
     // --- Studio instrumentation ---
@@ -846,6 +851,52 @@ export function actor(
         this.timersChanged = false;
         this.pushStudioTimers();
       }
+      this.archiveSoon();
+    }
+
+    /**
+     * ADR-019 D: after a commit, archive what pruning to `keep` removes (segments to R2, then deleted
+     * locally). Never inside the commit's transaction: the put is async. One run at a time; a failure is
+     * logged and the rows stay until the next commit tries again.
+     */
+    archiveSoon(): void {
+      if (archiveName === null || journalConfig.keep === null || this.archiving) return;
+      this.archiving = true;
+      void this.archive(archiveName, journalConfig.keep).finally(() => {
+        this.archiving = false;
+      });
+    }
+
+    async archive(name: string, keep: number): Promise<void> {
+      try {
+        const bucket = archiveBucket(this.envBindings, name);
+        const ids = { actorType: _actorName, actorId: this.subscriberId() };
+        await archiveDue(this.ctx.storage.sql, bucket, ids, keep, Date.now(), (write) =>
+          this.ctx.storage.transactionSync(write),
+        );
+      } catch (error) {
+        console.error(
+          JSON.stringify({
+            event: "actor_kit.journal.archive_failed",
+            actorType: _actorName,
+            actorId: this.subscriberId(),
+            message: error instanceof Error ? error.message : String(error),
+          }),
+        );
+      }
+    }
+
+    /** Where the journal lives and the object's storage, for Studio (ADR-019 D); undefined without a journal. */
+    journalStorage(): ReturnType<typeof journalStorage> | undefined {
+      const sql = this.ctx.storage.sql;
+      return journalConfig.enabled ? journalStorage(journalStats(sql), sql.databaseSize) : undefined;
+    }
+
+    /** The journal from `from` on (default: all of it): archived segments it needs (ADR-019 D), then the local rows. */
+    async journalFrom(from?: number): Promise<Journal> {
+      const sql = this.ctx.storage.sql;
+      if (archiveName === null) return readJournal(sql);
+      return readFullJournal(sql, archiveBucket(this.envBindings, archiveName), from === undefined ? {} : { from });
     }
 
     /** Write the snapshot (and its journal event). Only call inside commit()'s transaction. */
@@ -1256,7 +1307,7 @@ export function actor(
      */
     async rebuildByReplay(fromVersion: number): Promise<void> {
       this.rebuildFrom = null;
-      const state = await rebuildFromJournal(def, readJournal(this.ctx.storage.sql), { env: this.handlerEnv });
+      const state = await rebuildFromJournal(def, await this.journalFrom(), { env: this.handlerEnv });
       this.commit(state, {
         causeType: "migrate",
         name: null,
@@ -2476,6 +2527,7 @@ export function actor(
         outbox: this.readOutbox(),
         timers: readTimers(this.ctx.storage.sql),
         rejections: rejectionCounts(this.ctx.storage.sql),
+        journal: this.journalStorage(),
         activeLinks: this.readActiveLinks(),
         linkSubscribers: this.readLinkSubscribers(),
         actorId: this.actorId ?? this.ctx.id.toString(),
@@ -2497,6 +2549,7 @@ export function actor(
         outbox: snapshot.outbox.map((row) => projectOutboxRow(row, projection)),
         timers: snapshot.timers.map((row) => projectTimerRow(row, projection)),
         rejections: snapshot.rejections,
+        ...(snapshot.journal === undefined ? {} : { journal: snapshot.journal }),
         activeLinks: snapshot.activeLinks,
         linkSubscribers: snapshot.linkSubscribers,
         actorType: _actorName,
@@ -2609,6 +2662,8 @@ export function actor(
       timers?: TimerRow[];
       /** Refused messages ever counted, in total and by code (ADR-018 F). Absent for an actor that does not exist. */
       rejections?: { total: number; byCode: Record<string, number> };
+      /** Where the journal lives and the object's storage (ADR-019 D). Absent without a journal. */
+      journal?: ReturnType<typeof journalStorage> | undefined;
       activeLinks: Array<{
         targetType: string;
         targetId: string;
@@ -2648,6 +2703,7 @@ export function actor(
         outbox: this.readOutbox().map((row) => projectOutboxRow(row, projection)),
         timers: readTimers(this.ctx.storage.sql).map((row) => projectTimerRow(row, projection)),
         rejections: rejectionCounts(this.ctx.storage.sql),
+        journal: this.journalStorage(),
         activeLinks: this.readActiveLinks(),
         linkSubscribers: this.readLinkSubscribers(),
       };
@@ -2735,7 +2791,7 @@ export function actor(
       const sql = this.ctx.storage.sql;
       let plan: Awaited<ReturnType<typeof planRestore>>;
       try {
-        plan = await planRestore(def, readJournal(sql), toSeq, { env: this.handlerEnv });
+        plan = await planRestore(def, await this.journalFrom(toSeq), toSeq, { env: this.handlerEnv });
       } catch (error) {
         return { ok: false, error: error instanceof Error ? error.message : String(error) };
       }
@@ -2917,6 +2973,15 @@ export interface TypedActorClass<TContract> {
       }>;
       timers?: Array<{ id: string; name: string; key: string; payload: string; fireAt: number; createdAt: number }>;
       rejections?: { total: number; byCode: Record<string, number> };
+      /** Where the journal lives and the object's storage (ADR-019 D). */
+      journal?: {
+        local: { from: number; to: number; events: number } | null;
+        archived: Array<{ from: number; to: number; bytes: number }>;
+        archivedBytes: number;
+        storageBytes: number;
+        capBytes: number;
+        nearCap: boolean;
+      };
       activeLinks: Array<{
         targetType: string;
         targetId: string;

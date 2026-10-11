@@ -8,6 +8,7 @@ import { JsonTree } from "../components/json-tree";
 import { OutboxPanel } from "../components/outbox-panel";
 import { TimersPanel } from "../components/timers-panel";
 import { useStudioWs } from "../hooks/use-studio-ws";
+import { journalSummary } from "../journal-storage";
 import { phasePath } from "../phase-change";
 import type { InspectResult, TimelineItem } from "../protocol";
 import type { StudioStatus } from "../studio-state";
@@ -55,10 +56,34 @@ function ActorDetail({ actorType, actorId, entry }: { actorType: string; actorId
           <RejectionsCount rejections={inspect.rejections} />
           <StatusBadge status={status} />
         </p>
+        <JournalStorageLine journal={inspect.journal} />
       </div>
       <ErrorBanner error={error} />
       <ActorTabs actorType={actorType} actorId={actorId} inspect={inspect} timeline={timeline} entry={entry} />
     </div>
+  );
+}
+
+/** Where the journal lives (ADR-019 D): archived and local ranges, storage, and a warning near the cap. */
+function JournalStorageLine({ journal }: { journal: InspectResult["journal"] }) {
+  if (journal === undefined) return null;
+  const summary = journalSummary(journal);
+  const parts = [summary.archived, summary.local, summary.storage].filter((part) => part !== null);
+  return (
+    <>
+      <p className="text-zinc-500 text-xs mt-1 break-words" data-testid="journal-storage">
+        Journal: {parts.join(" · ")}
+      </p>
+      {summary.warning !== null && (
+        <p
+          role="alert"
+          className="mt-2 rounded border border-amber-800 bg-amber-950/40 px-3 py-2 text-sm text-amber-300"
+          data-testid="journal-storage-warning"
+        >
+          {summary.warning}
+        </p>
+      )}
+    </>
   );
 }
 

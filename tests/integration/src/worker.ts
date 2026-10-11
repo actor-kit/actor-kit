@@ -5,6 +5,7 @@ import { z } from "zod";
 
 import { ChatRoomContract } from "../../../examples/chat-room/src/chat";
 
+export { ArchivedTallyActor, UnboundArchiveActor } from "./archive-actors";
 export { StampOff, StampThrow, StampWarn } from "./determinism-actors";
 export { ExampleAuction, ExampleChatRoom, ExampleCounter, ExampleTodoList } from "./example-actors";
 export { Courier, FlakyInbox } from "./forward-retry-actors";

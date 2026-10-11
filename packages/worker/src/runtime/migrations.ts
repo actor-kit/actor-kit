@@ -230,4 +230,17 @@ export const ACTOR_KIT_MIGRATIONS: ReadonlyArray<{ readonly name: string; readon
     name: "0019_nondeterministic",
     sql: "ALTER TABLE events ADD COLUMN nondeterministic INTEGER;",
   },
+  {
+    // Journal segments archived to R2 before pruning (ADR-019 D): one row per segment.
+    name: "0020_journal_archive",
+    sql: `
+      CREATE TABLE IF NOT EXISTS journal_archive (
+        from_seq INTEGER PRIMARY KEY,
+        to_seq INTEGER NOT NULL,
+        key TEXT NOT NULL,
+        bytes INTEGER NOT NULL,
+        archived_at INTEGER NOT NULL
+      );
+    `,
+  },
 ];

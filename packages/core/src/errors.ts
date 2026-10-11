@@ -141,6 +141,18 @@ export const ERROR_CODES = {
     title: "`enter` or `exit` returned a `goto` (or `exit` returned `stay`).",
     fix: "`enter` returns its local or `ctx.stay(shared, local)`; `exit` returns the next shared state. Move to another state from a message or timer.",
   },
+  archive_missing: {
+    title: "An archived journal segment recorded by the actor is not in its R2 bucket.",
+    fix: "Check the bucket the `journal.archive` binding points at (and its lifecycle rules); segments must not be deleted while the actor may read them.",
+  },
+  archive_unbound: {
+    title: "`journal.archive` names a binding that is not an R2 bucket in the Worker env.",
+    fix: "Add the bucket to wrangler.jsonc (`r2_buckets`) under the name `journal.archive` gives.",
+  },
+  invalid_archive_segment: {
+    title: "An archived journal segment in R2 is not NDJSON of journal rows.",
+    fix: "Do not edit archived segments by hand; restore the object from a backup of the bucket.",
+  },
   invalid_phased_state: {
     title: "The persisted state of an actor with states is not `{ shared, phase, locals, stateTimers }`.",
     fix: "Do not write the persisted state by hand; restore or migrate through `versions`.",

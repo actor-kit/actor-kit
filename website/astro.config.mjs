@@ -56,6 +56,7 @@ export default defineConfig({
             { slug: "concepts/timers" },
             { slug: "concepts/domain-events" },
             { slug: "concepts/states" },
+            { slug: "concepts/journal" },
             { slug: "concepts/testing" },
           ],
         },

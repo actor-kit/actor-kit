@@ -320,6 +320,11 @@ CREATE TABLE journal_checkpoints (seq INTEGER PRIMARY KEY, version INTEGER, stat
 - A failed commit writes nothing and puts the in-memory state back.
 - A checkpoint (after-state) is written every `checkpointEvery` events (default 100).
 - `journal: false` turns it off; `journal: { keep }` prunes events at or below the newest checkpoint `<= lastSeq - keep`.
+- `journal: { keep, archive: "R2_BINDING" }` (ADR-019 D, `runtime/journal-archive.ts`): pruning waits for the
+  commit, puts the rows as an NDJSON segment in R2, then deletes them in a transaction and records the segment in
+  `journal_archive`. `readFullJournal(sql, bucket, { from })` merges the segments a range needs with the local
+  rows; restore and `rebuild: "replay"` read through it. Studio's inspect reports the local and archived ranges
+  and the object's storage (`journalStorage`, warning at 80% of the 10 GB per-object limit).
 - `readJournal(sql)` and `applyJournalEvent()` (`@actor-kit/worker/testing`) and `replayJournal()` (`@actor-kit/test`) read and fold it. Replay never runs guards or side effects.
 
 ### Transactional outbox and retries (ADR-003, ADR-015 D1)

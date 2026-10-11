@@ -110,3 +110,27 @@ local of the active path, typed. Studio's timeline marks phase changes with the 
   transition, `reject()` drops it.
 - Saga recipe: `examples/checkout-saga` (reserve → charge → confirm; compensation in reverse in
   `compensating`, one undo call per entry; a late charge refunded through `onStale`), website recipe "Sagas".
+
+## D as built: journal archive to R2 (2026-10-11)
+
+- `journal: { keep, archive: "R2_BINDING" }`; `archive` without `keep` (or empty) is refused at definition time
+  (`invalid_journal_option`). With an archive, `appendJournalEvent` no longer prunes inside the commit's
+  transaction (an R2 put is async): after the commit, `archiveDue` puts each prunable range (oldest local
+  event to the newest checkpoint at or before `lastSeq - keep`) as one segment, then deletes it locally in a
+  `transactionSync` and records it in `journal_archive` (migration `0020_journal_archive`). One run at a time;
+  a failure (a missing binding: `archive_unbound`, R2 down) is logged as `actor_kit.journal.archive_failed`
+  and deletes nothing, so the next commit tries again. A crash between put and delete rewrites the same key.
+- Segment: NDJSON lines `{ "kind": "checkpoint" | "event", "row": <SQLite row> }`, checkpoints first (the
+  base checkpoint at `fromSeq - 1` when there is one, and every checkpoint up to `toSeq`), so a segment replays
+  on its own. Readers parse each line through the journal's row parsers (`invalid_archive_segment`).
+- `readFullJournal(sql, bucket, { from })` fetches only the segments with `toSeq >= from` and merges them with
+  the local journal. The Durable Object's restore reads from `toSeq`, `rebuild: "replay"` reads everything.
+  A recorded segment missing from the bucket fails with `archive_missing`.
+- Studio: inspect and the WebSocket snapshot carry `journal: { local, archived, archivedBytes, storageBytes,
+  capBytes, nearCap }`; the actor header shows the archived and local ranges and the storage, with a warning
+  at 80% of the 10 GB per-object limit (`databaseSize`).
+- Tests: unit tests with an in-memory bucket on node:sqlite, fast-check properties (random journals,
+  checkpoint intervals, `keep`, archive points and restore points give the same events, checkpoints, final
+  state, checksums and restored states as a journal never pruned), and workerd tests with an R2 binding.
+- The journal query (`__journal`, ADR-019 F) is built on another branch; when the branches meet it reads
+  through `readFullJournal` like restore does.

@@ -100,6 +100,22 @@ export {
   snapshotSeq,
   upcastEmitted,
 } from "./runtime/journal";
+// Journal archive to R2 (ADR-019 D)
+export type { ArchiveBucket, ArchivedSegment, ArchiveIds, ArchiveRange } from "./runtime/journal-archive";
+export {
+  archiveBucket,
+  archiveDue,
+  archivedSegments,
+  archiveJournal,
+  buildSegment,
+  journalStats,
+  journalStorage,
+  parseSegment,
+  prunableRange,
+  readFullJournal,
+  STORAGE_CAP_BYTES,
+  segmentKey,
+} from "./runtime/journal-archive";
 // Studio timeline read from the journal (ADR-017 §5)
 export type { TimelinePageQuery, TimelineSource } from "./runtime/journal-timeline";
 export { readStudioTimeline, timelineCause, timelineEntry } from "./runtime/journal-timeline";

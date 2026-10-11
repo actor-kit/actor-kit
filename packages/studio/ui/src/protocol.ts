@@ -97,6 +97,17 @@ export const InspectSchema = z.object({
   timers: z.array(TimerEntrySchema).optional(),
   /** Refused messages ever counted (ADR-018 F); absent from older actors. */
   rejections: z.object({ total: z.number(), byCode: z.record(z.string(), z.number()) }).optional(),
+  /** Where the journal lives and the object's storage (ADR-019 D); absent without a journal. */
+  journal: z
+    .object({
+      local: z.object({ from: z.number(), to: z.number(), events: z.number() }).nullable(),
+      archived: z.array(z.object({ from: z.number(), to: z.number(), bytes: z.number() })),
+      archivedBytes: z.number(),
+      storageBytes: z.number(),
+      capBytes: z.number(),
+      nearCap: z.boolean(),
+    })
+    .optional(),
   activeLinks: z.array(ActiveLinkSchema),
   linkSubscribers: z.array(LinkSubscriberSchema),
 });
