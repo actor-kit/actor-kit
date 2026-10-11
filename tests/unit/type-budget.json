@@ -1,0 +1,5 @@
+{
+  "//": "ADR-019 A compile-time budget for tests/unit/tsconfig.budget.json, checked by `pnpm typecheck:budget`. Measured 2026-10-11: 660026 instantiations, 0.21s check.",
+  "instantiations": 750000,
+  "checkTimeSeconds": 2
+}

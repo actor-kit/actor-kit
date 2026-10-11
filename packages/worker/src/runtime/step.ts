@@ -19,17 +19,8 @@ import { ActorKitError } from "@actor-kit/core";
 import { parseDuration } from "./duration";
 import { createReplayFacts, type Facts, type JournalDraft, type LiveFacts } from "./journal";
 import { createOutbox, type UnlinkCall } from "./outbox";
-import {
-  goto,
-  type PhasedState,
-  PhaseTransition,
-  parseLocal,
-  phasedState,
-  type StepStateDef,
-  stateDef,
-  statesDeclaring,
-  stay,
-} from "./phases";
+import { assertSync, initialPhase, type PhaseContext, type PhaseRun, runAtLevel } from "./phase-run";
+import { dotted, innermost, mergeLocals, phasedState, type StepStateDef, statesDeclaring } from "./phases";
 import type { ParseIssue } from "./refusal";
 import { resolveRole } from "./roles";
 import type { ErrorsParser } from "./service-error";
@@ -300,14 +291,15 @@ export function admitStepMessage(
   const roleMessages: Record<string, Record<string, StepMessageSlot>> = def.messages ?? {};
   if (states === undefined) return admitMessage(roleMessages, role, state, event, ctx);
   const current = phasedState(state);
-  const inPhase = stateDef(states, current.phase).messages?.[event.type];
-  const message = inPhase ?? roleMessages[role]?.[event.type];
+  const inPath = innermost(states, current.phase, (d) => d.messages?.[event.type]);
+  const message = inPath?.found ?? roleMessages[role]?.[event.type];
   if (message === undefined) {
     const acceptedIn = statesDeclaring(states, event.type);
     if (acceptedIn.length === 0) return { ok: false, error: "message_not_found" };
-    return { ok: false, error: "wrong_state", phase: current.phase, acceptedIn };
+    return { ok: false, error: "wrong_state", phase: dotted(current.phase), acceptedIn };
   }
-  const phaseCtx = { ...ctx, phase: current.phase, local: current.local };
+  const level = inPath?.depth ?? current.phase.length;
+  const phaseCtx = { ...ctx, phase: current.phase, local: mergeLocals(current.locals.slice(0, level)) };
   return admitMessage({ [role]: { [event.type]: message } }, role, current.shared, event, phaseCtx);
 }
 
@@ -333,10 +325,6 @@ export function admitMessage<M extends Pick<StepMessageSlot, "schema" | "guard">
 }
 
 // --- step ---
-
-function assertSync(next: unknown, message: string): void {
-  if (next instanceof Promise) throw new ActorKitError("async_handler", message);
-}
 
 function draft(
   cause: { causeType: JournalDraft["causeType"]; name: string | null; payload: unknown },
@@ -403,17 +391,35 @@ function emitVerb(def: StepDef, effects: StepEffects): (name: string, payload: u
   };
 }
 
-/** A timer by name: the current phase's (actors with states), then the top-level ones. */
-export function findTimer(def: StepDef, phase: string | null, name: string) {
-  const inPhase = phase === null ? undefined : def.states?.[phase]?.timers?.[name];
-  return inPhase ?? def.timers?.[name];
+/**
+ * A timer by name, with the level that declares it: innermost first along `path` (actors with states),
+ * then the top-level ones (depth null).
+ */
+export function findTimerAt(def: StepDef, path: readonly string[] | null, name: string) {
+  const inPath = path === null ? undefined : innermost(def.states ?? {}, path, (d) => d.timers?.[name]);
+  if (inPath !== undefined) return { timer: inPath.found, depth: inPath.depth };
+  const top = def.timers?.[name];
+  return top === undefined ? undefined : { timer: top, depth: null };
 }
 
-/** ctx.schedule / ctx.cancel for a transition: the timer must be declared and its payload must parse. */
-function timerVerbs(def: StepDef, effects: StepEffects, det: DeterministicContext, phase: string | null = null) {
+/** A timer by name: along the active path (actors with states), then the top-level ones. */
+export function findTimer(def: StepDef, path: readonly string[] | null, name: string) {
+  return findTimerAt(def, path, name)?.timer;
+}
+
+/**
+ * ctx.schedule / ctx.cancel for a transition: the timer must be declared and its payload must parse.
+ * `path`: the level a handler runs at (actors with states), whose timers it can schedule.
+ */
+function timerVerbs(
+  def: StepDef,
+  effects: StepEffects,
+  det: DeterministicContext,
+  path: readonly string[] | null = null,
+) {
   return {
     schedule: (name: string, options: ScheduleOptions): void => {
-      const timer = findTimer(def, phase, name);
+      const timer = findTimer(def, path, name);
       if (timer === undefined) {
         throw new ActorKitError(
           "undeclared_timer",
@@ -433,109 +439,44 @@ function timerVerbs(def: StepDef, effects: StepEffects, det: DeterministicContex
   };
 }
 
-// --- States (ADR-017 §1) ---
+// --- States (ADR-017 §1, ADR-019 A) ---
 
-/** What a handler of an actor with states sees besides the usual context. */
-interface PhaseContext {
-  readonly phase: string;
-  readonly local: unknown;
-  readonly stay: typeof stay;
-  readonly goto: typeof goto;
-  readonly schedule: (name: string, options: ScheduleOptions) => void;
-}
-
-/**
- * ctx.schedule for a phase: `scope: "state"` timers get the key `${phase}:${name}` unless given one,
- * and are recorded so leaving the phase cancels them.
- */
-function scopedSchedule(
-  base: (name: string, options: ScheduleOptions) => void,
-  phase: string,
-  scoped: string[],
-): (name: string, options: ScheduleOptions) => void {
-  return (name, options) => {
-    if (options.scope !== "state") return base(name, options);
-    const key = options.key ?? `${phase}:${name}`;
-    base(name, { ...options, key });
-    scoped.push(key);
+/** One transition's view of the state tree (phase-run.ts moves through it). */
+function phaseRun(
+  def: StepDef,
+  states: Record<string, StepStateDef>,
+  effects: StepEffects,
+  facts: StepFacts,
+  env: unknown,
+): PhaseRun {
+  return {
+    states,
+    base: {
+      ...facts.ctx,
+      env,
+      execute: effects.execute,
+      forward: effects.forward,
+      emit: emitVerb(def, effects),
+    },
+    verbs: (path) => timerVerbs(def, effects, facts.ctx, path),
   };
-}
-
-interface PhaseRun {
-  readonly def: StepDef;
-  readonly states: Record<string, StepStateDef>;
-  readonly effects: StepEffects;
-  readonly facts: StepFacts;
-  readonly env: unknown;
-}
-
-/** Leave the current phase (cancel its state timers, drop its local) and enter `phase`. */
-function enterPhase(
-  run: PhaseRun,
-  shared: unknown,
-  phase: string,
-  input: unknown,
-  leaving: readonly string[],
-): PhasedState {
-  const target = stateDef(run.states, phase);
-  for (const key of leaving) run.effects.cancel(key);
-  const scoped: string[] = [];
-  const verbs = timerVerbs(run.def, run.effects, run.facts.ctx, phase);
-  const local =
-    target.enter === undefined
-      ? null
-      : target.enter(shared, input, {
-          ...run.facts.ctx,
-          env: run.env,
-          phase,
-          execute: run.effects.execute,
-          forward: run.effects.forward,
-          emit: emitVerb(run.def, run.effects),
-          cancel: verbs.cancel,
-          schedule: scopedSchedule(verbs.schedule, phase, scoped),
-        });
-  assertSync(local, `State "${phase}": enter returned a Promise. Handlers must be synchronous.`);
-  return { shared, phase, local: parseLocal(phase, target, local), stateTimers: scoped };
-}
-
-/** The persisted state after a handler of an actor with states returned `result`. */
-function settlePhase(run: PhaseRun, current: PhasedState, result: unknown, scoped: readonly string[]): PhasedState {
-  const stateTimers = [...current.stateTimers, ...scoped];
-  if (!(result instanceof PhaseTransition)) return { ...current, shared: result, stateTimers };
-  if (result.kind === "goto" && result.phase !== null) {
-    return enterPhase(run, result.shared, result.phase, result.value, stateTimers);
-  }
-  const local = result.hasLocal
-    ? parseLocal(current.phase, stateDef(run.states, current.phase), result.value)
-    : current.local;
-  return { ...current, shared: result.shared, local, stateTimers };
 }
 
 /**
  * Run a handler: as is for an actor without states; for one with states, on the shared state with
- * the phase context, its result settling the phase (stay, goto, or plain shared = stay).
+ * the phase context at the level that declares it (`depth`; null for a top-level one), its result
+ * settling the phase (stay, goto, or plain shared = stay).
  */
 function runHandler(
-  run: Omit<PhaseRun, "states">,
+  run: { readonly def: StepDef; readonly effects: StepEffects; readonly facts: StepFacts; readonly env: unknown },
   state: unknown,
+  depth: number | null,
   call: (state: unknown, phase: PhaseContext | null) => unknown,
   firedKey: string | null = null,
 ): unknown {
   const states = run.def.states;
   if (states === undefined) return call(state, null);
-  const parsed = phasedState(state);
-  const current = { ...parsed, stateTimers: parsed.stateTimers.filter((key) => key !== firedKey) };
-  const scoped: string[] = [];
-  const verbs = timerVerbs(run.def, run.effects, run.facts.ctx, current.phase);
-  const result = call(current.shared, {
-    phase: current.phase,
-    local: current.local,
-    stay,
-    goto,
-    schedule: scopedSchedule(verbs.schedule, current.phase, scoped),
-  });
-  assertSync(result, "A handler returned a Promise. Handlers must be synchronous.");
-  return settlePhase({ ...run, states }, current, result, scoped);
+  return runAtLevel(phaseRun(run.def, states, run.effects, run.facts, run.env), state, depth, call, firedKey);
 }
 
 /** For handlers that only see the shared state (lifecycle, services, links): the result is the new shared state. */
@@ -546,16 +487,25 @@ function onShared(def: StepDef, state: unknown, fn: (shared: unknown) => unknown
   return next === current.shared ? state : { ...current, shared: next };
 }
 
-/** The message's handler: the current phase's, then the role's top-level one. */
-/** The phase an actor with states is in (null without states). */
-export function phaseOf(def: StepDef, state: unknown): string | null {
+/** The active path of an actor with states (null without states). */
+export function phaseOf(def: StepDef, state: unknown): string[] | null {
   return def.states === undefined ? null : phasedState(state).phase;
 }
 
+/**
+ * The message's handler and the level that declares it: innermost first along the active path, then
+ * the role's top-level one (depth null).
+ */
+export function findMessage(def: StepDef, state: unknown, role: string, name: string) {
+  const path = phaseOf(def, state);
+  const inPath = path === null ? undefined : innermost(def.states ?? {}, path, (d) => d.messages?.[name]);
+  if (inPath !== undefined) return { slot: inPath.found, depth: inPath.depth };
+  const top = def.messages?.[role]?.[name];
+  return top === undefined ? undefined : { slot: top, depth: null };
+}
+
 export function messageSlot(def: StepDef, state: unknown, role: string, name: string) {
-  const phase = def.states === undefined ? null : phasedState(state).phase;
-  const inPhase = phase === null ? undefined : def.states?.[phase]?.messages?.[name];
-  return inPhase ?? def.messages?.[role]?.[name];
+  return findMessage(def, state, role, name)?.slot;
 }
 
 function stepMessage(
@@ -565,8 +515,8 @@ function stepMessage(
   facts: StepFacts,
   env: unknown,
 ): StepResult {
-  const slot = messageSlot(def, state, cause.role, cause.name);
-  if (slot === undefined) {
+  const found = findMessage(def, state, cause.role, cause.name);
+  if (found === undefined) {
     throw new ActorKitError(
       "unknown_message",
       `Message "${cause.name}" is not defined for role "${cause.role}". Add it to the role's messages (or a versions step for a removed message).`,
@@ -588,8 +538,8 @@ function stepMessage(
     ...timerVerbs(def, effects, facts.ctx),
   };
   const handlerState = guarded(facts, () =>
-    runHandler({ def, effects, facts, env }, state, (current, phase) => {
-      const result = slot.handler(current, cause.payload, phase === null ? base : { ...base, ...phase });
+    runHandler({ def, effects, facts, env }, state, found.depth, (current, phase) => {
+      const result = found.slot.handler(current, cause.payload, { ...base, ...phase });
       assertSync(
         result,
         `Message handler for "${cause.name}" returned a Promise. Handlers must be synchronous — use execute() for async side effects.`,
@@ -770,8 +720,7 @@ function stepTimer(
   facts: StepFacts,
   env: unknown,
 ): StepResult {
-  const phase = def.states === undefined ? null : phasedState(state).phase;
-  const timer = findTimer(def, phase, cause.name);
+  const found = findTimerAt(def, phaseOf(def, state), cause.name);
   const effects = createOutbox(facts.seq);
   const base = {
     ...facts.ctx,
@@ -784,14 +733,15 @@ function stepTimer(
     ...timerVerbs(def, effects, facts.ctx),
   };
   const next =
-    timer === undefined
+    found === undefined
       ? state
       : guarded(facts, () =>
           runHandler(
             { def, effects, facts, env },
             state,
+            found.depth,
             (current, phaseCtx) => {
-              const result = timer.handler(current, cause.payload, phaseCtx === null ? base : { ...base, ...phaseCtx });
+              const result = found.timer.handler(current, cause.payload, { ...base, ...phaseCtx });
               assertSync(
                 result,
                 `Timer "${cause.name}" returned a Promise. Handlers must be synchronous — use execute() for async side effects.`,
@@ -841,23 +791,6 @@ function stepCause(def: StepDef, state: unknown, cause: StepCause, facts: StepFa
 /** The persisted state init's result becomes: as it is, or the initial phase for an actor with states. */
 export function initialState(def: Pick<StepDef, "states" | "initial">, shared: unknown): unknown {
   return def.states === undefined ? shared : initialPhase(def.states, def.initial, shared);
-}
-
-/** An actor with states starts in `initial`, which has no local (nothing to build it from yet). */
-function initialPhase(states: Record<string, StepStateDef>, initial: string | undefined, shared: unknown): PhasedState {
-  if (initial === undefined) {
-    throw new ActorKitError(
-      "missing_initial",
-      'An actor with states needs `initial`: add initial: "<state>" to the definition.',
-    );
-  }
-  if (stateDef(states, initial).local !== undefined) {
-    throw new ActorKitError(
-      "initial_state_local",
-      `The initial state "${initial}" cannot have a local: it is entered before any input exists`,
-    );
-  }
-  return { shared, phase: initial, local: null, stateTimers: [] };
 }
 
 export interface InitCause {

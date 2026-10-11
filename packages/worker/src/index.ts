@@ -38,8 +38,10 @@ export { version } from "./runtime/versions";
 export type {
   EmittingMessageContext,
   EmittingTimerContext,
+  EnterContext,
   EventPayloads,
   EventSchemas,
+  ExitContext,
   Goto,
   KitActorDef,
   KitContractDef,
@@ -47,6 +49,7 @@ export type {
   LocalOf,
   PhasedState,
   PhasedStateOf,
+  PhaseHelpers,
   PhaseResult,
   Setup,
   StateDecl,
@@ -54,6 +57,20 @@ export type {
   TypedStateDef,
 } from "./setup";
 export { goto, PhaseTransition, setup, stay } from "./setup";
+// Hierarchical states (ADR-019 A): paths, merged locals, and the view/role helpers
+export type {
+  DeclAt,
+  LeafPathsOf,
+  LocalsAlong,
+  Matching,
+  MergedLocal,
+  MergeLocals,
+  PathOf,
+  PathsOf,
+  StatePath,
+  TargetOf,
+} from "./state-paths";
+export { localOf, matches } from "./state-paths";
 // Timer helper (ADR-015 D2)
 export type { PlainTimerContext } from "./timer";
 export { timer } from "./timer";

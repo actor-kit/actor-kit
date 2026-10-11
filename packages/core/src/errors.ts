@@ -129,8 +129,16 @@ export const ERROR_CODES = {
     title: "A state's local does not match its schema.",
     fix: "Return a local from `enter` / `ctx.stay(shared, local)` that parses with the state's `local` schema.",
   },
+  missing_state_input: {
+    title: "A state that declares an enter `input` was entered on the way to another state (or as an `initial` child).",
+    fix: "Goto that state itself (a goto's input goes to its target only), or drop its `input` and build its local from `ctx.local`.",
+  },
+  invalid_transition: {
+    title: "`enter` or `exit` returned a `goto` (or `exit` returned `stay`).",
+    fix: "`enter` returns its local or `ctx.stay(shared, local)`; `exit` returns the next shared state. Move to another state from a message or timer.",
+  },
   invalid_phased_state: {
-    title: "The persisted state of an actor with states is not `{ shared, phase, local, stateTimers }`.",
+    title: "The persisted state of an actor with states is not `{ shared, phase, locals, stateTimers }`.",
     fix: "Do not write the persisted state by hand; restore or migrate through `versions`.",
   },
   nondeterminism: {

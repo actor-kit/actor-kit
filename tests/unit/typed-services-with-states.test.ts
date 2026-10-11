@@ -69,12 +69,12 @@ describe("states + typed env + domain events + publish in simulate()", () => {
     const game = await sim.spawn(Game, "g1", {});
 
     game.send("u", { type: "GO" });
-    expect(phasedState(game.state)).toMatchObject({ phase: "round", local: { n: 5 } });
+    expect(phasedState(game.state)).toMatchObject({ phase: ["round"], locals: [{ n: 5 }] });
     game.send("u", { type: "HIT" });
     game.send("u", { type: "ADD" });
-    expect(phasedState(game.state)).toMatchObject({ shared: { total: 10 }, phase: "round", local: { n: 10 } });
+    expect(phasedState(game.state)).toMatchObject({ shared: { total: 10 }, phase: ["round"], locals: [{ n: 10 }] });
     sim.advance("10s");
-    expect(phasedState(game.state)).toMatchObject({ shared: { total: 15 }, phase: "idle", local: null });
+    expect(phasedState(game.state)).toMatchObject({ shared: { total: 15 }, phase: ["idle"], locals: [null] });
 
     expect(sim.events().map((e) => [e.name, e.payload])).toEqual([
       ["RoundStarted", { n: 5 }],

@@ -5,7 +5,7 @@
  */
 
 import { type Refusal, type RefusalCode, refusal } from "@actor-kit/core";
-import { phasedState, stateDef } from "./phases";
+import { dotted, levelsOf, phasedState } from "./phases";
 
 /** One issue of a failed parse (Zod's shape). */
 export interface ParseIssue {
@@ -43,10 +43,16 @@ export function refusalCode(error: AdmissionError): RefusalCode {
   return ADMISSION_CODES[error];
 }
 
+/** A state as a refusal reads it: its messages and its child states. */
+export interface RefusalStateDef {
+  readonly messages?: Readonly<Record<string, unknown>> | undefined;
+  readonly states?: Record<string, RefusalStateDef>;
+}
+
 /** What a refusal reads from the definition: role-nested messages and the states. */
 export interface RefusalDef {
   readonly messages?: Readonly<Record<string, Readonly<Record<string, unknown>> | undefined>> | undefined;
-  readonly states?: Readonly<Record<string, { readonly messages?: Readonly<Record<string, unknown>> | undefined }>>;
+  readonly states?: Record<string, RefusalStateDef>;
 }
 
 /** Who sent the message (guard_failed names them). */
@@ -64,11 +70,15 @@ function issuesText(issues: readonly ParseIssue[]): string {
     .join("; ");
 }
 
-/** The phase an actor with states is in, and the messages that phase declares; null without states. */
+/**
+ * The state an actor with states is in (its dotted path), and the messages the levels of its path
+ * declare, innermost first; null without states.
+ */
 function placeOf(def: RefusalDef, state: unknown): { phase: string; messages: string[] } | null {
   if (def.states === undefined) return null;
   const { phase } = phasedState(state);
-  return { phase, messages: Object.keys(stateDef(def.states, phase).messages ?? {}) };
+  const levels = levelsOf(def.states, phase).reverse();
+  return { phase: dotted(phase), messages: levels.flatMap((level) => Object.keys(level.messages ?? {})) };
 }
 
 function unknownMessage(def: RefusalDef, state: unknown, role: string, name: string): Refusal {

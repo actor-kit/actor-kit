@@ -88,7 +88,7 @@ import {
   requeueInterrupted,
   startAttempt,
 } from "./runtime/outbox-store";
-import type { StepStateDef } from "./runtime/phases";
+import { type StepStateDef, upgradePhased } from "./runtime/phases";
 import { PUBLISH_SERVICE, type PublishOption, publishedMessages, resolvePublish, sendToQueue } from "./runtime/publish";
 import { refuseAdmission, refuseInvalidDelivery, refuseNoRole, refuseNotInitialized } from "./runtime/refusal";
 import { resolveNamespace } from "./runtime/resolve-namespace";
@@ -610,7 +610,9 @@ export function actor(
       const persisted: unknown = JSON.parse(row.state);
       this.journalAhead = this.isJournalAhead();
       const migration = this.loadMigration(row.version, persisted);
-      this.state = migration !== null ? migration.state : def.restore ? def.restore(persisted) : persisted;
+      const loaded = migration !== null ? migration.state : def.restore ? def.restore(persisted) : persisted;
+      // An actor with states stored in the 0.2 shape (a flat phase name) is read as its one-element path (ADR-019 A).
+      this.state = upgradePhased(def, loaded);
 
       // Restore actor ID
       if (row.actor_id !== null) {

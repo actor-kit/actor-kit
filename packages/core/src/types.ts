@@ -175,10 +175,18 @@ type MessagesOf<M> = {
   [K in keyof M & string]: M[K] extends { schema: { _output: infer P } } ? MessageEvent<K, P> : { type: K };
 }[keyof M & string];
 
-/** The messages of every state an actor declares (ADR-017 §1); never without `states`. */
-type StateMessagesOf<TDef> = TDef extends { states: infer SS }
-  ? { [P in keyof SS]: SS[P] extends { messages?: infer M } ? MessagesOf<NonNullable<M>> : never }[keyof SS]
-  : never;
+/** The messages of one state: its own `messages`. */
+type OwnMessagesOf<D> = D extends { messages?: infer M } ? MessagesOf<NonNullable<M>> : never;
+
+/**
+ * The messages of every state an actor declares (ADR-017 §1), child states included (ADR-019 A);
+ * never without `states`. `D` bounds the depth, like the worker's state-path types.
+ */
+type StateMessagesOf<TDef, D extends unknown[] = []> = D["length"] extends 7
+  ? never
+  : TDef extends { states?: infer SS }
+    ? { [P in keyof SS]-?: OwnMessagesOf<SS[P]> | StateMessagesOf<SS[P], [...D, unknown]> }[keyof SS]
+    : never;
 
 type TopMessagesOf<TDef> = TDef extends { messages: infer M } ? MessagesOf<M> : never;
 

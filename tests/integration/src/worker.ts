@@ -10,6 +10,7 @@ export { Courier, FlakyInbox } from "./forward-retry-actors";
 export { Kiosk } from "./init-link-actors";
 export { JournalKeep, JournalOff, JournalProbe, NotAnActor } from "./journal-actors";
 export { Notice, NoticeNoJournal, Reader } from "./link-version-actors";
+export { RoundsActor } from "./nested-states";
 export { Retrier, RetrierNoJournal } from "./outbox-retry";
 export { Lot, LotTyped, LotUnbound } from "./publish-actors";
 export { QuizStates } from "./quiz-states";

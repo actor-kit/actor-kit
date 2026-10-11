@@ -33,9 +33,9 @@ describe("quiz in a Durable Object", () => {
     await stub.send("ann", "user", { type: "START" });
     await stub.send("ann", "user", { type: "ANSWER", text: "42" });
     expect(await state(stub)).toMatchObject({
-      phase: "round",
-      local: { n: 1, answers: { ann: "42" } },
-      stateTimers: ["round:roundEnd"],
+      phase: ["round"],
+      locals: [{ n: 1, answers: { ann: "42" } }],
+      stateTimers: [["round:roundEnd"]],
     });
     await runInDurableObject(stub, (_i, s) => {
       s.storage.sql.exec("UPDATE timers SET fire_at = 0");
@@ -43,14 +43,14 @@ describe("quiz in a Durable Object", () => {
     await runDurableObjectAlarm(stub);
     expect(await state(stub)).toEqual({
       shared: { players: ["ann"], scores: { ann: 1 } },
-      phase: "reveal",
-      local: null,
-      stateTimers: [],
+      phase: ["reveal"],
+      locals: [null],
+      stateTimers: [[]],
     });
     const journal = await runInDurableObject(stub, (_i, s) => readJournal(s.storage.sql));
     await replayJournal(QuizContract, journal);
     const { entries } = await stub.__getTimeline({ limit: 1 });
-    expect(JSON.parse(entries[0]?.stateSnapshot ?? "null")).toMatchObject({ phase: "reveal" });
+    expect(JSON.parse(entries[0]?.stateSnapshot ?? "null")).toMatchObject({ phase: ["reveal"] });
   });
 
   it("ending the round early cancels its timer", async () => {
@@ -59,6 +59,6 @@ describe("quiz in a Durable Object", () => {
     await stub.send("host", "service", { type: "END" });
     const timers = await runInDurableObject(stub, (_i, s) => s.storage.sql.exec("SELECT key FROM timers").toArray());
     expect(timers).toEqual([]);
-    expect(await state(stub)).toMatchObject({ phase: "reveal", local: null });
+    expect(await state(stub)).toMatchObject({ phase: ["reveal"], locals: [null] });
   });
 });

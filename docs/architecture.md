@@ -221,6 +221,18 @@ socket-facing checks: `connect-request.ts` (Upgrade header, caller identity head
 `studio-registry.ts` (finding the StudioRegistry). `actor.ts` itself is covered by the integration tests;
 `pnpm crap:worker` scores its CRAP with unit and integration (istanbul, workerd) coverage combined.
 
+### States in the step core (ADR-017, ADR-019 A)
+
+An actor with `states` persists `{ shared, phase, locals, stateTimers }` (`phase` the active path, one local
+and one scoped-timer list per level). `runtime/phases.ts` parses it (reading the 0.2 flat shape as a
+one-element path; `upgradePhased` rewrites a loaded snapshot) and holds the tree lookups (`levelsOf`,
+`innermost`, `mergeLocals`, `statesDeclaring`). `runtime/phase-run.ts` moves through the tree: `runAtLevel`
+runs a handler at the level that declares it and settles its result; a goto exits below the kept prefix
+(innermost first: `exit`, cancel that level's scoped timers, drop its local) and enters down to the target
+(outermost first, then `initial` children). `step.ts` only supplies the effect verbs (`phaseRun`). The rules
+are the transition table in ADR-019 "A as built". The worker's state-tree types (`state-paths.ts`) bound
+their recursion at six levels and are guarded by `pnpm typecheck:budget`.
+
 ### WebSocket lifecycle
 
 ```

@@ -8,6 +8,7 @@ import { JsonTree } from "../components/json-tree";
 import { OutboxPanel } from "../components/outbox-panel";
 import { TimersPanel } from "../components/timers-panel";
 import { useStudioWs } from "../hooks/use-studio-ws";
+import { phasePath } from "../phase-change";
 import type { InspectResult, TimelineItem } from "../protocol";
 import type { StudioStatus } from "../studio-state";
 
@@ -60,6 +61,17 @@ function ActorDetail({ actorType, actorId, entry }: { actorType: string; actorId
   );
 }
 
+/** The active state of an actor with states (ADR-019 A), as a path: `In playing › window`. */
+function PhaseLine({ state }: { state: unknown }) {
+  const path = phasePath(state);
+  if (path === null) return null;
+  return (
+    <p className="mb-2 text-xs text-fuchsia-300" data-testid="state-phase">
+      In {path.split(".").join(" › ")}
+    </p>
+  );
+}
+
 /** Nothing to show yet: say why (not created yet, still connecting) and offer the way back. */
 function Waiting({ status, error }: { status: StudioStatus; error: string | null }) {
   return (
@@ -100,6 +112,7 @@ function ActorTabs({
   const panels: Record<Tab, () => ReactNode> = {
     state: () => (
       <div className="bg-zinc-900 border border-zinc-800 rounded p-4 text-sm overflow-x-auto" data-testid="state-panel">
+        <PhaseLine state={inspect.state} />
         <JsonTree data={inspect.state} />
       </div>
     ),

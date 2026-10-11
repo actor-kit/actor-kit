@@ -1,8 +1,9 @@
 # Upgrading to 0.3
 
-0.3 makes the agent-first changes of [ADR-018](adrs/018-agent-first-api.md). Each breaking change has a
-note below with code before and after. Nothing here needs a data migration: 0.x has no production data
-contract.
+0.3 makes the agent-first changes of [ADR-018](adrs/018-agent-first-api.md) and the hierarchical states of
+[ADR-019](adrs/019-hierarchical-states-and-history-at-scale.md). Each breaking change has a note below with
+code before and after. Nothing here needs a manual data migration: the one stored shape that changes (an
+actor with states) is rewritten when the Durable Object loads it.
 
 ## testActor runs the runtime's step core (ADR-018 D)
 
@@ -189,3 +190,37 @@ ctx.cancel(id); // later, from another handler
 
 `effectInfo()` (from `@actor-kit/worker/testing`, for hand-built service tests) now takes an `audit` object
 and returns `record()`.
+
+## The phase is a path; locals and scoped timers are per level (ADR-019 A)
+
+States nest, so the persisted state of an actor with states is now
+`{ shared, phase, locals, stateTimers }`: `phase` is the path from the root (`["round"]` for a flat
+actor), `locals` has one local per level and `stateTimers` one list of keys per level. A Durable Object
+stored in the 0.2 shape (`{ shared, phase: "round", local, stateTimers }`) is read as its one-element
+path when it loads, and written in the new shape on its next transition; `phasedState()` reads both.
+
+`ctx.phase` in handlers, guards, `enter` and `exit` is the path too. Views and roles narrow with
+`matches()` (a path prefix, typed) and read the merged local with `localOf()`, since TypeScript cannot
+narrow a union on a tuple element.
+
+```ts
+// Before
+const project = (st: QuizState) => ({
+  phase: st.phase,
+  round: st.phase === "round" ? st.local.n : 0,
+});
+expect(q.state).toEqual({ shared, phase: "lobby", local: null, stateTimers: [] });
+
+// After
+import { localOf, matches } from "@actor-kit/worker";
+const project = (st: QuizState) => ({
+  phase: st.phase.join("."),
+  round: matches(st, "round") ? localOf(st).n : 0,
+});
+expect(q.state).toEqual({ shared, phase: ["lobby"], locals: [null], stateTimers: [[]] });
+```
+
+Handlers are unchanged: `ctx.local`, `ctx.stay`, `ctx.goto("round", ...)` and `kit.in("round")` work as
+before (a name is the one-element path). Refusals still name states as text (`playing.window`).
+`enter` may now return `ctx.stay(shared, local)` to change the shared state, and a state may declare
+`exit(shared, ctx)`, `initial` and child `states`.

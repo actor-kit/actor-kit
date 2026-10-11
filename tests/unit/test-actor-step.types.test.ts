@@ -5,7 +5,7 @@
  * events exactly as the runtime does.
  */
 import { testActor } from "@actor-kit/test";
-import { defineActor, link, message, setup, timer } from "@actor-kit/worker/testing";
+import { defineActor, link, localOf, matches, message, setup, timer } from "@actor-kit/worker/testing";
 import { describe, expect, expectTypeOf, it } from "vitest";
 import { z } from "zod";
 import { CORRECT, QuizContract } from "../../examples/quiz/quiz";
@@ -34,8 +34,8 @@ describe("testActor over step(): states", () => {
   it("init starts in the initial state, typed as the persisted phased state", () => {
     const t = testActor(QuizContract);
     const s0 = t.init({});
-    expect(s0).toEqual({ shared: { players: [], scores: {} }, phase: "lobby", local: null, stateTimers: [] });
-    expectTypeOf(s0.phase).toEqualTypeOf<"lobby" | "round" | "reveal">();
+    expect(s0).toEqual({ shared: { players: [], scores: {} }, phase: ["lobby"], locals: [null], stateTimers: [[]] });
+    expectTypeOf(s0.phase).toEqualTypeOf<readonly ["lobby"] | readonly ["round"] | readonly ["reveal"]>();
   });
 
   it("goto runs enter: local built, scoped timer recorded, event emitted", async () => {
@@ -43,24 +43,24 @@ describe("testActor over step(): states", () => {
     const joined = await t.send(t.init({}), "ann", { type: "JOIN" });
     const started = await t.send(joined.state, "ann", { type: "START" });
     expect(started.state).toMatchObject({
-      phase: "round",
-      local: { n: 1, answers: {} },
-      stateTimers: ["round:roundEnd"],
+      phase: ["round"],
+      locals: [{ n: 1, answers: {} }],
+      stateTimers: [["round:roundEnd"]],
     });
     expect(started.schedules).toEqual([
       { timer: "roundEnd", options: { in: "30s", scope: "state", key: "round:roundEnd" } },
     ]);
     expect(started.emitted).toEqual([{ name: "RoundStarted", payload: { n: 1 } }]);
-    if (started.state.phase === "round") expectTypeOf(started.state.local.n).toEqualTypeOf<number>();
+    if (matches(started.state, "round")) expectTypeOf(localOf(started.state).n).toEqualTypeOf<number>();
   });
 
   it("stay updates the local; leaving the phase cancels its scoped timers", async () => {
     const t = testActor(QuizContract);
     const s1 = (await t.send(t.init({}), "ann", { type: "START" })).state;
     const s2 = (await t.send(s1, "ann", { type: "ANSWER", text: CORRECT })).state;
-    expect(s2).toMatchObject({ phase: "round", local: { n: 1, answers: { ann: CORRECT } } });
+    expect(s2).toMatchObject({ phase: ["round"], locals: [{ n: 1, answers: { ann: CORRECT } }] });
     const ended = await t.send(s2, "host", { type: "END" }, { callerType: "service" });
-    expect(ended.state).toMatchObject({ phase: "reveal", local: null, stateTimers: [] });
+    expect(ended.state).toMatchObject({ phase: ["reveal"], locals: [null], stateTimers: [[]] });
     expect(ended.cancels).toEqual(["round:roundEnd"]);
     expect(ended.emitted).toEqual([{ name: "RoundScored", payload: { n: 1, correct: ["ann"] } }]);
   });

@@ -72,7 +72,7 @@ describe("kit.actor", () => {
     const g = await sim.spawn(Game, "g", {});
     g.send("u", { type: "GO" });
     g.send("u", { type: "SCORE" });
-    expect(g.state).toMatchObject({ phase: "idle", shared: { total: 3 } });
+    expect(g.state).toMatchObject({ phase: ["idle"], shared: { total: 3 } });
     expect(sim.published("GAME_EVENTS").map((m) => m.name)).toEqual(["Scored"]);
 
     const Plain = setup({
@@ -93,7 +93,7 @@ describe("kit.actor", () => {
     });
     const t = testActor(Small);
     const s1 = (await t.send(t.init({}), "u", { type: "GO" })).state;
-    expect(s1).toMatchObject({ phase: "b", local: { n: 3 } });
+    expect(s1).toMatchObject({ phase: ["b"], locals: [{ n: 3 }] });
   });
 
   it("defineActor(name, kit, def) is the same as kit.actor(name, def)", () => {

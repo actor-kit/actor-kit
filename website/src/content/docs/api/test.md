@@ -29,7 +29,7 @@ const state = t.init({});
 // state: { count: 0, lastUpdatedBy: null }
 ```
 
-Throws if input is invalid. For an actor with states, `init` returns the persisted state `{ shared, phase, local, stateTimers }`, typed per phase.
+Throws if input is invalid. For an actor with states, `init` returns the persisted state `{ shared, phase, locals, stateTimers }`, typed per phase.
 
 ### `t.send(state, caller, message, opts?)`
 

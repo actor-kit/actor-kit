@@ -1,23 +1,26 @@
 /**
- * States with typed locals (ADR-017 §1), the runtime part.
+ * States (ADR-017 §1, hierarchical in ADR-019 A), the runtime part.
  *
- * An actor with `states` persists `{ shared, phase, local, stateTimers }`: `local` belongs to the
- * current phase (null when the phase has none) and `stateTimers` lists the keys of the timers
- * scheduled with `scope: "state"` in it. A handler returns `ctx.stay(shared, local?)`,
- * `ctx.goto(phase, shared, input?)` or plain `shared` (stay with the same local). Exit drops the
- * local and cancels the phase's state timers; enter builds the new local with `enter(shared, input, ctx)`.
+ * An actor with `states` persists `{ shared, phase, locals, stateTimers }`: `phase` is the active path
+ * from the root to a leaf (`["playing", "window"]`), `locals[i]` the local of level i (null when it
+ * declares none) and `stateTimers[i]` the keys of the `scope: "state"` timers level i owns. A flat actor
+ * is the depth-1 case. A handler returns `ctx.stay(shared, local?)`, `ctx.goto(path, shared, input?)` or
+ * plain `shared` (stay). The transition table is in docs/adrs/019-hierarchical-states-and-history-at-scale.md.
  */
 
 import { ActorKitError } from "@actor-kit/core";
 import { z } from "zod";
+
+/** A state's path: a top-level name, or the names from the root down. */
+export type PathInput = string | readonly string[];
 
 /** What `ctx.stay` / `ctx.goto` return. `S` is the shared state's type (phantom at runtime). */
 export class PhaseTransition<S = unknown> {
   constructor(
     readonly kind: "stay" | "goto",
     readonly shared: S,
-    /** goto: the target phase. */
-    readonly phase: string | null,
+    /** goto: the target, as given (a name or a path). */
+    readonly phase: PathInput | null,
     /** stay: whether a new local was given (`stay(shared)` keeps the current one). */
     readonly hasLocal: boolean,
     /** stay: the new local; goto: the enter input. */
@@ -29,28 +32,58 @@ export function stay<S>(shared: S, ...local: unknown[]): PhaseTransition<S> {
   return new PhaseTransition("stay", shared, null, local.length > 0, local[0]);
 }
 
-export function goto<S>(phase: string, shared: S, ...input: unknown[]): PhaseTransition<S> {
+export function goto<S>(phase: PathInput, shared: S, ...input: unknown[]): PhaseTransition<S> {
   return new PhaseTransition("goto", shared, phase, false, input[0]);
 }
 
-const PhasedStateSchema = z.object({
+const PhasedStateSchema = z
+  .object({
+    shared: z.unknown(),
+    phase: z.array(z.string()).min(1),
+    locals: z.array(z.unknown()),
+    stateTimers: z.array(z.array(z.string())),
+  })
+  .refine((s) => s.locals.length === s.phase.length && s.stateTimers.length === s.phase.length, {
+    message: "one local and one timer list per level",
+  });
+
+/** The 0.2 (ADR-017) shape: a flat phase name, one local, one timer list. */
+const FlatStateSchema = z.object({
   shared: z.unknown(),
   phase: z.string(),
   local: z.unknown(),
   stateTimers: z.array(z.string()),
 });
 
-export type PhasedState = z.infer<typeof PhasedStateSchema>;
+export interface PhasedState {
+  readonly shared: unknown;
+  readonly phase: string[];
+  readonly locals: unknown[];
+  readonly stateTimers: string[][];
+}
 
-/** Parse the persisted state of an actor with `states` (it is stored as JSON, so parse, never assume). */
+/**
+ * Parse the persisted state of an actor with states (it is stored as JSON, so parse, never assume).
+ * The 0.2 flat shape is read as its one-element path.
+ */
 export function phasedState(state: unknown): PhasedState {
   const parsed = PhasedStateSchema.safeParse(state);
-  if (!parsed.success)
-    throw new ActorKitError(
-      "invalid_phased_state",
-      "The state of an actor with states must be { shared, phase, local, stateTimers }",
-    );
-  return parsed.data;
+  if (parsed.success) return parsed.data;
+  const flat = FlatStateSchema.safeParse(state);
+  if (flat.success) {
+    const { shared, phase, local, stateTimers } = flat.data;
+    return { shared, phase: [phase], locals: [local], stateTimers: [stateTimers] };
+  }
+  throw new ActorKitError(
+    "invalid_phased_state",
+    `The state of an actor with states must be { shared, phase, local, stateTimers } (0.2: a flat phase name) or { shared, phase, locals, stateTimers } (a path, one local and one timer list per level): ${parsed.error.issues.map((i) => i.message).join("; ")}`,
+  );
+}
+
+/** The state as loaded from storage: the 0.2 flat shape of an actor with states becomes its path shape. */
+export function upgradePhased(def: { readonly states?: unknown }, state: unknown): unknown {
+  if (def.states === undefined || !FlatStateSchema.safeParse(state).success) return state;
+  return phasedState(state);
 }
 
 export interface SafeParser {
@@ -60,7 +93,10 @@ export interface SafeParser {
 /** A state as the runtime holds it (unknown-typed, bivariant methods). */
 export interface StepStateDef {
   readonly local?: SafeParser;
+  /** Set (by `kit.in(path).state()`) when the state declares an enter input: it can only be a goto target. */
+  readonly input?: unknown;
   enter?(shared: unknown, input: unknown, ctx: unknown): unknown;
+  exit?(shared: unknown, ctx: unknown): unknown;
   readonly messages?: Record<
     string,
     {
@@ -73,34 +109,118 @@ export interface StepStateDef {
     string,
     { readonly schema: SafeParser; handler(state: unknown, payload: unknown, ctx: unknown): unknown }
   >;
+  readonly initial?: string;
+  readonly states?: Record<string, StepStateDef>;
 }
 
-/** A local, parsed by the phase's schema (a phase without one has a null local). */
-export function parseLocal(phase: string, def: StepStateDef, local: unknown): unknown {
+/** A path as a dotted name, for messages and timer keys (`playing.window`). */
+export function dotted(path: readonly string[]): string {
+  return path.join(".");
+}
+
+/** A goto target or `in()` argument as a path. */
+export function pathOf(target: PathInput): string[] {
+  return typeof target === "string" ? [target] : [...target];
+}
+
+/** A local, parsed by the level's schema (a level without one has a null local). */
+export function parseLocal(path: readonly string[], def: StepStateDef, local: unknown): unknown {
   if (def.local === undefined) return null;
   const parsed = def.local.safeParse(local);
   if (!parsed.success) {
-    throw new ActorKitError("invalid_local", `State "${phase}": invalid local: ${parsed.error.message}`);
+    throw new ActorKitError("invalid_local", `State "${dotted(path)}": invalid local: ${parsed.error.message}`);
   }
   return parsed.data;
 }
 
-/** The declared state for a phase. */
-export function stateDef<D>(states: Readonly<Record<string, D>>, phase: string): D {
-  const def = states[phase];
-  if (def === undefined) {
-    throw new ActorKitError(
-      "undeclared_state",
-      `State "${phase}" is not declared on this actor. Declare it in setup({ states }) and in the actor's states.`,
-    );
+/** The declared states along a path, root first. */
+export function levelsOf<D extends { readonly states?: Record<string, D> }>(
+  states: Readonly<Record<string, D>>,
+  path: readonly string[],
+): D[] {
+  const levels: D[] = [];
+  let children: Readonly<Record<string, D>> | undefined = states;
+  for (const name of path) {
+    const def: D | undefined = children?.[name];
+    if (def === undefined) {
+      throw new ActorKitError(
+        "undeclared_state",
+        `State "${dotted(path)}" is not declared on this actor. Declare it in setup({ states }) and in the actor's states.`,
+      );
+    }
+    levels.push(def);
+    children = def.states;
   }
+  return levels;
+}
+
+/** The declared state at a path. */
+export function stateDef<D extends { readonly states?: Record<string, D> }>(
+  states: Readonly<Record<string, D>>,
+  path: PathInput,
+): D {
+  const levels = levelsOf(states, pathOf(path));
+  const def = levels.at(-1);
+  if (def === undefined) throw new ActorKitError("undeclared_state", "A state path needs at least one name.");
   return def;
 }
 
+/** The `initial` child of a state with child states. */
+export function initialChild(def: StepStateDef, path: readonly string[]): string {
+  if (def.initial === undefined) {
+    throw new ActorKitError(
+      "missing_initial",
+      `State "${dotted(path)}" has child states and needs \`initial\`: add initial: "<child>" to it.`,
+    );
+  }
+  return def.initial;
+}
+
 /**
- * The states that declare the message, in declaration order. Asked once the current state and the
- * roles have not: any means the message was sent in the wrong phase.
+ * The local a handler at a level sees: the levels' locals spread root first (inner keys win), null
+ * levels skipped. A single non-null local is passed as it is; none gives null.
  */
-export function statesDeclaring(states: Record<string, StepStateDef>, name: string): string[] {
-  return Object.entries(states).flatMap(([phase, def]) => (def.messages?.[name] === undefined ? [] : [phase]));
+export function mergeLocals(locals: readonly unknown[]): unknown {
+  const present = locals.filter((local) => local !== null);
+  if (present.length < 2) return present[0] ?? null;
+  // Every one is non-null here: an object that is not an array can be spread.
+  if (!present.every((local) => typeof local === "object" && !Array.isArray(local))) {
+    throw new ActorKitError(
+      "invalid_local",
+      "Nested states merge their locals, so each local on a path must be an object (declare it with z.object).",
+    );
+  }
+  return Object.assign({}, ...present);
+}
+
+/**
+ * The states that declare the message, as dotted paths in declaration order (depth first). Asked once
+ * the active path and the roles have not: any means the message was sent in the wrong state.
+ */
+export function statesDeclaring(states: Record<string, StepStateDef>, name: string, prefix: string[] = []): string[] {
+  return Object.entries(states).flatMap(([key, def]) => {
+    const path = [...prefix, key];
+    const here = def.messages?.[name] === undefined ? [] : [dotted(path)];
+    return def.states === undefined ? here : [...here, ...statesDeclaring(def.states, name, path)];
+  });
+}
+
+/** The innermost level on the path that has `pick`, with its depth (1-based); undefined when none does. */
+export function innermost<D extends { readonly states?: Record<string, D> }, T>(
+  states: Readonly<Record<string, D>>,
+  path: readonly string[],
+  pick: (def: D) => T | undefined,
+): { readonly found: T; readonly depth: number } | undefined {
+  for (const [i, level] of [...levelsOf(states, path).entries()].reverse()) {
+    const found = pick(level);
+    if (found !== undefined) return { found, depth: i + 1 };
+  }
+  return undefined;
+}
+
+/** The longest common prefix of the active path and a goto target, kept by the goto: at most target.length - 1. */
+export function keptDepth(active: readonly string[], target: readonly string[]): number {
+  let depth = 0;
+  while (depth < target.length - 1 && active[depth] === target[depth]) depth++;
+  return depth;
 }

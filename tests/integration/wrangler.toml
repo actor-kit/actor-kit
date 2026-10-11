@@ -278,3 +278,12 @@ class_name = "CashierActor"
 [[migrations]]
 tag = "v23"
 new_sqlite_classes = ["CashierActor"]
+
+# Hierarchical states (ADR-019 A)
+[[durable_objects.bindings]]
+name = "ROUNDS"
+class_name = "RoundsActor"
+
+[[migrations]]
+tag = "v24"
+new_sqlite_classes = ["RoundsActor"]

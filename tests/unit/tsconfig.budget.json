@@ -1,0 +1,5 @@
+{
+  "//": "Compile-time budget (ADR-019 A): the state-tree type fixtures, measured by `pnpm typecheck:budget` (scripts/type-budget.mts).",
+  "extends": "./tsconfig.types.json",
+  "include": ["./nested-states.types.test.ts", "./contract-messages-states.types.test.ts", "./test-actor-step.types.test.ts"]
+}
