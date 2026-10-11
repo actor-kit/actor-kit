@@ -31,6 +31,7 @@ import {
 import { DOQB } from "workers-qb";
 import { z } from "zod";
 import type { LifecycleEvent } from "./define";
+import type { ContractSnapshot, ContractViewResult, InspectedState, RpcJournalPage, RpcRefusal } from "./rpc-types";
 import { hasActorDefShape } from "./runtime/actor-def";
 import {
   type AttemptResult,
@@ -2997,16 +2998,14 @@ export interface TypedActorClass<TContract> {
       event: ContractMessages<TContract>,
       /** Set by a forward: ctx.delivery (ADR-016 §1) and the flow it continues (ADR-017 §4). */
       meta?: MessageMeta | DeliveryInfo | Trace,
-    ): Promise<{ ok: true } | Refusal>;
-    getSnapshot(
-      caller: string,
-      callerType: "user" | "service",
-    ): Promise<{ checksum: string; snapshot: unknown; role: string }>;
+    ): Promise<{ ok: true } | RpcRefusal>;
+    /** The caller's role and its view (one member per role: `role` narrows `snapshot`). */
+    getSnapshot(caller: string, callerType: "user" | "service"): Promise<ContractSnapshot<TContract>>;
     fetch(request: Request): Promise<Response>;
     __inspect(opts?: { viewer?: "human" | "agent" }): Promise<{
       /** false when no actor has ever been persisted under this ID (studio lookups never create one). */
       initialized: boolean;
-      state: unknown;
+      state: InspectedState<TContract>;
       version: number;
       actorId: string | null;
       connections: LiveConnection[];
@@ -3057,7 +3056,7 @@ export interface TypedActorClass<TContract> {
       }>;
       hasMore: boolean;
     }>;
-    __journal(opts?: JournalOptions): Promise<JournalPage>;
+    __journal(opts?: JournalOptions): Promise<RpcJournalPage>;
     __redrive(opts: { effectId: string }): Promise<{ ok: true } | { ok: false; error: string }>;
     __fireTimer(opts: { key: string }): Promise<{ ok: true } | { ok: false; error: string }>;
     __restore(opts: { toSeq: number }): Promise<{ ok: true } | { ok: false; error: string }>;
@@ -3066,10 +3065,7 @@ export interface TypedActorClass<TContract> {
       caller?: string;
       callerType?: "user" | "service";
       viewer?: "human" | "agent";
-    }): Promise<
-      | { type: "studio.view"; role: string; caller: string | null; error: string }
-      | { type: "studio.view"; role: string; caller: string | null; callerRole: string | null; data: unknown }
-    >;
+    }): Promise<ContractViewResult<TContract>>;
   };
 }
 

@@ -192,7 +192,7 @@ Services are durable — the outbox persists the service name and input atomical
 
 Use Cloudflare's native typed DO bindings inside your Worker's `fetch` handler (not inside an actor) when you need to interact with actors from request-handling code — spawning, sending messages, or reading snapshots.
 
-Run `npx wrangler types` to generate typed bindings for your `Env`. This gives you `DurableObjectNamespace<ZoneActor>` on `env.ZONE`, with full type safety for `spawn()`, `send()`, and `getSnapshot()`.
+Run `npx wrangler types` to generate typed bindings for your `Env`. This gives you `DurableObjectNamespace<ZoneActor>` on `env.ZONE`, with full type safety for `spawn()`, `send()`, and `getSnapshot()` (its `snapshot` is the caller's role's view: check `role` to narrow it).
 
 ```typescript
 import type { ZoneActor } from "./zone";

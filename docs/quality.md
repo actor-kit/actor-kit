@@ -218,6 +218,7 @@ Migrations renumbered: `0020_publish_position`, `0021_journal_archive`.
 | 15. State-path helpers in core (`core/src/state-paths.ts` whole: `matches`, `localOf`, `mergeLocals`, moved from the worker, which re-exports them) | 38 | **100% (38/38)** | none | core 7.0, runtime 7.0, worker (`crap:worker`) 7.6; 0 ≥ 8 |
 | 16. Docs: client code's own zod import, `zod/mini` | n/a | docs only (bundle sizes measured with esbuild: 453 KB classic, 13 KB mini) | — | unchanged |
 | 17. `0.3.0-next.0` versions, `scripts/vendor.sh` / `scripts/vendor.mts` | n/a | no package source changed (Stryker mutates `packages/*/src`); the script is pinned by `tests/unit/vendor.test.ts` (versions, names, manifest rewrite, a real pack of all nine packages; file lists identical to `pnpm pack`) | — | unchanged |
+| 18. Typed Durable Object stub (`worker/src/rpc-types.ts`, `TypedActorClass` in `actor.ts`, `core/src/contract-types.ts`) | 0 | types only, no runtime code (nothing for Stryker to mutate); pinned by `typed-stub.types.test.ts` against Cloudflare's `DurableObjectNamespace` / RPC types (every result not `never`, role-narrowed views, the persisted state) | — | unchanged (no functions changed) |
 
 ## Equivalent mutants
 

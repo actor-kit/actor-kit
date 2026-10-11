@@ -16,6 +16,15 @@ export { message } from "./message";
 // Actor references
 export type { ActorRef, LocationHint } from "./ref";
 export { createRef } from "./ref";
+// What the Durable Object's RPC methods resolve to (Run Set Jimmy feedback 18)
+export type {
+  ContractSnapshot,
+  ContractViewResult,
+  InspectedState,
+  RpcJournalPage,
+  RpcRefusal,
+  ViewData,
+} from "./rpc-types";
 // Message helpers
 // Determinism in production (ADR-018 E): the `determinism` option and the error "throw" raises
 export type { DeterminismMode } from "./runtime/determinism";

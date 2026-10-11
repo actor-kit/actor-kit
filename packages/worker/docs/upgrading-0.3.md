@@ -445,6 +445,30 @@ enter: (s: S) => ctx.stay(s, { buys: [] }),
 enter: (s: S, _input, ctx) => ctx.stay(s, { ...ctx.local, windows: ctx.local.windows + 1, buys: [] }),
 ```
 
+## Type the Durable Object binding from the actor class
+
+New, from Run Set Jimmy feedback 18. A binding typed `DurableObjectNamespace<InstanceType<typeof RoomActor>>`
+typed `send`, but `getSnapshot()` resolved to `never` (Cloudflare's RPC types map `unknown` to `never`),
+so Workers wrote their stub's type by hand. Every RPC result is now typed from the contract; drop the
+hand-written stub:
+
+```ts
+// Before
+interface RoomStub {
+  getSnapshot(caller: string, callerType: "user" | "service"): Promise<{ checksum: string; snapshot: RoomView; role: string }>;
+  send(caller: string, callerType: "user" | "service", event: RoomEvent): Promise<{ ok: boolean }>;
+}
+const stub = env.ROOM.get(id) as unknown as RoomStub;
+
+// After
+interface Env { ROOM: DurableObjectNamespace<InstanceType<typeof RoomActor>> }
+const snap = await env.ROOM.get(id).getSnapshot(callerId, "user");
+if (snap.role === "host") snap.snapshot.secret; // role narrows the view
+```
+
+Code that read `__inspect().state` or `__getView().data` through such a binding now gets the contract's
+types instead of `never`; `RpcRefusal.details` and `__journal` causes are `JsonValue`.
+
 ## Service callbacks in actors with states run in a state (ADR-019 B)
 
 In an actor with states, `onDone`, `onError` and the new `onStale` run at the state that owns their call

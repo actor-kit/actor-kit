@@ -3618,7 +3618,7 @@ Services are durable — the outbox persists the service name and input atomical
 
 Use Cloudflare's native typed DO bindings inside your Worker's `fetch` handler (not inside an actor) when you need to interact with actors from request-handling code — spawning, sending messages, or reading snapshots.
 
-Run `npx wrangler types` to generate typed bindings for your `Env`. This gives you `DurableObjectNamespace<ZoneActor>` on `env.ZONE`, with full type safety for `spawn()`, `send()`, and `getSnapshot()`.
+Run `npx wrangler types` to generate typed bindings for your `Env`. This gives you `DurableObjectNamespace<ZoneActor>` on `env.ZONE`, with full type safety for `spawn()`, `send()`, and `getSnapshot()` (its `snapshot` is the caller's role's view: check `role` to narrow it).
 
 ```typescript
 import type { ZoneActor } from "./zone";
@@ -4655,6 +4655,28 @@ export const Counter = createActorClass(CounterContract);
 For flat messages, wraps them so every role has access — guards handle authorization.
 
 **Returns:** A class extending `DurableObject` with `spawn()`, `send()`, `getSnapshot()`, and `fetch()`.
+
+Type the Worker's binding from the class; do not write the stub's type by hand. Every RPC result is typed
+from the contract (Cloudflare's RPC types turn `unknown` into `never`, so none is left `unknown`):
+
+```typescript
+import type { TypedActorClass } from "@actor-kit/worker";
+
+type RoomActor = InstanceType<typeof Room>; // or InstanceType<TypedActorClass<typeof RoomContract>>
+interface Env { ROOM: DurableObjectNamespace<RoomActor> }
+
+const stub = env.ROOM.get(env.ROOM.idFromName(roomId));
+const snap = await stub.getSnapshot(callerId, "user");
+if (snap.role === "host") snap.snapshot.secret; // one member per role: role narrows the view
+const sent = await stub.send(callerId, "user", { type: "JOIN", name }); // { ok: true } | refusal
+```
+
+- `getSnapshot` resolves to `ContractSnapshot<typeof RoomContract>`: `{ checksum, role, snapshot }`, one
+  member per role with a view, `snapshot` typed by that view's schema.
+- `send` resolves to `{ ok: true }` or a refusal whose `details` is JSON; `__inspect().state` is the
+  persisted state (`ContractState`, with arrays where the state has tuples: RPC types turn tuples into
+  arrays); `__getView({ role })` is typed per role like `getSnapshot`; `__journal` entries carry JSON
+  causes and payloads.
 
 ### Definition fields
 
@@ -6189,6 +6211,30 @@ enter: (s: S) => ctx.stay(s, { buys: [] }),
 // After (unchanged when the local has only the window's keys)
 enter: (s: S, _input, ctx) => ctx.stay(s, { ...ctx.local, windows: ctx.local.windows + 1, buys: [] }),
 ```
+
+## Type the Durable Object binding from the actor class
+
+New, from Run Set Jimmy feedback 18. A binding typed `DurableObjectNamespace<InstanceType<typeof RoomActor>>`
+typed `send`, but `getSnapshot()` resolved to `never` (Cloudflare's RPC types map `unknown` to `never`),
+so Workers wrote their stub's type by hand. Every RPC result is now typed from the contract; drop the
+hand-written stub:
+
+```ts
+// Before
+interface RoomStub {
+  getSnapshot(caller: string, callerType: "user" | "service"): Promise<{ checksum: string; snapshot: RoomView; role: string }>;
+  send(caller: string, callerType: "user" | "service", event: RoomEvent): Promise<{ ok: boolean }>;
+}
+const stub = env.ROOM.get(id) as unknown as RoomStub;
+
+// After
+interface Env { ROOM: DurableObjectNamespace<InstanceType<typeof RoomActor>> }
+const snap = await env.ROOM.get(id).getSnapshot(callerId, "user");
+if (snap.role === "host") snap.snapshot.secret; // role narrows the view
+```
+
+Code that read `__inspect().state` or `__getView().data` through such a binding now gets the contract's
+types instead of `never`; `RpcRefusal.details` and `__journal` causes are `JsonValue`.
 
 ## Service callbacks in actors with states run in a state (ADR-019 B)
 

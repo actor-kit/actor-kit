@@ -2,6 +2,8 @@
 
 // Binary encoding
 export { decode, encode } from "./binary";
+// Contract-derived types (Run Set Jimmy feedback 18): the persisted state and the spawn input
+export type { ContractInput, ContractState, JsonValue } from "./contract-types";
 // Delta encoding
 export { applyDelta, encodeDelta } from "./delta";
 // Errors that teach (ADR-018 C)

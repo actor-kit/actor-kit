@@ -80,6 +80,28 @@ For flat messages, wraps them so every role has access — guards handle authori
 
 **Returns:** A class extending `DurableObject` with `spawn()`, `send()`, `getSnapshot()`, and `fetch()`.
 
+Type the Worker's binding from the class; do not write the stub's type by hand. Every RPC result is typed
+from the contract (Cloudflare's RPC types turn `unknown` into `never`, so none is left `unknown`):
+
+```typescript
+import type { TypedActorClass } from "@actor-kit/worker";
+
+type RoomActor = InstanceType<typeof Room>; // or InstanceType<TypedActorClass<typeof RoomContract>>
+interface Env { ROOM: DurableObjectNamespace<RoomActor> }
+
+const stub = env.ROOM.get(env.ROOM.idFromName(roomId));
+const snap = await stub.getSnapshot(callerId, "user");
+if (snap.role === "host") snap.snapshot.secret; // one member per role: role narrows the view
+const sent = await stub.send(callerId, "user", { type: "JOIN", name }); // { ok: true } | refusal
+```
+
+- `getSnapshot` resolves to `ContractSnapshot<typeof RoomContract>`: `{ checksum, role, snapshot }`, one
+  member per role with a view, `snapshot` typed by that view's schema.
+- `send` resolves to `{ ok: true }` or a refusal whose `details` is JSON; `__inspect().state` is the
+  persisted state (`ContractState`, with arrays where the state has tuples: RPC types turn tuples into
+  arrays); `__getView({ role })` is typed per role like `getSnapshot`; `__journal` entries carry JSON
+  causes and payloads.
+
 ### Definition fields
 
 | Field | Required | Description |
