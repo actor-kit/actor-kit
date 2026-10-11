@@ -99,7 +99,7 @@ export const ERROR_CODES = {
   },
   undeclared_event: {
     title: "`ctx.emit` named an event the actor does not declare.",
-    fix: "Declare the event in `setup({ events })` (and pass the kit's events to the actor).",
+    fix: "Declare the event in `setup({ events })` and define the actor with `kit.actor(...)`.",
   },
   invalid_event_payload: {
     title: "An emitted event's payload does not match its schema.",

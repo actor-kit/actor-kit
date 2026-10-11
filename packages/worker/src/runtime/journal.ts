@@ -604,7 +604,7 @@ async function replayEvent(
   options: FoldOptions,
 ): Promise<{ state: unknown; timerOps: TimerOp[]; emitted: readonly EmittedEvent[] }> {
   const env = options.env ?? {};
-  const facts = replayStepFacts(event.facts, options.guard);
+  const facts = replayStepFacts(event.facts, options.guard, event.seq);
   if (event.causeType === "init") {
     required(def.init, "init");
     const io = { env, link: async (name: string, id: string) => facts.takeLinkView(name, id) };

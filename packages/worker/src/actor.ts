@@ -71,6 +71,7 @@ import {
 import { forwardMeta, type MessageMeta, parseMessageMeta, TraceSchema } from "./runtime/message-meta";
 import { ACTOR_KIT_MIGRATIONS } from "./runtime/migrations";
 import {
+  cancelExecutionRows,
   cancelUndoneEffects,
   type DueForward,
   dueExecutions,
@@ -78,6 +79,7 @@ import {
   finishAttempt,
   insertExecutions,
   insertForwards,
+  interruptedExecutions,
   isRunning,
   nextRetryAt,
   outboxFailedEvent,
@@ -96,14 +98,19 @@ import {
   linkRetryPolicies,
   linkRetryRules,
   type RetryPolicy,
-  resolveRetryPolicy,
-  resolveRetryRule,
   type SettledTry,
   settleTry,
   type TryOutcome,
 } from "./runtime/retry";
 import { resolveRole } from "./runtime/roles";
 import { classifyFailure, type ErrorsParser, isBuiltInError, type TaggedError } from "./runtime/service-error";
+import {
+  parsedOutcome,
+  resolveServiceOptions,
+  type ServiceOptions,
+  serviceAttemptEvent,
+  settleInterrupted,
+} from "./runtime/service-options";
 import { admitStepMessage, liveStepFacts, type StepCause, type StepResult, step, stepInit } from "./runtime/step";
 import {
   type CallerHasher,
@@ -245,6 +252,12 @@ interface ActorDef {
       errors?: ErrorsParser;
       /** Tries, backoff and `while` (ADR-015 D1, ADR-016 §2). Default: 3 tries, 1s then 5s apart, ±20% jitter. */
       retry?: unknown;
+      /** Parses fn's return (ADR-018 G); only the parsed value is journaled and passed to onDone. */
+      result?: unknown;
+      /** Largest result accepted, as JSON bytes (default 128 KiB). */
+      maxResultBytes?: unknown;
+      /** `"at-least-once"` (default) or `"at-most-once"` (ADR-018 G). */
+      delivery?: unknown;
       onDone?(state: unknown, result: unknown, input: unknown, ctx: DeterministicContext): unknown;
       /** `error`: a declared error, `{ _tag: "Timeout", ms }` or `{ _tag: "Defect", message }`. */
       onError?(state: unknown, error: unknown, input: unknown, ctx: DeterministicContext): unknown;
@@ -448,12 +461,17 @@ export function actor(
   // Validate studio config at definition time, not on the first mutation.
   const studioRedactor = compileRedaction(def.studio?.redact);
   const journalConfig = resolveJournalConfig(def.journal);
-  const retryPolicies = new Map<string, RetryPolicy>(
-    Object.entries(def.services ?? {}).map(([name, service]) => [name, resolveRetryPolicy(service.retry)]),
+  // Delivery mode, result schema and size limit, retries (ADR-016, ADR-018 G), validated at definition time.
+  const serviceOptions = new Map<string, ServiceOptions>(
+    Object.entries(def.services ?? {}).map(([name, service]) => [name, resolveServiceOptions(name, service)]),
   );
+  const retryPolicies = new Map<string, RetryPolicy>([...serviceOptions].map(([name, o]) => [name, o.policy]));
   const retryRules = new Map<string, (error: TaggedError) => boolean>(
-    Object.entries(def.services ?? {}).map(([name, service]) => [name, resolveRetryRule(service.retry)]),
+    [...serviceOptions].map(([name, o]) => [name, o.rule]),
   );
+  /** A row's options: its service's, or the defaults (the publish service). */
+  const optionsFor = (service: string): ServiceOptions =>
+    serviceOptions.get(service) ?? resolveServiceOptions(service, {});
   const forwardPolicies = linkRetryPolicies(def.links);
   const forwardRules = linkRetryRules(def.links);
   // Time limits per try (ADR-016 §3), validated at definition time.
@@ -628,7 +646,9 @@ export function actor(
 
     /** After a load: resume interrupted effects and links. */
     resumeAfterLoad(): void {
-      // Drain any pending executions from before crash/restart; tries cut off mid-flight run again.
+      // Tries cut off by an eviction (ADR-018 G): an at-least-once try counts as an Evicted attempt, an
+      // at-most-once try becomes an OutcomeUnknown dead letter. Then drain what is due.
+      this.settleInterruptedExecutions();
       requeueInterrupted(this.ctx.storage.sql);
       this.drainExecutions();
 
@@ -638,6 +658,26 @@ export function actor(
       // Re-register active link subscriptions
       if (def.links) {
         this.reRegisterLinks();
+      }
+    }
+
+    /** Rows a try was running for when the actor stopped: settle each as its delivery mode says. */
+    settleInterruptedExecutions(): void {
+      const sql = this.ctx.storage.sql;
+      for (const row of interruptedExecutions(sql)) {
+        const settled = settleInterrupted(row, optionsFor(row.service), Date.now(), Math.random);
+        finishAttempt(sql, row.id, settled.settlement, settled.lastError, "executions", settled.lastErrorTag);
+        if (settled.settlement.status === "retrying") {
+          this.syncAlarm();
+          continue;
+        }
+        if (settled.onError === null) {
+          this.logDeadLetter("execution", row.id, row.service, row.attempts, settled.lastError, settled.lastErrorTag);
+          continue;
+        }
+        // The row is already settled; endExecution logs the dead letter and runs onError with Evicted.
+        const outcome: TryOutcome = { ok: false, error: settled.onError };
+        this.endExecution(row, row.attempts, outcome, { ...settled, settlement: { status: "failed" } }, () => {}, {});
       }
     }
 
@@ -958,7 +998,7 @@ export function actor(
 
       const attempt = startAttempt(sql, entry.id);
       this.pushStudioOutbox();
-      const outcome = await this.tryExecution(entry, serviceDef, attempt);
+      const { outcome, audit } = await this.tryExecution(entry, serviceDef, attempt);
 
       // Aborted (a restore undid its transition, or a redrive replaced it): discard the result, settle nothing.
       if ("aborted" in outcome || !isRunning(sql, entry.id)) {
@@ -976,7 +1016,7 @@ export function actor(
         settle();
         this.syncAlarm();
       } else {
-        this.endExecution(entry, attempt, outcome, settled, settle);
+        this.endExecution(entry, attempt, outcome, settled, settle, audit);
       }
       this.pushStudioOutbox();
     }
@@ -986,18 +1026,25 @@ export function actor(
       entry: { id: string; service: string; input: unknown },
       serviceDef: { fn(input: unknown, env: unknown, effect: EffectInfo): unknown; errors?: ErrorsParser | undefined },
       attempt: number,
-    ): Promise<AttemptResult> {
+    ): Promise<{ outcome: AttemptResult; audit: Record<string, unknown> }> {
       const controller = new AbortController();
       this.inFlight.start("executions", entry.id, controller);
       const fields = { actorType: _actorName, actorId: this.subscriberId(), effectId: entry.id, attempt };
       const ms = serviceTimeouts.get(entry.service) ?? DEFAULT_TIMEOUT_MS;
-      const outcome = await runAttempt(
-        (signal) => tryService(serviceDef, entry.input, this.handlerEnv, effectInfo({ ...fields, signal })),
+      const audit: Record<string, unknown> = {};
+      const started = Date.now();
+      const tried = await runAttempt(
+        (signal) => tryService(serviceDef, entry.input, this.handlerEnv, effectInfo({ ...fields, signal, audit })),
         ms,
         controller,
       );
       this.inFlight.finish("executions", entry.id, controller);
-      return outcome;
+      const outcome = parsedOutcome(entry.service, optionsFor(entry.service), tried);
+      if (!("aborted" in outcome)) {
+        const durationMs = Date.now() - started;
+        console.log(JSON.stringify(serviceAttemptEvent({ ...fields, service: entry.service, durationMs, outcome })));
+      }
+      return { outcome, audit };
     }
 
     /** The try that ends a row: log a dead letter, then run onDone/onError with the final status. */
@@ -1007,12 +1054,13 @@ export function actor(
       outcome: TryOutcome,
       settled: SettledTry,
       settle: () => void,
+      audit: Readonly<Record<string, unknown>>,
     ): void {
       if (settled.lastError !== null) {
         this.logDeadLetter("execution", entry.id, entry.service, attempt, settled.lastError, settled.lastErrorTag);
       }
       try {
-        this.settleExecution(entry.service, entry.id, entry.input, outcome, settle);
+        this.settleExecution(entry.service, entry.id, entry.input, outcome, settle, audit);
       } catch (error) {
         // onDone/onError threw, or its transition could not be persisted: nothing was written.
         // The row ends as a dead letter carrying the reason, instead of staying `running`.
@@ -1023,10 +1071,19 @@ export function actor(
     }
 
     /** Run onDone/onError for a try that ended the row, committing it with the row's final status. */
-    settleExecution(service: string, effectId: string, input: unknown, outcome: TryOutcome, settle: () => void): void {
+    settleExecution(
+      service: string,
+      effectId: string,
+      input: unknown,
+      outcome: TryOutcome,
+      settle: () => void,
+      audit: Readonly<Record<string, unknown>> = {},
+    ): void {
+      // effect.record() facts (ADR-018 G) ride on the result entry; replay never reads them.
+      const recorded = Object.keys(audit).length === 0 ? {} : { audit };
       const cause: StepCause = outcome.ok
-        ? { type: "service.onDone", service, input, result: outcome.result, effectId }
-        : { type: "service.onError", service, input, error: { ...outcome.error }, effectId };
+        ? { type: "service.onDone", service, input, result: outcome.result, effectId, ...recorded }
+        : { type: "service.onError", service, input, error: { ...outcome.error }, effectId, ...recorded };
       const result = this.runStep({ ...cause, trace: this.effectTrace(effectId) });
       if (result.state === this.state) {
         settle();
@@ -1073,7 +1130,9 @@ export function actor(
     runStep(cause: StepCause, now?: number): StepResult {
       const live = createLiveFacts(now === undefined ? undefined : clockedSources(now));
       const facts = liveStepFacts(live, (name) => this.readLinkTargets(name));
-      return step(def, this.state, cause, facts, this.handlerEnv);
+      // The seq commit() will give this transition, so ctx.execute() returns its effect ids (ADR-018 G).
+      const seq = nextTransitionSeq(this.ctx.storage.sql);
+      return step(def, this.state, cause, { ...facts, seq }, this.handlerEnv);
     }
 
     /** The snapshot (at this code version) is behind the journal's last seq. */
@@ -1320,6 +1379,14 @@ export function actor(
       if (timerOps.length > 0) {
         applyTimerOps(this.ctx.storage.sql, timerOps, Date.now());
         this.timersChanged = true;
+      }
+      this.cancelExecutions(timerOps.flatMap((op) => (op.op === "cancel" ? [op.key] : [])));
+    }
+
+    /** ctx.cancel(effectId) (ADR-018 G): calls not yet finished end as cancelled; a try in flight is aborted. */
+    cancelExecutions(effectIds: readonly string[]): void {
+      for (const effectId of cancelExecutionRows(this.ctx.storage.sql, effectIds)) {
+        this.inFlight.abort("executions", effectId, "cancelled");
       }
     }
 

@@ -130,12 +130,14 @@ export type {
   OutboxRow,
 } from "./runtime/outbox-store";
 export {
+  cancelExecutionRows,
   cancelUndoneEffects,
   dueExecutions,
   dueForwards,
   finishAttempt,
   insertExecutions,
   insertForwards,
+  interruptedExecutions,
   isRunning,
   nextRetryAt,
   outboxFailedEvent,
@@ -201,6 +203,22 @@ export {
   ServiceFailure,
   timeoutError,
 } from "./runtime/service-error";
+// Service options (ADR-018 G): delivery modes, result schemas, interrupted tries, attempt log lines
+export type {
+  Delivery,
+  InterruptedSettlement,
+  ResultParser,
+  ServiceAttemptEvent,
+  ServiceOptions,
+} from "./runtime/service-options";
+export {
+  DEFAULT_MAX_RESULT_BYTES,
+  parsedOutcome,
+  parseServiceResult,
+  resolveServiceOptions,
+  serviceAttemptEvent,
+  settleInterrupted,
+} from "./runtime/service-options";
 // Step core (ADR-015 D4): one transition as a pure function
 export type {
   Admission,

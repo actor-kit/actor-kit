@@ -80,7 +80,8 @@ export type TimerOp =
 // --- Outbox collector (used during a transition) ---
 
 interface OutboxCollector {
-  execute(service: string, input: unknown): void;
+  /** Record a service call; returns its effect id (`seq:index` of the transition being stepped). */
+  execute(service: string, input: unknown): string;
   link(name: string, id: string): void;
   unlink(name: string, id?: string): void;
   forward(linkName: string, targetId: string, message: { type: string; [key: string]: unknown }): void;
@@ -121,7 +122,8 @@ export interface EmittedEffect {
   readonly index: number;
 }
 
-export function createOutbox(): OutboxCollector {
+/** `seq`: the transition being stepped (0 outside a runtime), so execute() can return effect ids. */
+export function createOutbox(seq = 0): OutboxCollector {
   const executions: Array<Execution & { readonly index: number }> = [];
   const links: LinkCall[] = [];
   const unlinks: UnlinkCall[] = [];
@@ -143,8 +145,10 @@ export function createOutbox(): OutboxCollector {
       return [...emitted];
     },
 
-    execute(service: string, input: unknown): void {
-      executions.push({ service, input, index: effects++ });
+    execute(service: string, input: unknown): string {
+      const index = effects++;
+      executions.push({ service, input, index });
+      return formatEffectId(seq, index);
     },
 
     link(name: string, id: string): void {

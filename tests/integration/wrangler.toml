@@ -269,3 +269,12 @@ class_name = "Reader"
 [[migrations]]
 tag = "v22"
 new_sqlite_classes = ["Notice", "NoticeNoJournal", "Reader"]
+
+# Service handles, result schemas and delivery modes (ADR-018 G)
+[[durable_objects.bindings]]
+name = "CASHIER"
+class_name = "CashierActor"
+
+[[migrations]]
+tag = "v23"
+new_sqlite_classes = ["CashierActor"]

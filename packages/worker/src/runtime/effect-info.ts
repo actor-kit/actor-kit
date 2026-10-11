@@ -15,8 +15,13 @@ import { z } from "zod";
 export type { DeliveryInfo };
 
 export interface EffectInfo extends DeliveryInfo {
-  /** Aborted when the try times out, or when a redrive, restore or shutdown cancels it (ADR-016 §3). */
+  /** Aborted when the try times out, or when a redrive, restore, shutdown or ctx.cancel() cancels it (ADR-016 §3, ADR-018 G). */
   readonly signal: AbortSignal;
+  /**
+   * Attach an audit fact to this try's result entry in the journal (ADR-018 G), e.g. the gateway's charge
+   * id. Redactable in Studio like any journal payload; replay ignores it.
+   */
+  record(name: string, value: unknown): void;
 }
 
 export function idempotencyKey(actorType: string, actorId: string, effectId: string): string {
@@ -37,9 +42,18 @@ export function deliveryInfo(fields: EffectFields): DeliveryInfo {
   return { actorType, actorId, effectId, idempotencyKey: idempotencyKey(actorType, actorId, effectId), attempt };
 }
 
-/** A service try's third argument. */
-export function effectInfo(fields: EffectFields & { readonly signal: AbortSignal }): EffectInfo {
-  return { ...deliveryInfo(fields), signal: fields.signal };
+/** A service try's third argument. `audit` collects what the try records with effect.record(). */
+export function effectInfo(
+  fields: EffectFields & { readonly signal: AbortSignal; readonly audit: Record<string, unknown> },
+): EffectInfo {
+  const { audit } = fields;
+  return {
+    ...deliveryInfo(fields),
+    signal: fields.signal,
+    record: (name, value) => {
+      audit[name] = value;
+    },
+  };
 }
 
 /** A forward's metadata as its target receives it over RPC (parsed at that boundary). */

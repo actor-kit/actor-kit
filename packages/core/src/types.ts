@@ -16,8 +16,11 @@ export interface Execution {
   readonly input: unknown;
 }
 
-/** execute() triggers a named service with a typed input. */
-export type ExecuteFn = (service: string, input: unknown) => void;
+/**
+ * execute() triggers a named service with a typed input. It returns the call's effect id (`seq:index`,
+ * ADR-018 G): keep it to `cancel(effectId)` the call, or to match it in onDone/onError (`ctx.effectId`).
+ */
+export type ExecuteFn = (service: string, input: unknown) => string;
 
 // --- Message context ---
 
@@ -75,8 +78,12 @@ export interface ScheduleOptions {
 /** schedule() starts a durable timer declared in the actor's `timers` block. */
 export type ScheduleFn = (timer: string, options: ScheduleOptions) => void;
 
-/** cancel() removes a pending timer by key. Cancelling a key that is not pending does nothing. */
-export type CancelFn = (key: string) => void;
+/**
+ * cancel() removes a pending timer by key, or cancels a service call by the effect id execute() returned
+ * (ADR-018 G): a call not yet run never runs, one in flight is aborted (its AbortSignal) and its late
+ * result is discarded. Cancelling a key or id that is not pending does nothing.
+ */
+export type CancelFn = (keyOrEffectId: string) => void;
 
 /**
  * The effect that delivered a forwarded message (ADR-016 §1): the sending actor, the forward's effect id,

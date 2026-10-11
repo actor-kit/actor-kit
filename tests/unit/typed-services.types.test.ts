@@ -44,6 +44,7 @@ describe("typed service errors", () => {
             if (error._tag === "CardDeclined") return { ...state, last: error.reason };
             if (error._tag === "RateLimited") return { ...state, n: error.retryAfterMs };
             if (error._tag === "Timeout") return { ...state, n: error.ms };
+            if (error._tag === "Evicted") return state;
             return { ...state, last: error.message };
           },
         },

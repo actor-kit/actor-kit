@@ -21,7 +21,14 @@ describe("idempotencyKey", () => {
 describe("effectInfo", () => {
   it("carries the actor, the effect id, its idempotency key, the try number and the signal", () => {
     const signal = new AbortController().signal;
-    const info = effectInfo({ actorType: "checkout", actorId: "room-7", effectId: "3:1", attempt: 2, signal });
+    const info = effectInfo({
+      actorType: "checkout",
+      actorId: "room-7",
+      effectId: "3:1",
+      attempt: 2,
+      signal,
+      audit: {},
+    });
     expect(info).toEqual({
       actorType: "checkout",
       actorId: "room-7",
@@ -29,6 +36,7 @@ describe("effectInfo", () => {
       idempotencyKey: "checkout/room-7/3:1",
       attempt: 2,
       signal,
+      record: expect.any(Function),
     });
     expect(info.signal).toBe(signal);
   });

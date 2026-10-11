@@ -9,6 +9,7 @@ const STATUS_COLORS: Record<string, string> = {
   pending: "text-amber-400",
   running: "text-sky-400",
   retrying: "text-amber-300",
+  cancelled: "text-zinc-500",
 };
 
 function dueIn(at: number): string {

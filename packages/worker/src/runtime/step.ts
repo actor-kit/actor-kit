@@ -63,9 +63,9 @@ export interface StepDef {
     {
       /** Declared failures (ADR-016 §2); the step core passes errors through, simulate() parses rejections. */
       readonly errors?: ErrorsParser | undefined;
-      onDone?(state: unknown, result: unknown, input: unknown, ctx: DeterministicContext): unknown;
-      /** `error`: the typed service error (ADR-016 §2): a declared error, a Timeout or a Defect. */
-      onError?(state: unknown, error: unknown, input: unknown, ctx: DeterministicContext): unknown;
+      onDone?(state: unknown, result: unknown, input: unknown, ctx: ServiceCallbackCtx): unknown;
+      /** `error`: the typed service error (ADR-016 §2): a declared error, a Timeout, a Defect or Evicted. */
+      onError?(state: unknown, error: unknown, input: unknown, ctx: ServiceCallbackCtx): unknown;
     }
   >;
   links?: Record<
@@ -147,6 +147,8 @@ export type StepCause = Traced &
         readonly result: unknown;
         /** The execution's effect id (journaled, so restore can match results to effects). */
         readonly effectId?: string | undefined;
+        /** Audit facts the try recorded with effect.record() (ADR-018 G): journaled, never replayed. */
+        readonly audit?: Readonly<Record<string, unknown>> | undefined;
       }
     | {
         readonly type: "service.onError";
@@ -155,6 +157,7 @@ export type StepCause = Traced &
         readonly effectId?: string | undefined;
         /** The parsed service error (ADR-016 §2), journaled as it is so replay delivers the same value. */
         readonly error: ServiceErrorValue;
+        readonly audit?: Readonly<Record<string, unknown>> | undefined;
       }
     | { readonly type: "link.onUpdate"; readonly link: string; readonly sourceId: string; readonly view: unknown }
     | {
@@ -202,6 +205,8 @@ export interface StepFacts {
    * runtime passes nothing, so handlers run as they are.
    */
   readonly guard?: (<T>(handler: () => T) => T) | undefined;
+  /** The seq the transition will be committed under (0 outside a runtime): ctx.execute returns `seq:index`. */
+  readonly seq?: number | undefined;
 }
 
 /** Call a handler through the facts' guard, if any. */
@@ -238,10 +243,12 @@ export function liveStepFacts(live: LiveFacts, read: (name: string) => string[])
 export function replayStepFacts(
   facts: Facts,
   guard?: <T>(handler: () => T) => T,
+  seq?: number,
 ): StepFacts & { takeLinkView(name: string, id: string): unknown } {
   const replay = createReplayFacts(facts);
   return {
     guard,
+    seq,
     ctx: replay.ctx,
     unlinkTargets: (name) => replay.takeUnlinked(name),
     recorded: () => facts,
@@ -385,7 +392,7 @@ function emitVerb(def: StepDef, effects: StepEffects): (name: string, payload: u
     if (schema === undefined) {
       throw new ActorKitError(
         "undeclared_event",
-        `Event "${name}" is not declared on this actor. Declare it in setup({ events }) and pass the kit's events to the actor.`,
+        `Event "${name}" is not declared on this actor. Declare it in setup({ events }) and define the actor with kit.actor().`,
       );
     }
     const parsed = schema.safeParse(payload);
@@ -565,7 +572,7 @@ function stepMessage(
       `Message "${cause.name}" is not defined for role "${cause.role}". Add it to the role's messages (or a versions step for a removed message).`,
     );
   }
-  const effects = createOutbox();
+  const effects = createOutbox(facts.seq);
   const base = {
     ...facts.ctx,
     caller: cause.caller,
@@ -618,7 +625,7 @@ function stepLifecycle(
 ): StepResult {
   const which = cause.type === "lifecycle.connect" ? "connect" : "disconnect";
   const handler = def.lifecycle?.[which];
-  const effects = createOutbox();
+  const effects = createOutbox(facts.seq);
   const who = { caller: cause.caller, callerType: cause.callerType };
   const event = cause.callerConnections === undefined ? who : { ...who, callerConnections: cause.callerConnections };
   const next =
@@ -657,19 +664,33 @@ type On<K extends CallbackCause["type"]> = Extract<CallbackCause, { type: K }>;
 
 // Transitions without a caller: service results, link callbacks, migration. A missing handler is a no-op.
 
-function withEffectId<P extends object>(payload: P, effectId: string | undefined): P | (P & { effectId: string }) {
-  return effectId === undefined ? payload : { ...payload, effectId };
+/** A service result's journal payload: the effect id and the try's audit facts, when there are any. */
+function resultPayload<P extends object>(
+  payload: P,
+  cause: { readonly effectId?: string | undefined; readonly audit?: Readonly<Record<string, unknown>> | undefined },
+): P | (P & { effectId: string }) | (P & { effectId?: string; audit: Readonly<Record<string, unknown>> }) {
+  const withId = cause.effectId === undefined ? payload : { ...payload, effectId: cause.effectId };
+  return cause.audit === undefined ? withId : { ...withId, audit: cause.audit };
 }
 
-/** What onDone / onError get as ctx: now/id/random and the actor's env (ADR-016 §4). */
-type ServiceCallbackCtx = DeterministicContext & { readonly env: unknown };
+/** What onDone / onError get as ctx: now/id/random, the actor's env (ADR-016 §4) and the call's effect id (ADR-018 G). */
+type ServiceCallbackCtx = DeterministicContext & { readonly env: unknown; readonly effectId: string };
+
+/** onDone / onError's ctx; an entry journaled before effect ids has an empty one. */
+function callbackCtx(
+  det: DeterministicContext,
+  env: unknown,
+  cause: { readonly effectId?: string | undefined },
+): ServiceCallbackCtx {
+  return { ...det, env, effectId: cause.effectId ?? "" };
+}
 
 function serviceDone(def: StepDef, state: unknown, cause: On<"service.onDone">, det: ServiceCallbackCtx) {
   const onDone = def.services?.[cause.service]?.onDone;
   return {
     next: onDone === undefined ? state : onShared(def, state, (s) => onDone(s, cause.result, cause.input, det)),
     name: cause.service,
-    payload: withEffectId({ input: cause.input, result: cause.result }, cause.effectId),
+    payload: resultPayload({ input: cause.input, result: cause.result }, cause),
   };
 }
 
@@ -678,7 +699,7 @@ function serviceError(def: StepDef, state: unknown, cause: On<"service.onError">
   return {
     next: onError === undefined ? state : onShared(def, state, (s) => onError(s, cause.error, cause.input, det)),
     name: cause.service,
-    payload: withEffectId({ input: cause.input, error: cause.error }, cause.effectId),
+    payload: resultPayload({ input: cause.input, error: cause.error }, cause),
   };
 }
 
@@ -719,9 +740,9 @@ function runCallback(
 ): CallbackOutcome {
   switch (cause.type) {
     case "service.onDone":
-      return serviceDone(def, state, cause, { ...det, env });
+      return serviceDone(def, state, cause, callbackCtx(det, env, cause));
     case "service.onError":
-      return serviceError(def, state, cause, { ...det, env });
+      return serviceError(def, state, cause, callbackCtx(det, env, cause));
     case "link.onUpdate":
       return linkUpdate(def, state, cause, det);
     case "link.onError":
@@ -736,7 +757,7 @@ function stepCallback(def: StepDef, state: unknown, cause: CallbackCause, facts:
   return {
     state: next,
     handlerState: next,
-    effects: createOutbox(),
+    effects: createOutbox(facts.seq),
     event: draft({ causeType: cause.type, name, payload }, NOBODY, facts),
   };
 }
@@ -751,7 +772,7 @@ function stepTimer(
 ): StepResult {
   const phase = def.states === undefined ? null : phasedState(state).phase;
   const timer = findTimer(def, phase, cause.name);
-  const effects = createOutbox();
+  const effects = createOutbox(facts.seq);
   const base = {
     ...facts.ctx,
     env,

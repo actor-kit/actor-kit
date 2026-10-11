@@ -43,12 +43,14 @@ import {
   type PublishedBody,
   parseDuration,
   parseEffectId,
+  parseServiceResult,
   publishedMessages,
   refuseAdmission,
   refuseNoRole,
   resolveJournalConfig,
   resolvePublish,
   resolveRole,
+  resolveServiceOptions,
   type StepCause,
   type StepResult,
   step,
@@ -225,6 +227,7 @@ function isPlainRecord(value: unknown): value is Record<string, unknown> {
 const BuiltInErrorSchema = z.union([
   z.object({ _tag: z.literal("Timeout"), ms: z.number() }),
   z.object({ _tag: z.literal("Defect"), message: z.string() }),
+  z.object({ _tag: z.literal("Evicted") }),
 ]);
 
 /** A rejection as the service's onError receives it: parsed like the runtime parses a failed try. */
@@ -333,8 +336,8 @@ function createSimulation(
   function factsFor(actor: ActorData) {
     const live = createLiveFacts(sources);
     const facts = liveStepFacts(live, (name) => actor.links.filter((l) => l.name === name).map((l) => l.id));
-    // Every handler runs under the determinism guard (ADR-016 §5).
-    return { ...facts, guard: withDeterminismGuard };
+    // Every handler runs under the determinism guard (ADR-016 §5); execute() returns ids under the next seq.
+    return { ...facts, guard: withDeterminismGuard, seq: actor.seq + 1 };
   }
 
   // --- Commit: the simulated counterpart of actor.ts commit() + writeEffects() ---
@@ -477,6 +480,12 @@ function createSimulation(
     actor.timers.sort((a, b) => a.fireAt - b.fireAt);
   }
 
+  /** ctx.cancel(effectId) (ADR-018 G): the actor's calls with those ids leave pendingEffects, never to run. */
+  function cancelPending(actor: ActorData, result: StepResult): void {
+    const cancelled = new Set(result.effects.toTimerOps().flatMap((op) => (op.op === "cancel" ? [op.key] : [])));
+    data.pending = data.pending.filter((p) => !(keyOf(p.actor) === keyOf(actor) && cancelled.has(p.effectId)));
+  }
+
   /** Published events (ADR-017 §3) are delivered to their queue at once. */
   function publish(actor: ActorData, def: SimDef, result: StepResult): void {
     const config = publishOf(def);
@@ -503,6 +512,7 @@ function createSimulation(
     }
     const added = applyLinks(actor, def, result);
     applyTimers(actor, result);
+    cancelPending(actor, result);
     appendJournal(actor, def, result.event);
     for (const { name, payload } of result.event.emitted ?? []) {
       data.events.push({ actor: { type: actor.type, id: actor.id }, seq: actor.seq, name, payload });
@@ -633,6 +643,14 @@ function createSimulation(
     const traced = { ...settled, trace: effectTrace(actor, pending.effectId) };
     const result = step(defOf(actor.type), actor.state, traced, factsFor(actor), envFor(actor.type));
     if (result.state !== actor.state) commit(actor, result, null);
+  }
+
+  /** A resolved result as onDone gets it (ADR-018 G): parsed by the service's `result`, within its size limit. */
+  function resultOf(pending: PendingEffect, result: unknown): unknown {
+    const service = defOf(pending.actor.type).services?.[pending.service] ?? {};
+    const parsed = parseServiceResult(pending.service, resolveServiceOptions(pending.service, service), result);
+    if (!parsed.ok) throw new ActorKitError("invalid_result", `simulate: ${parsed.error.message}`);
+    return parsed.value;
   }
 
   function nextDueTimer(until: number): { actor: ActorData; timer: ActorData["timers"][number] } | null {
@@ -844,7 +862,7 @@ function createSimulation(
         type: "service.onDone",
         service: p.service,
         input: p.input,
-        result,
+        result: resultOf(p, result),
         effectId: p.effectId,
       })),
     reject: (effect, error) =>

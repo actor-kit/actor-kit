@@ -144,3 +144,48 @@ BID: message(z.object({ amount: z.number() }), (s, p, ctx) => { ctx.emit("BidPla
 const auction = setup({ events: { BidPlaced: z.object({ amount: z.number() }) } });
 BID: auction.message(z.object({ amount: z.number() }), (s: S, p, ctx) => { ctx.emit("BidPlaced", p); return s; }),
 ```
+
+## Service calls: handles, result limits, Evicted (ADR-018 G)
+
+**`onError` can receive `{ _tag: "Evicted" }`.** A try cut off by an eviction now counts as an attempt
+(it used to run again without counting). When it was the last attempt, `onError` runs with this new
+built-in error, so exhaustive checks over the error union need a branch for it.
+
+```ts
+// Before
+onError: (s, error) => (error._tag === "Timeout" ? retryLater(s) : giveUp(s, error.message)),
+
+// After
+onError: (s, error) =>
+  error._tag === "Timeout" || error._tag === "Evicted" ? retryLater(s) : giveUp(s, error._tag === "Defect" ? error.message : error._tag),
+```
+
+**A try cut off by an eviction waits for its backoff** (it is `retrying`, not `pending`, on wake).
+
+**Results are limited to 128 KiB of JSON** (`maxResultBytes` per service); a larger result fails the try
+as a `Defect`. Return a reference instead, or raise the limit.
+
+```ts
+// Before: a 1 MB result was journaled as is
+report: { fn: async () => bigReport() },
+
+// After
+report: { fn: async () => ({ url: await storeReport(await bigReport()) }) },
+// or, if it must be inline: report: { maxResultBytes: 2_000_000, fn: async () => bigReport() },
+```
+
+**`ctx.execute()` returns the effect id, and `ctx.cancel(id)` also cancels calls.** Code that typed
+`execute` as returning `void` keeps compiling; a timer key you chose that looks like an effect id
+(`"12:0"`) would now also cancel the execution with that id, so pick keys that are not `seq:index`.
+
+```ts
+// Before
+ctx.execute("charge", input);
+
+// After (optional)
+const id = ctx.execute("charge", input); // "812:0"
+ctx.cancel(id); // later, from another handler
+```
+
+`effectInfo()` (from `@actor-kit/worker/testing`, for hand-built service tests) now takes an `audit` object
+and returns `record()`.

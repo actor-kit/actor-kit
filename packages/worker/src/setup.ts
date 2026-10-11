@@ -1,30 +1,42 @@
 /**
- * setup() — typed helpers for what an actor declares up front (ADR-017).
+ * setup() — the kit of an actor (ADR-017, ADR-018 A): what it declares up front, the typed helpers,
+ * and `kit.actor()`, the one documented way to define it.
  *
  *   const quiz = setup({
  *     events: { RoundStarted: z.object({ n: z.number() }) },
  *     states: { lobby: {}, round: { local: RoundLocal, input: z.object({ n: z.number() }) }, reveal: {} },
  *   });
+ *   const lobby = quiz.in("lobby");
  *   const round = quiz.in("round");
- *   defineActor("quiz", {
- *     events: quiz.events,
+ *   export const Quiz = quiz.actor("quiz", {
  *     initial: "lobby",
  *     states: {
- *       lobby: quiz.in("lobby").state({ messages: { START: quiz.in("lobby").message(z.object({}), (s: S, _p, ctx) => ctx.goto("round", s, { n: 1 })) } }),
+ *       lobby: lobby.state({ messages: { START: lobby.message(z.object({}), (s: S, _p, ctx) => ctx.goto("round", s, { n: 1 })) } }),
  *       round: round.state({ enter: (s: S, { n }, ctx) => ({ n, answers: {} }), messages: { ... }, timers: { ... } }),
  *       reveal: quiz.in("reveal").state({}),
  *     },
+ *     ...
  *   });
  *
  * A `message()` handler defined inline cannot see the actor's `events` or `states` (TypeScript does
- * not infer a nested generic call from its siblings), so the typed `emit`, `local`, `stay` and
- * `goto` come from helpers bound to the declarations, like XState's `setup()`. Everything is also
+ * not infer a nested generic call from its siblings), so the typed `emit`, `local`, `stay`, `goto`
+ * and `env` come from helpers bound to the declarations, like XState's `setup()`. Everything is also
  * checked at runtime: emitted payloads and locals are parsed by their schemas.
  */
 
 import type { GuardContext, MessageContext, MessageDef, TimerContext, TimerDef } from "@actor-kit/core";
 import type { z } from "zod";
-import type { ActorContract, PublishCheck, TypedServices, VersionsCheck } from "./define";
+import type {
+  ActorContract,
+  PublishCheck,
+  ServiceCallbackContext,
+  ServiceDef,
+  ServiceErrorOf,
+  ServiceRetry,
+  TypedServices,
+  VersionsCheck,
+} from "./define";
+import type { EffectInfo } from "./runtime/effect-info";
 import { goto as gotoPhase, PhaseTransition, stay as stayInPhase } from "./runtime/phases";
 
 export { PhaseTransition };
@@ -183,6 +195,13 @@ export interface Setup<ES extends EventSchemas, SD extends StateDecls, TEnvSchem
     schema: z.ZodType<P>,
     handler: Handler<S, P, EmittingTimerContext<TEnv, EventPayloads<ES>>>,
   ): TimerDef<S, P, TEnv>;
+  /**
+   * A service (ADR-016, ADR-018 G) typed by the kit: `fn`'s env, onDone's `result` (the `result` schema's
+   * output), onError's error union (its `errors` plus the built-ins) and both callbacks' ctx (env, effectId).
+   */
+  service<S, TResult = unknown, TDeclared = unknown>(
+    def: KitServiceDef<S, TResult, TDeclared, SetupEnv<TEnvSchema>>,
+  ): ServiceDef<S, TDeclared, SetupEnv<TEnvSchema>, TResult>;
   /** Helpers for one declared state: its messages, timers and `enter` see its typed local. */
   in<P extends keyof SD & string>(phase: P): PhaseHelpers<SD, EventPayloads<ES>, P, SetupEnv<TEnvSchema>>;
   /**
@@ -217,6 +236,19 @@ export type KitActorDef<TDef, TState, TErrors, ES, SD, TEnvSchema> = TDef &
 
 /** The contract's definition: the actor's own, plus the kit's events and env. */
 export type KitContractDef<TDef, ES, TEnvSchema> = TDef & { readonly events: ES; readonly env: TEnvSchema };
+
+/** What `kit.service()` takes: a service definition whose callbacks are typed by the kit. */
+export interface KitServiceDef<S, TResult, TDeclared, TEnv> {
+  readonly errors?: z.ZodType<TDeclared>;
+  readonly result?: z.ZodType<TResult>;
+  readonly maxResultBytes?: number;
+  readonly delivery?: "at-least-once" | "at-most-once";
+  fn(input: unknown, env: TEnv, effect: EffectInfo): Promise<unknown>;
+  readonly retry?: ServiceRetry<ServiceErrorOf<TDeclared>>;
+  readonly timeoutMs?: number;
+  onDone?(state: S, result: TResult, input: unknown, ctx: ServiceCallbackContext<TEnv>): S;
+  onError?(state: S, error: ServiceErrorOf<TDeclared>, input: unknown, ctx: ServiceCallbackContext<TEnv>): S;
+}
 
 /** The persisted state of an actor declared with `kit`, for views and roles: `PhasedStateOf<typeof kit, Shared>`. */
 export type PhasedStateOf<K, S> = K extends { states: infer SD extends StateDecls | undefined }
@@ -267,6 +299,7 @@ function kitOf<ES extends EventSchemas, SD extends StateDecls, TEnvSchema>(
     timer(schema, handler) {
       return { schema, handler: typed(handler) };
     },
+    service: (def) => def,
     in(phase) {
       const local = states?.[phase]?.local;
       return {

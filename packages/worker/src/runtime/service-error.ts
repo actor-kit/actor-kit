@@ -31,7 +31,12 @@ export type DefectError = {
   readonly message: string;
 };
 
-export type BuiltInError = TimeoutError | DefectError;
+/** A try cut off by an eviction (ADR-018 G): counted as an attempt; onError gets it after the last one. */
+export type EvictedError = {
+  readonly _tag: "Evicted";
+};
+
+export type BuiltInError = TimeoutError | DefectError | EvictedError;
 
 /** What onError (and `retry.while`) receives: the service's declared errors plus the built-ins. */
 export type ServiceError<TDeclared = never> = TDeclared | BuiltInError;
@@ -42,6 +47,7 @@ const FAILURE = Symbol.for("actor-kit.service-failure");
 const BuiltInErrorSchema = z.union([
   z.object({ _tag: z.literal("Timeout"), ms: z.number() }),
   z.object({ _tag: z.literal("Defect"), message: z.string() }),
+  z.object({ _tag: z.literal("Evicted") }),
 ]);
 
 /** What `fail(error)` returns: throw it from a service's `fn`. */
@@ -83,7 +89,7 @@ export function defectError(message: string): DefectError {
 }
 
 export function isBuiltInError(error: TaggedError): boolean {
-  return error._tag === "Timeout" || error._tag === "Defect";
+  return error._tag === "Timeout" || error._tag === "Defect" || error._tag === "Evicted";
 }
 
 /** The structural slice of a Zod schema the runtime needs to parse `errors`. */
@@ -106,7 +112,9 @@ export function classifyFailure(thrown: unknown, errors: ErrorsParser | undefine
 export function describeServiceError(error: TaggedError): string {
   const builtIn = BuiltInErrorSchema.safeParse(error);
   if (!builtIn.success) return JSON.stringify(error);
-  return builtIn.data._tag === "Defect" ? builtIn.data.message : `timed out after ${builtIn.data.ms}ms`;
+  const known = builtIn.data;
+  if (known._tag === "Defect") return known.message;
+  return known._tag === "Timeout" ? `timed out after ${known.ms}ms` : "evicted while the try ran";
 }
 
 /** A service error read back from the journal (any object): described like describeServiceError. */

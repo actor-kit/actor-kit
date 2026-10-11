@@ -94,8 +94,12 @@ export type ServiceErrorOf<TDeclared> = unknown extends TDeclared ? BuiltInError
 /** What handlers see as `env`: the `env` schema's output (ADR-016 §4), or `unknown` without one. */
 export type EnvOf<TEnvSchema> = TEnvSchema extends ZodType<infer TEnv> ? TEnv : unknown;
 
-/** What a service's onDone / onError get as their last argument. */
-export type ServiceCallbackContext<TEnv = unknown> = DeterministicContext & { readonly env: TEnv };
+/** What a service's onDone / onError get as their last argument: also the call's effect id (ADR-018 G). */
+export type ServiceCallbackContext<TEnv = unknown> = DeterministicContext & {
+  readonly env: TEnv;
+  /** The effect id ctx.execute() returned for this call. */
+  readonly effectId: string;
+};
 
 /** What lifecycle.connect / disconnect get as ctx. */
 export interface LifecycleContext<TEnv = unknown> extends DeterministicContext {
@@ -126,15 +130,27 @@ export interface ServiceRetry<TError> {
  * A service in the `services` block, as defineActor types it. Methods (not function properties), so a
  * handler may annotate a narrower input or result.
  */
-export interface ServiceDef<TState, TDeclared = unknown, TEnv = unknown> {
+export interface ServiceDef<TState, TDeclared = unknown, TEnv = unknown, TResult = unknown> {
   /** Declared failures: a `z.discriminatedUnion("_tag", [...])`. `throw fail(error)` values parse against it. */
   readonly errors?: ZodType<TDeclared>;
-  /** The async work. `effect`: actor, effect id, idempotency key, try number, AbortSignal. */
+  /**
+   * Parses `fn`'s return (ADR-018 G): only the parsed value is journaled and passed to onDone. A result that
+   * does not parse fails the try as a Defect.
+   */
+  readonly result?: ZodType<TResult>;
+  /** Largest result accepted, as JSON bytes (default 128 KiB); larger fails the try as a Defect. */
+  readonly maxResultBytes?: number;
+  /**
+   * `"at-least-once"` (default): retried, and a try cut off by an eviction counts as an `Evicted` attempt.
+   * `"at-most-once"`: tried once; a try cut off by an eviction becomes an `OutcomeUnknown` dead letter.
+   */
+  readonly delivery?: "at-least-once" | "at-most-once";
+  /** The async work. `effect`: actor, effect id, idempotency key, try number, AbortSignal, record(). */
   fn(input: unknown, env: TEnv, effect: EffectInfo): Promise<unknown>;
   readonly retry?: ServiceRetry<ServiceErrorOf<TDeclared>>;
   /** Time limit per try, in ms (default 30 000). On expiry `effect.signal` is aborted and the try is a Timeout. */
   readonly timeoutMs?: number;
-  onDone?(state: TState, result: unknown, input: unknown, ctx: ServiceCallbackContext<TEnv>): TState;
+  onDone?(state: TState, result: TResult, input: unknown, ctx: ServiceCallbackContext<TEnv>): TState;
   /** Runs once, after the last try failed (or at once for an error `retry.while` does not retry). */
   onError?(state: TState, error: ServiceErrorOf<TDeclared>, input: unknown, ctx: ServiceCallbackContext<TEnv>): TState;
 }

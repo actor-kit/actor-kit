@@ -2,7 +2,7 @@
  * The outbox in SQLite (ADR-003, ADR-015 D1): executions and forwards.
  *
  * Row lifecycle: `pending` → `running` → `done` | `retrying` (waits until next_attempt_at, then
- * runs again) | `failed`. `failed` is final: failed rows are the dead letters, kept until an
+ * runs again) | `failed`; an execution ctx.cancel() reached before it finished is `cancelled` (ADR-018 G). `failed` is final: failed rows are the dead letters, kept until an
  * operator redrives them (back to `pending`, same effect id). Rows are keyed by effect id
  * (`seq:index`) and ordered by (seq, idx) as integers. Forwards follow the same lifecycle in their own
  * table; the attempt functions take the table (executions by default).
@@ -189,6 +189,38 @@ export function finishAttempt(
     error,
     errorTag,
     id,
+  );
+}
+
+const InterruptedRow = z.object({ id: z.string(), service: z.string(), payload: z.string(), attempts: z.number() });
+
+/** Executions left `running` by a crash or eviction, oldest effect first (ADR-018 G settles them). */
+export function interruptedExecutions(sql: JournalSql): DueExecution[] {
+  return sql
+    .exec("SELECT id, service, payload, attempts FROM executions WHERE status = 'running' ORDER BY seq, idx")
+    .toArray()
+    .map((raw) => {
+      const row = InterruptedRow.parse(raw);
+      const input: unknown = JSON.parse(row.payload);
+      return { id: row.id, service: row.service, input, attempts: row.attempts };
+    });
+}
+
+const IdRow = z.object({ id: z.string() });
+
+/**
+ * ctx.cancel(effectId) (ADR-018 G): executions with these ids that have not finished (pending, retrying,
+ * running) end as `cancelled`. Returns the ids it cancelled (a running one's try is then aborted).
+ */
+export function cancelExecutionRows(sql: JournalSql, effectIds: readonly string[]): string[] {
+  return effectIds.flatMap((id) =>
+    sql
+      .exec(
+        "UPDATE executions SET status = 'cancelled', next_attempt_at = NULL, last_error = 'cancelled by ctx.cancel()' WHERE id = ? AND status IN ('pending', 'retrying', 'running') RETURNING id",
+        id,
+      )
+      .toArray()
+      .map((raw) => IdRow.parse(raw).id),
   );
 }
 

@@ -14,6 +14,7 @@ export { Retrier, RetrierNoJournal } from "./outbox-retry";
 export { Lot, LotTyped, LotUnbound } from "./publish-actors";
 export { QuizStates } from "./quiz-states";
 export { Ledger, LedgerNoJournal, LedgerNoStudio } from "./restore-actors";
+export { CashierActor } from "./service-handles-actors";
 export { Bulletin, Desk } from "./studio-effects";
 export { StudioOff, StudioProbe } from "./studio-probe";
 export { StudioRedacted } from "./studio-redacted";
