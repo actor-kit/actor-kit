@@ -1,0 +1,44 @@
+{
+  "name": "@actor-kit/projection",
+  "version": "0.2.0",
+  "description": "Read models for Actor Kit: a Cloudflare Queue consumer that applies published events once, in order per actor, into D1, and rebuilds from actor journals",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "build": "tsdown"
+  },
+  "dependencies": {
+    "zod": "^4.6.5"
+  },
+  "license": "MIT",
+  "author": "Jonathan Mumm",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/actor-kit/actor-kit.git",
+    "directory": "packages/projection"
+  },
+  "homepage": "https://actorkit.dev",
+  "keywords": [
+    "actor",
+    "cloudflare",
+    "durable-objects",
+    "queues",
+    "d1",
+    "projection",
+    "read-model"
+  ],
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20260927.1"
+  }
+}

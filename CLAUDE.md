@@ -16,7 +16,7 @@ Actors on the edge. Each actor is a Cloudflare Durable Object with a mailbox, pr
 
 ## Repo structure
 
-Eight scoped packages under `@actor-kit/*`:
+Nine scoped packages under `@actor-kit/*`:
 
 ```
 actor-kit-2/
@@ -28,7 +28,8 @@ actor-kit-2/
 │   ├── test/              → @actor-kit/test: testActor(), simulate() (many actors, virtual clock), replayJournal()
 │   ├── storybook/         → @actor-kit/storybook: withActorKit(), createMockClient()
 │   ├── studio/            → @actor-kit/studio: actorKitStudio(), StudioRegistry, introspection
-│   └── studio-cli/        → @actor-kit/studio-cli: `actor-kit studio` CLI + read-only MCP server
+│   ├── studio-cli/        → @actor-kit/studio-cli: `actor-kit studio` CLI + read-only MCP server
+│   └── projection/        → @actor-kit/projection: Queue consumer → D1 read models, rebuild from journals
 ├── tests/
 │   ├── unit/              → Pure logic tests (no CF runtime)
 │   └── integration/       → vitest-pool-workers (full DO lifecycle)

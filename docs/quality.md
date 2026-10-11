@@ -120,6 +120,22 @@ ranges of `studio-project.ts` (`projectJournalEntry`), `studio/src/middleware.ts
 - `studio-mcp.test.ts` "exposes exactly the read-only tools" now lists `studio_journal`: ADR-019 F adds that
   read-only tool, and the test's point (every tool is read-only) is unchanged.
 
+## ADR-019 E (published-event positions, `@actor-kit/projection`)
+
+Stryker on `packages/projection/src/**` (all but `index.ts`) and `worker/runtime/publish.ts`.
+
+| Run | Score | Survivors |
+|---|---|---|
+| First | 94.30% (234/244 + 4 timeouts) | 15: projections built at module load in the test (a mutant that makes the constructor throw breaks the file's import, which Stryker's runner reports as survived), `via` unchecked, rebuild without `reset`, the default `fetch`, `actorId` length 1 in every test, and the race handling below |
+| After | **100% (250/254 killed + 4 timeouts)** | none |
+
+- Found while killing them: after losing a race to another consumer (its cursor row already there), the
+  drain stopped, so a later buffered event of that actor could wait for the next message. A conflict now
+  means "applied": the drain continues. `buffered()` lists only events after the cursor (a lost race can
+  leave a stale row, removed by the next drain).
+- `simulate()`'s position (`packages/test`): covered by `publish.test.ts`; CRAP for `packages/test/src` max 7.1.
+- CRAP: projection max 7.0, test max 7.1, worker (`pnpm crap:worker`) max 7.6; 0 functions ≥ 8.
+
 ## Equivalent mutants
 
 Surviving mutants that no test can kill, because the mutated program behaves identically. One line each.
