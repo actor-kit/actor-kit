@@ -51,6 +51,7 @@ export type {
   LocalOf,
   PhasedState,
   PhasedStateOf,
+  PhaseHelpers,
   PhaseResult,
   Setup,
   StateDecl,
