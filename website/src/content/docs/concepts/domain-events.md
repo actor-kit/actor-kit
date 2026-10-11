@@ -77,9 +77,12 @@ Queue binding after commit, with the outbox's retries, dead letters and redrive.
 panel lists the rows under the service `__publish`. The message body:
 
 ```typescript
-{ actorType, actorId, seq, index, name, payload, at, causationId, correlationId, idempotencyKey }
+{ actorType, actorId, seq, index, name, payload, at, causationId, correlationId, idempotencyKey, position }
 ```
 
 `idempotencyKey` is `${actorType}/${actorId}/${seq}:${index}` and is stable across retries:
-consumers dedupe on it. `simulate()` delivers published messages at once and lists them with
+consumers dedupe on it. `position` numbers one actor's published events 1, 2, 3... with no gaps
+(`seq` skips transitions that publish nothing), so a consumer can tell a late message from a missing
+one and apply events in order: it is assigned in the commit transaction and never reused or rewound,
+not even by a Studio restore. [`@actor-kit/projection`](/concepts/projections/) does this for you. `simulate()` delivers published messages at once and lists them with
 `sim.published("AUCTION_EVENTS")`.

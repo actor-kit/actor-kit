@@ -193,6 +193,8 @@ interface ActorData {
   connections: Record<string, number>;
   /** Last view pushed to each subscriber (`type/id` → role + JSON), so unchanged views are not pushed. */
   pushed: Record<string, string>;
+  /** Last published-event position assigned (ADR-019 E), as the runtime keeps it. */
+  publishPosition: number;
 }
 
 interface SimData {
@@ -471,9 +473,18 @@ function createSimulation(
     const config = publishOf(def);
     if (config === null) return;
     const { correlationId } = journalTrace(result.event.trace, eventId(actor.type, actor.id, actor.seq));
-    const transition = { actorType: actor.type, actorId: actor.id, seq: actor.seq, at: data.clock, correlationId };
+    const position = actor.publishPosition;
+    const transition = {
+      actorType: actor.type,
+      actorId: actor.id,
+      seq: actor.seq,
+      at: data.clock,
+      correlationId,
+      position,
+    };
     for (const { body } of publishedMessages(config, result.effects.getEmitted(), transition)) {
       data.published.push({ queue: config.queue, body });
+      actor.publishPosition = body.position;
     }
   }
 
@@ -742,6 +753,7 @@ function createSimulation(
         links,
         connections: {},
         pushed: {},
+        publishPosition: 0,
       };
       data.actors[keyOf(address)] = actor;
       appendJournal(actor, def, init.event);

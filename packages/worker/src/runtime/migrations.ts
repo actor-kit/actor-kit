@@ -205,4 +205,9 @@ export const ACTOR_KIT_MIGRATIONS: ReadonlyArray<{ readonly name: string; readon
     name: "0017_emitted",
     sql: "ALTER TABLE events ADD COLUMN emitted TEXT;",
   },
+  {
+    // Published-event positions (ADR-019 E): the last one assigned, never reused or rewound.
+    name: "0018_publish_position",
+    sql: "CREATE TABLE IF NOT EXISTS publish_position (id INTEGER PRIMARY KEY CHECK (id = 1), position INTEGER NOT NULL);",
+  },
 ];

@@ -74,7 +74,15 @@ import {
   startAttempt,
 } from "./runtime/outbox-store";
 import type { StepStateDef } from "./runtime/phases";
-import { PUBLISH_SERVICE, type PublishOption, publishedMessages, resolvePublish, sendToQueue } from "./runtime/publish";
+import {
+  PUBLISH_SERVICE,
+  type PublishOption,
+  publishedMessages,
+  readPublishPosition,
+  resolvePublish,
+  sendToQueue,
+  writePublishPosition,
+} from "./runtime/publish";
 import { resolveNamespace } from "./runtime/resolve-namespace";
 import { planRestore } from "./runtime/restore";
 import {
@@ -1282,8 +1290,11 @@ export function actor(
       if (publishConfig === null) return [];
       const { correlationId } = journalTrace(result.event.trace, this.eventIdOf(seq));
       const now = Date.now();
-      const transition = { actorType: _actorName, actorId: this.subscriberId(), seq, at: now, correlationId };
-      return publishedMessages(publishConfig, result.effects.getEmitted(), transition).map((message) => ({
+      const position = readPublishPosition(this.ctx.storage.sql);
+      const transition = { actorType: _actorName, actorId: this.subscriberId(), seq, at: now, correlationId, position };
+      const messages = publishedMessages(publishConfig, result.effects.getEmitted(), transition);
+      if (messages.length > 0) writePublishPosition(this.ctx.storage.sql, position + messages.length);
+      return messages.map((message) => ({
         id: message.effectId,
         seq,
         index: message.index,

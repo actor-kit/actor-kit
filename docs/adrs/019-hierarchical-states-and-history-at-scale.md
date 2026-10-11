@@ -34,6 +34,7 @@ Flat states drop data on every switch between sibling phases (Run Set Jimmy's `p
 
 ### E. Read models: `@actor-kit/projection`
 - `projection({ queue, db, apply })` wraps a Queue consumer: dedupes on `idempotencyKey`, keeps `last_seq` per actor (D1), applies events in `seq` order per actor (buffers or defers out-of-order ones), and exposes `rebuild()` that replays journals (via the Studio journal API) into a fresh read model.
+- **Amended 2026-10-11 (approved by Jon):** `seq` has gaps (a transition that publishes nothing still takes a seq), so a consumer cannot tell a late message from one that never existed. Every published body gains `position`: the actor's published events numbered 1, 2, 3... with no gaps, assigned in the commit transaction (`publish_position` table), never reused or rewound (a restore keeps counting up), and assigned identically by `simulate()`. The projection orders and dedupes on `position` (`idempotencyKey` names the same event); `rebuild()` recomputes positions by counting published events through the journal, in seq order, which matches the live numbering as long as the journal is complete from `init` and `publish.events` has not changed.
 
 ### F. Journal query API
 - `__journal({ from?, to?, causeType?, event?, correlationId?, limit })` RPC (redacted per ADR-014), exposed through Studio's API, the CLI (`actor-kit studio journal`) and MCP.

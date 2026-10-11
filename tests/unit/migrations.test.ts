@@ -37,6 +37,7 @@ describe("ACTOR_KIT_MIGRATIONS", () => {
       "0015_drop_timeline",
       "0016_trace_ids",
       "0017_emitted",
+      "0018_publish_position",
     ]);
   });
 
@@ -56,6 +57,7 @@ describe("ACTOR_KIT_MIGRATIONS", () => {
       "table:journal_checkpoints",
       "table:link_subscribers",
       "table:outbox",
+      "table:publish_position",
       "table:snapshots",
       "table:timers",
     ]);
