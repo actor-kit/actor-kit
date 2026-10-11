@@ -25,6 +25,8 @@ export class PhaseTransition<S = unknown> {
     readonly hasLocal: boolean,
     /** stay: the new local; goto: the enter input. */
     readonly value: unknown,
+    /** goto: new locals for kept levels, by dotted path (row 21); null when none are given. */
+    readonly locals: Readonly<Record<string, unknown>> | null = null,
   ) {}
 }
 
@@ -32,8 +34,24 @@ export function stay<S>(shared: S, ...local: unknown[]): PhaseTransition<S> {
   return new PhaseTransition("stay", shared, null, local.length > 0, local[0]);
 }
 
-export function goto<S>(phase: PathInput, shared: S, ...input: unknown[]): PhaseTransition<S> {
-  return new PhaseTransition("goto", shared, phase, false, input[0]);
+const GotoOptionsSchema = z.strictObject({ locals: z.record(z.string(), z.unknown()).optional() });
+
+/** goto's options, parsed where they enter the runtime: the kept levels' new locals, if any. */
+function gotoLocals(options: unknown): Readonly<Record<string, unknown>> | null {
+  if (options === undefined) return null;
+  const parsed = GotoOptionsSchema.safeParse(options);
+  if (!parsed.success) {
+    throw new ActorKitError(
+      "invalid_goto_locals",
+      `goto's options are { locals?: { "<kept level>": local } }: ${parsed.error.issues.map((i) => i.message).join("; ")}`,
+    );
+  }
+  return parsed.data.locals ?? null;
+}
+
+/** `goto(target, shared, input?, { locals }?)`. */
+export function goto<S>(phase: PathInput, shared: S, ...args: unknown[]): PhaseTransition<S> {
+  return new PhaseTransition("goto", shared, phase, false, args[0], gotoLocals(args[1]));
 }
 
 const PhasedStateSchema = z

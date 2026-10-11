@@ -250,6 +250,14 @@ Docs: https://actorkit.dev/errors/missing_state_input/
 
 Docs: https://actorkit.dev/errors/invalid_scope/
 
+## `invalid_goto_locals`
+
+**What happened:** `goto`'s `locals` option is malformed, or names a level the goto does not keep or one that declares no local.
+
+**How to fix it:** Pass `{ locals: { "<dotted path>": local } }` naming only levels the goto keeps (the common prefix of the active path and the target's parent) that declare a `local`.
+
+Docs: https://actorkit.dev/errors/invalid_goto_locals/
+
 ## `invalid_transition`
 
 **What happened:** `enter` or `exit` returned a `goto` (or `exit` returned `stay`).

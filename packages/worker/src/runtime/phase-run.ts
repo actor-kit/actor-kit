@@ -157,6 +157,7 @@ function enterLevel(
   const verbs = run.verbs(path);
   let shared = state.shared;
   let local: unknown = null;
+  let above: unknown[] = state.locals;
   if (def.enter !== undefined) {
     const out = def.enter(shared, input?.value, {
       ...run.base,
@@ -173,6 +174,7 @@ function enterLevel(
       if (out.kind === "goto") throw invalidTransition(path, "enter", "returns its local or ctx.stay(shared, local)");
       shared = out.shared;
       local = out.hasLocal ? out.value : null;
+      above = updateAbove(run, path, state.locals, local);
     } else {
       local = out;
     }
@@ -180,9 +182,55 @@ function enterLevel(
   return {
     shared,
     phase: [...path],
-    locals: [...state.locals, parseLocal(path, def, local)],
+    locals: [...above, parseLocal(path, def, local)],
     stateTimers: [...state.stateTimers, owned],
   };
+}
+
+/**
+ * Row 23: enter's `stay(shared, local)` with keys of the levels above. Each level above that declares a
+ * local parses its current local with `local` spread over it, so its keys in `local` replace its own and
+ * a local with only the entered level's keys leaves it as it was.
+ */
+function updateAbove(run: PhaseRun, path: readonly string[], locals: readonly unknown[], local: unknown): unknown[] {
+  // A level without a local holds null and parses to null.
+  return locals.map((current, i) => {
+    const levelPath = path.slice(0, i + 1);
+    return parseLocal(levelPath, stateDef(run.states, levelPath), mergeLocals([current, local]));
+  });
+}
+
+/**
+ * Row 21-22: a goto's `locals` replace the locals of levels it keeps (by dotted path), parsed by each
+ * level's schema, before any exit runs.
+ */
+function withKeptLocals(
+  run: PhaseRun,
+  state: PhasedState,
+  target: readonly string[],
+  locals: Readonly<Record<string, unknown>>,
+): PhasedState {
+  const kept = keptDepth(state.phase, target);
+  const levels = new Map(
+    state.phase.slice(0, kept).map((_, i) => {
+      const path = state.phase.slice(0, i + 1);
+      return [dotted(path), { i, path, def: stateDef(run.states, path) }];
+    }),
+  );
+  const next = [...state.locals];
+  for (const [name, local] of Object.entries(locals)) {
+    const level = levels.get(name);
+    if (level?.def.local === undefined) {
+      const keeps = kept === 0 ? "keeps no level" : `keeps ${dotted(state.phase.slice(0, kept))}`;
+      const why = level === undefined ? "which it does not keep" : "which declares no local";
+      throw new ActorKitError(
+        "invalid_goto_locals",
+        `goto "${dotted(target)}" ${keeps}; its locals name "${name}", ${why}. Name only the levels kept by the goto (the common prefix of the active path and the target's parent), each with a local.`,
+      );
+    }
+    next[level.i] = parseLocal(level.path, level.def, local);
+  }
+  return { ...state, locals: next };
 }
 
 /** Enter each level's `initial` child down to a leaf (rows 7, 11, 12). */
@@ -226,7 +274,12 @@ function settle(
   const at = { ...current, stateTimers };
   if (!(result instanceof PhaseTransition)) return { ...at, shared: result };
   // A goto carries its target; a stay has none.
-  if (result.phase !== null) return gotoPath(run, { ...at, shared: result.shared }, result.phase, result.value);
+  if (result.phase !== null) {
+    const moved = { ...at, shared: result.shared };
+    const target = pathOf(result.phase);
+    const from = result.locals === null ? moved : withKeptLocals(run, moved, target, result.locals);
+    return gotoPath(run, from, target, result.value);
+  }
   if (!result.hasLocal) return { ...at, shared: result.shared };
   const locals = at.locals.map((local, i) => {
     const path = current.phase.slice(0, i + 1);

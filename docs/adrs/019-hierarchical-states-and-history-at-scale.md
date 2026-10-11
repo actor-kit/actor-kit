@@ -77,12 +77,21 @@ local is passed as it is; none gives `null`. Paths are absolute: `"round"` means
 | 12 | goto into a parent from outside (`["lobby"]` → `["playing"]`) | Exit `lobby`, enter `playing` with the input, then its `initial` child with no input. |
 | 13 | goto a deep path from outside (`["lobby"]` → `["playing","acting"]`) | Exit `lobby`, enter `playing`, enter `acting`. The input goes to the target (`acting`); a level entered on the way gets `undefined`, and one that declares `input` fails (`missing_state_input`). |
 | 14 | exit of level k | `exit(shared, ctx)` runs (ctx.local = merge up to k) and returns the next shared state; then level k's `scope: "state"` timers are cancelled and its local dropped. `exit` cannot schedule a `scope: "state"` timer (`invalid_schedule`) or `goto`. |
-| 15 | enter of level k | `enter(shared, input, ctx)` runs with ctx.local = merge of the levels above it; it returns level k's local, or `ctx.stay(shared, local)` to change the shared state too (Run Set Jimmy feedback 8). A `goto` from `enter` fails (`invalid_transition`). |
+| 15 | enter of level k | `enter(shared, input, ctx)` runs with ctx.local = merge of the levels above it; it returns level k's local, or `ctx.stay(shared, local)` to change the shared state too (Run Set Jimmy feedback 8) and, with their keys, the levels above (row 23). A `goto` from `enter` fails (`invalid_transition`). |
 | 16 | `ctx.schedule(name, { scope: "state" })` at level k (handler or `enter`) | The timer is looked up innermost first from level k, then top-level. Level k owns it; its key defaults to `"<dotted level path>:<name>"` (flat: `round:roundEnd`). |
 | 17 | a timer fires | Looked up innermost first along the active path, then top-level; its handler runs at that level and its key leaves whichever level owned it. A timer whose level is no longer active (a plain-scoped one) is a no-op, as before. |
 | 18 | top-level messages and timers, lifecycle, service and link callbacks | See and return the shared state; locals, path and timers are kept. |
 | 19 | goto a path that is not declared | `undeclared_state`. |
 | 20 | merge of two non-null locals that are not both objects | `invalid_local`: nested locals must be objects (`z.object`). |
+| 21 | `ctx.goto(target, shared, input, { locals })` (and `ctx.reenter(shared, input, { locals })`) | `locals` maps a kept level's dotted path (row 7's Kept) to its new local, parsed by that level's schema. They apply with the shared state, before any exit, so the exits and enters of the move see them. A target without an input takes `undefined` in the input's place. Typed per level: a handler may name the levels its own path keeps (the common prefix of its path and the target's parent) that declare a local. Without `locals`, kept levels keep their locals (row 8). |
+| 22 | `locals` names a level the goto does not keep, or one that declares no local, or the options are not `{ locals? }` | `invalid_goto_locals`; nothing changes. A local that fails its schema is `invalid_local` (naming the level). |
+| 23 | `enter` at level k returns `ctx.stay(shared, local)` and `local` has keys of the levels above (`{ ...ctx.local, windows: ctx.local.windows + 1, buys: [] }`) | Level k parses `local`; each level above that declares a local parses its current local with `local` spread over it, so its keys in `local` replace its own and a `local` with only level k's keys leaves the levels above as they were (row 15 as before). As in row 6, levels share key names. Typed as level k's local plus a `Partial` of the merged local above it. |
+
+Rows 21-23 run inside the handler's transition, so the journal replays them and a restore to any seq
+gives back the locals the actor had there (tests: `tests/unit/goto-locals.test.ts`,
+`tests/integration/goto-locals.test.ts`; types: `tests/unit/goto-locals.types.test.ts`). Added for Run Set
+Jimmy feedback 14, whose round lives in `playing`'s local while nearly every move switches `window` ⇄
+`acting`.
 
 Views and roles get the persisted state. `matches(state, path)` narrows it by a path prefix
 (`matches(s, "playing")`, `matches(s, ["playing", "window"])`) and `localOf(state)` returns the merged

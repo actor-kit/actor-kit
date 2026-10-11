@@ -141,6 +141,11 @@ export const ERROR_CODES = {
     title: '`ctx.execute(..., { scope: "state" })` was called where no state can own the call.',
     fix: "Make scoped calls from a state's message, timer or `enter` (not `exit`, not a top-level handler of an actor without states).",
   },
+  invalid_goto_locals: {
+    title:
+      "`goto`'s `locals` option is malformed, or names a level the goto does not keep or one that declares no local.",
+    fix: 'Pass `{ locals: { "<dotted path>": local } }` naming only levels the goto keeps (the common prefix of the active path and the target\'s parent) that declare a `local`.',
+  },
   invalid_transition: {
     title: "`enter` or `exit` returned a `goto` (or `exit` returned `stay`).",
     fix: "`enter` returns its local or `ctx.stay(shared, local)`; `exit` returns the next shared state. Move to another state from a message or timer.",

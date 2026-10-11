@@ -9,3 +9,8 @@ import { ScopedCalls } from "./scoped-calls";
 
 export { ScopedCalls };
 export const ScopedCallsActor = createActorClass(ScopedCalls);
+
+import { RoundLocals } from "./round-locals";
+
+export { RoundLocals };
+export const RoundLocalsActor = createActorClass(RoundLocals);

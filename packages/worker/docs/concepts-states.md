@@ -57,7 +57,7 @@ export const Quiz = quiz.actor("quiz", {
   (`["round"]`), with one local and one list of scoped timers per level. Views and roles get it
   (`PhasedStateOf<typeof quiz, Shared>`): narrow it with `matches(state, "round")` and read the local
   with `localOf(state)`.
-- A handler returns `ctx.stay(shared, local?)`, `ctx.goto(state, shared, input?)`, or `shared`
+- A handler returns `ctx.stay(shared, local?)`, `ctx.goto(state, shared, input?, { locals }?)`, or `shared`
   (stay, same local). `goto` checks the target and its `enter` input; `ctx.local` is typed per
   state; the local is parsed by its schema.
 - Exit drops the local and cancels the state's `scope: "state"` timers; `enter` builds the next
@@ -140,9 +140,26 @@ export const Room = room.actor("room", {
   running and its scoped timers cancelled) and enters down to the target (outermost first). The target
   itself is always (re-)entered; a parent target then enters its `initial` child. The input goes to the
   target only; a state that declares an input cannot be entered on the way to another one.
+- **Change a kept level while switching its child.** Most moves in a round both change the round and
+  switch `window` ⇄ `acting`. Give the kept levels' new locals with the goto, by dotted path (a target
+  without an input takes `undefined` in its place); they apply before the exits and enters, which see
+  them:
+
+  ```typescript
+  ACT: buying.message(z.object({}), (s: S, _p, ctx) =>
+    ctx.goto(["playing", "acting"], s, { actor: ctx.caller }, { locals: { playing: { round: ctx.local.round + 1 } } })),
+  DONE: acting.message(z.object({}), (s: S, _p, ctx) =>
+    ctx.goto(["playing", "window"], s, undefined, { locals: { playing: { round: ctx.local.round + 1 } } })),
+  ```
+
+  Only the levels the move keeps can be named (`playing` here; a goto to `lobby` keeps none), each typed
+  by its own local; anything else is refused with `invalid_goto_locals`. `ctx.reenter(shared, input,
+  { locals })` takes the same option for the levels above the handler's.
 - **enter and exit.** `enter` returns its local, or `ctx.stay(shared, local)` to change the shared
-  state as well (it sees the parent's local as `ctx.local`). `exit` returns the next shared state.
-  Neither can `goto`.
+  state as well (it sees the parent's local as `ctx.local`). That local may also carry keys of the
+  levels above, which updates them: `ctx.stay(s, { ...ctx.local, windows: ctx.local.windows + 1, buys: [] })`
+  counts the round's windows from the window's `enter`; a local with only its own keys leaves them as
+  they were. `exit` returns the next shared state. Neither can `goto`.
 - **Scoped timers** belong to the state whose handler (or `enter`) scheduled them; their key defaults
   to `"playing.window:close"`.
 

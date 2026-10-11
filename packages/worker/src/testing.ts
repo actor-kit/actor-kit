@@ -368,6 +368,11 @@ export { goto, PhaseTransition, setup, stay } from "./setup";
 // Hierarchical states (ADR-019 A): paths, merged locals, and the view/role helpers
 export type {
   DeclAt,
+  Dotted,
+  EnterStayArgs,
+  GotoArgs,
+  GotoOptions,
+  KeptLocals,
   LeafPathsOf,
   LocalsAlong,
   Matching,

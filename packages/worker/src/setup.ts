@@ -42,8 +42,10 @@ import type { EffectInfo } from "./runtime/effect-info";
 import { goto as gotoPhase, PhaseTransition, pathOf, stay as stayInPhase } from "./runtime/phases";
 import type {
   DeclAt,
-  InputArgs,
+  EnterStayArgs,
+  GotoArgs,
   InputOf,
+  KeptLocals,
   LeafPathsOf,
   LocalOf,
   MergedLocal,
@@ -68,8 +70,13 @@ export type TypedEmit<E> = <K extends keyof E & string>(name: K, payload: E[K]) 
 
 export type {
   DeclAt,
+  Dotted,
+  EnterStayArgs,
+  GotoArgs,
+  GotoOptions,
   InputArgs,
   InputOf,
+  KeptLocals,
   LeafPathsOf,
   LocalOf,
   LocalsAlong,
@@ -85,11 +92,15 @@ export type {
   TargetOf,
 } from "./state-paths";
 
-/** `goto(target, shared, input?)`: the target is a declared state's name or path; its input is checked. */
-export type Goto<SD extends StateDecls, S> = <const T extends TargetOf<SD>>(
+/**
+ * `goto(target, shared, input?, { locals }?)`: the target is a declared state's name or path; its input
+ * is checked; `locals` updates the levels a handler at P keeps (row 21). P is empty where no level is
+ * known to be kept (service callbacks).
+ */
+export type Goto<SD extends StateDecls, S, P = readonly []> = <const T extends TargetOf<SD>>(
   target: T,
   shared: S,
-  ...input: InputArgs<DeclAt<SD, PathOf<T>>>
+  ...args: GotoArgs<DeclAt<SD, PathOf<T>>, KeptLocals<SD, P, PathOf<T>>>
 ) => PhaseTransition<S>;
 
 /** What a handler returns in an actor with states: the next shared state (stay), or stay/goto. */
@@ -118,8 +129,8 @@ export interface PhaseContext<SD extends StateDecls, P, S> {
    * timers and calls cancelled, local dropped), then its enter. `goto(<this state's path>, …)` does the
    * same; reenter says it on purpose (Run Set Jimmy feedback 4).
    */
-  reenter(shared: S, ...input: InputArgs<DeclAt<SD, P>>): PhaseTransition<S>;
-  readonly goto: Goto<SD, S>;
+  reenter(shared: S, ...args: GotoArgs<DeclAt<SD, P>, KeptLocals<SD, P, P>>): PhaseTransition<S>;
+  readonly goto: Goto<SD, S, P>;
 }
 
 type Handler<S, P, Ctx, R = S> = (state: S, payload: P, ctx: Ctx) => R;
@@ -151,10 +162,8 @@ type HookContext<TEnv, E> = Omit<Base<TimerContext<TEnv>>, "key" | "lateBy"> & {
 export type EnterContext<TEnv, E, SD extends StateDecls, P, S> = HookContext<TEnv, E> & {
   readonly phase: P;
   readonly local: MergedLocal<SD, ParentOf<P>>;
-  stay(
-    shared: S,
-    ...local: LocalOf<DeclAt<SD, P>> extends null ? [] : [local: LocalOf<DeclAt<SD, P>>]
-  ): PhaseTransition<S>;
+  /** Its own local; keys of the levels above update them too (row 23). */
+  stay(shared: S, ...local: EnterStayArgs<SD, P>): PhaseTransition<S>;
 };
 
 /** What `exit` gets: the effect verbs, the path being left and its merged local (dropped after exit). */

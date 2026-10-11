@@ -376,6 +376,38 @@ before (a name is the one-element path). Refusals still name states as text (`pl
 `enter` may now return `ctx.stay(shared, local)` to change the shared state, and a state may declare
 `exit(shared, ctx)`, `initial` and child `states`.
 
+## A move can change a kept level's local; a child's `enter` can change the levels above
+
+New, from Run Set Jimmy feedback 14 (ADR-019 A rows 21-23). A goto keeps the levels above the child it
+switches (row 8), and before this it kept their locals unchanged, so a round kept in `playing`'s local
+could not change in the same move that switched `window` ⇄ `acting`. Give the kept levels' locals with
+the goto; a target without an input takes `undefined` in the input's place:
+
+```ts
+// Before: the round lived in shared state, because a move could not change playing's local
+ACT: window.message(z.object({}), (s: S, _p, ctx) =>
+  ctx.goto(["playing", "acting"], { ...s, round: nextRound(s.round) }, { actor: ctx.caller })),
+
+// After
+ACT: window.message(z.object({}), (s: S, _p, ctx) =>
+  ctx.goto(["playing", "acting"], s, { actor: ctx.caller }, { locals: { playing: nextRound(ctx.local) } })),
+DONE: acting.message(z.object({}), (s: S, _p, ctx) =>
+  ctx.goto(["playing", "window"], s, undefined, { locals: { playing: nextRound(ctx.local) } })),
+```
+
+`enter`'s `ctx.stay(shared, local)` now also updates the levels above when `local` has their keys
+(each parses its current local with `local` spread over it). One behaviour change: a child whose
+`enter` local has a key that a level above also declares now writes that key to the level above too,
+as a handler's `ctx.stay` always did (row 6). Rename the key if that is not what you meant.
+
+```ts
+// Before: playing's local could not change from the window's enter
+enter: (s: S) => ctx.stay(s, { buys: [] }),
+
+// After (unchanged when the local has only the window's keys)
+enter: (s: S, _input, ctx) => ctx.stay(s, { ...ctx.local, windows: ctx.local.windows + 1, buys: [] }),
+```
+
 ## Service callbacks in actors with states run in a state (ADR-019 B)
 
 In an actor with states, `onDone`, `onError` and the new `onStale` run at the state that owns their call

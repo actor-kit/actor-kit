@@ -349,6 +349,15 @@ class_name = "UnboundArchiveActor"
 tag = "v29"
 new_sqlite_classes = ["ArchivedTallyActor", "UnboundArchiveActor"]
 
+# Goto with kept locals (ADR-019 A rows 21-23, Run Set Jimmy feedback 14)
+[[durable_objects.bindings]]
+name = "ROUND_LOCALS"
+class_name = "RoundLocalsActor"
+
+[[migrations]]
+tag = "v30"
+new_sqlite_classes = ["RoundLocalsActor"]
+
 
 # ADR-019 E: @actor-kit/projection consumes lot-events into D1
 [[d1_databases]]

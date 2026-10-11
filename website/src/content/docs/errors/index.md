@@ -40,6 +40,7 @@ Every error actor-kit throws is an `ActorKitError` with a stable `code` and a `d
 | [`invalid_local`](/errors/invalid_local/) | A state's local does not match its schema. |
 | [`missing_state_input`](/errors/missing_state_input/) | A state that declares an enter `input` was entered on the way to another state (or as an `initial` child). |
 | [`invalid_scope`](/errors/invalid_scope/) | `ctx.execute(..., { scope: "state" })` was called where no state can own the call. |
+| [`invalid_goto_locals`](/errors/invalid_goto_locals/) | `goto`'s `locals` option is malformed, or names a level the goto does not keep or one that declares no local. |
 | [`invalid_transition`](/errors/invalid_transition/) | `enter` or `exit` returned a `goto` (or `exit` returned `stay`). |
 | [`archive_missing`](/errors/archive_missing/) | An archived journal segment recorded by the actor is not in its R2 bucket. |
 | [`archive_unbound`](/errors/archive_unbound/) | `journal.archive` names a binding that is not an R2 bucket in the Worker env. |

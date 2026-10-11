@@ -85,6 +85,55 @@ export type MergedLocal<SD, P> = MergeLocals<LocalsAlong<SD, P>>;
 /** The path of P's parent (empty for a top-level state). */
 export type ParentOf<P> = P extends readonly [...infer I, string] ? I : readonly [];
 
+/** The common prefix of two paths. */
+type CommonPrefix<A, B> = A extends readonly [infer H, ...infer RA]
+  ? B extends readonly [H, ...infer RB]
+    ? [H, ...CommonPrefix<RA, RB>]
+    : []
+  : [];
+
+/** A path as its dotted name (`playing.window`). */
+export type Dotted<P> = P extends readonly [infer H extends string]
+  ? H
+  : P extends readonly [infer H extends string, ...infer R]
+    ? `${H}.${Dotted<R>}`
+    : never;
+
+/** The non-empty prefixes of a path, the path included. */
+type NonEmptyPrefixes<P> = P extends readonly [...infer I, string] ? P | NonEmptyPrefixes<I> : never;
+
+/**
+ * What a goto's `{ locals }` may name for a handler at P going to T (row 21): the levels the goto keeps
+ * whatever child is active (the common prefix of P and T's parent) that declare a local, by dotted path,
+ * each typed by its own local.
+ */
+export type KeptLocals<SD, P, T> = {
+  [Q in NonEmptyPrefixes<CommonPrefix<P, ParentOf<T>>> as LocalOf<DeclAt<SD, Q>> extends null
+    ? never
+    : Dotted<Q>]?: LocalOf<DeclAt<SD, Q>>;
+};
+
+/** goto's options (row 21): new locals for the levels it keeps (none when it keeps no level with a local). */
+export interface GotoOptions<K> {
+  readonly locals?: [keyof K] extends [never] ? Record<string, never> : K;
+}
+
+/**
+ * goto's arguments after the shared state: the target's input (`undefined` when it declares none), then
+ * the options. A target with an input requires it.
+ */
+export type GotoArgs<D, K> =
+  InputArgs<D> extends [infer I] ? [input: I, options?: GotoOptions<K>] : [input?: undefined, options?: GotoOptions<K>];
+
+/** What enter's `stay(shared, local)` takes at P (row 23): its own local, plus any keys of the levels above. */
+export type EnterStayArgs<SD, P> = [LocalOf<DeclAt<SD, P>>] extends [null]
+  ? [MergedLocal<SD, ParentOf<P>>] extends [null]
+    ? []
+    : [local?: Partial<MergedLocal<SD, ParentOf<P>>>]
+  : [MergedLocal<SD, ParentOf<P>>] extends [null]
+    ? [local: LocalOf<DeclAt<SD, P>>]
+    : [local: LocalOf<DeclAt<SD, P>> & Partial<MergedLocal<SD, ParentOf<P>>>];
+
 /** The leaf paths at or under P: what `ctx.phase` can be for a handler at P. */
 export type PathsUnder<SD, P> = P extends StatePath ? Extract<LeafPathsOf<SD>, readonly [...P, ...string[]]> : never;
 
