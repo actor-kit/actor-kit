@@ -55,6 +55,7 @@ import {
   type StepResult,
   step,
   stepInit,
+  stepInitSync,
   type TaggedError,
   type Trace,
   withDeterminismGuard,
@@ -143,6 +144,16 @@ export interface Simulation {
     input: ContractInput<C>,
     options?: { caller?: string; callerType?: "user" | "service" },
   ): Promise<SimActor<C>>;
+  /**
+   * spawn() without await, for an actor whose init is synchronous and makes no init links (an async init
+   * or a link() in init throws: use spawn()). Same journal and handle as spawn().
+   */
+  spawnSync<C extends AnyContract>(
+    contract: C,
+    id: string,
+    input: ContractInput<C>,
+    options?: { caller?: string; callerType?: "user" | "service" },
+  ): SimActor<C>;
   actor<C extends AnyContract>(contract: C, id: string): SimActor<C>;
   send<C extends AnyContract>(
     contract: C,
@@ -754,50 +765,96 @@ function createSimulation(
     return { role, ...view.data };
   }
 
+  /** What spawning needs before init runs: the def, the parsed input, the caller and live facts. */
+  function prepareSpawn(
+    def: SimDef,
+    contract: AnyContract,
+    id: string,
+    input: unknown,
+    options: { caller?: string; callerType?: "user" | "service" },
+  ) {
+    const address = { type: contract.name, id };
+    if (data.actors[keyOf(address)] !== undefined)
+      throw new ActorKitError("already_spawned", `simulate: ${keyOf(address)} is already spawned`);
+    publishOf(def);
+    const parsed = def.input.safeParse(input);
+    if (!parsed.success) throw new ActorKitError("invalid_input", `Invalid input: ${parsed.error.message}`);
+    const live = createLiveFacts(sources);
+    const facts = { ...liveStepFacts(live, () => []), guard: withDeterminismGuard };
+    const cause = {
+      input: parsed.data,
+      caller: options.caller ?? "system",
+      callerType: options.callerType ?? "service",
+    };
+    return { address, live, facts, cause };
+  }
+
+  /** Store a spawned actor (its init committed) and subscribe its init links. */
+  function placeSpawned(
+    def: SimDef,
+    address: ActorAddress,
+    init: { state: unknown; event: StepResult["event"] },
+    links: Array<{ name: string; id: string }>,
+  ): SimActor<AnyContract> {
+    const actor: ActorData = {
+      ...address,
+      state: init.state,
+      seq: 1,
+      journal: { events: [], checkpoints: [] },
+      timers: [],
+      links,
+      connections: {},
+      pushed: {},
+    };
+    data.actors[keyOf(address)] = actor;
+    appendJournal(actor, def, init.event);
+    for (const link of links) subscribe(actor, def, link);
+    return handle(address);
+  }
+
   function spawn(
     contract: AnyContract,
     id: string,
     input: unknown,
     options: { caller?: string; callerType?: "user" | "service" } = {},
   ): Promise<SimActor<AnyContract>> {
+    // An invalid contract throws at once (as it always has); everything else rejects the promise.
     const def = register(contract);
-    const address = { type: contract.name, id };
     return (async () => {
-      if (data.actors[keyOf(address)] !== undefined)
-        throw new ActorKitError("already_spawned", `simulate: ${keyOf(address)} is already spawned`);
-      publishOf(def);
-      const parsed = def.input.safeParse(input);
-      if (!parsed.success) throw new ActorKitError("invalid_input", `Invalid input: ${parsed.error.message}`);
+      const { address, live, facts, cause } = prepareSpawn(def, contract, id, input, options);
       const links: Array<{ name: string; id: string }> = [];
-      const live = createLiveFacts(sources);
-      const facts = { ...liveStepFacts(live, () => []), guard: withDeterminismGuard };
       const link = async (name: string, targetId: string) => {
         const view = await initLink(name, targetId, def);
         live.recordLinkView(name, targetId, view);
         links.push({ name, id: targetId });
         return view;
       };
-      const caller = {
-        input: parsed.data,
-        caller: options.caller ?? "system",
-        callerType: options.callerType ?? "service",
-      };
-      const init = await stepInit(def, caller, facts, { env: envFor(contract.name), link });
-      const actor: ActorData = {
-        ...address,
-        state: init.state,
-        seq: 1,
-        journal: { events: [], checkpoints: [] },
-        timers: [],
-        links,
-        connections: {},
-        pushed: {},
-      };
-      data.actors[keyOf(address)] = actor;
-      appendJournal(actor, def, init.event);
-      for (const link of links) subscribe(actor, def, link);
-      return handle(address);
+      const init = await stepInit(def, cause, facts, { env: envFor(contract.name), link });
+      return placeSpawned(def, address, init, links);
     })();
+  }
+
+  function spawnSync(
+    contract: AnyContract,
+    id: string,
+    input: unknown,
+    options: { caller?: string; callerType?: "user" | "service" } = {},
+  ): SimActor<AnyContract> {
+    const def = register(contract);
+    const { address, facts, cause } = prepareSpawn(def, contract, id, input, options);
+    const link = (name: string): Promise<unknown> => {
+      throw new ActorKitError(
+        "link_unavailable",
+        `simulate: "${contract.name}" links in init (link "${name}"): spawnSync cannot wait for the view. Use await sim.spawn().`,
+      );
+    };
+    const onAsync = () =>
+      new ActorKitError(
+        "async_handler",
+        `simulate: "${contract.name}" has an async init: spawnSync needs a synchronous init. Use await sim.spawn().`,
+      );
+    const init = stepInitSync(def, cause, facts, { env: envFor(contract.name), link, onAsync });
+    return placeSpawned(def, address, init, []);
   }
 
   function actor(contract: AnyContract, id: string): SimActor<AnyContract> {
@@ -825,6 +882,27 @@ function createSimulation(
     options?: { caller?: string; callerType?: "user" | "service" },
   ): Promise<SimActor<AnyContract>> {
     return spawn(contract, id, input, options);
+  }
+
+  function spawnSyncTyped<C extends AnyContract>(
+    contract: C,
+    id: string,
+    input: ContractInput<C>,
+    options?: { caller?: string; callerType?: "user" | "service" },
+  ): SimActor<C>;
+  function spawnSyncTyped(
+    contract: AnyContract,
+    id: string,
+    input: unknown,
+    options?: { caller?: string; callerType?: "user" | "service" },
+  ): SimActor<AnyContract>;
+  function spawnSyncTyped(
+    contract: AnyContract,
+    id: string,
+    input: unknown,
+    options?: { caller?: string; callerType?: "user" | "service" },
+  ): SimActor<AnyContract> {
+    return spawnSync(contract, id, input, options);
   }
 
   function actorTyped<C extends AnyContract>(contract: C, id: string): SimActor<C>;
@@ -862,6 +940,7 @@ function createSimulation(
       return data.clock;
     },
     spawn: spawnTyped,
+    spawnSync: spawnSyncTyped,
     actor: actorTyped,
     send: sendTyped,
     pendingEffects: () => [...data.pending],

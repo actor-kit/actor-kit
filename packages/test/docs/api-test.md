@@ -135,6 +135,9 @@ await replayJournal(AuctionContract, room.journal);           // every simulated
   name, `{ checkout: { PAYMENTS: fake } }`, parsed against it when the actor is spawned; other contracts get `env` as is).
 - **`spawn(contract, id, input, { caller, callerType }?)`**: parses the input and runs `init` (async). Init links
   read the linked actor's view as a service caller.
+- **`spawnSync(contract, id, input, { caller, callerType }?)`**: `spawn` without `await`, for an actor whose
+  `init` is synchronous and makes no init links (an async init throws `async_handler`, a `link()` in init
+  throws `link_unavailable`: use `spawn`). Same journal and handle; handy with `branch()` for templates.
 - **`actor(contract, id)`**: a handle with `state`, `journal`, `timers`, `links`, `send`, `role`, `view` and
   `connect(caller)`, which runs `lifecycle.connect` and returns `{ disconnect() }`. `callerConnections` counts the
   caller's open simulated connections, as the runtime counts sockets.

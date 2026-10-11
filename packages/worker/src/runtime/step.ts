@@ -906,6 +906,31 @@ export async function stepInit(
     throw new ActorKitError("invalid_actor_definition", "This actor has no init: add init(input) to the definition.");
   // Guarded until init's first await (an async init's later part runs outside the guard).
   const shared = await guarded(facts, () => init(cause.input, { env: io.env, link: io.link, ...facts.ctx }));
+  return initResult(def, cause, facts, shared);
+}
+
+/**
+ * The first transition when init is synchronous (simulate().spawnSync). `async` names the actor in the
+ * error when init returns a Promise.
+ */
+export function stepInitSync(
+  def: StepDef,
+  cause: InitCause,
+  facts: StepFacts,
+  io: { env: unknown; link: (name: string, id: string) => Promise<unknown>; onAsync: () => Error },
+): { state: unknown; event: JournalDraft } {
+  const init = def.init;
+  if (init === undefined)
+    throw new ActorKitError("invalid_actor_definition", "This actor has no init: add init(input) to the definition.");
+  const shared = guarded(facts, () => init(cause.input, { env: io.env, link: io.link, ...facts.ctx }));
+  if (shared instanceof Promise) {
+    shared.catch(() => {});
+    throw io.onAsync();
+  }
+  return initResult(def, cause, facts, shared);
+}
+
+function initResult(def: StepDef, cause: InitCause, facts: StepFacts, shared: unknown) {
   return {
     state: initialState(def, shared),
     event: draft(

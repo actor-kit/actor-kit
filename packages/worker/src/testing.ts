@@ -262,6 +262,7 @@ export {
   replayStepFacts,
   step,
   stepInit,
+  stepInitSync,
 } from "./runtime/step";
 // Studio protocol (pure): timeline options, timeline rows, studio WebSocket frames
 export type {

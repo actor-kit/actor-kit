@@ -100,6 +100,7 @@ CRAP over `packages/worker/src/runtime`, `packages/test/src`, `packages/core/src
 | 8. H docs that ship with the code (`scripts/docs.mts`, `scripts/gen-docs.mts`; generated error pages, package `docs/`, `llms.txt`, `llms-full.txt`) | n/a | no library source changed (Stryker mutates `packages/*/src`); the generator is pinned by `docs-generated.test.ts` (generated files up to date, every code's page exists, every errors URL in the sources resolves, every package publishes `docs/`, llms files complete) | — | unchanged |
 | RSJ 3. Roles on messages (`message-roles.ts` whole; `refusal.ts` wrong_role; `message.ts`; `step.ts` admission) | 120 | 94.32% first run, then edge tests (role-nested and junk entries, a caller-less refusal, `toStrictEqual` on message options, a states-only actor) → **96.67% (112/116)** | 4 equivalent (message-roles.ts:23, :26, :28; step.ts:312, below) | runtime 7.0; 0 ≥ 8 |
 | RSJ 4. `ctx.reenter` (`step.ts` phase context) | 1 | **100% (1/1)** | none | runtime 7.0; 0 ≥ 8 |
+| RSJ 2. `simulate().spawnSync` (`simulate.ts` spawn refactor, `step.ts` `stepInitSync`) | 52 | 86.79% first run; then tests for the handle's links, an async init that rejects (no unhandled rejection) and a missing init → **96.15%** | 2 equivalent (simulate.ts:783, init's unlink targets, listed below) | test 7.1, runtime 7.0; 0 ≥ 8 |
 
 ## Equivalent mutants
 
@@ -161,7 +162,7 @@ Surviving mutants that no test can kill, because the mutated program behaves ide
 | worker | determinism.ts:44 (×2) | the temporary replacement's `writable` / `enumerable` flags flipped | Handlers only call the replaced functions; whether they are writable or enumerable for the length of a handler is not observable, and the original descriptor is put back exactly. |
 | worker | determinism.ts:75 | `saved.reverse()` → `saved` | Every saved entry is a different (target, key) pair, so the restore order does not matter. |
 | test | simulate.ts:248 | `if (!envs.has(type))` → `true` | Only a memo: parsing the same fakes again gives the same env. |
-| test | simulate.ts:620 | init's unlink targets `() => []` → `() => undefined` / `["…"]` | Same as the existing simulate.ts:562 row (moved): `init` has no unlink. |
+| test | simulate.ts:620, :783 | init's unlink targets `() => []` → `() => undefined` / `["…"]` | Same as the existing simulate.ts:562 row (moved): `init` has no unlink. |
 | worker | service-error.ts:39 | `Symbol.for("actor-kit.service-failure")` → `Symbol.for("")` | The same registered symbol is used to mark and to read a failure, so any key works. |
 | worker | service-error.ts:68 | whole `if (!(thrown instanceof Error) \|\| !(FAILURE in thrown))` → `false` | A thrown value that is not a failure has no `[FAILURE]`, so it reads `undefined`, which isTaggedError rejects: still null. |
 | worker | retry.ts:64 | `parseOption(...)?.while` → `.while` | Kills by throwing a TypeError while test modules load (resolveRetryRule(undefined) via defineActor/link at module level), which Stryker's Vitest runner reports as survived (testing-strategy gotcha); run by hand it fails `service-errors.test.ts`. |
