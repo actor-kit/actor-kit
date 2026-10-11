@@ -3,7 +3,7 @@
 // the round, so ending the round early cancels it. Browser-safe (no cloudflare:workers).
 
 import { schema, string, uint32, view } from "@actor-kit/core";
-import { type PhasedStateOf, setup } from "@actor-kit/worker/testing";
+import { localOf, matches, type PhasedStateOf, setup } from "@actor-kit/worker/testing";
 import { z } from "zod";
 
 export type Shared = { players: string[]; scores: Record<string, number> };
@@ -42,11 +42,12 @@ const isHost = (_s: QuizState, _caller: string, { callerType }: { callerType: "u
   callerType === "service";
 
 const QuizView = schema({ phase: string, round: uint32, players: uint32, answered: uint32 });
+// The phase is a path (ADR-019 A): matches() narrows the state, localOf() reads the round's local.
 const project = (st: QuizState) => ({
-  phase: st.phase,
-  round: st.phase === "round" ? st.local.n : 0,
+  phase: st.phase.join("."),
+  round: matches(st, "round") ? localOf(st).n : 0,
   players: st.shared.players.length,
-  answered: st.phase === "round" ? Object.keys(st.local.answers).length : 0,
+  answered: matches(st, "round") ? Object.keys(localOf(st).answers).length : 0,
 });
 
 export const QuizContract = quiz.actor("quiz", {

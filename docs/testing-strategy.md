@@ -185,12 +185,21 @@ the guard's saved originals, so they keep working (fake timers included).
 `testActor(contract, { env })` is a single-actor wrapper over the runtime's pure `step()` core, as
 `simulate()` is for many actors: admission (`admitStepMessage`), handlers, states (phases, locals,
 `enter`, `scope: "state"` timers), declared-timer and declared-event checks and the determinism guard
-are the Durable Object's own code. `init` returns the persisted state (`{ shared, phase, local,
-stateTimers }` for an actor with states, typed per phase). `send` returns the next state plus the
+are the Durable Object's own code. `init` returns the persisted state (`{ shared, phase, locals,
+stateTimers }` for an actor with states: `phase` a path, one local per level; typed per leaf path). `send` returns the next state plus the
 effects as data: `executions`, `links`, `unlinks`, `forwards`, `schedules` (each `ctx.schedule()` call
 as made; timers never run, use `simulate().advance()`), `cancels` (including the scoped timers a phase
 change cancels), `emitted`. A refused message throws a `RefusalError` whose `code` is `unknown_message`,
 `invalid_payload`, `guard_failed`, `wrong_state` or `no_role`.
+
+### Nested states and type budgets (ADR-019 A)
+
+`tests/unit/nested-states.test.ts` has one test per row of the transition table in ADR-019 ("A as
+built"), on `tests/integration/src/rounds.ts` (a round with child states, shared with the integration
+suite, which hosts it as `ROUNDS`). `tests/unit/nested-states.types.test.ts` pins the path, merged-local
+and goto types. `pnpm typecheck:budget` (part of `pnpm typecheck`) typechecks the state-tree fixtures
+in `tests/unit/tsconfig.budget.json` and fails when type instantiations or check time exceed
+`tests/unit/type-budget.json`; raise the budget only in a reviewed change.
 
 ### Determinism in production (ADR-018 E)
 

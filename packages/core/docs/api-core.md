@@ -30,7 +30,8 @@ const quiz = setup({
 The kit's helpers:
 
 - **`kit.message(schema, handler | { guard, handler })`** and **`kit.timer(schema, handler)`** — messages and timers whose `ctx.env` and `ctx.emit` are typed by the declarations.
-- **`kit.in(state)`** — `.message()`, `.timer()` and `.state({ enter?, messages?, timers? })` for one declared state; their `ctx` adds a typed `phase`, `local`, `stay` and `goto`.
+- **`kit.in(state)`** — `.message()`, `.timer()` and `.state({ enter?, exit?, messages?, timers?, initial?, states? })` for one declared state, by name (`"round"`) or path (`["playing", "window"]`); their `ctx` adds a typed `phase` (the active path), `local` (merged with the ancestors' locals), `stay` and `goto`. `PhaseHelpers<Decls, Events, Path>` is its type.
+- **`matches(state, path)`** / **`localOf(state)`** — for views and roles of an actor with states: narrow the persisted state by a path prefix, and read the merged local of its active path.
 - **`kit.actor(name, def)`** — defines the actor (below).
 
 ## `kit.actor(name, def)`
@@ -88,7 +89,7 @@ For flat messages, wraps them so every role has access — guards handle authori
 | `roles` | Yes | `Record<string, (state, caller, claims) => boolean>` |
 | `messages` | Yes | Flat message handlers (`kit.message(...)`); in an actor with states, accepted in every state |
 | `views` | Yes | Per-role view definitions |
-| `initial` / `states` | With declared states | The first state, and each declared state's definition (`kit.in(name).state({ enter?, messages?, timers? })`) |
+| `initial` / `states` | With declared states | The first state, and each declared state's definition (`kit.in(name).state({ enter?, exit?, messages?, timers?, initial?, states? })`; a state with child states names its `initial` child) |
 | `timers` | No | Declared timers (`kit.timer(...)`). See [Timers](https://actorkit.dev/concepts/timers/) |
 | `publish` | No | `{ queue, events }`: send emitted events to a Queue binding. See [Domain Events](https://actorkit.dev/concepts/domain-events/) |
 | `versions` | No | Typed chain of state versions (`version(n, schema, options?)`). See [Actors & State](https://actorkit.dev/concepts/actors-and-state/) |

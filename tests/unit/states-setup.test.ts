@@ -46,9 +46,9 @@ describe("setup() with states", () => {
     expect(game.send("u", { type: "MOVE" })).toEqual({ ok: true });
     expect(phasedState(game.state)).toEqual({
       shared: { n: 1 },
-      phase: "playing",
-      local: { moves: 1 },
-      stateTimers: [],
+      phase: ["playing"],
+      locals: [{ moves: 1 }],
+      stateTimers: [[]],
     });
   });
 
@@ -70,7 +70,7 @@ describe("setup() with states", () => {
       });
       const two = await simulate({ contracts: [Two] }).spawn(Two, "t", {});
       expect(two.send("u", { type: "GO" })).toEqual({ ok: true });
-      expect(phasedState(two.state)).toEqual({ shared: { n: 0 }, phase: "b", local: null, stateTimers: [] });
+      expect(phasedState(two.state)).toEqual({ shared: { n: 0 }, phase: ["b"], locals: [null], stateTimers: [[]] });
     }
   });
 

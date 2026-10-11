@@ -5,6 +5,7 @@
 import { z } from "zod";
 import { defineActor } from "../define";
 import { type PhasedStateOf, setup } from "../setup";
+import { localOf, matches } from "../state-paths";
 
 type S = { n: number };
 const kit = setup({
@@ -19,7 +20,7 @@ const idle = kit.in("idle");
 const playing = kit.in("playing");
 
 export const start = idle.message(z.object({}), (s: S, _p, ctx) => {
-  const phase: "idle" = ctx.phase;
+  const phase: readonly ["idle"] = ctx.phase;
   const local: null = ctx.local;
   // @ts-expect-error playing needs its enter input
   ctx.goto("playing", s);
@@ -51,7 +52,7 @@ export const move = playing.message(z.object({ m: z.string() }), (s: S, { m }, c
 export const playingState = playing.state({
   enter: (_s: S, { n }, ctx) => {
     ctx.schedule("tick", { in: 10, scope: "state" });
-    const phase: "playing" = ctx.phase;
+    const phase: readonly ["playing"] = ctx.phase;
     void phase;
     return { n, moves: [] };
   },
@@ -69,13 +70,13 @@ export const guarded = playing.message(z.object({}), {
 type Snapshot = PhasedStateOf<typeof kit, S>;
 // Narrowing by phase types the local (one check per function: these are compiled, never run).
 export function playingMoves(state: Snapshot): string | null {
-  return state.phase === "playing" ? state.local.moves.join(",") : null;
+  return matches(state, "playing") ? localOf(state).moves.join(",") : null;
 }
 export function doneWinner(state: Snapshot): string | null {
-  return state.phase === "done" ? state.local.winner : null;
+  return matches(state, "done") ? localOf(state).winner : null;
 }
-export function idleLocal(state: Extract<Snapshot, { phase: "idle" }>): null {
-  return state.local;
+export function idleLocal(state: Extract<Snapshot, { phase: readonly ["idle"] }>): null {
+  return localOf(state);
 }
 
 export const Game = defineActor("game", {

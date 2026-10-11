@@ -219,6 +219,8 @@ interface SimData {
   rng: number;
   actors: Record<string, ActorData>;
   pending: PendingEffect[];
+  /** Scoped calls cancelled because their state was left (ADR-019 B): a late result still reaches onStale. */
+  stale: PendingEffect[];
   failedForwards: FailedForward[];
   events: SimEvent[];
   published: Array<{ queue: string; body: PublishedBody }>;
@@ -290,6 +292,7 @@ export function simulate(options: SimulateOptions = {}): Simulation {
       rng: options.seed ?? 1,
       actors: {},
       pending: [],
+      stale: [],
       failedForwards: [],
       events: [],
       published: [],
@@ -493,10 +496,18 @@ function createSimulation(
     actor.timers.sort((a, b) => a.fireAt - b.fireAt);
   }
 
-  /** ctx.cancel(effectId) (ADR-018 G): the actor's calls with those ids leave pendingEffects, never to run. */
+  /**
+   * ctx.cancel(effectId) (ADR-018 G): the actor's calls with those ids leave pendingEffects, never to run.
+   * A call cancelled because its state was left (ADR-019 B) is kept aside: its late result goes to onStale.
+   */
   function cancelPending(actor: ActorData, result: StepResult): void {
-    const cancelled = new Set(result.effects.toTimerOps().flatMap((op) => (op.op === "cancel" ? [op.key] : [])));
-    data.pending = data.pending.filter((p) => !(keyOf(p.actor) === keyOf(actor) && cancelled.has(p.effectId)));
+    const cancels = result.effects.toTimerOps().flatMap((op) => (op.op === "cancel" ? [op] : []));
+    const ofActor = (p: PendingEffect, keys: ReadonlySet<string>) =>
+      keyOf(p.actor) === keyOf(actor) && keys.has(p.effectId);
+    const all = new Set(cancels.map((op) => op.key));
+    const stale = new Set(cancels.flatMap((op) => (op.stale === true ? [op.key] : [])));
+    data.stale.push(...data.pending.filter((p) => ofActor(p, stale)));
+    data.pending = data.pending.filter((p) => !ofActor(p, all));
   }
 
   /** Published events (ADR-017 §3) are delivered to their queue at once. */
@@ -573,11 +584,11 @@ function createSimulation(
   function changed(actor: ActorData, result: StepResult): boolean {
     const { effects } = result;
     const declared = effects.getExecutions().length + effects.getForwards().length + effects.getEmitted().length;
-    return result.state !== actor.state || declared + effects.toTimerOps().length > 0;
+    return result.alwaysJournal === true || result.state !== actor.state || declared + effects.toTimerOps().length > 0;
   }
 
   /** Commit a transition only when it changed something (lifecycle, service, link callbacks). */
-  function commitIfChanged(actor: ActorData, result: StepResult, from: Caller): void {
+  function commitIfChanged(actor: ActorData, result: StepResult, from: Caller | null): void {
     if (changed(actor, result)) commit(actor, result, from);
   }
 
@@ -647,11 +658,15 @@ function createSimulation(
     };
   }
 
+  /** The effect in `list` (pending or stale calls) a bare id or a pending effect names; undefined when none. */
+  function matching(list: readonly PendingEffect[], effect: PendingEffect | string): PendingEffect[] {
+    return typeof effect === "string"
+      ? list.filter((p) => p.effectId === effect)
+      : list.filter((p) => p.effectId === effect.effectId && keyOf(p.actor) === keyOf(effect.actor));
+  }
+
   function findPending(effect: PendingEffect | string): PendingEffect {
-    const matches =
-      typeof effect === "string"
-        ? data.pending.filter((p) => p.effectId === effect)
-        : data.pending.filter((p) => p.effectId === effect.effectId && keyOf(p.actor) === keyOf(effect.actor));
+    const matches = matching(data.pending, effect);
     const [match] = matches;
     const id = typeof effect === "string" ? effect : effect.effectId;
     if (match === undefined) throw new ActorKitError("unknown_effect", `simulate: No pending effect "${id}"`);
@@ -673,6 +688,28 @@ function createSimulation(
     const traced = { ...settled, trace: effectTrace(actor, pending.effectId) };
     const result = step(defOf(actor.type), actor.state, traced, factsFor(actor), envFor(actor.type));
     if (changed(actor, result)) commit(actor, result, null);
+  }
+
+  /**
+   * A late result for a call whose state was left (ADR-019 B): resolved, it is a `service.stale` transition
+   * (onStale, or journaled and ignored); rejected, it is dropped. False when the effect is not stale.
+   */
+  function settleStale(effect: PendingEffect | string, result: { readonly value: unknown } | null): boolean {
+    const [late] = matching(data.stale, effect);
+    if (late === undefined) return false;
+    data.stale = data.stale.filter((p) => p !== late);
+    if (result === null) return true;
+    const actor = record(late.actor);
+    const cause: StepCause = {
+      type: "service.stale",
+      service: late.service,
+      input: late.input,
+      result: resultOf(late, result.value),
+      effectId: late.effectId,
+      trace: effectTrace(actor, late.effectId),
+    };
+    commitIfChanged(actor, step(defOf(actor.type), actor.state, cause, factsFor(actor), envFor(actor.type)), null);
+    return true;
   }
 
   /** A resolved result as onDone gets it (ADR-018 G): parsed by the service's `result`, within its size limit. */
@@ -957,6 +994,7 @@ function createSimulation(
     send: sendTyped,
     pendingEffects: () => [...data.pending],
     resolve: (effect, result) =>
+      settleStale(effect, { value: result }) ||
       settle(effect, (p) => ({
         type: "service.onDone",
         service: p.service,
@@ -965,6 +1003,7 @@ function createSimulation(
         effectId: p.effectId,
       })),
     reject: (effect, error) =>
+      settleStale(effect, null) ||
       settle(effect, (p) => ({
         type: "service.onError",
         service: p.service,

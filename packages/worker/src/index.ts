@@ -4,7 +4,7 @@ export type { TypedActorClass } from "./actor";
 // Core actor builder + typed DO class
 export { actor, createActorClass } from "./actor";
 // Contract builder
-export type { ActorContract, LifecycleEvent } from "./define";
+export type { ActorContract, LifecycleEvent, ServiceCallbackContext, ServiceDef } from "./define";
 export { defineActor } from "./define";
 // Identity (Worker-trust model)
 export { CALLER_ID_HEADER, CALLER_TYPE_HEADER, withCallerIdentity } from "./identity";
@@ -45,10 +45,14 @@ export { version } from "./runtime/versions";
 export type {
   EmittingMessageContext,
   EmittingTimerContext,
+  EnterContext,
   EventPayloads,
   EventSchemas,
+  ExitContext,
   Goto,
   KitActorDef,
+  KitCallbackContext,
+  KitCallbackResult,
   KitContractDef,
   KitDefCheck,
   KitServiceDef,
@@ -58,11 +62,26 @@ export type {
   PhaseHelpers,
   PhaseResult,
   Setup,
+  StateCallbackContext,
   StateDecl,
   TypedEmit,
   TypedStateDef,
 } from "./setup";
 export { goto, PhaseTransition, setup, stay } from "./setup";
+// Hierarchical states (ADR-019 A): paths, merged locals, and the view/role helpers
+export type {
+  DeclAt,
+  LeafPathsOf,
+  LocalsAlong,
+  Matching,
+  MergedLocal,
+  MergeLocals,
+  PathOf,
+  PathsOf,
+  StatePath,
+  TargetOf,
+} from "./state-paths";
+export { localOf, matches } from "./state-paths";
 // Timer helper (ADR-015 D2)
 export type { PlainTimerContext } from "./timer";
 export { timer } from "./timer";

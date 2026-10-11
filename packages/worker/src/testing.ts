@@ -2,7 +2,7 @@
 // Used by @actor-kit/test and unit tests that run outside CF runtime
 
 // Contract builder
-export type { ActorContract, LifecycleEvent } from "./define";
+export type { ActorContract, LifecycleEvent, ServiceCallbackContext, ServiceDef } from "./define";
 export { defineActor } from "./define";
 // Identity (Worker-trust model)
 export { CALLER_ID_HEADER, CALLER_TYPE_HEADER, withCallerIdentity } from "./identity";
@@ -100,6 +100,23 @@ export {
   snapshotSeq,
   upcastEmitted,
 } from "./runtime/journal";
+// Journal archive to R2 (ADR-019 D)
+export type { ArchiveBucket, ArchivedSegment, ArchiveIds, ArchiveRange } from "./runtime/journal-archive";
+export {
+  archiveBucket,
+  archiveDue,
+  archivedSegments,
+  archiveJournal,
+  buildSegment,
+  journalStats,
+  journalStorage,
+  parseSegment,
+  prunableRange,
+  readArchivedJournalPage,
+  readFullJournal,
+  STORAGE_CAP_BYTES,
+  segmentKey,
+} from "./runtime/journal-archive";
 // Studio timeline read from the journal (ADR-017 §5)
 export type {
   JournalEntry,
@@ -109,7 +126,13 @@ export type {
   JournalQuery,
   JournalReadContext,
 } from "./runtime/journal-query";
-export { JOURNAL_QUERY_MAX_LIMIT, parseJournalOptions, readJournalPage } from "./runtime/journal-query";
+export {
+  JOURNAL_QUERY_MAX_LIMIT,
+  journalEntry,
+  matchesJournalQuery,
+  parseJournalOptions,
+  readJournalPage,
+} from "./runtime/journal-query";
 export type { TimelinePageQuery, TimelineSource } from "./runtime/journal-timeline";
 export { readStudioTimeline, timelineCause, timelineEntry } from "./runtime/journal-timeline";
 // Live app connections from held sockets (pure)
@@ -165,6 +188,7 @@ export {
   readOutboxRows,
   redriveExecution,
   requeueInterrupted,
+  STALE_CANCEL_REASON,
   startAttempt,
 } from "./runtime/outbox-store";
 // Typed declarations: setup({ events, states }) (ADR-017)
@@ -311,11 +335,15 @@ export { compileVersions, toRuntimeDef, version } from "./runtime/versions";
 export type {
   EmittingMessageContext,
   EmittingTimerContext,
+  EnterContext,
   EventPayloads,
   EventSchemas,
+  ExitContext,
   Goto,
   InputArgs,
   KitActorDef,
+  KitCallbackContext,
+  KitCallbackResult,
   KitContractDef,
   KitDefCheck,
   KitServiceDef,
@@ -328,6 +356,7 @@ export type {
   PhaseResult,
   PhaseTimerDef,
   Setup,
+  StateCallbackContext,
   StateDecl,
   StateDecls,
   StateDef,
@@ -336,6 +365,20 @@ export type {
   TypedStateDef,
 } from "./setup";
 export { goto, PhaseTransition, setup, stay } from "./setup";
+// Hierarchical states (ADR-019 A): paths, merged locals, and the view/role helpers
+export type {
+  DeclAt,
+  LeafPathsOf,
+  LocalsAlong,
+  Matching,
+  MergedLocal,
+  MergeLocals,
+  PathOf,
+  PathsOf,
+  StatePath,
+  TargetOf,
+} from "./state-paths";
+export { localOf, matches } from "./state-paths";
 // Timer helper (ADR-015 D2)
 export type { PlainTimerContext } from "./timer";
 export { timer } from "./timer";

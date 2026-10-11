@@ -2600,6 +2600,29 @@ ABANDON: checkout.message(z.object({}), (s: S, _p, ctx) => {
 
 `ctx.cancel(effectId)` (the same verb that cancels a timer by key) cancels a call that has not finished: one not yet run never runs, one in flight has its `effect.signal` aborted and its late result discarded. The row ends as `cancelled`; no callback runs. `onDone` and `onError` get the call's id as `ctx.effectId`.
 
+## Calls scoped to a state
+
+In an actor with [states](https://actorkit.dev/concepts/states/), a call can belong to the state that made it (ADR-019):
+
+```typescript
+loading: loading.state({
+  enter: (_s: S, { q }, ctx) => {
+    ctx.execute("lookup", { q }, { scope: "state" });
+    return { q };
+  },
+}),
+```
+
+- Leaving that state (a goto, or a parent's exit) cancels the call: one not yet run never runs, one in
+  flight has its `effect.signal` aborted. The row ends `cancelled` with the reason.
+- A result that still arrives goes to the service's `onStale(state, result, input, ctx)`, or is journaled
+  as `service.stale` and ignored. A late failure is dropped.
+- A call's callbacks run at the state that owns it (the leaf when none does), with `ctx.phase`,
+  `ctx.stay` and `ctx.goto`, so `onDone` can move the actor on: that is how a
+  [saga](https://actorkit.dev/recipes/sagas/) steps forward and `onError` starts compensating.
+- `scope: "state"` from `exit`, from an actor without states or from a lifecycle callback is refused
+  (`invalid_scope`): nothing could own the call.
+
 ## Results: schemas, size and audit facts
 
 Declare `result` to parse what `fn` returns. Only the parsed value is journaled and passed to `onDone`, live and on replay, and `onDone`'s `result` is typed by it when the service comes from `kit.service()`:
@@ -2868,7 +2891,8 @@ not even by a Studio restore. [`@actor-kit/projection`](https://actorkit.dev/con
 Source: https://actorkit.dev/concepts/states/
 
 An actor may declare `states` (ADR-017). Data that only matters in one phase lives in that phase's
-**local**, and timers scheduled with `scope: "state"` are cancelled when the actor leaves it.
+**local**, and timers scheduled with `scope: "state"` are cancelled when the actor leaves it. States
+nest (ADR-019): a parent's local survives while its children come and go.
 
 ```typescript
 import { setup } from "@actor-kit/worker";
@@ -2915,12 +2939,14 @@ export const Quiz = quiz.actor("quiz", {
 - The states are declared once, in `setup({ states })`: each one's optional `local` and `enter`
   `input` schemas. `quiz.actor()` takes them from the kit, so `initial` must name a declared state
   and `states` must define every one (each with `quiz.in(name).state({ ... })`), or it is a type error.
-- The persisted state is `{ shared, phase, local, stateTimers }`. Views and roles get it
-  (`PhasedStateOf<typeof quiz, Shared>`, narrowed by `phase`).
-- A handler returns `ctx.stay(shared, local?)`, `ctx.goto(phase, shared, input?)`, or `shared`
+- The persisted state is `{ shared, phase, locals, stateTimers }`: `phase` is a path
+  (`["round"]`), with one local and one list of scoped timers per level. Views and roles get it
+  (`PhasedStateOf<typeof quiz, Shared>`): narrow it with `matches(state, "round")` and read the local
+  with `localOf(state)`.
+- A handler returns `ctx.stay(shared, local?)`, `ctx.goto(state, shared, input?)`, or `shared`
   (stay, same local). `goto` checks the target and its `enter` input; `ctx.local` is typed per
   state; the local is parsed by its schema.
-- Exit drops the local and cancels the phase's `scope: "state"` timers; `enter` builds the next
+- Exit drops the local and cancels the state's `scope: "state"` timers; `enter` builds the next
   local and may schedule, execute and emit.
 - **`goto` to the state the actor is already in re-enters it**: exit runs (its `scope: "state"` timers
   are cancelled, its local dropped) and `enter` runs again with the new input. Say it on purpose with
@@ -2929,10 +2955,88 @@ export const Quiz = quiz.actor("quiz", {
 - A message is accepted only in the states that declare it, plus the top-level `messages`;
   otherwise it is rejected with `wrong_state`, before its guard. A message is accepted from every role
   unless it names `roles` (then other roles get `wrong_role`).
-- Studio's State panel shows the phase and local; the timeline marks phase changes.
+- Studio's State panel names the active path; the timeline marks phase changes.
 
-See `examples/quiz/quiz.ts` for a full contract and `tests/unit/states.test.ts` for the
-behaviour under `simulate()`.
+## Nested states
+
+A state can have child states. Run Set Jimmy's round (`playing`) keeps the round's data while the
+buy `window` and a player `acting` alternate:
+
+```typescript
+const room = setup({
+  states: {
+    lobby: {},
+    playing: {
+      local: z.object({ round: z.number() }),
+      input: z.object({ round: z.number() }),
+      states: {
+        window: { local: z.object({ buys: z.array(z.string()) }) },
+        acting: { local: z.object({ actor: z.string() }), input: z.object({ actor: z.string() }) },
+      },
+    },
+  },
+});
+const playing = room.in("playing");
+const buying = room.in(["playing", "window"]);
+const acting = room.in(["playing", "acting"]);
+
+export const Room = room.actor("room", {
+  // ...
+  initial: "lobby",
+  states: {
+    lobby: room.in("lobby").state({
+      messages: { START: room.in("lobby").message(z.object({}), (s: S, _p, ctx) => ctx.goto("playing", s, { round: 1 })) },
+    }),
+    playing: playing.state({
+      initial: "window",
+      // enter can change the shared state too: return ctx.stay(shared, local).
+      enter: (s: S, { round }, ctx) => ctx.stay({ ...s, dealer: nextDealer(s) }, { round }),
+      exit: (s: S, ctx) => ({ ...s, lastRound: ctx.local.round }),
+      states: {
+        window: buying.state({
+          enter: (_s: S, _input, ctx) => {
+            ctx.schedule("close", { in: "5s", scope: "state" }); // owned by window
+            return { buys: [] };
+          },
+          messages: {
+            // ctx.local is { round } & { buys }: the parent's local and the window's, merged.
+            BUY: buying.message(z.object({}), (s: S, _p, ctx) =>
+              ctx.stay(s, { ...ctx.local, buys: [...ctx.local.buys, ctx.caller] })),
+            ACT: buying.message(z.object({}), (s: S, _p, ctx) => ctx.goto(["playing", "acting"], s, { actor: ctx.caller })),
+          },
+          timers: { close: buying.timer(z.undefined(), (s: S, _p, ctx) => ctx.goto(["playing", "acting"], s, { actor: "dealer" })) },
+        }),
+        acting: acting.state({ enter: (_s: S, { actor }) => ({ actor }) }),
+      },
+    }),
+  },
+});
+```
+
+- **Paths.** A state is named by its path: `"lobby"` (top level) or `["playing", "window"]`.
+  `room.in(path)` gives that state's helpers; `goto` takes a path and checks it and the target's input.
+  `PhaseHelpers<Decls, Events, Path>` types a helper shared by several states.
+- **Locals per level.** `ctx.local` is the merge of the handler's state's local and its ancestors'
+  (`{ round } & { buys }` in the window). `ctx.stay(shared, local)` updates every level up to the
+  handler's from that one value (each level keeps its own keys, so nested locals are `z.object`s).
+  Leaving the window drops `buys`; `round` stays until the actor leaves `playing`.
+- **Lookup.** A message is looked up in the innermost active state first, then outward, then in the
+  top-level `messages`; timers likewise.
+- **goto.** It exits the active states below the common ancestor (innermost first, each `exit`
+  running and its scoped timers cancelled) and enters down to the target (outermost first). The target
+  itself is always (re-)entered; a parent target then enters its `initial` child. The input goes to the
+  target only; a state that declares an input cannot be entered on the way to another one.
+- **enter and exit.** `enter` returns its local, or `ctx.stay(shared, local)` to change the shared
+  state as well (it sees the parent's local as `ctx.local`). `exit` returns the next shared state.
+  Neither can `goto`.
+- **Scoped timers** belong to the state whose handler (or `enter`) scheduled them; their key defaults
+  to `"playing.window:close"`.
+
+The full rules, one row per case, are the transition table in
+[ADR-019](https://github.com/actor-kit/actor-kit/blob/main/docs/adrs/019-hierarchical-states-and-history-at-scale.md).
+
+See `examples/quiz/quiz.ts` for a flat contract, `tests/integration/src/rounds.ts` for a nested one,
+and `tests/unit/nested-states.test.ts` for the behaviour under `simulate()`.
 
 # Testing
 
@@ -3040,7 +3144,7 @@ await expect(t.send(state, "alice", { type: "RESET" })).rejects.toThrow(RefusalE
 await expect(t.send(state, "alice", { type: "RESET" })).rejects.toMatchObject({ code: "guard_failed" });
 ```
 
-Actors with states work the same way: `init()` returns the persisted state `{ shared, phase, local, stateTimers }`, and `send()` moves between phases as the runtime does.
+Actors with states work the same way: `init()` returns the persisted state `{ shared, phase, locals, stateTimers }`, and `send()` moves between phases as the runtime does.
 
 **Capture service calls** without executing them:
 
@@ -4484,7 +4588,8 @@ const quiz = setup({
 The kit's helpers:
 
 - **`kit.message(schema, handler | { guard, handler })`** and **`kit.timer(schema, handler)`** — messages and timers whose `ctx.env` and `ctx.emit` are typed by the declarations.
-- **`kit.in(state)`** — `.message()`, `.timer()` and `.state({ enter?, messages?, timers? })` for one declared state; their `ctx` adds a typed `phase`, `local`, `stay` and `goto`.
+- **`kit.in(state)`** — `.message()`, `.timer()` and `.state({ enter?, exit?, messages?, timers?, initial?, states? })` for one declared state, by name (`"round"`) or path (`["playing", "window"]`); their `ctx` adds a typed `phase` (the active path), `local` (merged with the ancestors' locals), `stay` and `goto`. `PhaseHelpers<Decls, Events, Path>` is its type.
+- **`matches(state, path)`** / **`localOf(state)`** — for views and roles of an actor with states: narrow the persisted state by a path prefix, and read the merged local of its active path.
 - **`kit.actor(name, def)`** — defines the actor (below).
 
 ## `kit.actor(name, def)`
@@ -4542,7 +4647,7 @@ For flat messages, wraps them so every role has access — guards handle authori
 | `roles` | Yes | `Record<string, (state, caller, claims) => boolean>` |
 | `messages` | Yes | Flat message handlers (`kit.message(...)`); in an actor with states, accepted in every state |
 | `views` | Yes | Per-role view definitions |
-| `initial` / `states` | With declared states | The first state, and each declared state's definition (`kit.in(name).state({ enter?, messages?, timers? })`) |
+| `initial` / `states` | With declared states | The first state, and each declared state's definition (`kit.in(name).state({ enter?, exit?, messages?, timers?, initial?, states? })`; a state with child states names its `initial` child) |
 | `timers` | No | Declared timers (`kit.timer(...)`). See [Timers](https://actorkit.dev/concepts/timers/) |
 | `publish` | No | `{ queue, events }`: send emitted events to a Queue binding. See [Domain Events](https://actorkit.dev/concepts/domain-events/) |
 | `versions` | No | Typed chain of state versions (`version(n, schema, options?)`). See [Actors & State](https://actorkit.dev/concepts/actors-and-state/) |
@@ -5073,7 +5178,7 @@ const state = t.init({});
 // state: { count: 0, lastUpdatedBy: null }
 ```
 
-Throws if input is invalid. For an actor with states, `init` returns the persisted state `{ shared, phase, local, stateTimers }`, typed per phase.
+Throws if input is invalid. For an actor with states, `init` returns the persisted state `{ shared, phase, locals, stateTimers }`, typed per phase.
 
 ### `t.send(state, caller, message, opts?)`
 
@@ -5618,10 +5723,10 @@ interface TimelineEntry {
 
 # Upgrading to 0.3
 
-0.3 makes the agent-first changes of [ADR-018](adrs/018-agent-first-api.md) and the richer views, journal
-query and read models of [ADR-019](adrs/019-hierarchical-states-and-history-at-scale.md) (C, E, F). Each breaking change has a
-note below with code before and after. Nothing here needs a data migration: 0.x has no production data
-contract.
+0.3 makes the agent-first changes of [ADR-018](adrs/018-agent-first-api.md) and ADR-019
+([hierarchical states, scoped calls, the journal archive, richer views, the journal query and read models](adrs/019-hierarchical-states-and-history-at-scale.md)).
+Each breaking change has a note below with code before and after. Nothing here needs a manual data migration:
+the one stored shape that changes (an actor with states) is rewritten when the Durable Object loads it.
 
 ## testActor runs the runtime's step core (ADR-018 D)
 
@@ -5960,6 +6065,61 @@ const sql = {
 await replayJournal(RoomContract, readJournal(sql)); // throws at the first diverging event
 ```
 
+## The phase is a path; locals and scoped timers are per level (ADR-019 A)
+
+States nest, so the persisted state of an actor with states is now
+`{ shared, phase, locals, stateTimers }`: `phase` is the path from the root (`["round"]` for a flat
+actor), `locals` has one local per level and `stateTimers` one list of keys per level. A Durable Object
+stored in the 0.2 shape (`{ shared, phase: "round", local, stateTimers }`) is read as its one-element
+path when it loads, and written in the new shape on its next transition; `phasedState()` reads both.
+
+`ctx.phase` in handlers, guards, `enter` and `exit` is the path too. Views and roles narrow with
+`matches()` (a path prefix, typed) and read the merged local with `localOf()`, since TypeScript cannot
+narrow a union on a tuple element.
+
+```ts
+// Before
+const project = (st: QuizState) => ({
+  phase: st.phase,
+  round: st.phase === "round" ? st.local.n : 0,
+});
+expect(q.state).toEqual({ shared, phase: "lobby", local: null, stateTimers: [] });
+
+// After
+import { localOf, matches } from "@actor-kit/worker";
+const project = (st: QuizState) => ({
+  phase: st.phase.join("."),
+  round: matches(st, "round") ? localOf(st).n : 0,
+});
+expect(q.state).toEqual({ shared, phase: ["lobby"], locals: [null], stateTimers: [[]] });
+```
+
+Handlers are unchanged: `ctx.local`, `ctx.stay`, `ctx.goto("round", ...)` and `kit.in("round")` work as
+before (a name is the one-element path). Refusals still name states as text (`playing.window`).
+`enter` may now return `ctx.stay(shared, local)` to change the shared state, and a state may declare
+`exit(shared, ctx)`, `initial` and child `states`.
+
+## Service callbacks in actors with states run in a state (ADR-019 B)
+
+In an actor with states, `onDone`, `onError` and the new `onStale` run at the state that owns their call
+(the active leaf for a call made without `scope: "state"`). Their ctx gains `phase`, `stay` and `goto`
+(typed through `kit.service()`), and their transition writes every effect, so a callback can move the
+actor on. A callback that returned the state unchanged behaves as before.
+
+```ts
+// Before: onDone could only change the shared state; a message had to move the actor on
+charge: saga.service({ fn, onDone: (s: S, { id }) => ({ ...s, payment: id, next: "confirming" }) }),
+
+// After
+charge: saga.service({ fn, onDone: (s: S, { id }, _input, ctx) => ctx.goto("confirming", { ...s, payment: id }) }),
+```
+
+`ServiceDef` has two more type parameters (what callbacks return and their ctx), with defaults; code that
+names `ServiceDef<S, E, Env, R, Events>` is unchanged. `startAttempt()` (from `@actor-kit/worker/testing`)
+returns `null` for a row that is no longer `pending` or `retrying`.
+
+One note per breaking or behaviour change. 0.3 is a pre-release under the `next` tag.
+
 ## Published events carry `position` (ADR-019 E)
 
 Every message `publish` sends to a Queue now has a `position` field: that actor's published events
@@ -6225,9 +6385,57 @@ Docs: https://actorkit.dev/errors/undeclared_state/
 
 Docs: https://actorkit.dev/errors/invalid_local/
 
+## `missing_state_input`
+
+**What happened:** A state that declares an enter `input` was entered on the way to another state (or as an `initial` child).
+
+**How to fix it:** Goto that state itself (a goto's input goes to its target only), or drop its `input` and build its local from `ctx.local`.
+
+Docs: https://actorkit.dev/errors/missing_state_input/
+
+## `invalid_scope`
+
+**What happened:** `ctx.execute(..., { scope: "state" })` was called where no state can own the call.
+
+**How to fix it:** Make scoped calls from a state's message, timer or `enter` (not `exit`, not a top-level handler of an actor without states).
+
+Docs: https://actorkit.dev/errors/invalid_scope/
+
+## `invalid_transition`
+
+**What happened:** `enter` or `exit` returned a `goto` (or `exit` returned `stay`).
+
+**How to fix it:** `enter` returns its local or `ctx.stay(shared, local)`; `exit` returns the next shared state. Move to another state from a message or timer.
+
+Docs: https://actorkit.dev/errors/invalid_transition/
+
+## `archive_missing`
+
+**What happened:** An archived journal segment recorded by the actor is not in its R2 bucket.
+
+**How to fix it:** Check the bucket the `journal.archive` binding points at (and its lifecycle rules); segments must not be deleted while the actor may read them.
+
+Docs: https://actorkit.dev/errors/archive_missing/
+
+## `archive_unbound`
+
+**What happened:** `journal.archive` names a binding that is not an R2 bucket in the Worker env.
+
+**How to fix it:** Add the bucket to wrangler.jsonc (`r2_buckets`) under the name `journal.archive` gives.
+
+Docs: https://actorkit.dev/errors/archive_unbound/
+
+## `invalid_archive_segment`
+
+**What happened:** An archived journal segment in R2 is not NDJSON of journal rows.
+
+**How to fix it:** Do not edit archived segments by hand; restore the object from a backup of the bucket.
+
+Docs: https://actorkit.dev/errors/invalid_archive_segment/
+
 ## `invalid_phased_state`
 
-**What happened:** The persisted state of an actor with states is not `{ shared, phase, local, stateTimers }`.
+**What happened:** The persisted state of an actor with states is not `{ shared, phase, locals, stateTimers }`.
 
 **How to fix it:** Do not write the persisted state by hand; restore or migrate through `versions`.
 

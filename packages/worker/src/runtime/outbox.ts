@@ -75,7 +75,11 @@ export type TimerOp =
       readonly payload: unknown;
       readonly fireAt: number;
     }
-  | { readonly op: "cancel"; readonly key: string };
+  /**
+   * `stale`: cancelled because the state that owned it was left (ADR-019 B). A call cancelled this way
+   * still delivers a late result, to `onStale`.
+   */
+  | { readonly op: "cancel"; readonly key: string; readonly stale?: true };
 
 // --- Outbox collector (used during a transition) ---
 
@@ -100,7 +104,8 @@ interface OutboxCollector {
   schedule(timer: TimerSchedule, requested: ScheduleRequest): void;
   /** Every ctx.schedule() call, as made (ADR-018 D: testActor records timers). */
   getSchedules(): ScheduleRequest[];
-  cancel(key: string): void;
+  /** Cancel a timer key or a call's effect id; `stale` when its owning state was left (ADR-019 B). */
+  cancel(key: string, stale?: boolean): void;
   /** Schedules and cancels, in declaration order, for the transition numbered `seq`. */
   toTimerOps(seq?: number): TimerOp[];
   /** Record a domain event (ADR-017 §2), already parsed. Takes an effect index (publish uses it). */
@@ -130,7 +135,7 @@ export function createOutbox(seq = 0): OutboxCollector {
   const forwards: Array<ForwardCall & { readonly index: number }> = [];
   const timerOps: Array<
     | { readonly op: "schedule"; readonly timer: TimerSchedule; readonly index: number }
-    | { readonly op: "cancel"; readonly key: string }
+    | { readonly op: "cancel"; readonly key: string; readonly stale?: true }
   > = [];
   const emitted: EmittedEffect[] = [];
   const requests: ScheduleRequest[] = [];
@@ -202,8 +207,8 @@ export function createOutbox(seq = 0): OutboxCollector {
       return [...requests];
     },
 
-    cancel(key: string): void {
-      timerOps.push({ op: "cancel", key });
+    cancel(key: string, stale = false): void {
+      timerOps.push(stale ? { op: "cancel", key, stale } : { op: "cancel", key });
     },
 
     toTimerOps(seq = 0): TimerOp[] {

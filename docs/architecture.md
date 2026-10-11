@@ -221,6 +221,18 @@ socket-facing checks: `connect-request.ts` (Upgrade header, caller identity head
 `studio-registry.ts` (finding the StudioRegistry). `actor.ts` itself is covered by the integration tests;
 `pnpm crap:worker` scores its CRAP with unit and integration (istanbul, workerd) coverage combined.
 
+### States in the step core (ADR-017, ADR-019 A)
+
+An actor with `states` persists `{ shared, phase, locals, stateTimers }` (`phase` the active path, one local
+and one scoped-timer list per level). `runtime/phases.ts` parses it (reading the 0.2 flat shape as a
+one-element path; `upgradePhased` rewrites a loaded snapshot) and holds the tree lookups (`levelsOf`,
+`innermost`, `mergeLocals`, `statesDeclaring`). `runtime/phase-run.ts` moves through the tree: `runAtLevel`
+runs a handler at the level that declares it and settles its result; a goto exits below the kept prefix
+(innermost first: `exit`, cancel that level's scoped timers, drop its local) and enters down to the target
+(outermost first, then `initial` children). `step.ts` only supplies the effect verbs (`phaseRun`). The rules
+are the transition table in ADR-019 "A as built". The worker's state-tree types (`state-paths.ts`) bound
+their recursion at six levels and are guarded by `pnpm typecheck:budget`.
+
 ### WebSocket lifecycle
 
 ```
@@ -308,6 +320,11 @@ CREATE TABLE journal_checkpoints (seq INTEGER PRIMARY KEY, version INTEGER, stat
 - A failed commit writes nothing and puts the in-memory state back.
 - A checkpoint (after-state) is written every `checkpointEvery` events (default 100).
 - `journal: false` turns it off; `journal: { keep }` prunes events at or below the newest checkpoint `<= lastSeq - keep`.
+- `journal: { keep, archive: "R2_BINDING" }` (ADR-019 D, `runtime/journal-archive.ts`): pruning waits for the
+  commit, puts the rows as an NDJSON segment in R2, then deletes them in a transaction and records the segment in
+  `journal_archive`. `readFullJournal(sql, bucket, { from })` merges the segments a range needs with the local
+  rows; restore and `rebuild: "replay"` read through it. Studio's inspect reports the local and archived ranges
+  and the object's storage (`journalStorage`, warning at 80% of the 10 GB per-object limit).
 - `readJournal(sql)` and `applyJournalEvent()` (`@actor-kit/worker/testing`) and `replayJournal()` (`@actor-kit/test`) read and fold it. Replay never runs guards or side effects.
 
 ### Transactional outbox and retries (ADR-003, ADR-015 D1)

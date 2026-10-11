@@ -103,6 +103,15 @@ CRAP over `packages/worker/src/runtime`, `packages/test/src`, `packages/core/src
 | RSJ 2. `simulate().spawnSync` (`simulate.ts` spawn refactor, `step.ts` `stepInitSync`) | 52 | 86.79% first run; then tests for the handle's links, an async init that rejects (no unhandled rejection) and a missing init → **96.15%** | 2 equivalent (simulate.ts:783, init's unlink targets, listed below) | test 7.1, runtime 7.0; 0 ≥ 8 |
 | RSJ 6. `actorClient<typeof Contract>({ roles, views })` (`builder.ts` whole) | 51 | **88.24% (45/51)** on the whole file; all 6 survivors are the existing equivalents (renumbered, plus the roles-and-views twin of the name-and-def check, below) | 6 equivalent (5 existing, renumbered; 1 new: builder.ts:108) | client 7.0; 0 ≥ 8 |
 
+## ADR-019 (hierarchical states, scoped invocations, journal archive), per step
+
+| Step | Mutated | Score | Survivors | Max CRAP |
+|---|---|---|---|---|
+| A. Nested states (`phases.ts`, `phase-run.ts`, `state-paths.ts` whole; `step.ts` admission, timer/message lookup, phaseRun, runHandler, stepMessage, stepTimer; `refusal.ts` placeOf; `setup.ts` `in()`/declAt; Studio `phase-change.ts`, State panel PhaseLine) | 565 | 89.60% first run (50 survivors, 15 no coverage); then tests for every error message, stay without a local, unscoped timers at a level, a parent-level handler's schedule and local, bubbling past message-less levels, the innermost-first `expected` list, `upgradePhased`, a role without top-level messages; and simplifications (no pre-validation before exits: entering validates; goto told apart from stay by its target; `innermost` iterates entries reversed; `isPlainObject` dropped; `matches` without the length check; handler-promise check left to the caller, which names the message) → **99.13% (560/565)**; the last 5 then killed (or the code simplified: the undeclared-state message names the path asked for, each walk goes one level deeper) → phases.ts + phase-run.ts re-run **100% (303/303)** | none | runtime 7.0, test 7.1, core 6.0, studio UI 7.0, worker (`crap:worker`) 7.6; 0 ≥ 8 |
+| B. Scoped invocations (`phase-run.ts` whole; `step.ts` plainExecute, service callbacks (atCallLevel, onDone/onError/onStale, runCallback, stepCallback); `attempt.ts` runAttempt; `outbox-store.ts` startAttempt, cancelExecutionRows; `outbox.ts` cancel; `journal.ts` / `journal-timeline.ts` service.stale; `simulate.ts` stale calls; Studio cause summary) | 530 | 94.02% first run (29 survivors, 5 no coverage); then tests for the owning level of a callback (a parent's call sees the parent's local, a child's the child's, an unowned one the leaf's), the not-journaled unchanged callback, a stale call settling once, a late result for an undeclared service, Studio's service.stale summary, label and timeline cause; and simplifications (runAttempt's two flags, no redundant finish guard; the callback-identity check through a recorded list) → re-run of the changed ranges **97.74% (253/259)**, then the owner-level survivors killed | 2 equivalent (simulate.ts:491, :495, below) | runtime 7.0, test 7.1, core 6.0, studio UI 7.0, worker (`crap:worker`) 7.6 after splitting `runExecution` (8.0: CC 8 with `startExecution` folded in); 0 ≥ 8 |
+| D. Journal archive to R2 (`journal-archive.ts` whole; `journal.ts` config and append; Studio `journal-storage.ts`, the header's journal line, the snapshot reducer) | 273 | 88.75% first run (35 survivors: the property tests cannot see an archive that writes less, so `oldest > base` → `>=` and the default transaction survived; error-message and bucket-shape details; a module-level zod schema whose static mutants only broke module load); then unit tests that appending with an archive never prunes inline, one-event segments, `archiveDue`'s default transaction, a range ending where a segment ends, a broken line's number, every non-bucket binding, bytes up to TB, a header without an archive or a warning; and simplifications (the oldest event searched below the base, no redundant `null` checks through a union row schema, the segment schema built per parse, no sort of already ordered checkpoints, a segment ending at `from` is not fetched) → **98.65% (285/289)**, then the 3-segment summary case added | 3 equivalent (journal-archive.ts:62, studio-state.ts:111, :112, below) | runtime 7.0, test 7.1, core 6.0, studio UI 7.0, worker (`crap:worker`) 7.6; 0 ≥ 8 |
+| Merge of the ADR-019 parallel branch (C, E, F): `__journal` over the archive (`readArchivedJournalPage`, `segmentsFor`; `journal-query.ts` `journalEntry`, `matchesJournalQuery`), the client builder's name for `{ roles, views }` clients | 106 | 92.17% first run (property test only; 9 survivors); then example tests per filter, the window edges (a segment ending at `from`, `before - 1`), oldest-first pages that a full local page must not stop, an exact `hasMore`, and the `{ roles, views }` client's error name; `matchesJournalQuery` restructured (CRAP 8.8 → 2) and the segment window split out (8.0 → 4) | 3 equivalent (builder.ts:108, :110, journal-query.ts:154, below) | runtime 7.0, test 7.1, core 7.0, client 7.0, studio 7.0, studio-cli 7.0, studio UI 7.0, worker (`crap:worker`) 7.6; 0 ≥ 8 |
+
 ## ADR-019 C (richer view schemas), Stryker on `core/src/schema.ts`, `codec.ts`, `delta.ts` (whole files)
 
 | Run | Score | Survivors |
@@ -194,6 +203,13 @@ Every length and count on the wire is now an unsigned LEB128 varint (`codec.ts` 
   string (1.1s alone; it timed out under `pnpm crap:worker`'s coverage on a loaded machine). Long strings are
   now a short random sample repeated past 65536 bytes: same property, 0.1s.
 
+## Merge of ADR-019 A/B/D (claude/adr019-states) into claude/v0.3
+
+Both lines had merged the ADR-019 C/E/F branch and resolved it alike (the same three error codes, the same
+builder fix). Stryker on the files whose merged content differs from both parents (`core/errors.ts`,
+`worker/runtime/migrations.ts`): **98.73% (77/78)**; the survivor is the existing errors.ts row (now line 333).
+Migrations renumbered: `0020_publish_position`, `0021_journal_archive`.
+
 ## Equivalent mutants
 
 Surviving mutants that no test can kill, because the mutated program behaves identically. One line each.
@@ -246,6 +262,10 @@ Surviving mutants that no test can kill, because the mutated program behaves ide
 | test | simulate.ts:179 | `value !== null` → `true` (pushed view spread) | Spreading `null` adds no keys, so `{ role, ...null }` equals `{ role }`. |
 | test | simulate.ts:725 | `issues[0]?.message` → `issues[0].message` | A failed parse always has at least one issue. |
 | test | simulate.ts:306 (×3) | unknown-contract guard in `defOf` → removed / message `""` / code `""` | Unreachable: an actor exists only after `spawn` registered its contract, and every lookup is for an existing actor's type. The guard is for the type checker. |
+| worker | journal-query.ts:154 | `event.emitted ?? []` → `["Stryker was here"]` | A string has no `name`, so the event filter matches nothing either way. |
+| worker | journal-archive.ts:62 | `if (base === null) return null` → `if (false)` | With no checkpoint the next query asks `MIN(seq) ... WHERE seq <= NULL`, which SQLite answers with NULL, so the same null comes back. |
+| studio UI | studio-state.ts:111, :112 | `frame.rejections === undefined ? {} : {...}` / the same for `journal` → always the object | Sets the key to `undefined` instead of leaving it out; every reader treats both the same. |
+| test | simulate.ts:491, :495 | `flatMap(... ? [op] : [])` / `? [op.key] : []` → `["Stryker was here"]` | The strings have no `key`, and a set of keys with `undefined` in it never matches an effect id (`seq:index`), so the same calls are cancelled or kept aside. |
 | test | simulate.ts:257 | undeclared or present link `return false` → `true` | Subscribing such a link pushes nothing: an undeclared link has no source, and a present one's view is already pushed (dedupe). |
 | test | simulate.ts:265 | unlink(name) unsubscribes `[]` → `["Stryker was here"]` | A string has no `name`, so it points at no source and nothing is forgotten. |
 | test | simulate.ts:276 (×2) | `def.links?.[name]?.contract` → without `?.` | Only declared links are ever recorded on an actor, so the link definition always exists. |
@@ -273,9 +293,10 @@ Surviving mutants that no test can kill, because the mutated program behaves ide
 | studio UI | studio-state.ts:111 | `frame.rejections === undefined ? {} : { rejections }` → always the spread | A `rejections: undefined` key renders the same nothing as an absent one. |
 | worker | message-roles.ts:23, :26, :28 | an empty list → `["Stryker was here"]` | Destructuring a string gives a one-letter "slot" with no `roles`, which names no role, so nothing is refused. |
 | worker | step.ts:312 | `roleMessages[role]?.[type]` → without `?.` | Every contract's messages are nested under every role (createActorClass, toSimDef, testActor), so the role's entry always exists. |
-| core | errors.ts:309 | `Object.keys(ERROR_CODES).filter(isErrorCode)` → without the filter | Every key of the registry is an ErrorCode; the filter exists for the type checker. |
+| core | errors.ts:333 | `Object.keys(ERROR_CODES).filter(isErrorCode)` → without the filter | Every key of the registry is an ErrorCode; the filter exists for the type checker. |
 | worker | setup.ts:278 | `local === undefined ? def : { ...def, local }` → always spread | Adds `local: undefined` to a state without a local schema; the runtime only reads `def.local === undefined` (phases.ts `parseLocal`, step.ts initial check). |
 | worker | journal-query.ts:113 | `query.order === "asc" ? "ASC" : …` → `""` | `ORDER BY seq` with no direction is ascending in SQLite. |
+| worker | setup.ts:226 | `local === undefined ? def : { ...def, local }` → always spread | Adds `local: undefined` to a state without a local schema; the runtime only reads `def.local === undefined` (phases.ts `parseLocal`, step.ts initial check). |
 
 ## Bugs found while hardening (2026-10-07)
 

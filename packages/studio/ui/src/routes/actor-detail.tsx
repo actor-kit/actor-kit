@@ -8,6 +8,8 @@ import { JsonTree } from "../components/json-tree";
 import { OutboxPanel } from "../components/outbox-panel";
 import { TimersPanel } from "../components/timers-panel";
 import { useStudioWs } from "../hooks/use-studio-ws";
+import { journalSummary } from "../journal-storage";
+import { phasePath } from "../phase-change";
 import type { InspectResult, TimelineItem } from "../protocol";
 import type { StudioStatus } from "../studio-state";
 
@@ -54,10 +56,45 @@ function ActorDetail({ actorType, actorId, entry }: { actorType: string; actorId
           <RejectionsCount rejections={inspect.rejections} />
           <StatusBadge status={status} />
         </p>
+        <JournalStorageLine journal={inspect.journal} />
       </div>
       <ErrorBanner error={error} />
       <ActorTabs actorType={actorType} actorId={actorId} inspect={inspect} timeline={timeline} entry={entry} />
     </div>
+  );
+}
+
+/** Where the journal lives (ADR-019 D): archived and local ranges, storage, and a warning near the cap. */
+function JournalStorageLine({ journal }: { journal: InspectResult["journal"] }) {
+  if (journal === undefined) return null;
+  const summary = journalSummary(journal);
+  const parts = [summary.archived, summary.local, summary.storage].filter((part) => part !== null);
+  return (
+    <>
+      <p className="text-zinc-500 text-xs mt-1 break-words" data-testid="journal-storage">
+        Journal: {parts.join(" · ")}
+      </p>
+      {summary.warning !== null && (
+        <p
+          role="alert"
+          className="mt-2 rounded border border-amber-800 bg-amber-950/40 px-3 py-2 text-sm text-amber-300"
+          data-testid="journal-storage-warning"
+        >
+          {summary.warning}
+        </p>
+      )}
+    </>
+  );
+}
+
+/** The active state of an actor with states (ADR-019 A), as a path: `In playing › window`. */
+function PhaseLine({ state }: { state: unknown }) {
+  const path = phasePath(state);
+  if (path === null) return null;
+  return (
+    <p className="mb-2 text-xs text-fuchsia-300" data-testid="state-phase">
+      In {path.split(".").join(" › ")}
+    </p>
   );
 }
 
@@ -114,6 +151,7 @@ function ActorTabs({
   const panels: Record<Tab, () => ReactNode> = {
     state: () => (
       <div className="bg-zinc-900 border border-zinc-800 rounded p-4 text-sm overflow-x-auto" data-testid="state-panel">
+        <PhaseLine state={inspect.state} />
         <JsonTree data={inspect.state} />
       </div>
     ),

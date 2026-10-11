@@ -72,6 +72,7 @@ export type {
   Duration,
   EmitFn,
   ExecuteFn,
+  ExecuteOptions,
   Execution,
   ForwardCall,
   ForwardFn,

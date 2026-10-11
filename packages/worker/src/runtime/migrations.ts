@@ -235,4 +235,17 @@ export const ACTOR_KIT_MIGRATIONS: ReadonlyArray<{ readonly name: string; readon
     name: "0020_publish_position",
     sql: "CREATE TABLE IF NOT EXISTS publish_position (id INTEGER PRIMARY KEY CHECK (id = 1), position INTEGER NOT NULL);",
   },
+  {
+    // Journal segments archived to R2 before pruning (ADR-019 D): one row per segment.
+    name: "0021_journal_archive",
+    sql: `
+      CREATE TABLE IF NOT EXISTS journal_archive (
+        from_seq INTEGER PRIMARY KEY,
+        to_seq INTEGER NOT NULL,
+        key TEXT NOT NULL,
+        bytes INTEGER NOT NULL,
+        archived_at INTEGER NOT NULL
+      );
+    `,
+  },
 ];

@@ -33,28 +33,40 @@ export type AttemptResult = TryOutcome | { readonly aborted: true };
 /**
  * Run one try with `controller`'s signal under a `ms` time limit. The first of these wins: the try
  * settles (a throw is a Defect), the time runs out (the signal is aborted, the try is a Timeout), or the
- * controller is aborted from outside (`{ aborted: true }`). Whatever comes after is ignored.
+ * controller is aborted from outside (`{ aborted: true }`). After an abort from outside, the try's own
+ * outcome, when it comes, goes to `onLate` (ADR-019 B: a scoped call's late result); otherwise it is ignored.
  */
 export function runAttempt(
   run: (signal: AbortSignal) => Promise<TryOutcome>,
   ms: number,
   controller: AbortController,
+  onLate?: (outcome: TryOutcome) => void,
 ): Promise<AttemptResult> {
   if (controller.signal.aborted) return Promise.resolve({ aborted: true });
   return new Promise((resolve) => {
+    let ended = false;
+    let abortedFirst = false;
     // The first call settles the promise; later ones (a late result, the abort a timeout causes) do nothing.
     const finish = (result: AttemptResult) => {
+      ended = true;
       clearTimeout(timer);
       resolve(result);
     };
-    const onAbort = () => finish({ aborted: true });
+    const settled = (outcome: TryOutcome) => {
+      if (abortedFirst) onLate?.(outcome);
+      finish(outcome);
+    };
     const timer = setTimeout(() => {
       finish({ ok: false, error: timeoutError(ms) });
       controller.abort(timeoutError(ms));
     }, ms);
-    controller.signal.addEventListener("abort", onAbort);
-    run(controller.signal).then(finish, (error: unknown) =>
-      finish({ ok: false, error: classifyFailure(error, undefined) }),
+    controller.signal.addEventListener("abort", () => {
+      // An abort from outside, before the try ended (a timeout's own abort comes after it ended).
+      if (!ended) abortedFirst = true;
+      finish({ aborted: true });
+    });
+    run(controller.signal).then(settled, (error: unknown) =>
+      settled({ ok: false, error: classifyFailure(error, undefined) }),
     );
   });
 }

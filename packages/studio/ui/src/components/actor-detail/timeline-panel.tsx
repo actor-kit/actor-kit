@@ -18,6 +18,7 @@ const CAUSE_LABELS = new Map<string, { label: string; color: string }>([
   ["lifecycle.disconnect", { label: "disconnect", color: "bg-zinc-500" }],
   ["service.onDone", { label: "service ok", color: "bg-emerald-700" }],
   ["service.onError", { label: "service err", color: "bg-red-700" }],
+  ["service.stale", { label: "service late", color: "bg-amber-800" }],
   ["link.onUpdate", { label: "link update", color: "bg-violet-700" }],
   ["link.onError", { label: "link err", color: "bg-red-700" }],
   ["link.onUnlink", { label: "link unlink", color: "bg-zinc-500" }],

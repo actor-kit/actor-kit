@@ -157,3 +157,50 @@ describe("in-flight tries", () => {
     expect(inFlight.abortAfter(4, "restored")).toBe(0);
   });
 });
+
+describe("runAttempt: a late result after an abort (ADR-019 B)", () => {
+  it("is handed to onLate, never to the aborted try", async () => {
+    const t = deferredTry();
+    const late: unknown[] = [];
+    const controller = new AbortController();
+    const result = runAttempt(t.run, 1000, controller, (outcome) => late.push(outcome));
+    controller.abort("stale");
+    expect(await result).toEqual({ aborted: true });
+    t.settle({ answer: 1 });
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(late).toEqual([{ ok: true, result: { answer: 1 } }]);
+  });
+
+  it("a late failure is handed over classified; a try that settled in time calls no onLate", async () => {
+    const failing = deferredTry();
+    const late: unknown[] = [];
+    const controller = new AbortController();
+    const aborted = runAttempt(failing.run, 1000, controller, (outcome) => late.push(outcome));
+    controller.abort("stale");
+    await aborted;
+    failing.fail(new Error("boom"));
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(late).toEqual([{ ok: false, error: { _tag: "Defect", message: "boom" } }]);
+
+    const inTime = deferredTry();
+    const none: unknown[] = [];
+    const settled = runAttempt(inTime.run, 1000, new AbortController(), (outcome) => none.push(outcome));
+    inTime.settle(2);
+    expect(await settled).toEqual({ ok: true, result: 2 });
+    expect(none).toEqual([]);
+  });
+
+  it("a timed-out try's result is not late: the timeout ended it", async () => {
+    const t = deferredTry();
+    const late: unknown[] = [];
+    const result = runAttempt(t.run, 1000, new AbortController(), (outcome) => late.push(outcome));
+    vi.advanceTimersByTime(1000);
+    expect(await result).toMatchObject({ ok: false, error: { _tag: "Timeout" } });
+    t.settle(3);
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(late).toEqual([]);
+  });
+});

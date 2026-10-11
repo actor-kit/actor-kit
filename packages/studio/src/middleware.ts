@@ -138,6 +138,7 @@ export const JOURNAL_CAUSE_TYPES = [
   "lifecycle.disconnect",
   "service.onDone",
   "service.onError",
+  "service.stale",
   "link.onUpdate",
   "link.onError",
   "migrate",

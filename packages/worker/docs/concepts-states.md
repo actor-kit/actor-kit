@@ -5,7 +5,8 @@
 Online: https://actorkit.dev/concepts/states/
 
 An actor may declare `states` (ADR-017). Data that only matters in one phase lives in that phase's
-**local**, and timers scheduled with `scope: "state"` are cancelled when the actor leaves it.
+**local**, and timers scheduled with `scope: "state"` are cancelled when the actor leaves it. States
+nest (ADR-019): a parent's local survives while its children come and go.
 
 ```typescript
 import { setup } from "@actor-kit/worker";
@@ -52,12 +53,14 @@ export const Quiz = quiz.actor("quiz", {
 - The states are declared once, in `setup({ states })`: each one's optional `local` and `enter`
   `input` schemas. `quiz.actor()` takes them from the kit, so `initial` must name a declared state
   and `states` must define every one (each with `quiz.in(name).state({ ... })`), or it is a type error.
-- The persisted state is `{ shared, phase, local, stateTimers }`. Views and roles get it
-  (`PhasedStateOf<typeof quiz, Shared>`, narrowed by `phase`).
-- A handler returns `ctx.stay(shared, local?)`, `ctx.goto(phase, shared, input?)`, or `shared`
+- The persisted state is `{ shared, phase, locals, stateTimers }`: `phase` is a path
+  (`["round"]`), with one local and one list of scoped timers per level. Views and roles get it
+  (`PhasedStateOf<typeof quiz, Shared>`): narrow it with `matches(state, "round")` and read the local
+  with `localOf(state)`.
+- A handler returns `ctx.stay(shared, local?)`, `ctx.goto(state, shared, input?)`, or `shared`
   (stay, same local). `goto` checks the target and its `enter` input; `ctx.local` is typed per
   state; the local is parsed by its schema.
-- Exit drops the local and cancels the phase's `scope: "state"` timers; `enter` builds the next
+- Exit drops the local and cancels the state's `scope: "state"` timers; `enter` builds the next
   local and may schedule, execute and emit.
 - **`goto` to the state the actor is already in re-enters it**: exit runs (its `scope: "state"` timers
   are cancelled, its local dropped) and `enter` runs again with the new input. Say it on purpose with
@@ -66,7 +69,85 @@ export const Quiz = quiz.actor("quiz", {
 - A message is accepted only in the states that declare it, plus the top-level `messages`;
   otherwise it is rejected with `wrong_state`, before its guard. A message is accepted from every role
   unless it names `roles` (then other roles get `wrong_role`).
-- Studio's State panel shows the phase and local; the timeline marks phase changes.
+- Studio's State panel names the active path; the timeline marks phase changes.
 
-See `examples/quiz/quiz.ts` for a full contract and `tests/unit/states.test.ts` for the
-behaviour under `simulate()`.
+## Nested states
+
+A state can have child states. Run Set Jimmy's round (`playing`) keeps the round's data while the
+buy `window` and a player `acting` alternate:
+
+```typescript
+const room = setup({
+  states: {
+    lobby: {},
+    playing: {
+      local: z.object({ round: z.number() }),
+      input: z.object({ round: z.number() }),
+      states: {
+        window: { local: z.object({ buys: z.array(z.string()) }) },
+        acting: { local: z.object({ actor: z.string() }), input: z.object({ actor: z.string() }) },
+      },
+    },
+  },
+});
+const playing = room.in("playing");
+const buying = room.in(["playing", "window"]);
+const acting = room.in(["playing", "acting"]);
+
+export const Room = room.actor("room", {
+  // ...
+  initial: "lobby",
+  states: {
+    lobby: room.in("lobby").state({
+      messages: { START: room.in("lobby").message(z.object({}), (s: S, _p, ctx) => ctx.goto("playing", s, { round: 1 })) },
+    }),
+    playing: playing.state({
+      initial: "window",
+      // enter can change the shared state too: return ctx.stay(shared, local).
+      enter: (s: S, { round }, ctx) => ctx.stay({ ...s, dealer: nextDealer(s) }, { round }),
+      exit: (s: S, ctx) => ({ ...s, lastRound: ctx.local.round }),
+      states: {
+        window: buying.state({
+          enter: (_s: S, _input, ctx) => {
+            ctx.schedule("close", { in: "5s", scope: "state" }); // owned by window
+            return { buys: [] };
+          },
+          messages: {
+            // ctx.local is { round } & { buys }: the parent's local and the window's, merged.
+            BUY: buying.message(z.object({}), (s: S, _p, ctx) =>
+              ctx.stay(s, { ...ctx.local, buys: [...ctx.local.buys, ctx.caller] })),
+            ACT: buying.message(z.object({}), (s: S, _p, ctx) => ctx.goto(["playing", "acting"], s, { actor: ctx.caller })),
+          },
+          timers: { close: buying.timer(z.undefined(), (s: S, _p, ctx) => ctx.goto(["playing", "acting"], s, { actor: "dealer" })) },
+        }),
+        acting: acting.state({ enter: (_s: S, { actor }) => ({ actor }) }),
+      },
+    }),
+  },
+});
+```
+
+- **Paths.** A state is named by its path: `"lobby"` (top level) or `["playing", "window"]`.
+  `room.in(path)` gives that state's helpers; `goto` takes a path and checks it and the target's input.
+  `PhaseHelpers<Decls, Events, Path>` types a helper shared by several states.
+- **Locals per level.** `ctx.local` is the merge of the handler's state's local and its ancestors'
+  (`{ round } & { buys }` in the window). `ctx.stay(shared, local)` updates every level up to the
+  handler's from that one value (each level keeps its own keys, so nested locals are `z.object`s).
+  Leaving the window drops `buys`; `round` stays until the actor leaves `playing`.
+- **Lookup.** A message is looked up in the innermost active state first, then outward, then in the
+  top-level `messages`; timers likewise.
+- **goto.** It exits the active states below the common ancestor (innermost first, each `exit`
+  running and its scoped timers cancelled) and enters down to the target (outermost first). The target
+  itself is always (re-)entered; a parent target then enters its `initial` child. The input goes to the
+  target only; a state that declares an input cannot be entered on the way to another one.
+- **enter and exit.** `enter` returns its local, or `ctx.stay(shared, local)` to change the shared
+  state as well (it sees the parent's local as `ctx.local`). `exit` returns the next shared state.
+  Neither can `goto`.
+- **Scoped timers** belong to the state whose handler (or `enter`) scheduled them; their key defaults
+  to `"playing.window:close"`.
+
+The full rules, one row per case, are the transition table in
+[ADR-019](https://github.com/actor-kit/actor-kit/blob/main/docs/adrs/019-hierarchical-states-and-history-at-scale.md).
+
+See `examples/quiz/quiz.ts` for a flat contract, `tests/integration/src/rounds.ts` for a nested one,
+and `tests/unit/nested-states.test.ts` for the behaviour under `simulate()`.

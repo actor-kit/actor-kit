@@ -106,7 +106,7 @@ await expect(t.send(state, "alice", { type: "RESET" })).rejects.toThrow(RefusalE
 await expect(t.send(state, "alice", { type: "RESET" })).rejects.toMatchObject({ code: "guard_failed" });
 ```
 
-Actors with states work the same way: `init()` returns the persisted state `{ shared, phase, local, stateTimers }`, and `send()` moves between phases as the runtime does.
+Actors with states work the same way: `init()` returns the persisted state `{ shared, phase, locals, stateTimers }`, and `send()` moves between phases as the runtime does.
 
 **Capture service calls** without executing them:
 

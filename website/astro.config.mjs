@@ -57,6 +57,7 @@ export default defineConfig({
             { slug: "concepts/domain-events" },
             { slug: "concepts/projections" },
             { slug: "concepts/states" },
+            { slug: "concepts/journal" },
             { slug: "concepts/testing" },
           ],
         },
@@ -65,6 +66,7 @@ export default defineConfig({
           items: [
             { slug: "recipes/actor-to-actor" },
             { slug: "recipes/scaling-with-relays" },
+            { slug: "recipes/sagas" },
             { slug: "recipes/testing-side-effects" },
             { slug: "recipes/storybook" },
           ],

@@ -56,6 +56,7 @@ import {
   clockedSources,
   createLiveFacts,
   foldJournal,
+  type Journal,
   type JournalDraft,
   type JournalEvent,
   type JournalOption,
@@ -66,6 +67,14 @@ import {
   resolveJournalConfig,
   snapshotSeq,
 } from "./runtime/journal";
+import {
+  archiveBucket,
+  archiveDue,
+  journalStats,
+  journalStorage,
+  readArchivedJournalPage,
+  readFullJournal,
+} from "./runtime/journal-archive";
 import { type JournalOptions, type JournalPage, parseJournalOptions, readJournalPage } from "./runtime/journal-query";
 import { readStudioTimeline, timelineEntry } from "./runtime/journal-timeline";
 import {
@@ -95,9 +104,10 @@ import {
   readOutboxRows,
   redriveExecution,
   requeueInterrupted,
+  STALE_CANCEL_REASON,
   startAttempt,
 } from "./runtime/outbox-store";
-import type { StepStateDef } from "./runtime/phases";
+import { type StepStateDef, upgradePhased } from "./runtime/phases";
 import {
   PUBLISH_SERVICE,
   type PublishOption,
@@ -499,6 +509,8 @@ export function actor(
   // Validate studio config at definition time, not on the first mutation.
   const studioRedactor = compileRedaction(def.studio?.redact);
   const journalConfig = resolveJournalConfig(def.journal);
+  // ADR-019 D: the R2 binding pruned journal rows are archived to first (null: pruning deletes).
+  const archiveName = journalConfig.archive ?? null;
   const determinism = resolveDeterminism(def.determinism);
   // Delivery mode, result schema and size limit, retries (ADR-016, ADR-018 G), validated at definition time.
   const serviceOptions = new Map<string, ServiceOptions>(
@@ -555,6 +567,7 @@ export function actor(
     timersChanged = false; // A commit scheduled or cancelled timers: push them to Studio after it
     journalAhead = false; // The snapshot lags the journal (same code version): rebuild it on wake
     rebuildFrom: number | null = null; // Stored version to rebuild from by replay (ADR-015 D5), on wake
+    archiving = false; // An archive run (ADR-019 D) is in progress
     previousSubscriberViews = new Map<string, string>(); // dedupe: "type:id" → "role:json"
 
     // --- Studio instrumentation ---
@@ -649,7 +662,9 @@ export function actor(
       const persisted: unknown = JSON.parse(row.state);
       this.journalAhead = this.isJournalAhead();
       const migration = this.loadMigration(row.version, persisted);
-      this.state = migration !== null ? migration.state : def.restore ? def.restore(persisted) : persisted;
+      const loaded = migration !== null ? migration.state : def.restore ? def.restore(persisted) : persisted;
+      // An actor with states stored in the 0.2 shape (a flat phase name) is read as its one-element path (ADR-019 A).
+      this.state = upgradePhased(def, loaded);
 
       // Restore actor ID
       if (row.actor_id !== null) {
@@ -855,6 +870,52 @@ export function actor(
         this.timersChanged = false;
         this.pushStudioTimers();
       }
+      this.archiveSoon();
+    }
+
+    /**
+     * ADR-019 D: after a commit, archive what pruning to `keep` removes (segments to R2, then deleted
+     * locally). Never inside the commit's transaction: the put is async. One run at a time; a failure is
+     * logged and the rows stay until the next commit tries again.
+     */
+    archiveSoon(): void {
+      if (archiveName === null || journalConfig.keep === null || this.archiving) return;
+      this.archiving = true;
+      void this.archive(archiveName, journalConfig.keep).finally(() => {
+        this.archiving = false;
+      });
+    }
+
+    async archive(name: string, keep: number): Promise<void> {
+      try {
+        const bucket = archiveBucket(this.envBindings, name);
+        const ids = { actorType: _actorName, actorId: this.subscriberId() };
+        await archiveDue(this.ctx.storage.sql, bucket, ids, keep, Date.now(), (write) =>
+          this.ctx.storage.transactionSync(write),
+        );
+      } catch (error) {
+        console.error(
+          JSON.stringify({
+            event: "actor_kit.journal.archive_failed",
+            actorType: _actorName,
+            actorId: this.subscriberId(),
+            message: error instanceof Error ? error.message : String(error),
+          }),
+        );
+      }
+    }
+
+    /** Where the journal lives and the object's storage, for Studio (ADR-019 D); undefined without a journal. */
+    journalStorage(): ReturnType<typeof journalStorage> | undefined {
+      const sql = this.ctx.storage.sql;
+      return journalConfig.enabled ? journalStorage(journalStats(sql), sql.databaseSize) : undefined;
+    }
+
+    /** The journal from `from` on (default: all of it): archived segments it needs (ADR-019 D), then the local rows. */
+    async journalFrom(from?: number): Promise<Journal> {
+      const sql = this.ctx.storage.sql;
+      if (archiveName === null) return readJournal(sql);
+      return readFullJournal(sql, archiveBucket(this.envBindings, archiveName), from === undefined ? {} : { from });
     }
 
     /** Write the snapshot (and its journal event). Only call inside commit()'s transaction. */
@@ -1023,19 +1084,30 @@ export function actor(
       }
     }
 
-    /** One try of one execution: settle the row and, on the outcome that ends it, run onDone/onError. */
-    async runExecution(entry: { id: string; service: string; input: unknown }): Promise<void> {
+    /**
+     * Start a try of an execution: its service and retry policy, and the try's number. Null when the
+     * service is not defined (the row fails) or the row no longer waits (cancelled since the drain listed it).
+     */
+    startExecution(entry: { id: string; service: string }) {
       const sql = this.ctx.storage.sql;
       const serviceDef = serviceFor(entry.service);
       const policy = retryPolicies.get(entry.service);
       if (serviceDef === undefined || policy === undefined) {
         finishAttempt(sql, entry.id, { status: "failed" }, `Service "${entry.service}" is not defined`);
         this.pushStudioOutbox();
-        return;
+        return null;
       }
-
       const attempt = startAttempt(sql, entry.id);
       this.pushStudioOutbox();
+      return attempt === null ? null : { serviceDef, policy, attempt };
+    }
+
+    /** One try of one execution: settle the row and, on the outcome that ends it, run onDone/onError. */
+    async runExecution(entry: { id: string; service: string; input: unknown }): Promise<void> {
+      const sql = this.ctx.storage.sql;
+      const started = this.startExecution(entry);
+      if (started === null) return;
+      const { serviceDef, policy, attempt } = started;
       const { outcome, audit } = await this.tryExecution(entry, serviceDef, attempt);
 
       // Aborted (a restore undid its transition, or a redrive replaced it): discard the result, settle nothing.
@@ -1075,6 +1147,10 @@ export function actor(
         (signal) => tryService(serviceDef, entry.input, this.handlerEnv, effectInfo({ ...fields, signal, audit })),
         ms,
         controller,
+        // A scoped call whose state was left (ADR-019 B): its late result goes to onStale.
+        (late) => {
+          if (controller.signal.reason === STALE_CANCEL_REASON) this.applyLateResult(entry, late);
+        },
       );
       this.inFlight.finish("executions", entry.id, controller);
       const outcome = parsedOutcome(entry.service, optionsFor(entry.service), tried);
@@ -1127,9 +1203,11 @@ export function actor(
         settle();
         return;
       }
+      // With states, a callback may goto (ADR-019 B): the states it enters and leaves schedule, execute
+      // and cancel, so every effect is written, not only emitted events.
       this.commit(result.state, result.event, (seq) => {
         settle();
-        this.writeEmitted(result, seq);
+        this.writeEffects(result, seq, `service:${service}`, "service");
       });
       this.afterEffects(result);
     }
@@ -1248,7 +1326,7 @@ export function actor(
      */
     async rebuildByReplay(fromVersion: number): Promise<void> {
       this.rebuildFrom = null;
-      const state = await rebuildFromJournal(def, readJournal(this.ctx.storage.sql), { env: this.handlerEnv });
+      const state = await rebuildFromJournal(def, await this.journalFrom(), { env: this.handlerEnv });
       this.commit(state, {
         causeType: "migrate",
         name: null,
@@ -1327,6 +1405,7 @@ export function actor(
       }
 
       const attempt = startAttempt(sql, entry.id, "forwards");
+      if (attempt === null) return; // cancelled (a restore) since the drain listed it
       this.pushStudioOutbox();
       const callerType: "user" | "service" = entry.callerType === "service" ? "service" : "user";
       const delivery = deliveryInfo({
@@ -1449,13 +1528,55 @@ export function actor(
         applyTimerOps(this.ctx.storage.sql, timerOps, Date.now());
         this.timersChanged = true;
       }
-      this.cancelExecutions(timerOps.flatMap((op) => (op.op === "cancel" ? [op.key] : [])));
+      const cancels = timerOps.flatMap((op) => (op.op === "cancel" ? [op] : []));
+      this.cancelExecutions(cancels.flatMap((op) => (op.stale === true ? [] : [op.key])));
+      this.cancelExecutions(
+        cancels.flatMap((op) => (op.stale === true ? [op.key] : [])),
+        STALE_CANCEL_REASON,
+      );
     }
 
-    /** ctx.cancel(effectId) (ADR-018 G): calls not yet finished end as cancelled; a try in flight is aborted. */
-    cancelExecutions(effectIds: readonly string[]): void {
-      for (const effectId of cancelExecutionRows(this.ctx.storage.sql, effectIds)) {
-        this.inFlight.abort("executions", effectId, "cancelled");
+    /**
+     * ctx.cancel(effectId) (ADR-018 G), or leaving the state that owned a scoped call (ADR-019 B, `reason`
+     * STALE_CANCEL_REASON): calls not yet finished end as cancelled; a try in flight is aborted.
+     */
+    cancelExecutions(effectIds: readonly string[], reason = "cancelled"): void {
+      const rowReason = reason === STALE_CANCEL_REASON ? reason : undefined;
+      for (const effectId of cancelExecutionRows(this.ctx.storage.sql, effectIds, rowReason)) {
+        this.inFlight.abort("executions", effectId, reason);
+      }
+    }
+
+    /**
+     * A scoped call's result that arrived after its state was left (ADR-019 B): parsed like any result,
+     * then a `service.stale` transition (onStale, or journaled and ignored). A late failure is dropped.
+     */
+    applyLateResult(entry: { id: string; service: string; input: unknown }, late: TryOutcome): void {
+      const outcome = parsedOutcome(entry.service, optionsFor(entry.service), late);
+      if ("aborted" in outcome || !outcome.ok) return;
+      try {
+        const cause: StepCause = {
+          type: "service.stale",
+          service: entry.service,
+          input: entry.input,
+          result: outcome.result,
+          effectId: entry.id,
+        };
+        const result = this.runStep({ ...cause, trace: this.effectTrace(entry.id) });
+        this.commit(result.state, result.event, (seq) =>
+          this.writeEffects(result, seq, `service:${entry.service}`, "service"),
+        );
+        this.afterEffects(result);
+      } catch (error) {
+        console.error(
+          JSON.stringify({
+            event: "actor_kit.service.stale_failed",
+            actorType: _actorName,
+            actorId: this.subscriberId(),
+            effectId: entry.id,
+            message: error instanceof Error ? error.message : String(error),
+          }),
+        );
       }
     }
 
@@ -2428,6 +2549,7 @@ export function actor(
         outbox: this.readOutbox(),
         timers: readTimers(this.ctx.storage.sql),
         rejections: rejectionCounts(this.ctx.storage.sql),
+        journal: this.journalStorage(),
         activeLinks: this.readActiveLinks(),
         linkSubscribers: this.readLinkSubscribers(),
         actorId: this.actorId ?? this.ctx.id.toString(),
@@ -2449,6 +2571,7 @@ export function actor(
         outbox: snapshot.outbox.map((row) => projectOutboxRow(row, projection)),
         timers: snapshot.timers.map((row) => projectTimerRow(row, projection)),
         rejections: snapshot.rejections,
+        ...(snapshot.journal === undefined ? {} : { journal: snapshot.journal }),
         activeLinks: snapshot.activeLinks,
         linkSubscribers: snapshot.linkSubscribers,
         actorType: _actorName,
@@ -2561,6 +2684,8 @@ export function actor(
       timers?: TimerRow[];
       /** Refused messages ever counted, in total and by code (ADR-018 F). Absent for an actor that does not exist. */
       rejections?: { total: number; byCode: Record<string, number> };
+      /** Where the journal lives and the object's storage (ADR-019 D). Absent without a journal. */
+      journal?: ReturnType<typeof journalStorage> | undefined;
       activeLinks: Array<{
         targetType: string;
         targetId: string;
@@ -2600,6 +2725,7 @@ export function actor(
         outbox: this.readOutbox().map((row) => projectOutboxRow(row, projection)),
         timers: readTimers(this.ctx.storage.sql).map((row) => projectTimerRow(row, projection)),
         rejections: rejectionCounts(this.ctx.storage.sql),
+        journal: this.journalStorage(),
         activeLinks: this.readActiveLinks(),
         linkSubscribers: this.readLinkSubscribers(),
       };
@@ -2634,15 +2760,23 @@ export function actor(
       const { query, viewer } = parseJournalOptions(opts);
       const projection = this.studioProjection(viewer);
       if (!this.persistedLoaded) return Promise.resolve({ entries: [], hasMore: false });
-      const page = readJournalPage(this.ctx.storage.sql, query, {
-        published: publishConfig?.events ?? new Set(),
-        eventId: (seq) => this.eventIdOf(seq),
+      const read = {
+        published: publishConfig?.events ?? new Set<string>(),
+        eventId: (seq: number) => this.eventIdOf(seq),
         sourceType: linkSourceType,
-      });
-      return Promise.all(page.entries.map((entry) => projectJournalEntry(entry, projection))).then((entries) => ({
-        entries,
-        hasMore: page.hasMore,
-      }));
+      };
+      const sql = this.ctx.storage.sql;
+      // With an archive (ADR-019 D), a page reaching archived seqs reads their segments from R2.
+      const page =
+        archiveName === null
+          ? Promise.resolve(readJournalPage(sql, query, read))
+          : readArchivedJournalPage(sql, archiveBucket(this.envBindings, archiveName), query, read);
+      return page.then((p) =>
+        Promise.all(p.entries.map((entry) => projectJournalEntry(entry, projection))).then((entries) => ({
+          entries,
+          hasMore: p.hasMore,
+        })),
+      );
     }
 
     /**
@@ -2706,7 +2840,7 @@ export function actor(
       const sql = this.ctx.storage.sql;
       let plan: Awaited<ReturnType<typeof planRestore>>;
       try {
-        plan = await planRestore(def, readJournal(sql), toSeq, { env: this.handlerEnv });
+        plan = await planRestore(def, await this.journalFrom(toSeq), toSeq, { env: this.handlerEnv });
       } catch (error) {
         return { ok: false, error: error instanceof Error ? error.message : String(error) };
       }
@@ -2888,6 +3022,15 @@ export interface TypedActorClass<TContract> {
       }>;
       timers?: Array<{ id: string; name: string; key: string; payload: string; fireAt: number; createdAt: number }>;
       rejections?: { total: number; byCode: Record<string, number> };
+      /** Where the journal lives and the object's storage (ADR-019 D). */
+      journal?: {
+        local: { from: number; to: number; events: number } | null;
+        archived: Array<{ from: number; to: number; bytes: number }>;
+        archivedBytes: number;
+        storageBytes: number;
+        capBytes: number;
+        nearCap: boolean;
+      };
       activeLinks: Array<{
         targetType: string;
         targetId: string;

@@ -314,6 +314,42 @@ class_name = "Scoreboard"
 tag = "v26"
 new_sqlite_classes = ["Scoreboard"]
 
+# Hierarchical states (ADR-019 A)
+[[durable_objects.bindings]]
+name = "ROUNDS"
+class_name = "RoundsActor"
+
+[[migrations]]
+tag = "v27"
+new_sqlite_classes = ["RoundsActor"]
+
+# Scoped invocations (ADR-019 B)
+[[durable_objects.bindings]]
+name = "SCOPED_CALLS"
+class_name = "ScopedCallsActor"
+
+[[migrations]]
+tag = "v28"
+new_sqlite_classes = ["ScopedCallsActor"]
+
+# Journal archive to R2 (ADR-019 D)
+[[r2_buckets]]
+binding = "JOURNAL_ARCHIVE"
+bucket_name = "journal-archive"
+
+[[durable_objects.bindings]]
+name = "ARCHIVED_TALLY"
+class_name = "ArchivedTallyActor"
+
+[[durable_objects.bindings]]
+name = "UNBOUND_ARCHIVE"
+class_name = "UnboundArchiveActor"
+
+[[migrations]]
+tag = "v29"
+new_sqlite_classes = ["ArchivedTallyActor", "UnboundArchiveActor"]
+
+
 # ADR-019 E: @actor-kit/projection consumes lot-events into D1
 [[d1_databases]]
 binding = "PROJECTION_DB"

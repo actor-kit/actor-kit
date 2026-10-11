@@ -234,9 +234,57 @@ Docs: https://actorkit.dev/errors/undeclared_state/
 
 Docs: https://actorkit.dev/errors/invalid_local/
 
+## `missing_state_input`
+
+**What happened:** A state that declares an enter `input` was entered on the way to another state (or as an `initial` child).
+
+**How to fix it:** Goto that state itself (a goto's input goes to its target only), or drop its `input` and build its local from `ctx.local`.
+
+Docs: https://actorkit.dev/errors/missing_state_input/
+
+## `invalid_scope`
+
+**What happened:** `ctx.execute(..., { scope: "state" })` was called where no state can own the call.
+
+**How to fix it:** Make scoped calls from a state's message, timer or `enter` (not `exit`, not a top-level handler of an actor without states).
+
+Docs: https://actorkit.dev/errors/invalid_scope/
+
+## `invalid_transition`
+
+**What happened:** `enter` or `exit` returned a `goto` (or `exit` returned `stay`).
+
+**How to fix it:** `enter` returns its local or `ctx.stay(shared, local)`; `exit` returns the next shared state. Move to another state from a message or timer.
+
+Docs: https://actorkit.dev/errors/invalid_transition/
+
+## `archive_missing`
+
+**What happened:** An archived journal segment recorded by the actor is not in its R2 bucket.
+
+**How to fix it:** Check the bucket the `journal.archive` binding points at (and its lifecycle rules); segments must not be deleted while the actor may read them.
+
+Docs: https://actorkit.dev/errors/archive_missing/
+
+## `archive_unbound`
+
+**What happened:** `journal.archive` names a binding that is not an R2 bucket in the Worker env.
+
+**How to fix it:** Add the bucket to wrangler.jsonc (`r2_buckets`) under the name `journal.archive` gives.
+
+Docs: https://actorkit.dev/errors/archive_unbound/
+
+## `invalid_archive_segment`
+
+**What happened:** An archived journal segment in R2 is not NDJSON of journal rows.
+
+**How to fix it:** Do not edit archived segments by hand; restore the object from a backup of the bucket.
+
+Docs: https://actorkit.dev/errors/invalid_archive_segment/
+
 ## `invalid_phased_state`
 
-**What happened:** The persisted state of an actor with states is not `{ shared, phase, local, stateTimers }`.
+**What happened:** The persisted state of an actor with states is not `{ shared, phase, locals, stateTimers }`.
 
 **How to fix it:** Do not write the persisted state by hand; restore or migrate through `versions`.
 

@@ -20,7 +20,16 @@ export interface Execution {
  * execute() triggers a named service with a typed input. It returns the call's effect id (`seq:index`,
  * ADR-018 G): keep it to `cancel(effectId)` the call, or to match it in onDone/onError (`ctx.effectId`).
  */
-export type ExecuteFn = (service: string, input: unknown) => string;
+export type ExecuteFn = (service: string, input: unknown, options?: ExecuteOptions) => string;
+
+/**
+ * `scope: "state"` (actors with states, ADR-019 B): the call belongs to the state whose handler or `enter`
+ * made it. Leaving that state cancels it (its AbortSignal is aborted); a result that still arrives goes to
+ * the service's `onStale`, or is journaled as `service.stale` and ignored.
+ */
+export interface ExecuteOptions {
+  readonly scope?: "state";
+}
 
 // --- Message context ---
 
@@ -177,10 +186,18 @@ type MessagesOf<M> = {
   [K in keyof M & string]: M[K] extends { schema: { _output: infer P } } ? MessageEvent<K, P> : { type: K };
 }[keyof M & string];
 
-/** The messages of every state an actor declares (ADR-017 §1); never without `states`. */
-type StateMessagesOf<TDef> = TDef extends { states: infer SS }
-  ? { [P in keyof SS]: SS[P] extends { messages?: infer M } ? MessagesOf<NonNullable<M>> : never }[keyof SS]
-  : never;
+/** The messages of one state: its own `messages`. */
+type OwnMessagesOf<D> = D extends { messages?: infer M } ? MessagesOf<NonNullable<M>> : never;
+
+/**
+ * The messages of every state an actor declares (ADR-017 §1), child states included (ADR-019 A);
+ * never without `states`. `D` bounds the depth, like the worker's state-path types.
+ */
+type StateMessagesOf<TDef, D extends unknown[] = []> = D["length"] extends 7
+  ? never
+  : TDef extends { states?: infer SS }
+    ? { [P in keyof SS]-?: OwnMessagesOf<SS[P]> | StateMessagesOf<SS[P], [...D, unknown]> }[keyof SS]
+    : never;
 
 type TopMessagesOf<TDef> = TDef extends { messages: infer M } ? MessagesOf<M> : never;
 
@@ -222,6 +239,7 @@ export type MutationCause =
     }
   | { readonly type: "service.onDone"; readonly service: string; readonly input: unknown; readonly result: unknown }
   | { readonly type: "service.onError"; readonly service: string; readonly input: unknown; readonly error: string }
+  | { readonly type: "service.stale"; readonly service: string; readonly input: unknown; readonly result: unknown }
   | {
       readonly type: "link.onUpdate";
       readonly sourceType: string;

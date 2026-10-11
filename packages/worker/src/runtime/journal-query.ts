@@ -11,7 +11,13 @@
 
 import { ActorKitError } from "@actor-kit/core";
 import { z } from "zod";
-import { JOURNAL_CAUSE_TYPES, JOURNAL_EVENT_COLUMNS, type JournalSql, parseJournalEventRow } from "./journal";
+import {
+  JOURNAL_CAUSE_TYPES,
+  JOURNAL_EVENT_COLUMNS,
+  type JournalEvent,
+  type JournalSql,
+  parseJournalEventRow,
+} from "./journal";
 import { timelineCause } from "./journal-timeline";
 
 export const JOURNAL_QUERY_MAX_LIMIT = 1000;
@@ -118,20 +124,40 @@ export function readJournalPage(sql: JournalSql, query: JournalQuery, ctx: Journ
       query.limit + 1,
     )
     .toArray();
-  const entries = rows.slice(0, query.limit).map((row) => {
-    const event = parseJournalEventRow(row);
-    return {
-      id: ctx.eventId(event.seq),
-      seq: event.seq,
-      causeType: event.causeType,
-      cause: timelineCause(event, ctx.sourceType),
-      emitted: (event.emitted ?? []).map((e) => ({ ...e, published: ctx.published.has(e.name) })),
-      correlationId: event.correlationId ?? null,
-      causationId: event.causationId ?? null,
-      createdAt: event.createdAt,
-      codeVersion: event.codeVersion,
-      checksum: event.stateChecksum,
-    };
-  });
+  const entries = rows.slice(0, query.limit).map((row) => journalEntry(parseJournalEventRow(row), ctx));
   return { entries, hasMore: rows.length > query.limit };
+}
+
+/** One journal event as a query entry. */
+export function journalEntry(event: JournalEvent, ctx: JournalReadContext): JournalEntry {
+  return {
+    id: ctx.eventId(event.seq),
+    seq: event.seq,
+    causeType: event.causeType,
+    cause: timelineCause(event, ctx.sourceType),
+    emitted: (event.emitted ?? []).map((e) => ({ ...e, published: ctx.published.has(e.name) })),
+    correlationId: event.correlationId ?? null,
+    causationId: event.causationId ?? null,
+    createdAt: event.createdAt,
+    codeVersion: event.codeVersion,
+    checksum: event.stateChecksum,
+  };
+}
+
+/** A filter that is not set lets everything through. */
+function unsetOr<T>(value: T | undefined, test: (value: T) => boolean): boolean {
+  return value === undefined || test(value);
+}
+
+/** Whether an event matches the query's filters (the same as the SQL WHERE, for events read from R2). */
+export function matchesJournalQuery(event: JournalEvent, query: JournalQuery): boolean {
+  const emitted = (event.emitted ?? []).map((e) => e.name);
+  return (
+    unsetOr(query.from, (from) => event.seq >= from) &&
+    unsetOr(query.to, (to) => event.seq <= to) &&
+    unsetOr(query.before, (before) => event.seq < before) &&
+    unsetOr(query.causeType, (type) => event.causeType === type) &&
+    unsetOr(query.correlationId, (id) => event.correlationId === id) &&
+    unsetOr(query.event, (name) => emitted.includes(name))
+  );
 }

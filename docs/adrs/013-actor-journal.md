@@ -127,6 +127,12 @@ defineActor("chat-room", {
 
 With `keep`, events at or below the newest checkpoint `B` with `B <= lastSeq - keep` are deleted with older checkpoints. Replay of a pruned journal starts from checkpoint `B`.
 
+With `journal: { keep, archive: "R2_BINDING" }` (ADR-019 D), those rows go to R2 first: after the commit, the
+runtime writes them as one NDJSON segment (`actorType/actorId/<fromSeq>-<toSeq>.ndjson`: the base checkpoint,
+the checkpoints inside, then the events, each line `{ kind, row }`), and only then deletes them locally and
+records the segment in the `journal_archive` table (`from_seq`, `to_seq`, `key`, `bytes`, `archived_at`).
+Restore and rebuilds by replay fetch the segments they need (`readFullJournal`). A failed put deletes nothing.
+
 ### Verification: `replayJournal()` (step 2)
 
 `@actor-kit/test` exports `replayJournal(contract, journal)`. It folds the journal through the contract's current handlers (from `init`, or from the base checkpoint of a pruned journal), recomputes the checksum after every event and throws on the first divergence, naming the `seq`, cause and both checksums. `readJournal(sql)` in `@actor-kit/worker/testing` reads and Zod-parses the two tables from a DO's storage. Every example actor runs through both in the integration suite, which is how hidden non-determinism is found.

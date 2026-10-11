@@ -53,19 +53,19 @@ describe("ctx.reenter", () => {
     t.send("u", { type: "OPEN" });
     sim.advance("6s");
     t.send("u", { type: "REARM" });
-    expect(t.state).toMatchObject({ phase: "buying", local: { window: 2 }, shared: { enters: 1 } });
+    expect(t.state).toMatchObject({ phase: ["buying"], locals: [{ window: 2 }], shared: { enters: 1 } });
     expect(t.timers.map((x) => [x.name, x.fireAt])).toEqual([["close", 16_000]]);
     sim.advance("9s");
-    expect(t.state.phase).toBe("buying");
+    expect(t.state.phase).toEqual(["buying"]);
     sim.advance("1s");
-    expect(t.state.phase).toBe("idle");
+    expect(t.state.phase).toEqual(["idle"]);
   });
 
   it("goto(currentPhase) is the same re-entry", async () => {
     const t = testActor(Table);
     const opened = (await t.send(t.init({}), "u", { type: "OPEN" })).state;
     const again = await t.send(opened, "u", { type: "AGAIN" });
-    expect(again.state).toMatchObject({ phase: "buying", local: { window: 99 } });
+    expect(again.state).toMatchObject({ phase: ["buying"], locals: [{ window: 99 }] });
     expect(again.cancels).toEqual(["buying:close"]);
     expect(again.schedules).toEqual([{ timer: "close", options: { in: "10s", scope: "state", key: "buying:close" } }]);
   });

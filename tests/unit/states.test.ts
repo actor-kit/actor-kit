@@ -23,9 +23,9 @@ describe("quiz: phases, locals and state timers", () => {
     const { q } = await quiz();
     expect(q.state).toEqual({
       shared: { players: ["ann", "bob"], scores: { ann: 0, bob: 0 } },
-      phase: "lobby",
-      local: null,
-      stateTimers: [],
+      phase: ["lobby"],
+      locals: [null],
+      stateTimers: [[]],
     });
     expect(q.view("ann")).toEqual({ phase: "lobby", round: 0, players: 2, answered: 0 });
   });
@@ -34,9 +34,9 @@ describe("quiz: phases, locals and state timers", () => {
     const { sim, q } = await quiz();
     expect(q.send("ann", { type: "START" })).toEqual({ ok: true });
     expect(phasedState(q.state)).toMatchObject({
-      phase: "round",
-      local: { n: 1, answers: {} },
-      stateTimers: ["round:roundEnd"],
+      phase: ["round"],
+      locals: [{ n: 1, answers: {} }],
+      stateTimers: [["round:roundEnd"]],
     });
     expect(q.timers.map((t) => [t.name, t.key, t.fireAt])).toEqual([["roundEnd", "round:roundEnd", 30_000]]);
     expect(sim.events().map((e) => e.name)).toEqual(["RoundStarted"]);
@@ -48,7 +48,7 @@ describe("quiz: phases, locals and state timers", () => {
     q.send("ann", { type: "ANSWER", text: CORRECT });
     q.send("bob", { type: "ANSWER", text: "7" });
     q.send("cat", { type: "JOIN" }); // top-level, plain return: the local stays
-    expect(phasedState(q.state).local).toEqual({ n: 1, answers: { ann: CORRECT, bob: "7" } });
+    expect(phasedState(q.state).locals).toEqual([{ n: 1, answers: { ann: CORRECT, bob: "7" } }]);
     expect(q.view("ann")).toEqual({ phase: "round", round: 1, players: 3, answered: 2 });
   });
 
@@ -59,9 +59,9 @@ describe("quiz: phases, locals and state timers", () => {
     sim.advance("30s");
     expect(q.state).toEqual({
       shared: { players: ["ann", "bob"], scores: { ann: 1, bob: 0 } },
-      phase: "reveal",
-      local: null,
-      stateTimers: [],
+      phase: ["reveal"],
+      locals: [null],
+      stateTimers: [[]],
     });
     expect(sim.events().at(-1)).toMatchObject({ name: "RoundScored", payload: { n: 1, correct: ["ann"] } });
     await replayJournal(QuizContract, q.journal);
@@ -71,10 +71,10 @@ describe("quiz: phases, locals and state timers", () => {
     const { q } = await quiz();
     q.send("ann", { type: "START" });
     expect(q.send("host", { type: "END" }, { callerType: "service" })).toEqual({ ok: true });
-    expect(phasedState(q.state).phase).toBe("reveal");
+    expect(phasedState(q.state).phase).toEqual(["reveal"]);
     expect(q.timers).toEqual([]);
     q.send("ann", { type: "NEXT" });
-    expect(phasedState(q.state)).toMatchObject({ phase: "lobby", local: null });
+    expect(phasedState(q.state)).toMatchObject({ phase: ["lobby"], locals: [null] });
     await replayJournal(QuizContract, q.journal);
   });
 
@@ -116,7 +116,7 @@ describe("runtime checks", () => {
     const sim = simulate({ contracts: [Bad] });
     const actor = await sim.spawn(Bad, "x", {});
     actor.send("u", { type: "GO" });
-    expect(phasedState(actor.state).local).toEqual({ k: 1 });
+    expect(phasedState(actor.state).locals).toEqual([{ k: 1 }]);
     expect(() => actor.send("u", { type: "BREAK" })).toThrow(/State "b": invalid local/);
   });
 

@@ -14,7 +14,7 @@ https://actorkit.dev; agents can read https://actorkit.dev/llms.txt (an index) o
 - [Side Effects](concepts-side-effects.md): Durable async effects via services and execute().
 - [Timers](concepts-timers.md): Durable timers that survive hibernation, restarts and deploys.
 - [Domain events](concepts-domain-events.md): Record what happened, not only what was asked for, with typed ctx.emit.
-- [States](concepts-states.md): Phases with typed locals and state-scoped timers.
+- [States](concepts-states.md): Phases with typed locals and state-scoped timers, nested as deep as the game needs.
 - [Actor-to-Actor Communication](recipes-actor-to-actor.md): How actors sync state, forward events, and call each other using links, services, and DO stubs.
 - [Scaling with Relays](recipes-scaling-with-relays.md): Handle thousands of connections using relay actors.
 - [@actor-kit/core & @actor-kit/worker](api-core.md): Server-side API reference.

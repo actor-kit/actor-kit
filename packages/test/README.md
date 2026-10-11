@@ -34,7 +34,7 @@ await expect(t.send(state, "alice", { type: "RESET" })).rejects.toThrow(RefusalE
 ```
 
 `testActor` runs the runtime's own step core: actors with states work (`init` returns
-`{ shared, phase, local, stateTimers }`), and undeclared timers and events are refused as in the
+`{ shared, phase, locals, stateTimers }`), and undeclared timers and events are refused as in the
 Durable Object. `simulate()`'s `send` returns `{ ok: true }` or the refusal
 (`{ ok: false, code, message, expected?, details?, docs }`) instead of throwing.
 
