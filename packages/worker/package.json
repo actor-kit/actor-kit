@@ -55,6 +55,7 @@
   ],
   "files": [
     "dist",
+    "docs",
     "biome",
     "README.md",
     "LICENSE"

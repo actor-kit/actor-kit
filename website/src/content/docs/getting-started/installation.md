@@ -100,3 +100,11 @@ const next = await t.send(state, "alice", { type: "INCREMENT" });
 ```
 
 `testActor()` covers role evaluation, message routing, Zod validation, guards, view projection, and emission capture. See [Testing](/concepts/testing/) for the full guide.
+
+## For AI coding agents
+
+The docs come in agent-friendly forms: [llms.txt](https://actorkit.dev/llms.txt) indexes every page,
+[llms-full.txt](https://actorkit.dev/llms-full.txt) holds them all in one file, and every package ships the
+pages its users need in its `docs/` folder (`node_modules/@actor-kit/worker/docs/`), matching the installed
+version. Errors and refusals carry a `code` whose page is under [/errors/](/errors/).
+

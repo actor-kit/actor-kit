@@ -77,6 +77,10 @@ export default defineConfig({
         },
         { slug: "faq", label: "FAQ" },
         {
+          label: "Error codes",
+          items: [{ autogenerate: { directory: "errors", collapsed: true } }],
+        },
+        {
           label: "API Reference",
           items: [
             { slug: "api/core", label: "core & worker" },
