@@ -12,6 +12,7 @@ Every error actor-kit throws is an `ActorKitError` with a stable `code` and a `d
 | [`unknown_message`](/errors/unknown_message/) | The actor has no message of that name for the caller's role (and current state). |
 | [`invalid_payload`](/errors/invalid_payload/) | The message's payload does not match its schema. |
 | [`guard_failed`](/errors/guard_failed/) | The message's guard returned false for this caller in the current state. |
+| [`wrong_role`](/errors/wrong_role/) | The message names the roles that may send it, and the caller's role is not one of them. |
 | [`wrong_state`](/errors/wrong_state/) | The message is declared only by other states than the one the actor is in. |
 | [`no_role`](/errors/no_role/) | No role predicate matched the caller. |
 | [`not_initialized`](/errors/not_initialized/) | The actor has not been spawned yet. |

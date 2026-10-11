@@ -113,6 +113,8 @@ export {
 } from "./runtime/live-connections";
 export type { MessageMeta, ParsedMessageMeta } from "./runtime/message-meta";
 export { forwardMeta, parseMessageMeta } from "./runtime/message-meta";
+// Roles on messages: checked when an actor is defined
+export { checkMessageRoles } from "./runtime/message-roles";
 // Message router
 export type { RouteResult } from "./runtime/message-router";
 export { routeMessage } from "./runtime/message-router";

@@ -98,6 +98,7 @@ CRAP over `packages/worker/src/runtime`, `packages/test/src`, `packages/core/src
 | 6. F journal format (`rejections.ts` whole; changed lines of `versions.ts`, `journal.ts`, `step.ts`, `define.ts`, `link.ts`, `setup.ts`, `simulate.ts`, Studio `protocol.ts` / `studio-state.ts` / `actor-detail.tsx`) | 91 | 93.41% (85/91) first run; then a version-2 event kept out of step 2's rename, an onUnlink that emits, and the chain compiled inside each test (a schema mutant failed the file's collection) → re-run of those lines **100% (37/37)** | 1 equivalent (studio-state.ts:111, below) | runtime 7.0, test 7.1, studio UI 7.0, worker (`crap:worker`) 7.6; 0 ≥ 8 |
 | 7. E determinism in production (`determinism.ts` changed lines: warn mode, nesting, watch, flag, log line, option; `journal.ts` flag column; `journal-timeline.ts`; Studio `protocol.ts` / `timeline-panel.tsx` badge) | 138 | **99.28% (137/138)**; the one survivor (throw-mode watch's empty `violations`) killed by asserting the whole watch | none | runtime 7.0, studio UI 7.0, worker (`crap:worker`) 7.6; 0 ≥ 8 |
 | 8. H docs that ship with the code (`scripts/docs.mts`, `scripts/gen-docs.mts`; generated error pages, package `docs/`, `llms.txt`, `llms-full.txt`) | n/a | no library source changed (Stryker mutates `packages/*/src`); the generator is pinned by `docs-generated.test.ts` (generated files up to date, every code's page exists, every errors URL in the sources resolves, every package publishes `docs/`, llms files complete) | — | unchanged |
+| RSJ 3. Roles on messages (`message-roles.ts` whole; `refusal.ts` wrong_role; `message.ts`; `step.ts` admission) | 120 | 94.32% first run, then edge tests (role-nested and junk entries, a caller-less refusal, `toStrictEqual` on message options, a states-only actor) → **96.67% (112/116)** | 4 equivalent (message-roles.ts:23, :26, :28; step.ts:312, below) | runtime 7.0; 0 ≥ 8 |
 
 ## Equivalent mutants
 
@@ -176,6 +177,8 @@ Surviving mutants that no test can kill, because the mutated program behaves ide
 | worker | service-options.ts:139 | `"aborted" in tried \|\| !tried.ok` → `"" in tried \|\| …` | An aborted try has no `ok`, so `!tried.ok` is already true for it. |
 | test | simulate.ts:485 | non-cancel op → `["Stryker was here"]` | That string is never an effect id, so no pending effect is removed. |
 | studio UI | studio-state.ts:111 | `frame.rejections === undefined ? {} : { rejections }` → always the spread | A `rejections: undefined` key renders the same nothing as an absent one. |
+| worker | message-roles.ts:23, :26, :28 | an empty list → `["Stryker was here"]` | Destructuring a string gives a one-letter "slot" with no `roles`, which names no role, so nothing is refused. |
+| worker | step.ts:312 | `roleMessages[role]?.[type]` → without `?.` | Every contract's messages are nested under every role (createActorClass, toSimDef, testActor), so the role's entry always exists. |
 | core | errors.ts:277 | `Object.keys(ERROR_CODES).filter(isErrorCode)` → without the filter | Every key of the registry is an ErrorCode; the filter exists for the type checker. |
 | worker | setup.ts:278 | `local === undefined ? def : { ...def, local }` → always spread | Adds `local: undefined` to a state without a local schema; the runtime only reads `def.local === undefined` (phases.ts `parseLocal`, step.ts initial check). |
 

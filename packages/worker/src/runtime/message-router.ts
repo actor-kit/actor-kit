@@ -15,7 +15,8 @@ import { admitMessage } from "./step";
 
 export type RouteResult<TState> =
   | { ok: true; state: TState; payload: unknown }
-  | { ok: false; error: "message_not_found" | "validation_failed" | "guard_failed"; detail?: string };
+  | { ok: false; error: "message_not_found" | "validation_failed" | "guard_failed"; detail?: string }
+  | { ok: false; error: "wrong_role"; roles: readonly string[] };
 
 // --- Minimal shape for the router ---
 // The router only needs schema + handler + guard. It doesn't care about the payload

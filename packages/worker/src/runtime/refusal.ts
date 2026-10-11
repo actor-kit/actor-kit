@@ -16,6 +16,7 @@ export interface ParseIssue {
 /** A refused admission from the step core (`admitStepMessage`). */
 export type RefusedAdmission =
   | { readonly ok: false; readonly error: "message_not_found" | "guard_failed" }
+  | { readonly ok: false; readonly error: "wrong_role"; readonly roles: readonly string[] }
   | {
       readonly ok: false;
       readonly error: "wrong_state";
@@ -37,6 +38,7 @@ const ADMISSION_CODES = {
   validation_failed: "invalid_payload",
   guard_failed: "guard_failed",
   wrong_state: "wrong_state",
+  wrong_role: "wrong_role",
 } as const satisfies Record<AdmissionError, RefusalCode>;
 
 export function refusalCode(error: AdmissionError): RefusalCode {
@@ -109,6 +111,14 @@ export function refuseAdmission(
         expected: acceptedIn,
         details: { phase },
       });
+    }
+    case "wrong_role": {
+      const caller = who === undefined ? "the caller" : `the caller "${who.caller}"`;
+      return refusal(
+        "wrong_role",
+        `${name} is accepted from role ${admission.roles.join(" or ")}; ${caller} has role ${role}.`,
+        { expected: admission.roles, details: { role } },
+      );
     }
     case "validation_failed":
       return invalidPayload(admission, name);

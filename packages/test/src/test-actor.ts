@@ -30,6 +30,7 @@ import type {
 } from "@actor-kit/worker/testing";
 import {
   admitStepMessage,
+  checkMessageRoles,
   createLiveFacts,
   envErrorMessage,
   initialState,
@@ -383,6 +384,7 @@ export function testActor(
 
 /** The definition the step core runs for a contract: its messages role-nested, as the runtime stores them. */
 function harnessDef(contract: ContractShape): TestableActorDef<unknown, unknown> & StepDef {
+  checkMessageRoles(contract.def);
   const { messages, ...def } = contract.def;
   return { ...def, messages: roleNestedMessages(messages ?? {}, def.roles) };
 }

@@ -48,7 +48,9 @@ type GuardFn<TState, TPayload = unknown, TEnv = unknown> = (
 ) => boolean;
 
 interface GuardedHandler<TState, TPayload, TEnv = unknown> {
-  guard: GuardFn<TState, TPayload, TEnv>;
+  guard?: GuardFn<TState, TPayload, TEnv>;
+  /** The roles that may send this message; any other role is refused with `wrong_role`. */
+  roles?: readonly string[];
   handler: MessageHandler<TState, TPayload, TEnv>;
 }
 
@@ -80,9 +82,11 @@ export function message<TPayload, TState, TEnv = unknown>(
       handler: handlerOrConfig,
     };
   }
+  const { handler, guard, roles } = handlerOrConfig;
   return {
     schema: zodSchema,
-    handler: handlerOrConfig.handler,
-    guard: handlerOrConfig.guard,
+    handler,
+    ...(guard === undefined ? {} : { guard }),
+    ...(roles === undefined ? {} : { roles }),
   };
 }

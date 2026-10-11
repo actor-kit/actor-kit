@@ -256,3 +256,17 @@ PLACE: game.message(z.object({}), (s: S, _p, ctx) => ({ ...s, at: ctx.now(), id:
 
 To catch these before tests run, enable the Biome plugin:
 `"plugins": ["./node_modules/@actor-kit/worker/biome/no-nondeterminism.grit"]`.
+
+## State messages take any role unless they say otherwise
+
+Unchanged behaviour, now documented, with a new way out: a message (top-level or in a state) without
+`roles` is accepted from every role. A state message is found by the actor's phase, not by the caller's
+role, so in 0.2 a guest could send a player's move unless a guard checked. Name the roles instead:
+
+```ts
+// Before
+DRAW: playing.message(z.object({}), { guard: (s: S, _p, ctx) => isSeated(s, ctx.caller), handler: draw }),
+
+// After
+DRAW: playing.message(z.object({}), { roles: ["player"], handler: draw }), // others: wrong_role
+```
