@@ -418,6 +418,54 @@ Docs: https://actorkit.dev/errors/cli_usage/
 
 Docs: https://actorkit.dev/errors/invalid_frame/
 
+## `invalid_schema`
+
+**What happened:** A view schema was built with arguments it cannot encode (an empty or duplicated enum, a union without variants or with a variant that declares the tag).
+
+**How to fix it:** Fix the `enumOf()` / `union()` / `schema()` call the message names.
+
+Docs: https://actorkit.dev/errors/invalid_schema/
+
+## `invalid_view_value`
+
+**What happened:** A view value does not fit its schema (an enum value outside the list, an unknown union variant, or a value `parse()` rejects).
+
+**How to fix it:** Return a value of the schema's shape from the view function; `Schema.parse(value)` names each wrong field.
+
+Docs: https://actorkit.dev/errors/invalid_view_value/
+
+## `invalid_journal_query`
+
+**What happened:** The journal query options are invalid.
+
+**How to fix it:** Pass `from`, `to` and `before` as non-negative integers, `limit` from 1 to 1000, a known `causeType` and `order` asc or desc.
+
+Docs: https://actorkit.dev/errors/invalid_journal_query/
+
+## `invalid_projection`
+
+**What happened:** A projection was configured or wired wrongly (a table prefix that is not a SQL identifier, or a batch from another queue).
+
+**How to fix it:** Use letters, digits and underscores for `table`, and call `queue()` only with batches for which `handles(batch)` is true.
+
+Docs: https://actorkit.dev/errors/invalid_projection/
+
+## `incomplete_journal`
+
+**What happened:** A projection rebuild found an actor journal it cannot replay from the start (empty, pruned, or not a journal page).
+
+**How to fix it:** Rebuild only actors whose journal is on and unpruned (no `journal.keep`), through `actorJournalSource` or `studioJournalSource`.
+
+Docs: https://actorkit.dev/errors/incomplete_journal/
+
+## `invalid_initial_view`
+
+**What happened:** The `initialView` passed to `actorClient(...).create()` does not match the view schema.
+
+**How to fix it:** Pass the view the server rendered for this caller (its role's view, e.g. from `getSnapshot`); the message names each wrong field.
+
+Docs: https://actorkit.dev/errors/invalid_initial_view/
+
 ## `missing_host`
 
 **What happened:** The client has no host to connect to (no window.location).

@@ -43,7 +43,7 @@ describe("publishedMessages", () => {
         { name: "Noted", payload: {}, index: 2 },
         { name: "Placed", payload: { n: 2 }, index: 3 },
       ],
-      { actorType: "lot", actorId: "l1", seq: 7, at: 99, correlationId: "user/u/1" },
+      { actorType: "lot", actorId: "l1", seq: 7, at: 99, correlationId: "user/u/1", position: 4 },
     );
     expect(messages).toEqual([
       {
@@ -60,9 +60,13 @@ describe("publishedMessages", () => {
           causationId: "lot/l1/7",
           correlationId: "user/u/1",
           idempotencyKey: "lot/l1/7:1",
+          position: 5,
         },
       },
-      expect.objectContaining({ effectId: "7:3", body: expect.objectContaining({ idempotencyKey: "lot/l1/7:3" }) }),
+      expect.objectContaining({
+        effectId: "7:3",
+        body: expect.objectContaining({ idempotencyKey: "lot/l1/7:3", position: 6 }),
+      }),
     ]);
   });
 
@@ -74,6 +78,7 @@ describe("publishedMessages", () => {
         seq: 1,
         at: 0,
         correlationId: "a/b/1",
+        position: 0,
       }),
     ).toEqual([]);
   });
@@ -116,6 +121,7 @@ describe("simulate", () => {
         causationId: "lot/l1/2",
         correlationId: "lot/l1/2",
         idempotencyKey: "lot/l1/2:2",
+        position: 1,
       },
     ]);
     expect(sim.published("OTHER")).toEqual([]);
@@ -146,5 +152,39 @@ describe("definition", () => {
     });
     const sim = simulate({ contracts: [Bad] });
     await expect(sim.spawn(Bad, "b", {})).rejects.toThrow('publish: event "Nope" is not declared in events');
+  });
+});
+
+describe("positions (ADR-019 E)", () => {
+  it("number published events 1, 2, 3 per actor, skipping transitions that publish nothing", async () => {
+    const Multi = defineActor("multi", {
+      ...Lot.def,
+      messages: {
+        ...Lot.def.messages,
+        TWICE: kit.message(z.object({}), (s: S, _p, ctx) => {
+          ctx.emit("Placed", { n: 1 });
+          ctx.emit("Placed", { n: 2 });
+          return s;
+        }),
+        QUIET: kit.message(z.object({}), (s: S, _p, ctx) => {
+          ctx.emit("Noted", {});
+          return s;
+        }),
+      },
+      services: Lot.def.services,
+    });
+    const sim = simulate({ contracts: [Multi], now: 0 });
+    const a = await sim.spawn(Multi, "a", {});
+    const b = await sim.spawn(Multi, "b", {});
+    a.send("u", { type: "TWICE" });
+    a.send("u", { type: "QUIET" });
+    b.send("u", { type: "PLACE", n: 1 });
+    a.send("u", { type: "PLACE", n: 5 });
+    expect(sim.published("LOT_EVENTS").map((p) => [p.actorId, p.seq, p.position])).toEqual([
+      ["a", 2, 1],
+      ["a", 2, 2],
+      ["b", 2, 1],
+      ["a", 4, 3],
+    ]);
   });
 });

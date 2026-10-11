@@ -3,9 +3,9 @@
  *
  * Encodes typed data into compact binary format.
  * Field order is deterministic (from schema definition order).
- * Strings are length-prefixed (uint16 length + UTF-8 bytes).
- * Arrays are count-prefixed (uint16 count + elements).
- * All multi-byte integers are big-endian.
+ * Strings are length-prefixed (varint byte length + UTF-8 bytes).
+ * Arrays are count-prefixed (varint count + elements).
+ * Fixed-width multi-byte numbers are big-endian.
  * The value layout lives in codec.ts, shared with delta encoding.
  */
 

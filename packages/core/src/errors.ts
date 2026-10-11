@@ -231,6 +231,34 @@ export const ERROR_CODES = {
     title: "A frame from the server could not be read.",
     fix: "Use the same @actor-kit version on the client and the Worker.",
   },
+  invalid_schema: {
+    title:
+      "A view schema was built with arguments it cannot encode (an empty or duplicated enum, a union without variants or with a variant that declares the tag).",
+    fix: "Fix the `enumOf()` / `union()` / `schema()` call the message names.",
+  },
+  invalid_view_value: {
+    title:
+      "A view value does not fit its schema (an enum value outside the list, an unknown union variant, or a value `parse()` rejects).",
+    fix: "Return a value of the schema's shape from the view function; `Schema.parse(value)` names each wrong field.",
+  },
+  invalid_journal_query: {
+    title: "The journal query options are invalid.",
+    fix: "Pass `from`, `to` and `before` as non-negative integers, `limit` from 1 to 1000, a known `causeType` and `order` asc or desc.",
+  },
+  invalid_projection: {
+    title:
+      "A projection was configured or wired wrongly (a table prefix that is not a SQL identifier, or a batch from another queue).",
+    fix: "Use letters, digits and underscores for `table`, and call `queue()` only with batches for which `handles(batch)` is true.",
+  },
+  incomplete_journal: {
+    title:
+      "A projection rebuild found an actor journal it cannot replay from the start (empty, pruned, or not a journal page).",
+    fix: "Rebuild only actors whose journal is on and unpruned (no `journal.keep`), through `actorJournalSource` or `studioJournalSource`.",
+  },
+  invalid_initial_view: {
+    title: "The `initialView` passed to `actorClient(...).create()` does not match the view schema.",
+    fix: "Pass the view the server rendered for this caller (its role's view, e.g. from `getSnapshot`); the message names each wrong field.",
+  },
   missing_host: {
     title: "The client has no host to connect to (no window.location).",
     fix: "Pass `host` when creating the client outside a browser (server-side rendering, tests, React Native).",

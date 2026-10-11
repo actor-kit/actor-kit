@@ -112,14 +112,22 @@ Each schema primitive has a fixed binary representation:
 | `uint8` | Unsigned 8-bit integer | 1 |
 | `uint16` | Unsigned 16-bit, big-endian | 2 |
 | `uint32` | Unsigned 32-bit, big-endian | 4 |
+| `int8` / `int16` / `int32` | Signed, two's complement, big-endian | 1 / 2 / 4 |
 | `float32` | IEEE 754 single-precision | 4 |
 | `float64` | IEEE 754 double-precision | 8 |
 | `boolean` | `0x00` or `0x01` | 1 |
-| `string` | Length-prefixed UTF-8 (`uint16` length + bytes) | 2 + len |
-| `array(T)` | Count-prefixed (`uint16` count + elements) | 2 + sum |
+| `string` | Length-prefixed UTF-8 (varint length + bytes) | 1-3 + len |
+| `array(T)` | Count-prefixed (varint count + elements) | 1-3 + sum |
 | Nested `schema({...})` | Fields concatenated in definition order | sum |
+| `enumOf([...])` / `literal(v)` | Index in the list (none for one value, `uint8` up to 256, else `uint16`) | 0-2 |
+| `record(T)` | varint count, then varint-length key + value per entry | 1-3 + sum |
+| `union(tag, variants)` | `uint8` variant index + the variant's fields | 1 + sum |
+| `json(zod)` | varint length + JSON text, parsed with the schema on the client | 1-4 + len |
 
-All multi-byte integers use big-endian byte order. No padding, no alignment — fields are packed contiguously.
+Inside a delta, records send only removed, changed and added keys, and unions send only the changed
+fields of an unchanged variant; everything else changed is resent whole.
+
+Lengths and counts are unsigned LEB128 varints (one byte below 128), so strings, arrays and records have no size limit below what a frame holds. Fixed-width multi-byte numbers use big-endian byte order. No padding, no alignment — fields are packed contiguously.
 
 ## Client decoding
 

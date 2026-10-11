@@ -5,6 +5,10 @@
  * `queue`. The Durable Object writes one outbox row per published event in the transition's
  * transaction, under the event's effect id (`seq:index`), and sends it after commit with the
  * outbox's retries, dead letters and redrive (ADR-015 D1). Consumers dedupe on `idempotencyKey`.
+ *
+ * `position` numbers an actor's published events 1, 2, 3... with no gaps (ADR-019 E): `seq` skips
+ * transitions that publish nothing, so only `position` tells a consumer whether it missed one. It is
+ * assigned in the commit transaction and never reused or rewound, not even by a restore.
  */
 
 import { ActorKitError } from "@actor-kit/core";
@@ -67,6 +71,8 @@ export interface PublishedBody {
   readonly causationId: string;
   readonly correlationId: string;
   readonly idempotencyKey: string;
+  /** This actor's published events numbered 1, 2, 3... without gaps (ADR-019 E). */
+  readonly position: number;
 }
 
 export interface PublishedMessage {
@@ -75,21 +81,37 @@ export interface PublishedMessage {
   readonly body: PublishedBody;
 }
 
-/** The messages a committed transition publishes: one per emitted event named in `publish.events`. */
+/**
+ * The messages a committed transition publishes: one per emitted event named in `publish.events`.
+ * `transition.position` is the last position already assigned; the messages take the next ones.
+ */
 export function publishedMessages(
   config: PublishConfig,
   emitted: readonly EmittedEffect[],
-  transition: { actorType: string; actorId: string; seq: number; at: number; correlationId: string },
+  transition: { actorType: string; actorId: string; seq: number; at: number; correlationId: string; position: number },
 ): PublishedMessage[] {
   const { actorType, actorId, seq, at, correlationId } = transition;
   return emitted
     .filter((event) => config.events.has(event.name))
-    .map(({ name, payload, index }) => {
+    .map(({ name, payload, index }, i) => {
       const effectId = formatEffectId(seq, index);
       // The same key every effect has (ADR-016 §1): unique across the deployment, stable across retries.
       const idempotencyKey = effectIdempotencyKey(actorType, actorId, effectId);
       const causationId = eventId(actorType, actorId, seq);
-      const body = { actorType, actorId, seq, index, name, payload, at, causationId, correlationId, idempotencyKey };
+      const position = transition.position + i + 1;
+      const body = {
+        actorType,
+        actorId,
+        seq,
+        index,
+        name,
+        payload,
+        at,
+        causationId,
+        correlationId,
+        idempotencyKey,
+        position,
+      };
       return { effectId, index, body };
     });
 }
@@ -101,4 +123,23 @@ export async function sendToQueue(env: unknown, queue: string, body: unknown): P
   if (typeof send !== "function") throw new ActorKitError("queue_not_bound", `Queue binding "${queue}" is not bound`);
   await Reflect.apply(send, binding, [body]);
   return null;
+}
+
+/** Structural slice of SqlStorage the position store needs. */
+interface PositionSql {
+  exec(query: string, ...bindings: unknown[]): { toArray(): Record<string, unknown>[] };
+}
+
+/** The last position this actor assigned (0 before its first published event). */
+export function readPublishPosition(sql: PositionSql): number {
+  const position = sql.exec("SELECT position FROM publish_position WHERE id = 1").toArray()[0]?.["position"];
+  return typeof position === "number" ? position : 0;
+}
+
+/** Record the last assigned position (inside the commit transaction that assigned it). */
+export function writePublishPosition(sql: PositionSql, position: number): void {
+  sql.exec(
+    "INSERT INTO publish_position (id, position) VALUES (1, ?) ON CONFLICT(id) DO UPDATE SET position = excluded.position",
+    position,
+  );
 }

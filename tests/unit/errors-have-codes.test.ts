@@ -7,8 +7,8 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 const ROOT = join(__dirname, "../..");
-const SOURCES = ["core", "worker", "client", "react", "test", "storybook", "studio", "studio-cli"].map((p) =>
-  join(ROOT, "packages", p, "src"),
+const SOURCES = ["core", "worker", "client", "react", "test", "storybook", "studio", "studio-cli", "projection"].map(
+  (p) => join(ROOT, "packages", p, "src"),
 );
 
 function sourceFiles(dir: string): string[] {

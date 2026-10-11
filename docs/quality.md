@@ -103,15 +103,106 @@ CRAP over `packages/worker/src/runtime`, `packages/test/src`, `packages/core/src
 | RSJ 2. `simulate().spawnSync` (`simulate.ts` spawn refactor, `step.ts` `stepInitSync`) | 52 | 86.79% first run; then tests for the handle's links, an async init that rejects (no unhandled rejection) and a missing init → **96.15%** | 2 equivalent (simulate.ts:783, init's unlink targets, listed below) | test 7.1, runtime 7.0; 0 ≥ 8 |
 | RSJ 6. `actorClient<typeof Contract>({ roles, views })` (`builder.ts` whole) | 51 | **88.24% (45/51)** on the whole file; all 6 survivors are the existing equivalents (renumbered, plus the roles-and-views twin of the name-and-def check, below) | 6 equivalent (5 existing, renumbered; 1 new: builder.ts:108) | client 7.0; 0 ≥ 8 |
 
+## ADR-019 C (richer view schemas), Stryker on `core/src/schema.ts`, `codec.ts`, `delta.ts` (whole files)
+
+| Run | Score | Survivors |
+|---|---|---|
+| First | 98.64% (574/582) | 8: `isFloat` float32 arm (×2), nullable float vs `null` (×2), `nextEntries[i]?.[0]`, `valueMetaOf` guard (×2, one NoCoverage), `a === b` fast path |
+| After | **99.83% (586/587)** | 1, equivalent (delta.ts:58 fast path, below) |
+
+- Killed by `core-rich-schemas.test.ts` "float tolerance in deltas" (float32 tolerance; a `null` previous or next
+  value is never "within 1e-6" of a number) and "are read through the schema that built them".
+- Removed by simplifying: the record order check walks `nextEntries` (always defined) instead of indexing it.
+- Found by the property tests (`core-rich-schemas.property.test.ts`, fast-check over random nested schemas):
+  the 1e-6 float tolerance also hid small changes in `json`, enum and integer values (it now applies to float
+  fields only). Found by `pnpm crap`'s coverage run: the enum distinct-values check was O(n²) (65536 values took
+  over 5s); it is a Set now.
+- CRAP: core max 7.0 (0 ≥ 8). client max 10.0: `url.ts buildUrl` (CC 10, 100% covered), unchanged by this work
+  (came in with `a2594c6`, same-origin socket scheme); listed as a follow-up.
+
+## ADR-019 F (journal query)
+
+Stryker on `worker/runtime/journal-query.ts` (whole), `studio-cli/src/shape.ts` (whole) and the changed
+ranges of `studio-project.ts` (`projectJournalEntry`), `studio/src/middleware.ts` (journal query schema,
+`handleJournal`), `studio-cli/src/cli.ts` (`journal`, `order`), `client.ts` (journal schema and call) and
+`mcp.ts` (`studio_journal`).
+
+| Run | Score | Survivors |
+|---|---|---|
+| First | 91.73% (233/254) | 23: CLI and MCP messages and descriptions, `order=desc` accepted, malformed id / unbound type on the journal route, `hasMore` with a page that holds exactly the rest, ORDER BY `""` |
+| After | **99.28% (273/275)** | 2, equivalent: journal-query.ts:111 (below) and the existing shape.ts:43 row |
+
+- CRAP: studio max 7.0, studio-cli max 7.0, worker (`pnpm crap:worker`, unit + integration) max 7.6; 0 functions ≥ 8.
+- `studio-mcp.test.ts` "exposes exactly the read-only tools" now lists `studio_journal`: ADR-019 F adds that
+  read-only tool, and the test's point (every tool is read-only) is unchanged.
+
+## ADR-019 E (published-event positions, `@actor-kit/projection`)
+
+Stryker on `packages/projection/src/**` (all but `index.ts`) and `worker/runtime/publish.ts`.
+
+| Run | Score | Survivors |
+|---|---|---|
+| First | 94.30% (234/244 + 4 timeouts) | 15: projections built at module load in the test (a mutant that makes the constructor throw breaks the file's import, which Stryker's runner reports as survived), `via` unchecked, rebuild without `reset`, the default `fetch`, `actorId` length 1 in every test, and the race handling below |
+| After | **100% (250/254 killed + 4 timeouts)** | none |
+
+- Found while killing them: after losing a race to another consumer (its cursor row already there), the
+  drain stopped, so a later buffered event of that actor could wait for the next message. A conflict now
+  means "applied": the drain continues. `buffered()` lists only events after the cursor (a lost race can
+  leave a stale row, removed by the next drain).
+- `simulate()`'s position (`packages/test`): covered by `publish.test.ts`; CRAP for `packages/test/src` max 7.1.
+- CRAP: projection max 7.0, test max 7.1, worker (`pnpm crap:worker`) max 7.6; 0 functions ≥ 8.
+
+## View schema validation (StandardSchemaV1), Stryker on `core/src/validate.ts`, `meta.ts`, `schema.ts`
+
+| Run | Score | Survivors |
+|---|---|---|
+| First | 94.95% (339/357) | 18: messages (array, object, number, boolean), the 65535 boundaries (`>` vs `>=`), the `or null` path of a top-level nullable, `SchemaValidationError` name and path separator, nullable array elements, and checks that did not read their argument |
+| After | **99.73% (365/366)** | 1: validate.ts `validates` body emptied, which leaves every descriptor without a validator at module load; Stryker's Vitest runner reports a module-load failure as survived (same family as retry.ts:64) |
+
+- `client/src/initial-view.ts` (create() validating `initialView`): 92.31% first run (issue formatting duplicated from
+  core, `null` and non-string roles, a contract with neither roles nor schemas); after reusing core's
+  `describeIssues` and adding those tests, 100% (69/69). Run together with `validate.ts`: 99.65% (282/283).
+- Removed by simplifying: the string byte-length check moved into its own `checkString`; `checkFields` takes the schema, not a meta it did not read; `issuesOf`'s `nullable` has no default.
+- CRAP: core max 7.0 (0 ≥ 8).
+
+## Varint lengths and counts (strings over 65535 bytes corrupted the frame)
+
+Every length and count on the wire is now an unsigned LEB128 varint (`codec.ts` `writeVarint` /
+`readVarint` / `varintSize`; record-delta counts in `delta.ts`). The validator's 65535 limits went with it.
+
+| Run (`codec.ts`, `delta.ts`, `validate.ts`, whole files) | Score | Survivors |
+|---|---|---|
+| First | 99.56% (660/668 + 5 timeouts) | 3: varint bound `<` → `<=` (killed by a 9-byte length ending in `0x01`), and the existing delta.ts fast path and validate.ts module-load rows |
+| After | **99.70% (666/668)** | 2, equivalent: delta.ts:61 fast path and the validate.ts module-load row (`validates` body) |
+
+## Merge of ADR-019 C/E/F into ADR-018 (claude/v0.3)
+
+- ADR-018 C applied to the ADR-019 code: schema building throws `invalid_schema`, encoding a value outside its
+  schema and `parse()` throw `invalid_view_value`, decoding bytes a schema cannot have written throws
+  `invalid_frame`, the journal query throws `invalid_journal_query`, `@actor-kit/projection` throws
+  `invalid_projection` / `incomplete_journal` (and `studio_request_failed`, `actor_not_found` from its journal
+  sources), and `InitialViewError` is an `ActorKitError` (`invalid_initial_view`). `errors-have-codes.test.ts`
+  now also scans `packages/projection/src` (stricter). Pinned by `adr019-error-codes.test.ts`.
+- `actorClient<typeof C>({ roles, views })` validates `initialView` through the same schemas
+  (`client-initial-view.test.ts`).
+- Stryker on `errors.ts`, `meta.ts`, `validate.ts`, `initial-view.ts`, `builder.ts`, `journal-query.ts` and
+  `projection/src/**`: **99.02% (594/600)**; the 6 survivors are the existing rows below (builder.ts ×4,
+  errors.ts:309, journal-query.ts:113), renumbered.
+- CRAP after the merge: every package max ≤ 7.6 (worker with `pnpm crap:worker`), 0 functions ≥ 8;
+  `buildUrl` came down with ADR-018's split.
+- `core-varint-lengths.test.ts`'s property test generated tens of thousands of random graphemes per long
+  string (1.1s alone; it timed out under `pnpm crap:worker`'s coverage on a loaded machine). Long strings are
+  now a short random sample repeated past 65536 bytes: same property, 0.1s.
+
 ## Equivalent mutants
 
 Surviving mutants that no test can kill, because the mutated program behaves identically. One line each.
 
 | Package | Location | Mutant | Why it is equivalent |
 |---|---|---|---|
-| core | delta.ts:28 | `if (a === b) return true` → `if (false)` | Fast path only; the number and JSON comparisons below return the same result. |
-| client | builder.ts:107, :108 | `"name" in arg && "def" in arg` / `"roles" in arg && "views" in arg` → `\|\|` | A SchemaDefinition has none of these keys; a contract has both name and def, the roles-and-views form both roles and views. |
-| client | builder.ts:115, 119 (×3) | `isRecord` / `isViewSchema` → `true` | A non-schema registered for a role makes decode throw, which the client catches and ignores, the same as having no schema. |
+| core | delta.ts:61 | `if (a === b) return true` → `if (false)` | Fast path only; the number and JSON comparisons below return the same result. |
+| client | builder.ts:108, :109 | `"name" in arg && "def" in arg` / `"roles" in arg && "views" in arg` → `\|\|` | A SchemaDefinition has none of these keys; a contract has both name and def, the roles-and-views form both roles and views. |
+| client | builder.ts:116, 120 (×3) | `isRecord` / `isViewSchema` → `true` | A non-schema registered for a role makes decode throw, which the client catches and ignores, the same as having no schema. |
 | client | builder.ts:131 | `if (isViewSchema(...))` → `true` | Registers `undefined` for the role; `viewSchemas[role] ?? viewSchema` falls back exactly as when it is absent. |
 | client | client.ts:155, 156, 164 | `roleIndex === undefined ? …` / `roleName === undefined ? …` → `false` | parseFrame always sets roleIndex on snapshots, and indexing with `undefined` yields `undefined` anyway. |
 | client | client.ts:179 | `onRedirect?.(…)` → `onRedirect(…)` | Binary path only: the TypeError is caught by handleBinaryMessage's try/catch, same as doing nothing. |
@@ -182,8 +273,9 @@ Surviving mutants that no test can kill, because the mutated program behaves ide
 | studio UI | studio-state.ts:111 | `frame.rejections === undefined ? {} : { rejections }` → always the spread | A `rejections: undefined` key renders the same nothing as an absent one. |
 | worker | message-roles.ts:23, :26, :28 | an empty list → `["Stryker was here"]` | Destructuring a string gives a one-letter "slot" with no `roles`, which names no role, so nothing is refused. |
 | worker | step.ts:312 | `roleMessages[role]?.[type]` → without `?.` | Every contract's messages are nested under every role (createActorClass, toSimDef, testActor), so the role's entry always exists. |
-| core | errors.ts:277 | `Object.keys(ERROR_CODES).filter(isErrorCode)` → without the filter | Every key of the registry is an ErrorCode; the filter exists for the type checker. |
+| core | errors.ts:309 | `Object.keys(ERROR_CODES).filter(isErrorCode)` → without the filter | Every key of the registry is an ErrorCode; the filter exists for the type checker. |
 | worker | setup.ts:278 | `local === undefined ? def : { ...def, local }` → always spread | Adds `local: undefined` to a state without a local schema; the runtime only reads `def.local === undefined` (phases.ts `parseLocal`, step.ts initial check). |
+| worker | journal-query.ts:113 | `query.order === "asc" ? "ASC" : …` → `""` | `ORDER BY seq` with no direction is ascending in SQLite. |
 
 ## Bugs found while hardening (2026-10-07)
 

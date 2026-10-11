@@ -7,11 +7,28 @@
  *   // { count: number; name: string }
  */
 
+import type { z } from "zod";
+import { ActorKitError } from "./errors";
+import { registerInner } from "./meta";
+import { type Validates, validates } from "./validate";
+
+export { valueMetaOf } from "./meta";
+
 // --- Primitive type descriptors ---
 
-export type PrimitiveTypeName = "uint8" | "uint16" | "uint32" | "float32" | "float64" | "string" | "boolean";
+export type PrimitiveTypeName =
+  | "uint8"
+  | "uint16"
+  | "uint32"
+  | "int8"
+  | "int16"
+  | "int32"
+  | "float32"
+  | "float64"
+  | "string"
+  | "boolean";
 
-export interface PrimitiveDescriptor<T extends PrimitiveTypeName, V> {
+export interface PrimitiveDescriptor<T extends PrimitiveTypeName, V> extends Validates<V> {
   readonly kind: "primitive";
   readonly type: T;
   readonly _phantom: V;
@@ -21,7 +38,12 @@ export interface PrimitiveDescriptor<T extends PrimitiveTypeName, V> {
 class Primitive<T extends PrimitiveTypeName, V> implements PrimitiveDescriptor<T, V> {
   readonly kind = "primitive";
   declare readonly _phantom: V;
+  readonly "~standard": Validates<V>["~standard"];
+  readonly parse: Validates<V>["parse"];
   constructor(readonly type: T) {
+    const validator = validates<V>(() => ({ type }));
+    this["~standard"] = validator["~standard"];
+    this.parse = validator.parse;
     Object.freeze(this);
   }
 }
@@ -33,6 +55,10 @@ function primitive<T extends PrimitiveTypeName, V>(type: T): PrimitiveDescriptor
 export const uint8: PrimitiveDescriptor<"uint8", number> = primitive("uint8");
 export const uint16: PrimitiveDescriptor<"uint16", number> = primitive("uint16");
 export const uint32: PrimitiveDescriptor<"uint32", number> = primitive("uint32");
+/** Signed integers: fixed width, two's complement, big-endian. */
+export const int8: PrimitiveDescriptor<"int8", number> = primitive("int8");
+export const int16: PrimitiveDescriptor<"int16", number> = primitive("int16");
+export const int32: PrimitiveDescriptor<"int32", number> = primitive("int32");
 export const float32: PrimitiveDescriptor<"float32", number> = primitive("float32");
 export const float64: PrimitiveDescriptor<"float64", number> = primitive("float64");
 export const string: PrimitiveDescriptor<"string", string> = primitive("string");
@@ -40,14 +66,138 @@ export const boolean: PrimitiveDescriptor<"boolean", boolean> = primitive("boole
 
 // --- Array combinator ---
 
-export interface ArrayDescriptor<E extends FieldDescriptor> {
+export interface ArrayDescriptor<E extends FieldDescriptor> extends Validates<InferNonNullable<E>[]> {
   readonly kind: "array";
   readonly type: "array";
   readonly element: E;
 }
 
 export function array<E extends FieldDescriptor>(element: E): ArrayDescriptor<E> {
-  return Object.freeze({ kind: "array" as const, type: "array" as const, element });
+  return Object.freeze({
+    kind: "array" as const,
+    type: "array" as const,
+    element,
+    ...validates<InferNonNullable<E>[]>(() => ({ type: "array", element: elementMeta(element) })),
+  });
+}
+
+// --- Record combinator (string keys) ---
+
+export interface RecordDescriptor<E extends BaseFieldDescriptor>
+  extends Validates<{ [key: string]: InferNonNullable<E> }> {
+  readonly kind: "record";
+  readonly type: "record";
+  readonly element: E;
+}
+
+/** A string-keyed record: a count, then each key and value. Deltas send removed, changed and added keys. */
+export function record<E extends BaseFieldDescriptor>(element: E): RecordDescriptor<E> {
+  return Object.freeze({
+    kind: "record" as const,
+    type: "record" as const,
+    element,
+    ...validates<{ [key: string]: InferNonNullable<E> }>(() => ({ type: "record", element: buildValueMeta(element) })),
+  });
+}
+
+// --- Enums and literals ---
+
+export type EnumValue = string | number | boolean;
+
+export interface EnumDescriptor<V extends readonly EnumValue[]> extends Validates<V[number]> {
+  readonly kind: "enum";
+  readonly type: "enum";
+  readonly values: V;
+}
+
+const MAX_ENUM_VALUES = 0x10000;
+
+/** A value as it appears in error messages. */
+export const show = (value: unknown): string => JSON.stringify(value) ?? String(value);
+
+/** One of a fixed list of values, sent as its index (0 bytes for one value, 1 up to 256, else 2). */
+export function enumOf<const V extends readonly [EnumValue, ...EnumValue[]]>(values: V): EnumDescriptor<V> {
+  if (values.length === 0) throw new ActorKitError("invalid_schema", "enumOf() needs at least one value");
+  if (values.length > MAX_ENUM_VALUES)
+    throw new ActorKitError("invalid_schema", `enumOf() takes at most ${MAX_ENUM_VALUES} values`);
+  const seen = new Set<EnumValue>();
+  for (const value of values) {
+    if (seen.has(value))
+      throw new ActorKitError("invalid_schema", `enumOf() values must be distinct: ${show(value)} appears twice`);
+    seen.add(value);
+  }
+  return Object.freeze({
+    kind: "enum" as const,
+    type: "enum" as const,
+    values,
+    ...validates<V[number]>(() => ({ type: "enum", values })),
+  });
+}
+
+/** A single value: takes no bytes on the wire. */
+export function literal<const V extends EnumValue>(value: V): EnumDescriptor<readonly [V]> {
+  return enumOf([value]);
+}
+
+// --- Discriminated union ---
+
+type AnySchema = SchemaDefinition<Record<string, FieldDescriptor>>;
+
+export interface UnionDescriptor<Tag extends string, V extends Readonly<Record<string, AnySchema>>>
+  extends Validates<InferUnion<Tag, V>> {
+  readonly kind: "union";
+  readonly type: "union";
+  readonly tag: Tag;
+  readonly variants: V;
+}
+
+const MAX_VARIANTS = 0x100;
+
+/**
+ * A discriminated union: `{ [tag]: variantName, ...that variant's fields }`. Sent as the variant's
+ * index (one byte) then its fields; a delta sends only changed fields while the tag is unchanged.
+ */
+export function union<const Tag extends string, const V extends Readonly<Record<string, AnySchema>>>(
+  tag: Tag,
+  variants: V,
+): UnionDescriptor<Tag, V> {
+  const entries: [string, AnySchema][] = Object.entries(variants);
+  if (entries.length === 0) throw new ActorKitError("invalid_schema", `union "${tag}" needs at least one variant`);
+  if (entries.length > MAX_VARIANTS)
+    throw new ActorKitError("invalid_schema", `union "${tag}" takes at most ${MAX_VARIANTS} variants`);
+  for (const [name, variant] of entries) {
+    if (variant.fields.some((f) => f.name === tag)) {
+      throw new ActorKitError(
+        "invalid_schema",
+        `union "${tag}": variant "${name}" must not declare the tag field "${tag}"`,
+      );
+    }
+  }
+  return Object.freeze({
+    kind: "union" as const,
+    type: "union" as const,
+    tag,
+    variants,
+    ...validates<InferUnion<Tag, V>>(() => ({ type: "union", tag, variants: variantsOf(variants) })),
+  });
+}
+
+// --- JSON escape hatch ---
+
+export interface JsonDescriptor<S extends z.ZodType> extends Validates<z.output<S>> {
+  readonly kind: "json";
+  readonly type: "json";
+  readonly schema: S;
+}
+
+/** Any JSON value, sent as JSON text and parsed with `zodSchema` when decoded. Changes resend it whole. */
+export function json<S extends z.ZodType>(zodSchema: S): JsonDescriptor<S> {
+  return Object.freeze({
+    kind: "json" as const,
+    type: "json" as const,
+    schema: zodSchema,
+    ...validates<z.output<S>>(() => ({ type: "json", json: zodSchema })),
+  });
 }
 
 // --- Nullable combinator ---
@@ -57,52 +207,76 @@ export function array<E extends FieldDescriptor>(element: E): ArrayDescriptor<E>
 export type BaseFieldDescriptor =
   | PrimitiveDescriptor<PrimitiveTypeName, unknown>
   | ArrayDescriptor<BaseFieldDescriptor>
+  | RecordDescriptor<BaseFieldDescriptor>
+  | EnumDescriptor<readonly EnumValue[]>
+  | UnionDescriptor<string, Readonly<Record<string, AnySchema>>>
+  | JsonDescriptor<z.ZodType>
   | SchemaDefinition<Record<string, FieldDescriptor>>;
 
-export interface NullableDescriptor<F extends BaseFieldDescriptor> {
+export interface NullableDescriptor<F extends BaseFieldDescriptor> extends Validates<InferNonNullable<F> | null> {
   readonly kind: "nullable";
   readonly type: "nullable";
   readonly field: F;
 }
 
 export function nullable<F extends BaseFieldDescriptor>(field: F): NullableDescriptor<F> {
-  return Object.freeze({ kind: "nullable" as const, type: "nullable" as const, field });
+  return Object.freeze({
+    kind: "nullable" as const,
+    type: "nullable" as const,
+    field,
+    ...validates<InferNonNullable<F> | null>(() => buildValueMeta(field), true),
+  });
 }
 
 // --- Schema (nested) descriptor ---
 
 // A FieldDescriptor is anything that can appear as a field value in schema({})
-export type FieldDescriptor =
-  | PrimitiveDescriptor<PrimitiveTypeName, unknown>
-  | ArrayDescriptor<BaseFieldDescriptor>
-  | NullableDescriptor<BaseFieldDescriptor>
-  | SchemaDefinition<Record<string, FieldDescriptor>>;
+export type FieldDescriptor = BaseFieldDescriptor | NullableDescriptor<BaseFieldDescriptor>;
 
 // --- Schema definition ---
 
-type AnySchema = SchemaDefinition<Record<string, FieldDescriptor>>;
+/** One variant of a union, in declaration order (its index is the wire tag). */
+export interface VariantMeta {
+  readonly name: string;
+  readonly schema: AnySchema;
+}
 
-/**
- * How one non-null value is laid out on the wire: a primitive, an array of
- * values, or a nested schema. Each variant names the other variants' keys as
- * `undefined` so callers can read `meta.element?.type` without narrowing.
- */
+/** Everything a layout can carry besides its type. */
+interface Layout {
+  readonly element: ValueMeta;
+  readonly schema: AnySchema;
+  readonly values: readonly EnumValue[];
+  readonly tag: string;
+  readonly variants: readonly VariantMeta[];
+  readonly json: z.ZodType;
+}
+
+/** The layout keys `K`, with every other layout key named as `undefined` so `meta.element?.type` reads without narrowing. */
+type Only<K extends keyof Layout> = { readonly [P in K]: Layout[P] } & {
+  readonly [P in Exclude<keyof Layout, K>]?: undefined;
+};
+
+/** How one non-null value is laid out on the wire. */
 export type ValueMeta =
-  | { readonly type: PrimitiveTypeName; readonly element?: undefined; readonly schema?: undefined }
-  | { readonly type: "array"; readonly element: ValueMeta; readonly schema?: undefined }
-  | { readonly type: "schema"; readonly schema: AnySchema; readonly element?: undefined };
+  | ({ readonly type: PrimitiveTypeName } & Only<never>)
+  | ({ readonly type: "array" | "record" } & Only<"element">)
+  | ({ readonly type: "schema" } & Only<"schema">)
+  | ({ readonly type: "enum" } & Only<"values">)
+  | ({ readonly type: "union" } & Only<"tag" | "variants">)
+  | ({ readonly type: "json" } & Only<"json">);
 
-/** A nullable field: the inner value's layout, flattened next to `innerType`. */
-export type NullableMeta = { readonly name: string; readonly type: "nullable" } & (
-  | { readonly innerType: PrimitiveTypeName; readonly element?: undefined; readonly schema?: undefined }
-  | { readonly innerType: "array"; readonly element: ValueMeta; readonly schema?: undefined }
-  | { readonly innerType: "schema"; readonly schema: AnySchema; readonly element?: undefined }
-);
+/** A nullable field: the inner value's layout, flattened next to `innerType` (read it with `valueMetaOf`). */
+export type NullableMeta = {
+  readonly name: string;
+  readonly type: "nullable";
+  readonly innerType: ValueMeta["type"];
+} & { readonly [P in keyof Layout]?: Layout[P] | undefined };
 
 /** One top-level field of a schema, in definition order. */
 export type FieldMeta = (ValueMeta & { readonly name: string; readonly innerType?: undefined }) | NullableMeta;
 
-export interface SchemaDefinition<TShape extends Record<string, FieldDescriptor>> {
+export interface SchemaDefinition<TShape extends Record<string, FieldDescriptor>>
+  extends Validates<{ [K in keyof TShape]: InferField<TShape[K]> }> {
   readonly kind: "schema";
   readonly type: "schema";
   readonly shape: TShape;
@@ -112,24 +286,43 @@ export interface SchemaDefinition<TShape extends Record<string, FieldDescriptor>
 
 function buildValueMeta(descriptor: BaseFieldDescriptor): ValueMeta {
   switch (descriptor.kind) {
-    case "primitive":
-      return { type: descriptor.type };
     case "array":
-      return { type: "array", element: buildValueMeta(descriptor.element) };
+    case "record":
+      return { type: descriptor.kind, element: buildValueMeta(descriptor.element) };
     case "schema":
       return { type: "schema", schema: descriptor };
+    default:
+      return buildLeafMeta(descriptor);
   }
 }
 
-function buildNullableMeta(name: string, inner: ValueMeta): NullableMeta {
-  switch (inner.type) {
-    case "array":
-      return { name, type: "nullable", innerType: "array", element: inner.element };
-    case "schema":
-      return { name, type: "nullable", innerType: "schema", schema: inner.schema };
-    default:
-      return { name, type: "nullable", innerType: inner.type };
+/** An array element's layout (the wire format has no nullable elements: a nullable one is read as its inner type). */
+function elementMeta(descriptor: FieldDescriptor): ValueMeta {
+  return buildValueMeta(descriptor.kind === "nullable" ? descriptor.field : descriptor);
+}
+
+function buildLeafMeta(descriptor: Exclude<BaseFieldDescriptor, { kind: "array" | "record" | "schema" }>): ValueMeta {
+  switch (descriptor.kind) {
+    case "primitive":
+      return { type: descriptor.type };
+    case "enum":
+      return { type: "enum", values: descriptor.values };
+    case "union":
+      return { type: "union", tag: descriptor.tag, variants: variantsOf(descriptor.variants) };
+    case "json":
+      return { type: "json", json: descriptor.schema };
   }
+}
+
+function variantsOf(variants: Readonly<Record<string, AnySchema>>): readonly VariantMeta[] {
+  return Object.entries(variants).map(([name, variantSchema]) => ({ name, schema: variantSchema }));
+}
+
+function buildNullableMeta(name: string, inner: ValueMeta): NullableMeta {
+  const { type: innerType, ...layout } = inner;
+  const meta: NullableMeta = { name, type: "nullable", innerType, ...layout };
+  registerInner(meta, inner);
+  return meta;
 }
 
 function buildFieldMeta(name: string, descriptor: FieldDescriptor): FieldMeta {
@@ -139,58 +332,55 @@ function buildFieldMeta(name: string, descriptor: FieldDescriptor): FieldMeta {
   return { name, ...buildValueMeta(descriptor) };
 }
 
-/** The layout of a field's non-null value (a nullable field's inner type). */
-export function valueMetaOf(field: FieldMeta): ValueMeta {
-  if (field.type !== "nullable") return field;
-  switch (field.innerType) {
-    case "array":
-      return { type: "array", element: field.element };
-    case "schema":
-      return { type: "schema", schema: field.schema };
-    default:
-      return { type: field.innerType };
-  }
-}
-
 export function schema<TShape extends Record<string, FieldDescriptor>>(shape: TShape): SchemaDefinition<TShape> {
   const descriptors: [string, FieldDescriptor][] = Object.entries(shape);
   const fields = descriptors.map(([name, descriptor]) => buildFieldMeta(name, descriptor));
   const hasNullable = fields.some((f) => f.type === "nullable");
 
-  return Object.freeze({
+  const layout = {
     kind: "schema" as const,
     type: "schema" as const,
     shape,
     fields: Object.freeze(fields),
     hasNullable,
+  };
+  const definition: SchemaDefinition<TShape> = Object.freeze({
+    ...layout,
+    ...validates<{ [K in keyof TShape]: InferField<TShape[K]> }>(() => ({ type: "schema", schema: definition })),
   });
+  return definition;
 }
 
 // --- Type inference ---
 
-// Infer the TypeScript type from a FieldDescriptor
-// Use a helper that avoids deep recursion by splitting nullable from non-nullable
-// inference. NullableDescriptor<T> unwraps T which is BaseFieldDescriptor (no
-// nested nullable), so recursion depth is bounded.
-type InferField<F> =
-  F extends NullableDescriptor<infer Inner>
-    ? InferNonNullable<Inner> | null
-    : F extends PrimitiveDescriptor<infer _T, infer V>
-      ? V
-      : F extends ArrayDescriptor<infer E>
-        ? InferNonNullable<E>[]
-        : F extends SchemaDefinition<infer S>
-          ? { [K in keyof S]: InferField<S[K]> }
-          : never;
+// Infer the TypeScript type from a FieldDescriptor. NullableDescriptor<T> unwraps T, which is a
+// BaseFieldDescriptor (no nested nullable), so recursion depth is bounded.
+type InferField<F> = F extends NullableDescriptor<infer Inner> ? InferNonNullable<Inner> | null : InferNonNullable<F>;
 
 type InferNonNullable<F> =
   F extends PrimitiveDescriptor<infer _T, infer V>
     ? V
     : F extends ArrayDescriptor<infer E>
       ? InferNonNullable<E>[]
-      : F extends SchemaDefinition<infer S>
-        ? { [K in keyof S]: InferField<S[K]> }
-        : never;
+      : F extends RecordDescriptor<infer E>
+        ? { [key: string]: InferNonNullable<E> }
+        : F extends EnumDescriptor<infer V>
+          ? V[number]
+          : F extends UnionDescriptor<infer Tag, infer V>
+            ? InferUnion<Tag, V>
+            : F extends JsonDescriptor<infer S>
+              ? z.output<S>
+              : F extends SchemaDefinition<infer S>
+                ? { [K in keyof S]: InferField<S[K]> }
+                : never;
+
+/** Flattens an intersection into one object type (for readable unions). */
+type Flat<T> = { [K in keyof T]: T[K] };
+
+// The wide `Record<string, schema>` (a generic constraint) stops here instead of recursing forever.
+type InferUnion<Tag extends string, V> = string extends keyof V
+  ? Record<string, unknown>
+  : { [K in keyof V & string]: Flat<{ [P in Tag]: K } & Infer<V[K]>> }[keyof V & string];
 
 // Infer the full TypeScript type from a SchemaDefinition
 export type Infer<S> =

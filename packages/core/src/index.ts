@@ -30,9 +30,39 @@ export {
 // Hashing
 export { xxh64 } from "./hash";
 // Schema builder
-export type { FieldDescriptor, Infer, PrimitiveDescriptor, SchemaDefinition } from "./schema";
-export { array, boolean, float32, float64, nullable, schema, string, uint8, uint16, uint32 } from "./schema";
-
+export type {
+  ArrayDescriptor,
+  EnumDescriptor,
+  EnumValue,
+  FieldDescriptor,
+  Infer,
+  JsonDescriptor,
+  NullableDescriptor,
+  PrimitiveDescriptor,
+  RecordDescriptor,
+  SchemaDefinition,
+  UnionDescriptor,
+} from "./schema";
+export {
+  array,
+  boolean,
+  enumOf,
+  float32,
+  float64,
+  int8,
+  int16,
+  int32,
+  json,
+  literal,
+  nullable,
+  record,
+  schema,
+  string,
+  uint8,
+  uint16,
+  uint32,
+  union,
+} from "./schema";
 // Shared types
 export type {
   CancelFn,
@@ -59,6 +89,9 @@ export type {
   TimerDef,
   UnlinkFn,
 } from "./types";
+// Validation (StandardSchemaV1)
+export type { StandardIssue, StandardProps, StandardResult, Validates } from "./validate";
+export { describeIssues, SchemaValidationError } from "./validate";
 
 // View
 export type { PerCallerViewDef, SharedViewDef, ViewDef } from "./view";

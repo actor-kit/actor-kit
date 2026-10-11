@@ -39,6 +39,7 @@ describe("ACTOR_KIT_MIGRATIONS", () => {
       "0017_emitted",
       "0018_rejections",
       "0019_nondeterministic",
+      "0020_publish_position",
     ]);
   });
 
@@ -58,6 +59,7 @@ describe("ACTOR_KIT_MIGRATIONS", () => {
       "table:journal_checkpoints",
       "table:link_subscribers",
       "table:outbox",
+      "table:publish_position",
       "table:rejection_counts",
       "table:rejections",
       "table:snapshots",

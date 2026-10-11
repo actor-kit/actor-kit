@@ -61,6 +61,12 @@ Every error actor-kit throws is an `ActorKitError` with a stable `code` and a `d
 | [`studio_request_failed`](/errors/studio_request_failed/) | The Studio API answered with an error or something that is not Studio. |
 | [`cli_usage`](/errors/cli_usage/) | The `actor-kit studio` command line is incomplete or invalid. |
 | [`invalid_frame`](/errors/invalid_frame/) | A frame from the server could not be read. |
+| [`invalid_schema`](/errors/invalid_schema/) | A view schema was built with arguments it cannot encode (an empty or duplicated enum, a union without variants or with a variant that declares the tag). |
+| [`invalid_view_value`](/errors/invalid_view_value/) | A view value does not fit its schema (an enum value outside the list, an unknown union variant, or a value `parse()` rejects). |
+| [`invalid_journal_query`](/errors/invalid_journal_query/) | The journal query options are invalid. |
+| [`invalid_projection`](/errors/invalid_projection/) | A projection was configured or wired wrongly (a table prefix that is not a SQL identifier, or a batch from another queue). |
+| [`incomplete_journal`](/errors/incomplete_journal/) | A projection rebuild found an actor journal it cannot replay from the start (empty, pruned, or not a journal page). |
+| [`invalid_initial_view`](/errors/invalid_initial_view/) | The `initialView` passed to `actorClient(...).create()` does not match the view schema. |
 | [`missing_host`](/errors/missing_host/) | The client has no host to connect to (no window.location). |
 | [`headers_in_browser`](/errors/headers_in_browser/) | `getHeaders` was used in a browser, which cannot set WebSocket upgrade headers. |
 | [`missing_provider`](/errors/missing_provider/) | A React hook was used outside its actor context's `<Provider>`. |

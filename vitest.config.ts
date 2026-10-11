@@ -16,6 +16,7 @@ export default defineConfig({
       "@actor-kit/react": resolve(__dirname, "packages/react/src/index.ts"),
       "@actor-kit/test": resolve(__dirname, "packages/test/src/index.ts"),
       "@actor-kit/studio": resolve(__dirname, "packages/studio/src/index.ts"),
+      "@actor-kit/projection": resolve(__dirname, "packages/projection/src/index.ts"),
     },
   },
 });

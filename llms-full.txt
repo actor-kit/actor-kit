@@ -2080,6 +2080,7 @@ type PlayerViewType = Infer<typeof PlayerView>;
 | `uint8` | 1 | `number` |
 | `uint16` | 2 | `number` |
 | `uint32` | 4 | `number` |
+| `int8` / `int16` / `int32` | 1 / 2 / 4 (two's complement) | `number` |
 | `float32` | 4 | `number` |
 | `float64` | 8 | `number` |
 | `string` | 2 + UTF-8 | `string` |
@@ -2090,6 +2091,50 @@ type PlayerViewType = Infer<typeof PlayerView>;
 - `array(T)` — array of any schema type
 - `nullable(T)` — field that can be `null` (adds a compact null bitmask to the wire format)
 - Nested `schema({...})` — objects within objects
+- `enumOf(["lobby", "playing"])` — one of a fixed list (strings, numbers or booleans), sent as its index (1 byte up to 256 values); `literal("card")` is a one-value enum that takes no bytes
+- `record(T)` — a string-keyed record (`Record<string, T>`); a delta sends only removed, changed and added keys
+- `union(tag, { name: schema({...}) })` — a discriminated union `{ [tag]: name, ...fields }`; a delta sends only the changed fields while the variant stays the same, the whole variant when it changes
+- `json(zodSchema)` — escape hatch for shapes the binary types cannot express: sent as JSON text, parsed with the Zod schema on the client, resent whole when it changes
+
+```typescript
+import { enumOf, int16, json, record, schema, uint8, union } from "@actor-kit/core";
+import { z } from "zod";
+
+const PlayerView = schema({
+  phase: enumOf(["lobby", "playing", "done"]),
+  scores: record(int16), // signed: scores can go negative
+  turn: union("kind", {
+    waiting: schema({}),
+    acting: schema({ player: uint8, seconds: uint8 }),
+  }),
+  settings: json(z.object({ theme: z.string() })),
+});
+
+type PlayerViewType = Infer<typeof PlayerView>;
+// {
+//   phase: "lobby" | "playing" | "done";
+//   scores: Record<string, number>;
+//   turn: { kind: "waiting" } | { kind: "acting"; player: number; seconds: number };
+//   settings: { theme: string };
+// }
+```
+
+All of these nest (a record of unions, an array of enums, a nullable union, ...). Encoding a value
+outside an enum or an unknown union variant throws; the server never sends a frame the client cannot
+decode.
+
+### Validating a view
+
+Every schema (and every field type) is a [Standard Schema](https://standardschema.dev): it validates
+the decoded JS value, with a path for each problem. Use it for a boot view a Worker inlined as JSON:
+
+```typescript
+const view = PlayerView.parse(JSON.parse(script.textContent ?? "null")); // throws SchemaValidationError
+const result = PlayerView["~standard"].validate(untrusted); // { value } or { issues: [{ message, path }] }
+```
+
+Extra keys are allowed (a view may carry its `role`). A `json(zodSchema)`
+field is checked with its Zod schema.
 
 ## Binary Sync
 
@@ -2328,14 +2373,22 @@ Each schema primitive has a fixed binary representation:
 | `uint8` | Unsigned 8-bit integer | 1 |
 | `uint16` | Unsigned 16-bit, big-endian | 2 |
 | `uint32` | Unsigned 32-bit, big-endian | 4 |
+| `int8` / `int16` / `int32` | Signed, two's complement, big-endian | 1 / 2 / 4 |
 | `float32` | IEEE 754 single-precision | 4 |
 | `float64` | IEEE 754 double-precision | 8 |
 | `boolean` | `0x00` or `0x01` | 1 |
-| `string` | Length-prefixed UTF-8 (`uint16` length + bytes) | 2 + len |
-| `array(T)` | Count-prefixed (`uint16` count + elements) | 2 + sum |
+| `string` | Length-prefixed UTF-8 (varint length + bytes) | 1-3 + len |
+| `array(T)` | Count-prefixed (varint count + elements) | 1-3 + sum |
 | Nested `schema({...})` | Fields concatenated in definition order | sum |
+| `enumOf([...])` / `literal(v)` | Index in the list (none for one value, `uint8` up to 256, else `uint16`) | 0-2 |
+| `record(T)` | varint count, then varint-length key + value per entry | 1-3 + sum |
+| `union(tag, variants)` | `uint8` variant index + the variant's fields | 1 + sum |
+| `json(zod)` | varint length + JSON text, parsed with the schema on the client | 1-4 + len |
 
-All multi-byte integers use big-endian byte order. No padding, no alignment — fields are packed contiguously.
+Inside a delta, records send only removed, changed and added keys, and unions send only the changed
+fields of an unchanged variant; everything else changed is resent whole.
+
+Lengths and counts are unsigned LEB128 varints (one byte below 128), so strings, arrays and records have no size limit below what a frame holds. Fixed-width multi-byte numbers use big-endian byte order. No padding, no alignment — fields are packed contiguously.
 
 ## Client decoding
 
@@ -2800,11 +2853,14 @@ Queue binding after commit, with the outbox's retries, dead letters and redrive.
 panel lists the rows under the service `__publish`. The message body:
 
 ```typescript
-{ actorType, actorId, seq, index, name, payload, at, causationId, correlationId, idempotencyKey }
+{ actorType, actorId, seq, index, name, payload, at, causationId, correlationId, idempotencyKey, position }
 ```
 
 `idempotencyKey` is `${actorType}/${actorId}/${seq}:${index}` and is stable across retries:
-consumers dedupe on it. `simulate()` delivers published messages at once and lists them with
+consumers dedupe on it. `position` numbers one actor's published events 1, 2, 3... with no gaps
+(`seq` skips transitions that publish nothing), so a consumer can tell a late message from a missing
+one and apply events in order: it is assigned in the commit transaction and never reused or rewound,
+not even by a Studio restore. [`@actor-kit/projection`](https://actorkit.dev/concepts/projections/) does this for you. `simulate()` delivers published messages at once and lists them with
 `sim.published("AUCTION_EVENTS")`.
 
 # States
@@ -4148,10 +4204,17 @@ export CF_ACCESS_CLIENT_ID=... CF_ACCESS_CLIENT_SECRET=...   # agent service tok
 actor-kit studio list --type game
 actor-kit studio inspect game room-7
 actor-kit studio timeline game room-7 --limit 20 --shape   # no values: safe for a public issue
+actor-kit studio journal game room-7 --event RoundWon --order asc   # entries that emitted RoundWon, oldest first
+actor-kit studio journal game room-7 --correlation-id game/room-7/12   # one flow: a message and everything it caused
 actor-kit studio view game room-7 --role player --caller <id>
 ```
 
-`actor-kit-studio-mcp` serves the same tools over stdio: `studio_list_actors`, `studio_actor_types`, `studio_inspect`, `studio_timeline` (shape by default) and `studio_view`.
+`actor-kit-studio-mcp` serves the same tools over stdio: `studio_list_actors`, `studio_actor_types`, `studio_inspect`, `studio_timeline` and `studio_journal` (shape by default) and `studio_view`.
+
+The journal query (`GET /__studio/api/actors/:type/:id/journal`, the `__journal()` RPC) filters journal
+entries by seq range (`from`, `to`, `before`), `causeType`, emitted `event` name and `correlationId`,
+newest first or `order=asc`. Each entry has its cause, the domain events it emitted (marked `published`
+when `publish` sends them) and its correlation and causation ids, redacted like everything else.
 
 ## Enable timeline without StudioRegistry
 
@@ -4597,7 +4660,14 @@ const data = decode(PlayerView, bytes);
 
 ## Schema primitives
 
-`uint8`, `uint16`, `uint32`, `float32`, `float64`, `string`, `boolean`, `array(T)`
+`uint8`, `uint16`, `uint32`, `int8`, `int16`, `int32`, `float32`, `float64`, `string`, `boolean`.
+
+## Schema combinators
+
+`array(T)`, `nullable(T)`, nested `schema({...})`, `enumOf([...values])`, `literal(value)`, `record(T)`,
+`union(tag, { variant: schema({...}) })` and `json(zodSchema)`. Every one is inferred by `Infer<>`.
+See [Views](https://actorkit.dev/concepts/views/#combinators) for examples and
+[the wire protocol](https://github.com/actor-kit/actor-kit/blob/main/docs/binary-protocol.md) for their layout.
 
 # @actor-kit/client
 
@@ -4666,7 +4736,7 @@ const client = CounterClient.create({
 | `path` | `string` | Yes | Path on your Worker, e.g. `/api/counter/counter-1` (the scheme follows the page: https → wss) |
 | `host` | `string` | No | Host with optional port. Defaults to `window.location.host`; required outside a browser |
 | `getToken` | `() => string \| Promise<string>` | No | Token sent on every (re)connect via `Sec-WebSocket-Protocol` |
-| `initialView` | `TView` | Yes | Initial view from server (SSR snapshot). The client starts with this view immediately. |
+| `initialView` | `TView` | Yes | Initial view from server (SSR snapshot). The client starts with this view immediately. Validated against the view schema (the role the view names, for a contract): a mismatch throws `InitialViewError` (`code: "invalid_initial_view"`, `issues` with paths). |
 | `onRedirect` | `(target: { actorType: string; actorId: string }) => void` | No | Called on redirect |
 | `onError` | `(error: ClientError) => void` | No | Called when the actor refuses a message (or sends a frame the client cannot read). See below |
 
@@ -5548,7 +5618,8 @@ interface TimelineEntry {
 
 # Upgrading to 0.3
 
-0.3 makes the agent-first changes of [ADR-018](adrs/018-agent-first-api.md). Each breaking change has a
+0.3 makes the agent-first changes of [ADR-018](adrs/018-agent-first-api.md) and the richer views, journal
+query and read models of [ADR-019](adrs/019-hierarchical-states-and-history-at-scale.md) (C, E, F). Each breaking change has a
 note below with code before and after. Nothing here needs a data migration: 0.x has no production data
 contract.
 
@@ -5888,6 +5959,35 @@ const sql = {
 };
 await replayJournal(RoomContract, readJournal(sql)); // throws at the first diverging event
 ```
+
+## Published events carry `position` (ADR-019 E)
+
+Every message `publish` sends to a Queue now has a `position` field: that actor's published events
+numbered 1, 2, 3... with no gaps. Consumers that validate the body strictly must accept the new field.
+Positions start at 1 for actors that publish after the upgrade (the counter starts at 0 when migration
+`0020_publish_position` runs); events published before it have no position. Consumers that need
+ordering should use `@actor-kit/projection`, which applies events in `position` order.
+
+## Delta float tolerance applies to float fields only (ADR-019 C)
+
+Deltas used to treat any two numbers within 1e-6 as unchanged. Only `float32` and `float64` fields do
+now; a `json`, enum or integer value that changes by less than 1e-6 is sent.
+
+## `create({ initialView })` now validates the view against the role's schema
+
+`actorClient(contract).create()` (and the typed `actorClient<typeof C>({ roles, views })`) checks `initialView` against the view schema of the role the view
+names (`initialView.role`); a view without a role must match one role's schema (unless some role has
+no schema). `actorClient(schema).create()` checks it against the schema. A mismatch throws
+`InitialViewError` with `code: "invalid_initial_view"`, a message naming each wrong field, a `docs` URL
+and the `issues`. Pass the view the server rendered for this caller; a placeholder no longer works.
+
+## Lengths and counts on the wire are varints
+
+String, record-key and JSON lengths and array and record counts used to be a big-endian `uint16`
+(JSON a `uint32`); a string over 65535 bytes wrapped the length and corrupted the frame. They are
+unsigned LEB128 varints now (`docs/binary-protocol.md`), so large values round-trip. Server and client
+must both run 0.3: a 0.2 client cannot decode 0.3 frames. Views with only short strings and small
+arrays get slightly smaller frames.
 
 # Error codes
 
@@ -6308,6 +6408,54 @@ Docs: https://actorkit.dev/errors/cli_usage/
 **How to fix it:** Use the same @actor-kit version on the client and the Worker.
 
 Docs: https://actorkit.dev/errors/invalid_frame/
+
+## `invalid_schema`
+
+**What happened:** A view schema was built with arguments it cannot encode (an empty or duplicated enum, a union without variants or with a variant that declares the tag).
+
+**How to fix it:** Fix the `enumOf()` / `union()` / `schema()` call the message names.
+
+Docs: https://actorkit.dev/errors/invalid_schema/
+
+## `invalid_view_value`
+
+**What happened:** A view value does not fit its schema (an enum value outside the list, an unknown union variant, or a value `parse()` rejects).
+
+**How to fix it:** Return a value of the schema's shape from the view function; `Schema.parse(value)` names each wrong field.
+
+Docs: https://actorkit.dev/errors/invalid_view_value/
+
+## `invalid_journal_query`
+
+**What happened:** The journal query options are invalid.
+
+**How to fix it:** Pass `from`, `to` and `before` as non-negative integers, `limit` from 1 to 1000, a known `causeType` and `order` asc or desc.
+
+Docs: https://actorkit.dev/errors/invalid_journal_query/
+
+## `invalid_projection`
+
+**What happened:** A projection was configured or wired wrongly (a table prefix that is not a SQL identifier, or a batch from another queue).
+
+**How to fix it:** Use letters, digits and underscores for `table`, and call `queue()` only with batches for which `handles(batch)` is true.
+
+Docs: https://actorkit.dev/errors/invalid_projection/
+
+## `incomplete_journal`
+
+**What happened:** A projection rebuild found an actor journal it cannot replay from the start (empty, pruned, or not a journal page).
+
+**How to fix it:** Rebuild only actors whose journal is on and unpruned (no `journal.keep`), through `actorJournalSource` or `studioJournalSource`.
+
+Docs: https://actorkit.dev/errors/incomplete_journal/
+
+## `invalid_initial_view`
+
+**What happened:** The `initialView` passed to `actorClient(...).create()` does not match the view schema.
+
+**How to fix it:** Pass the view the server rendered for this caller (its role's view, e.g. from `getSnapshot`); the message names each wrong field.
+
+Docs: https://actorkit.dev/errors/invalid_initial_view/
 
 ## `missing_host`
 

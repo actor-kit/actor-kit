@@ -19,6 +19,7 @@
 
 import type { ContractMessages, FieldDescriptor, Infer, SchemaDefinition } from "@actor-kit/core";
 import { type ActorClient, type ClientError, createActorClient, type WebSocketConstructor } from "./client";
+import { checkContractView, checkViewAgainst } from "./initial-view";
 
 /** Runtime options for creating a client connection. */
 export interface CreateOptions<TView = unknown> {
@@ -104,8 +105,8 @@ export function actorClient(
     | { readonly roles: unknown; readonly views: unknown }
     | SchemaDefinition<Record<string, FieldDescriptor>>,
 ): ActorClientFactory<unknown, { type: string }> {
-  if ("name" in arg && "def" in arg) return buildContractFactory(arg.def);
-  if ("roles" in arg && "views" in arg) return buildContractFactory(arg);
+  if ("name" in arg && "def" in arg) return buildContractFactory(arg.def, arg.name);
+  if ("roles" in arg && "views" in arg) return buildContractFactory(arg, "{ roles, views }");
   return buildSchemaFactory(arg);
 }
 
@@ -134,15 +135,17 @@ function contractSchemas(def: { readonly roles?: unknown; readonly views?: unkno
 }
 
 /** A factory decoding with a contract's roles and views (the contract's `def`, or just those two parts). */
-function buildContractFactory(def: {
-  readonly roles?: unknown;
-  readonly views?: unknown;
-}): ActorClientFactory<unknown, { type: string }> {
+function buildContractFactory(
+  def: { readonly roles?: unknown; readonly views?: unknown },
+  /** How errors name the client: the contract's name, or how it was built. */
+  name: string,
+): ActorClientFactory<unknown, { type: string }> {
   const { roleNames, viewSchemas } = contractSchemas(def);
 
   function build<TEvent extends { type: string }>(): ActorClientFactory<unknown, TEvent> {
     return {
       create(options: CreateOptions<unknown>): ActorClient<unknown, TEvent> {
+        checkContractView(name, roleNames, viewSchemas, options.initialView);
         return createActorClient<unknown, TEvent>({
           ...options,
           viewSchemas,
@@ -170,6 +173,7 @@ function buildSchemaFactory<TShape extends Record<string, FieldDescriptor>>(
   function buildFactory<TEvent extends { type: string }>(): ActorClientFactory<TView, TEvent> {
     return {
       create(options: CreateOptions<TView>): ActorClient<TView, TEvent> {
+        checkViewAgainst(viewSchema, options.initialView);
         return createActorClient<TShape, TEvent>({
           ...options,
           viewSchema,

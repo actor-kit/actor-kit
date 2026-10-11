@@ -116,9 +116,9 @@ describe("binary encoder/decoder with nullable fields", () => {
       const data = { count: 5, name: "alice" };
       const bytesNow = encode(S, data);
 
-      // Manually verify: uint32(4) + uint16-prefix(2) + "alice"(5) = 11 bytes
+      // Manually verify: uint32(4) + varint length prefix(1) + "alice"(5) = 10 bytes
       // No null mask overhead
-      expect(bytesNow.byteLength).toBe(11);
+      expect(bytesNow.byteLength).toBe(10);
 
       const decoded = decode(S, bytesNow);
       expect(decoded.count).toBe(5);
