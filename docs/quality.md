@@ -101,6 +101,7 @@ CRAP over `packages/worker/src/runtime`, `packages/test/src`, `packages/core/src
 | RSJ 3. Roles on messages (`message-roles.ts` whole; `refusal.ts` wrong_role; `message.ts`; `step.ts` admission) | 120 | 94.32% first run, then edge tests (role-nested and junk entries, a caller-less refusal, `toStrictEqual` on message options, a states-only actor) → **96.67% (112/116)** | 4 equivalent (message-roles.ts:23, :26, :28; step.ts:312, below) | runtime 7.0; 0 ≥ 8 |
 | RSJ 4. `ctx.reenter` (`step.ts` phase context) | 1 | **100% (1/1)** | none | runtime 7.0; 0 ≥ 8 |
 | RSJ 2. `simulate().spawnSync` (`simulate.ts` spawn refactor, `step.ts` `stepInitSync`) | 52 | 86.79% first run; then tests for the handle's links, an async init that rejects (no unhandled rejection) and a missing init → **96.15%** | 2 equivalent (simulate.ts:783, init's unlink targets, listed below) | test 7.1, runtime 7.0; 0 ≥ 8 |
+| RSJ 6. `actorClient<typeof Contract>({ roles, views })` (`builder.ts` whole) | 51 | **88.24% (45/51)** on the whole file; all 6 survivors are the existing equivalents (renumbered, plus the roles-and-views twin of the name-and-def check, below) | 6 equivalent (5 existing, renumbered; 1 new: builder.ts:108) | client 7.0; 0 ≥ 8 |
 
 ## Equivalent mutants
 
@@ -109,9 +110,9 @@ Surviving mutants that no test can kill, because the mutated program behaves ide
 | Package | Location | Mutant | Why it is equivalent |
 |---|---|---|---|
 | core | delta.ts:28 | `if (a === b) return true` → `if (false)` | Fast path only; the number and JSON comparisons below return the same result. |
-| client | builder.ts:90 | `"name" in arg && "def" in arg` → `\|\|` | A SchemaDefinition has neither key, a contract has both. |
-| client | builder.ts:99, 103 (×3) | `isRecord` / `isViewSchema` → `true` | A non-schema registered for a role makes decode throw, which the client catches and ignores, the same as having no schema. |
-| client | builder.ts:116 | `if (isViewSchema(...))` → `true` | Registers `undefined` for the role; `viewSchemas[role] ?? viewSchema` falls back exactly as when it is absent. |
+| client | builder.ts:107, :108 | `"name" in arg && "def" in arg` / `"roles" in arg && "views" in arg` → `\|\|` | A SchemaDefinition has none of these keys; a contract has both name and def, the roles-and-views form both roles and views. |
+| client | builder.ts:115, 119 (×3) | `isRecord` / `isViewSchema` → `true` | A non-schema registered for a role makes decode throw, which the client catches and ignores, the same as having no schema. |
+| client | builder.ts:131 | `if (isViewSchema(...))` → `true` | Registers `undefined` for the role; `viewSchemas[role] ?? viewSchema` falls back exactly as when it is absent. |
 | client | client.ts:155, 156, 164 | `roleIndex === undefined ? …` / `roleName === undefined ? …` → `false` | parseFrame always sets roleIndex on snapshots, and indexing with `undefined` yields `undefined` anyway. |
 | client | client.ts:179 | `onRedirect?.(…)` → `onRedirect(…)` | Binary path only: the TypeError is caught by handleBinaryMessage's try/catch, same as doing nothing. |
 | client | client.ts:267 | `typeof data === "string"` → `true` | Non-string data fails JSON.parse (or parses to a non-object) and is ignored either way. |

@@ -77,6 +77,22 @@ export function actorClient<TContract extends { readonly name: string; readonly 
   contract: TContract,
 ): ActorClientFactory<ContractView<TContract>, ContractEvents<TContract>>;
 
+/**
+ * Without the contract value, so zod and the message handlers stay out of the browser bundle: pass the
+ * contract's own `roles` and `views` objects (keep them in a zod-free module the contract imports) and
+ * name the contract type, imported with `import type`:
+ *
+ *   import type { Room } from "./room";
+ *   import { roomRoles, roomViews } from "./room.views";
+ *   const RoomClient = actorClient<typeof Room>({ roles: roomRoles, views: roomViews });
+ */
+export function actorClient<
+  TContract extends { readonly name: string; readonly def: { readonly roles: unknown; readonly views: unknown } },
+>(parts: {
+  readonly roles: TContract["def"]["roles"];
+  readonly views: TContract["def"]["views"];
+}): ActorClientFactory<ContractView<TContract>, ContractEvents<TContract>>;
+
 export function actorClient<TShape extends Record<string, FieldDescriptor>>(
   viewSchema: SchemaDefinition<TShape>,
 ): ActorClientFactory<Infer<SchemaDefinition<TShape>>, { type: string; [key: string]: unknown }>;
@@ -85,11 +101,11 @@ export function actorClient<TShape extends Record<string, FieldDescriptor>>(
 export function actorClient(
   arg:
     | { readonly name: string; readonly def: Record<string, unknown> }
+    | { readonly roles: unknown; readonly views: unknown }
     | SchemaDefinition<Record<string, FieldDescriptor>>,
 ): ActorClientFactory<unknown, { type: string }> {
-  if ("name" in arg && "def" in arg) {
-    return buildContractFactory(arg);
-  }
+  if ("name" in arg && "def" in arg) return buildContractFactory(arg.def);
+  if ("roles" in arg && "views" in arg) return buildContractFactory(arg);
   return buildSchemaFactory(arg);
 }
 
@@ -104,12 +120,11 @@ function isViewSchema(value: unknown): value is SchemaDefinition<Record<string, 
 }
 
 /** Role names in definition order (the server's roleIndex) and the schema of each role's view, if any. */
-function contractSchemas(def: Record<string, unknown>): {
+function contractSchemas(def: { readonly roles?: unknown; readonly views?: unknown }): {
   roleNames: string[] | undefined;
   viewSchemas: Record<string, SchemaDefinition<Record<string, FieldDescriptor>>>;
 } {
-  const roles = def["roles"];
-  const views = def["views"];
+  const { roles, views } = def;
   const viewSchemas: Record<string, SchemaDefinition<Record<string, FieldDescriptor>>> = {};
   for (const [roleName, viewDef] of Object.entries(isRecord(views) ? views : {})) {
     const viewSchema = isRecord(viewDef) ? viewDef["schema"] : undefined;
@@ -118,11 +133,12 @@ function contractSchemas(def: Record<string, unknown>): {
   return { roleNames: isRecord(roles) ? Object.keys(roles) : undefined, viewSchemas };
 }
 
-function buildContractFactory(contract: {
-  readonly name: string;
-  readonly def: Record<string, unknown>;
+/** A factory decoding with a contract's roles and views (the contract's `def`, or just those two parts). */
+function buildContractFactory(def: {
+  readonly roles?: unknown;
+  readonly views?: unknown;
 }): ActorClientFactory<unknown, { type: string }> {
-  const { roleNames, viewSchemas } = contractSchemas(contract.def);
+  const { roleNames, viewSchemas } = contractSchemas(def);
 
   function build<TEvent extends { type: string }>(): ActorClientFactory<unknown, TEvent> {
     return {

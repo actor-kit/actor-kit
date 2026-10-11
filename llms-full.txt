@@ -4605,25 +4605,43 @@ Source: https://actorkit.dev/api/client/
 
 The client package (`@actor-kit/client`) provides the browser-side SDK. No Cloudflare or React dependencies.
 
-## `actorClient(contract)` / `actorClient<Contract>()`
+## `actorClient(contract)` / `actorClient<typeof Contract>({ roles, views })`
 
-Creates a typed client factory. Accepts either a contract value or a contract type parameter.
+Creates a typed client factory, from the contract value or from just its roles and views.
 
-### Type-only import (recommended for client bundles)
+### Keep zod out of the client bundle (recommended)
 
-Use `import type` to keep Zod, handlers, and Cloudflare dependencies out of the browser bundle. The contract is used purely as a type — no runtime value crosses the boundary:
+The contract value carries Zod schemas and message handlers; importing it into the browser pulls all of
+Zod in (zod 4's classic build brings its locales: one port measured ~395 KB → ~860 KB). The client needs
+only two zod-free parts: the **roles** (their order numbers the binary frames) and the **view schemas**.
+Put them in their own module, have the contract use those same objects, and import the contract as a
+type only:
 
 ```typescript
-// counter.client.ts
+// counter.views.ts — no zod here
+import { nullable, schema, string, uint32, view } from "@actor-kit/core";
+export type CounterState = { count: number; lastUpdatedBy: string | null };
+export const CounterView = schema({ count: uint32, lastUpdatedBy: nullable(string) });
+export const counterRoles = { user: () => true };
+export const counterViews = { user: view.shared(CounterView, (s: CounterState) => s) };
+
+// counter.contract.ts — server and tests
+import { counterRoles, counterViews } from "./counter.views";
+export const CounterContract = counter.actor("counter", { roles: counterRoles, views: counterViews, /* … */ });
+
+// counter.client.ts — browser
 import { actorClient } from "@actor-kit/client";
 import type { CounterContract } from "./counter.contract";
+import { counterRoles, counterViews } from "./counter.views";
 
-export const CounterClient = actorClient<CounterContract>();
+export const CounterClient = actorClient<typeof CounterContract>({ roles: counterRoles, views: counterViews });
 ```
 
-### Value import (server-side or when bundle size doesn't matter)
+The type argument types `view` and `send` from the contract; passing anything but the contract's own
+`roles` and `views` is a type error. (In React, `actorContext<typeof CounterContract>()` needs no runtime
+value at all.)
 
-When running on the server (SSR, tests, scripts), you can pass the contract directly:
+### Value import (server-side, tests, or when bundle size doesn't matter)
 
 ```typescript
 import { actorClient } from "@actor-kit/client";
@@ -4631,10 +4649,6 @@ import { CounterContract } from "./counter.contract";
 
 export const CounterClient = actorClient(CounterContract);
 ```
-
-### Why type-only?
-
-The contract object returned by `kit.actor()` carries Zod schemas, message handlers, and references to `@actor-kit/worker` internals. Importing it as a value pulls all of that into your client bundle — even though the client only needs the *types* for view shapes and message unions. Using `import type` ensures the bundler tree-shakes everything the client doesn't need.
 
 ### `.create(options)`
 
@@ -4676,7 +4690,7 @@ Reconnection is automatic and never gives up: after an unexpected close the clie
 interface ActorClient<TView, TMessage> {
   readonly connectionState: ConnectionState;
   readonly view: TView;              // always defined — initialView guarantees it
-  readonly role: string | undefined;
+  readonly role: string | undefined; // the caller's role; the view object itself carries no role
   subscribe(listener: (view: TView) => void): () => void;
   onStateChange(listener: (state: ConnectionState) => void): () => void;
   send(message: TMessage): void;
@@ -4684,6 +4698,10 @@ interface ActorClient<TView, TMessage> {
   disconnect(): void;
 }
 ```
+
+A decoded view is the role's view data only: it carries no `role` field. Read the role from
+`client.role` (or `useRole()` in React); the server's `getSnapshot()` likewise returns `role` beside
+the snapshot. If a component needs both in one object, add a `role` field to the view schema.
 
 ## Using the client
 
@@ -5811,6 +5829,64 @@ return target === ctx.phase && !rearm ? ctx.stay(s) : ctx.goto(target, s, { wind
 
 // After
 return rearm ? ctx.reenter(s, { window }) : ctx.stay(s);
+```
+
+## Keep zod out of the client bundle
+
+0.3 needs zod 4 (a peer of `@actor-kit/worker`). Importing a contract value into the browser pulls zod's
+classic build in, locales included (one port: ~395 KB → ~860 KB). Move the roles and view schemas into a
+zod-free module the contract imports, and give the client just those:
+
+```ts
+// Before: the whole contract, and zod, in the browser
+const RoomClient = actorClient(RoomContract);
+
+// After
+import type { RoomContract } from "./room";
+import { roomRoles, roomViews } from "./room.views"; // no zod
+const RoomClient = actorClient<typeof RoomContract>({ roles: roomRoles, views: roomViews });
+```
+
+A decoded view carries no `role`; read `client.role` (React: `useRole()`).
+
+## A new Durable Object class blocks `wrangler rollback`
+
+Not an actor-kit change, but every v1 → v2 port meets it: Cloudflare refuses `wrangler rollback` to a
+version from before a Durable Object class was added, renamed or deleted (a class lifecycle migration).
+If you need rollback, keep your class name (export the v2 class under the old name); otherwise roll back
+by deploying a prepared branch (the old code plus the new migration and a placeholder class).
+
+```toml
+# Before: a new class, and no rollback past this deploy
+[[migrations]]
+tag = "v3"
+new_sqlite_classes = ["RoomActor"]
+
+# After: keep the old name, no class migration
+# export const Room = createActorClass(RoomContract); // was the v1 class name
+```
+
+## Reading a journal from `wrangler dev` without vitest-pool-workers
+
+`@cloudflare/vitest-pool-workers` needs Vitest 4. On Vitest 5 you can still check a real journal: stop
+`wrangler dev`, open the Durable Object's SQLite file with `node:sqlite`, and hand it to `readJournal`
+(it needs only `exec(...).toArray()`), then `replayJournal`:
+
+```ts
+import { DatabaseSync } from "node:sqlite";
+import { readJournal } from "@actor-kit/worker/testing";
+import { replayJournal } from "@actor-kit/test";
+import { RoomContract } from "../src/room";
+
+// .wrangler/state/v3/do/<worker>-<Class>/<id>.sqlite (or your --persist-to folder)
+const db = new DatabaseSync(path, { readOnly: true });
+const sql = {
+  exec: (query: string, ...bindings: Array<string | number | null>) => {
+    const rows = db.prepare(query).all(...bindings).map((row) => ({ ...row }));
+    return { toArray: () => rows, one: () => rows[0] ?? {} };
+  },
+};
+await replayJournal(RoomContract, readJournal(sql)); // throws at the first diverging event
 ```
 
 # Error codes

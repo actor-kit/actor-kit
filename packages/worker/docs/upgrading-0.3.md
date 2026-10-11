@@ -284,3 +284,61 @@ return target === ctx.phase && !rearm ? ctx.stay(s) : ctx.goto(target, s, { wind
 // After
 return rearm ? ctx.reenter(s, { window }) : ctx.stay(s);
 ```
+
+## Keep zod out of the client bundle
+
+0.3 needs zod 4 (a peer of `@actor-kit/worker`). Importing a contract value into the browser pulls zod's
+classic build in, locales included (one port: ~395 KB → ~860 KB). Move the roles and view schemas into a
+zod-free module the contract imports, and give the client just those:
+
+```ts
+// Before: the whole contract, and zod, in the browser
+const RoomClient = actorClient(RoomContract);
+
+// After
+import type { RoomContract } from "./room";
+import { roomRoles, roomViews } from "./room.views"; // no zod
+const RoomClient = actorClient<typeof RoomContract>({ roles: roomRoles, views: roomViews });
+```
+
+A decoded view carries no `role`; read `client.role` (React: `useRole()`).
+
+## A new Durable Object class blocks `wrangler rollback`
+
+Not an actor-kit change, but every v1 → v2 port meets it: Cloudflare refuses `wrangler rollback` to a
+version from before a Durable Object class was added, renamed or deleted (a class lifecycle migration).
+If you need rollback, keep your class name (export the v2 class under the old name); otherwise roll back
+by deploying a prepared branch (the old code plus the new migration and a placeholder class).
+
+```toml
+# Before: a new class, and no rollback past this deploy
+[[migrations]]
+tag = "v3"
+new_sqlite_classes = ["RoomActor"]
+
+# After: keep the old name, no class migration
+# export const Room = createActorClass(RoomContract); // was the v1 class name
+```
+
+## Reading a journal from `wrangler dev` without vitest-pool-workers
+
+`@cloudflare/vitest-pool-workers` needs Vitest 4. On Vitest 5 you can still check a real journal: stop
+`wrangler dev`, open the Durable Object's SQLite file with `node:sqlite`, and hand it to `readJournal`
+(it needs only `exec(...).toArray()`), then `replayJournal`:
+
+```ts
+import { DatabaseSync } from "node:sqlite";
+import { readJournal } from "@actor-kit/worker/testing";
+import { replayJournal } from "@actor-kit/test";
+import { RoomContract } from "../src/room";
+
+// .wrangler/state/v3/do/<worker>-<Class>/<id>.sqlite (or your --persist-to folder)
+const db = new DatabaseSync(path, { readOnly: true });
+const sql = {
+  exec: (query: string, ...bindings: Array<string | number | null>) => {
+    const rows = db.prepare(query).all(...bindings).map((row) => ({ ...row }));
+    return { toArray: () => rows, one: () => rows[0] ?? {} };
+  },
+};
+await replayJournal(RoomContract, readJournal(sql)); // throws at the first diverging event
+```

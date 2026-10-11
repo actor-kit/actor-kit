@@ -15,9 +15,10 @@ pnpm add @actor-kit/core @actor-kit/client
 
 ```ts
 import { actorClient } from "@actor-kit/client";
-import { counterContract } from "./contract";
+import type { counterContract } from "./contract"; // a type only: zod stays out of the bundle
+import { counterRoles, counterViews } from "./counter.views"; // the zod-free roles and view schemas
 
-const client = actorClient(counterContract).create({
+const client = actorClient<typeof counterContract>({ roles: counterRoles, views: counterViews }).create({
   path: "/api/counter/counter-1", // through your Worker; host defaults to the page's
   initialView: { count: 0 },
 });

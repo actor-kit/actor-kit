@@ -6,25 +6,43 @@ Online: https://actorkit.dev/api/client/
 
 The client package (`@actor-kit/client`) provides the browser-side SDK. No Cloudflare or React dependencies.
 
-## `actorClient(contract)` / `actorClient<Contract>()`
+## `actorClient(contract)` / `actorClient<typeof Contract>({ roles, views })`
 
-Creates a typed client factory. Accepts either a contract value or a contract type parameter.
+Creates a typed client factory, from the contract value or from just its roles and views.
 
-### Type-only import (recommended for client bundles)
+### Keep zod out of the client bundle (recommended)
 
-Use `import type` to keep Zod, handlers, and Cloudflare dependencies out of the browser bundle. The contract is used purely as a type — no runtime value crosses the boundary:
+The contract value carries Zod schemas and message handlers; importing it into the browser pulls all of
+Zod in (zod 4's classic build brings its locales: one port measured ~395 KB → ~860 KB). The client needs
+only two zod-free parts: the **roles** (their order numbers the binary frames) and the **view schemas**.
+Put them in their own module, have the contract use those same objects, and import the contract as a
+type only:
 
 ```typescript
-// counter.client.ts
+// counter.views.ts — no zod here
+import { nullable, schema, string, uint32, view } from "@actor-kit/core";
+export type CounterState = { count: number; lastUpdatedBy: string | null };
+export const CounterView = schema({ count: uint32, lastUpdatedBy: nullable(string) });
+export const counterRoles = { user: () => true };
+export const counterViews = { user: view.shared(CounterView, (s: CounterState) => s) };
+
+// counter.contract.ts — server and tests
+import { counterRoles, counterViews } from "./counter.views";
+export const CounterContract = counter.actor("counter", { roles: counterRoles, views: counterViews, /* … */ });
+
+// counter.client.ts — browser
 import { actorClient } from "@actor-kit/client";
 import type { CounterContract } from "./counter.contract";
+import { counterRoles, counterViews } from "./counter.views";
 
-export const CounterClient = actorClient<CounterContract>();
+export const CounterClient = actorClient<typeof CounterContract>({ roles: counterRoles, views: counterViews });
 ```
 
-### Value import (server-side or when bundle size doesn't matter)
+The type argument types `view` and `send` from the contract; passing anything but the contract's own
+`roles` and `views` is a type error. (In React, `actorContext<typeof CounterContract>()` needs no runtime
+value at all.)
 
-When running on the server (SSR, tests, scripts), you can pass the contract directly:
+### Value import (server-side, tests, or when bundle size doesn't matter)
 
 ```typescript
 import { actorClient } from "@actor-kit/client";
@@ -32,10 +50,6 @@ import { CounterContract } from "./counter.contract";
 
 export const CounterClient = actorClient(CounterContract);
 ```
-
-### Why type-only?
-
-The contract object returned by `kit.actor()` carries Zod schemas, message handlers, and references to `@actor-kit/worker` internals. Importing it as a value pulls all of that into your client bundle — even though the client only needs the *types* for view shapes and message unions. Using `import type` ensures the bundler tree-shakes everything the client doesn't need.
 
 ### `.create(options)`
 
@@ -77,7 +91,7 @@ Reconnection is automatic and never gives up: after an unexpected close the clie
 interface ActorClient<TView, TMessage> {
   readonly connectionState: ConnectionState;
   readonly view: TView;              // always defined — initialView guarantees it
-  readonly role: string | undefined;
+  readonly role: string | undefined; // the caller's role; the view object itself carries no role
   subscribe(listener: (view: TView) => void): () => void;
   onStateChange(listener: (state: ConnectionState) => void): () => void;
   send(message: TMessage): void;
@@ -85,6 +99,10 @@ interface ActorClient<TView, TMessage> {
   disconnect(): void;
 }
 ```
+
+A decoded view is the role's view data only: it carries no `role` field. Read the role from
+`client.role` (or `useRole()` in React); the server's `getSnapshot()` likewise returns `role` beside
+the snapshot. If a component needs both in one object, add a `role` field to the view schema.
 
 ## Using the client
 
