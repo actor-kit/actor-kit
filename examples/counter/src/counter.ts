@@ -3,13 +3,16 @@
 
 import { z } from "zod";
 import { nullable, schema, string, uint32, view } from "@actor-kit/core";
-import { defineActor, message } from "@actor-kit/worker/testing";
+import { setup } from "@actor-kit/worker/testing";
 
 type CounterState = { count: number; lastUpdatedBy: string | null };
 
 export const CounterViewSchema = schema({ count: uint32, lastUpdatedBy: nullable(string) });
 
-export const CounterContract = defineActor("counter", {
+/** The kit (ADR-018 A): this actor declares no events, states or env, so it is empty. */
+const counter = setup({});
+
+export const CounterContract = counter.actor("counter", {
   input: z.object({}),
   init: (): CounterState => ({ count: 0, lastUpdatedBy: null }),
 
@@ -23,7 +26,7 @@ export const CounterContract = defineActor("counter", {
   },
 
   messages: {
-    INCREMENT: message(
+    INCREMENT: counter.message(
       z.object({}),
       (state: CounterState, _payload, { caller }) => ({
         ...state,
@@ -31,7 +34,7 @@ export const CounterContract = defineActor("counter", {
         lastUpdatedBy: caller,
       }),
     ),
-    DECREMENT: message(
+    DECREMENT: counter.message(
       z.object({}),
       (state: CounterState, _payload, { caller }) => ({
         ...state,
@@ -39,7 +42,7 @@ export const CounterContract = defineActor("counter", {
         lastUpdatedBy: caller,
       }),
     ),
-    RESET: message(z.object({}), {
+    RESET: counter.message(z.object({}), {
       guard: (_state: CounterState, _payload: Record<string, never>, ctx: { role: string }) =>
         ctx.role === "admin",
       handler: () => ({ count: 0, lastUpdatedBy: null }),

@@ -13,10 +13,16 @@
 
 import type { TimerContext, TimerDef } from "@actor-kit/core";
 import type { z } from "zod";
+import type { TypedEmit } from "./setup";
+
+/** A standalone timer's context: no declared events, so `emit` accepts none (ADR-018 A). */
+export type PlainTimerContext<TEnv = unknown> = Omit<TimerContext<TEnv>, "emit"> & {
+  readonly emit: TypedEmit<Record<never, never>>;
+};
 
 export function timer<TPayload, TState, TEnv = unknown>(
   schema: z.ZodType<TPayload>,
-  handler: (state: TState, payload: TPayload, ctx: TimerContext<TEnv>) => TState,
+  handler: (state: TState, payload: TPayload, ctx: PlainTimerContext<TEnv>) => TState,
 ): TimerDef<TState, TPayload, TEnv> {
   return { schema, handler };
 }

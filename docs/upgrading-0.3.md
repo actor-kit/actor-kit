@@ -102,3 +102,45 @@ expect(() => run()).toThrow(expect.objectContaining({ code: "undeclared_timer" }
 
 `ActorRef.send` on a binding that is not an actor-kit Durable Object resolves with an `actor_not_found`
 refusal (was `{ ok: false, error: "stub.send not available" }`).
+
+## One way to define an actor: `kit.actor` (ADR-018 A)
+
+`setup()` takes `events`, `states` and `env`, all optional, and its kit defines the actor. The kit supplies
+`events` and `env`, so the definition no longer repeats them; with `states`, `initial` must name a declared
+state and every declared state needs its definition (both checked by the compiler).
+
+```ts
+// Before
+const quiz = setup({ events, states });
+export const Quiz = defineActor("quiz", { events: quiz.events, initial: "lobby", states: { ... }, ... });
+
+// After
+const quiz = setup({ events, states });
+export const Quiz = quiz.actor("quiz", { initial: "lobby", states: { ... }, ... });
+// or: defineActor("quiz", quiz, { ... })
+```
+
+An actor with nothing to declare uses `setup({})`:
+
+```ts
+// Before
+export const Counter = defineActor("counter", { messages: { INC: message(z.object({}), (s: S) => s) }, ... });
+
+// After
+const counter = setup({});
+export const Counter = counter.actor("counter", { messages: { INC: counter.message(z.object({}), (s: S) => s) }, ... });
+```
+
+`defineActor(name, def)` still works for a whole definition, but docs and examples use the kit.
+
+**The standalone `message()` / `timer()` no longer type `ctx.emit` loosely.** Their context's `emit`
+accepts no event name (the actor declares none). Emit through the kit's helpers instead.
+
+```ts
+// Before (compiled; checked only at runtime)
+BID: message(z.object({ amount: z.number() }), (s, p, ctx) => { ctx.emit("BidPlaced", p); return s; }),
+
+// After
+const auction = setup({ events: { BidPlaced: z.object({ amount: z.number() }) } });
+BID: auction.message(z.object({ amount: z.number() }), (s: S, p, ctx) => { ctx.emit("BidPlaced", p); return s; }),
+```

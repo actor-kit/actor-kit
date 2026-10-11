@@ -3,7 +3,7 @@
 
 import { z } from "zod";
 import { array, boolean, schema, string, uint32, view } from "@actor-kit/core";
-import { defineActor, message } from "@actor-kit/worker/testing";
+import { setup } from "@actor-kit/worker/testing";
 
 // --- Types ---
 type Todo = { id: string; text: string; done: boolean };
@@ -25,7 +25,10 @@ const ViewerViewSchema = schema({
 });
 
 // --- Actor ---
-export const TodoListContract = defineActor("todo-list", {
+/** The kit (ADR-018 A): this actor declares no events, states or env, so it is empty. */
+const todo = setup({});
+
+export const TodoListContract = todo.actor("todo-list", {
   input: z.object({ creator: z.string() }),
   init: (input: { creator: string }): TodoState => ({
     todos: [],
@@ -40,7 +43,7 @@ export const TodoListContract = defineActor("todo-list", {
   },
 
   messages: {
-    ADD_TODO: message(
+    ADD_TODO: todo.message(
       z.object({ text: z.string().min(1).max(200) }),
       {
         guard: (_state: TodoState, _payload: { text: string }, ctx: { role: string }) =>
@@ -51,7 +54,7 @@ export const TodoListContract = defineActor("todo-list", {
         }),
       },
     ),
-    TOGGLE: message(
+    TOGGLE: todo.message(
       z.object({ id: z.string() }),
       {
         guard: (_state: TodoState, _payload: { id: string }, ctx: { role: string }) =>
@@ -62,7 +65,7 @@ export const TodoListContract = defineActor("todo-list", {
         }),
       },
     ),
-    DELETE_TODO: message(
+    DELETE_TODO: todo.message(
       z.object({ id: z.string() }),
       {
         guard: (_state: TodoState, _payload: { id: string }, ctx: { role: string }) =>
@@ -73,7 +76,7 @@ export const TodoListContract = defineActor("todo-list", {
         }),
       },
     ),
-    INVITE: message(
+    INVITE: todo.message(
       z.object({ userId: z.string() }),
       {
         guard: (_state: TodoState, _payload: { userId: string }, ctx: { role: string }) =>

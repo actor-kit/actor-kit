@@ -23,13 +23,22 @@
 
 import type { GuardContext, MessageContext, MessageDef } from "@actor-kit/core";
 import type { z } from "zod";
+import type { TypedEmit } from "./setup";
+
+/**
+ * A standalone message's context: the actor declares no events (use `setup({ events })` for those),
+ * so `emit` accepts none, the same type a kit without events gives (ADR-018 A).
+ */
+export type PlainMessageContext<TEnv = unknown> = Omit<MessageContext<TEnv>, "emit"> & {
+  readonly emit: TypedEmit<Record<never, never>>;
+};
 
 // --- Message handler types ---
 
 type MessageHandler<TState, TPayload, TEnv = unknown> = (
   state: TState,
   payload: TPayload,
-  ctx: MessageContext<TEnv>,
+  ctx: PlainMessageContext<TEnv>,
 ) => TState;
 
 type GuardFn<TState, TPayload = unknown, TEnv = unknown> = (

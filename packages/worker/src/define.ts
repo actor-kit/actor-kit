@@ -25,6 +25,7 @@ import type { ZodType } from "zod";
 import type { EffectInfo } from "./runtime/effect-info";
 import type { BuiltInError } from "./runtime/service-error";
 import type { ChainIsTyped, CurrentState } from "./runtime/versions";
+import type { EventSchemas, KitActorDef, KitContractDef, Setup, StateDecls } from "./setup";
 
 /**
  * A typed contract that preserves the full definition type.
@@ -37,9 +38,11 @@ export interface ActorContract<TName extends string = string, TDef = unknown> {
 }
 
 /**
- * Create a typed actor contract from a definition.
- * The contract preserves all type information for downstream consumers
- * (actorClient, actorContext, testActor, createRef).
+ * Create a typed contract from a definition. The documented shape is `defineActor(name, kit, def)`
+ * (the same as `kit.actor(name, def)`, ADR-018 A): the kit from `setup()` supplies the events, env and
+ * states, and its helpers type every handler. `defineActor(name, def)` takes a whole definition.
+ * The contract preserves all type information for downstream consumers (actorClient, actorContext,
+ * testActor, simulate, createRef).
  */
 export function defineActor<
   TName extends string,
@@ -55,8 +58,28 @@ export function defineActor<
   def: TDef &
     VersionsCheck<TDef> &
     PublishCheck<TDef> & { env?: TEnvSchema } & TypedServices<TState, TErrors, EnvOf<TEnvSchema>>,
-): ActorContract<TName, TDef> {
-  return { name, def };
+): ActorContract<TName, TDef>;
+export function defineActor<
+  TName extends string,
+  ES extends EventSchemas,
+  SD extends StateDecls,
+  TEnvSchema,
+  TDef extends { input: ZodType; init(...args: never[]): unknown },
+  TState = unknown,
+  TErrors extends Record<string, unknown> = Record<never, never>,
+>(
+  name: TName,
+  kit: Setup<ES, SD, TEnvSchema>,
+  def: KitActorDef<TDef, TState, TErrors, ES, SD, TEnvSchema>,
+): ActorContract<TName, KitContractDef<TDef, ES, TEnvSchema>>;
+export function defineActor(name: string, defOrKit: unknown, def?: unknown): ActorContract<string, unknown> {
+  if (isKit(defOrKit)) return defOrKit.actor(name, def);
+  return { name, def: defOrKit };
+}
+
+/** A kit from setup() (it has `actor`); a definition does not. */
+function isKit(value: unknown): value is { actor(name: string, def: unknown): ActorContract<string, unknown> } {
+  return typeof value === "object" && value !== null && "actor" in value && typeof value.actor === "function";
 }
 
 // --- Typed services (ADR-016) ---
@@ -120,7 +143,7 @@ export interface ServiceDef<TState, TDeclared = unknown, TEnv = unknown> {
  * The typed parts of a definition: the state comes from init, each service's error union from its
  * `errors` (inferred per service, so every onError sees its own).
  */
-type TypedServices<TState, TErrors, TEnv> = {
+export type TypedServices<TState, TErrors, TEnv> = {
   init(...args: never[]): TState | PromiseLike<TState>;
   services?: { [K in keyof TErrors]: ServiceDef<TState, TErrors[K], TEnv> };
   lifecycle?: {
@@ -133,7 +156,7 @@ type TypedServices<TState, TErrors, TEnv> = {
  * ADR-017 §3: `publish.events` may only name events the actor declares in `events`. With a typed
  * `env` (ADR-016 §4), `publish.queue` must be one of its bindings: the parsed env keeps only those.
  */
-type PublishCheck<TDef> = TDef extends { publish: unknown }
+export type PublishCheck<TDef> = TDef extends { publish: unknown }
   ? { publish: { queue: PublishQueue<TDef>; events: readonly PublishEvents<TDef>[] } }
   : unknown;
 
@@ -147,7 +170,7 @@ type InitState<TDef> = TDef extends { init(...args: never[]): infer S } ? Awaite
  * ADR-015 D5: every step of `versions` must take the previous version's state, and the last
  * version must describe what init returns. A mismatch makes `versions` a type error.
  */
-type VersionsCheck<TDef> = TDef extends { versions: infer V extends readonly unknown[] }
+export type VersionsCheck<TDef> = TDef extends { versions: infer V extends readonly unknown[] }
   ? ChainIsTyped<V> extends true
     ? [InitState<TDef>] extends [CurrentState<V>]
       ? unknown

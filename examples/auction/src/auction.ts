@@ -3,7 +3,7 @@
 
 import { z } from "zod";
 import { boolean, nullable, schema, string, uint32, view } from "@actor-kit/core";
-import { defineActor, setup } from "@actor-kit/worker/testing";
+import { setup } from "@actor-kit/worker/testing";
 
 type Bid = { bidder: string; amount: number; timestamp: number };
 type AuctionState = {
@@ -34,8 +34,7 @@ const auction = setup({
 const highestOf = (state: AuctionState) =>
   state.bids.length > 0 ? Math.max(...state.bids.map((b) => b.amount)) : 0;
 
-export const AuctionContract = defineActor("auction", {
-  events: auction.events,
+export const AuctionContract = auction.actor("auction", {
   // The outbound stream (ADR-017 §3): bids and results go to the AUCTION_EVENTS queue for read models.
   publish: { queue: "AUCTION_EVENTS", events: ["BidPlaced", "AuctionClosed"] },
 

@@ -10,6 +10,7 @@ export { CALLER_ID_HEADER, CALLER_TYPE_HEADER, withCallerIdentity } from "./iden
 export type { LinkDef, LinkErrorCode } from "./link";
 export { link } from "./link";
 // Message builder
+export type { PlainMessageContext } from "./message";
 export { message } from "./message";
 // Actor references
 export type { ActorRef, LocationHint } from "./ref";
@@ -264,6 +265,9 @@ export type {
   EventSchemas,
   Goto,
   InputArgs,
+  KitActorDef,
+  KitContractDef,
+  KitDefCheck,
   LocalOf,
   PhaseContext,
   PhasedState,
@@ -282,4 +286,5 @@ export type {
 } from "./setup";
 export { goto, PhaseTransition, setup, stay } from "./setup";
 // Timer helper (ADR-015 D2)
+export type { PlainTimerContext } from "./timer";
 export { timer } from "./timer";

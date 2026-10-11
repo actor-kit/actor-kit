@@ -24,9 +24,8 @@
 
 import type { GuardContext, MessageContext, MessageDef, TimerContext, TimerDef } from "@actor-kit/core";
 import type { z } from "zod";
-import { message } from "./message";
+import type { ActorContract, PublishCheck, TypedServices, VersionsCheck } from "./define";
 import { goto as gotoPhase, PhaseTransition, stay as stayInPhase } from "./runtime/phases";
-import { timer } from "./timer";
 
 export { PhaseTransition };
 
@@ -186,7 +185,38 @@ export interface Setup<ES extends EventSchemas, SD extends StateDecls, TEnvSchem
   ): TimerDef<S, P, TEnv>;
   /** Helpers for one declared state: its messages, timers and `enter` see its typed local. */
   in<P extends keyof SD & string>(phase: P): PhaseHelpers<SD, EventPayloads<ES>, P, SetupEnv<TEnvSchema>>;
+  /**
+   * Define the actor (ADR-018 A): the kit supplies `events`, `env` and the states' declarations, so the
+   * definition holds only behaviour. Same as `defineActor(name, kit, def)`.
+   */
+  actor<
+    TName extends string,
+    TDef extends { input: z.ZodType; init(...args: never[]): unknown },
+    TState = unknown,
+    TErrors extends Record<string, unknown> = Record<never, never>,
+  >(
+    name: TName,
+    def: KitActorDef<TDef, TState, TErrors, ES, SD, TEnvSchema>,
+  ): ActorContract<TName, KitContractDef<TDef, ES, TEnvSchema>>;
 }
+
+/**
+ * What the kit fixes in a definition: an actor with declared states names its `initial` among them and
+ * defines every one; an actor without has neither. `events` and `env` come from the kit.
+ */
+export type KitDefCheck<SD> = { events?: never; env?: never } & ([keyof SD] extends [never]
+  ? { initial?: never; states?: never }
+  : { initial: keyof SD & string; states: { [P in keyof SD]: unknown } });
+
+/** A definition for `kit.actor`: defineActor's checks, with the kit's events, env and states. */
+export type KitActorDef<TDef, TState, TErrors, ES, SD, TEnvSchema> = TDef &
+  KitDefCheck<SD> &
+  VersionsCheck<TDef> &
+  PublishCheck<KitContractDef<TDef, ES, TEnvSchema>> &
+  TypedServices<TState, TErrors, SetupEnv<TEnvSchema>>;
+
+/** The contract's definition: the actor's own, plus the kit's events and env. */
+export type KitContractDef<TDef, ES, TEnvSchema> = TDef & { readonly events: ES; readonly env: TEnvSchema };
 
 /** The persisted state of an actor declared with `kit`, for views and roles: `PhasedStateOf<typeof kit, Shared>`. */
 export type PhasedStateOf<K, S> = K extends { states: infer SD extends StateDecls | undefined }
@@ -200,34 +230,45 @@ function typed<S, P, Ctx extends { readonly emit: (name: string, payload: unknow
   return (state, payload, ctx) => handler(state, payload, { ...ctx, emit: (name, value) => ctx.emit(name, value) });
 }
 
-export function setup<const ES extends EventSchemas, const SD extends StateDecls = Record<never, never>>(declarations: {
-  events: ES;
-  states?: SD;
-}): Setup<ES, SD>;
-/** With `env` (ADR-016 §4): every helper's ctx.env is the schema's output; pass `env: kit.env` to the actor. */
+/**
+ * Declare what an actor has up front (events, states, env) and get the typed helpers and `kit.actor`
+ * (ADR-018 A). Everything is optional: `setup({})` is the kit of an actor with none of them.
+ */
 export function setup<
   const ES extends EventSchemas,
   const SD extends StateDecls = Record<never, never>,
-  TEnvSchema extends z.ZodType = z.ZodType,
->(declarations: { events: ES; states?: SD; env: TEnvSchema }): Setup<ES, SD, TEnvSchema>;
+  TEnvSchema extends z.ZodType | undefined = undefined,
+>(declarations: { events: ES; states?: SD; env?: TEnvSchema }): Setup<ES, SD, TEnvSchema>;
 export function setup<
-  const ES extends EventSchemas,
-  const SD extends StateDecls,
-  TEnvSchema extends z.ZodType | undefined,
->(declarations: { events: ES; states?: SD; env?: TEnvSchema }): Setup<ES, SD, TEnvSchema | undefined> {
+  const SD extends StateDecls = Record<never, never>,
+  TEnvSchema extends z.ZodType | undefined = undefined,
+>(declarations: { events?: undefined; states?: SD; env?: TEnvSchema }): Setup<Record<never, never>, SD, TEnvSchema>;
+export function setup<const SD extends StateDecls, TEnvSchema extends z.ZodType | undefined>(declarations: {
+  events?: EventSchemas | undefined;
+  states?: SD;
+  env?: TEnvSchema;
+}): Setup<EventSchemas, SD, TEnvSchema | undefined> {
+  return kitOf(declarations.events ?? {}, declarations.states, declarations.env);
+}
+
+function kitOf<ES extends EventSchemas, SD extends StateDecls, TEnvSchema>(
+  events: ES,
+  states: SD | undefined,
+  env: TEnvSchema,
+): Setup<ES, SD, TEnvSchema> {
   return {
-    events: declarations.events,
-    states: declarations.states,
-    env: declarations.env,
+    events,
+    states,
+    env,
     message(schema, handler) {
-      if (typeof handler === "function") return message(schema, typed(handler));
-      return message(schema, { guard: handler.guard, handler: typed(handler.handler) });
+      if (typeof handler === "function") return { schema, handler: typed(handler) };
+      return { schema, handler: typed(handler.handler), guard: handler.guard };
     },
     timer(schema, handler) {
-      return timer(schema, typed(handler));
+      return { schema, handler: typed(handler) };
     },
     in(phase) {
-      const local = declarations.states?.[phase]?.local;
+      const local = states?.[phase]?.local;
       return {
         message: (schema, handler) =>
           typeof handler === "function"
@@ -236,6 +277,9 @@ export function setup<
         timer: (schema, handler) => ({ schema, handler }),
         state: (def) => (local === undefined ? def : { ...def, local }),
       };
+    },
+    actor(name, def) {
+      return { name, def: { ...def, events, env } };
     },
   };
 }

@@ -3,7 +3,7 @@
 // the round, so ending the round early cancels it. Browser-safe (no cloudflare:workers).
 
 import { schema, string, uint32, view } from "@actor-kit/core";
-import { defineActor, type PhasedStateOf, setup } from "@actor-kit/worker/testing";
+import { type PhasedStateOf, setup } from "@actor-kit/worker/testing";
 import { z } from "zod";
 
 export type Shared = { players: string[]; scores: Record<string, number> };
@@ -49,11 +49,10 @@ const project = (st: QuizState) => ({
   answered: st.phase === "round" ? Object.keys(st.local.answers).length : 0,
 });
 
-export const QuizContract = defineActor("quiz", {
+export const QuizContract = quiz.actor("quiz", {
   input: z.object({}),
   init: (): Shared => ({ players: [], scores: {} }),
   roles: { host: isHost, player: () => true },
-  events: quiz.events,
   initial: "lobby",
   // Top-level messages are accepted in every state.
   messages: {

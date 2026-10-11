@@ -3,7 +3,7 @@
 
 import { z } from "zod";
 import { array, schema, string, uint32, view } from "@actor-kit/core";
-import { defineActor, type LifecycleEvent, message } from "@actor-kit/worker/testing";
+import { type LifecycleEvent, setup } from "@actor-kit/worker/testing";
 
 type ChatMessage = { id: string; author: string; text: string; timestamp: number };
 type ChatState = {
@@ -17,7 +17,10 @@ const ChatViewSchema = schema({
   onlineCount: uint32,
 });
 
-export const ChatRoomContract = defineActor("chat-room", {
+/** The kit (ADR-018 A): this actor declares no events, states or env, so it is empty. */
+const chat = setup({});
+
+export const ChatRoomContract = chat.actor("chat-room", {
   input: z.object({}),
   init: (): ChatState => ({ messages: [], onlineUsers: [] }),
 
@@ -26,7 +29,7 @@ export const ChatRoomContract = defineActor("chat-room", {
   },
 
   messages: {
-    SEND_MESSAGE: message(
+    SEND_MESSAGE: chat.message(
       z.object({ text: z.string().min(1).max(500) }),
       (state: ChatState, { text }, { caller, id, now }) => ({
         ...state,
