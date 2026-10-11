@@ -215,6 +215,7 @@ Migrations renumbered: `0020_publish_position`, `0021_journal_archive`.
 | Item | Mutated | Score | Survivors | Max CRAP |
 |---|---|---|---|---|
 | 14. Goto with kept locals, enter updating the levels above (`phases.ts` goto and its options; `phase-run.ts` enterLevel, updateAbove, withKeptLocals, descend, gotoPath, settle) | 143 | 93.67% first run (10 survivors: two `i + 1` path slices only a three-level tree tells apart, the option issues' join, and conditions the runtime already implies); then a three-level test (grandchild enter updating both levels above, a goto keeping two levels), the exact options message with two issues, and simplifications (one `goto` constructor call; `updateAbove` parses every level, a level without a local parses to null; kept levels looked up in one map) → **100% (143/143)** | none | runtime 7.0, core 7.0, test 7.1, worker (`crap:worker`) 7.6; 0 ≥ 8 |
+| 15. State-path helpers in core (`core/src/state-paths.ts` whole: `matches`, `localOf`, `mergeLocals`, moved from the worker, which re-exports them) | 38 | **100% (38/38)** | none | core 7.0, runtime 7.0, worker (`crap:worker`) 7.6; 0 ≥ 8 |
 
 ## Equivalent mutants
 

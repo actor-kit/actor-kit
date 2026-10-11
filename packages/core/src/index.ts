@@ -63,6 +63,34 @@ export {
   uint32,
   union,
 } from "./schema";
+// State paths (ADR-019 A): typed paths and merged locals, and the zod-free view/role helpers
+// (Run Set Jimmy feedback 15); @actor-kit/worker re-exports them.
+export type {
+  DeclAt,
+  Dotted,
+  EnterStayArgs,
+  GotoArgs,
+  GotoOptions,
+  InputArgs,
+  InputOf,
+  KeptLocals,
+  LeafPathsOf,
+  LocalOf,
+  LocalsAlong,
+  Matching,
+  MergedLocal,
+  MergeLocals,
+  ParentOf,
+  PathOf,
+  PathsOf,
+  PathsUnder,
+  PhasedState,
+  StateDecl,
+  StateDecls,
+  StatePath,
+  TargetOf,
+} from "./state-paths";
+export { localOf, matches, mergeLocals } from "./state-paths";
 // Shared types
 export type {
   CancelFn,
@@ -93,7 +121,6 @@ export type {
 // Validation (StandardSchemaV1)
 export type { StandardIssue, StandardProps, StandardResult, Validates } from "./validate";
 export { describeIssues, SchemaValidationError } from "./validate";
-
 // View
 export type { PerCallerViewDef, SharedViewDef, ViewDef } from "./view";
 export { view } from "./view";

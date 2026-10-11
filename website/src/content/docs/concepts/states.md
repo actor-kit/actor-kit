@@ -55,7 +55,8 @@ export const Quiz = quiz.actor("quiz", {
 - The persisted state is `{ shared, phase, locals, stateTimers }`: `phase` is a path
   (`["round"]`), with one local and one list of scoped timers per level. Views and roles get it
   (`PhasedStateOf<typeof quiz, Shared>`): narrow it with `matches(state, "round")` and read the local
-  with `localOf(state)`.
+  with `localOf(state)`. Both come from `@actor-kit/core` too (zod-free at runtime, for view code the
+  browser imports), with the types `PathsOf`, `MergedLocal` and `PhasedState`.
 - A handler returns `ctx.stay(shared, local?)`, `ctx.goto(state, shared, input?, { locals }?)`, or `shared`
   (stay, same local). `goto` checks the target and its `enter` input; `ctx.local` is typed per
   state; the local is parsed by its schema.

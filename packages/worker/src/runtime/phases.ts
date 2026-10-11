@@ -8,7 +8,7 @@
  * plain `shared` (stay). The transition table is in docs/adrs/019-hierarchical-states-and-history-at-scale.md.
  */
 
-import { ActorKitError } from "@actor-kit/core";
+import { ActorKitError, mergeLocals } from "@actor-kit/core";
 import { z } from "zod";
 
 /** A state's path: a top-level name, or the names from the root down. */
@@ -132,6 +132,9 @@ export interface StepStateDef {
   readonly states?: Record<string, StepStateDef>;
 }
 
+/** Nested locals merge as views see them (`localOf`); the function lives in @actor-kit/core (zod-free). */
+export { mergeLocals };
+
 /** A path as a dotted name, for messages and timer keys (`playing.window`). */
 export function dotted(path: readonly string[]): string {
   return path.join(".");
@@ -193,23 +196,6 @@ export function initialChild(def: StepStateDef, path: readonly string[]): string
     );
   }
   return def.initial;
-}
-
-/**
- * The local a handler at a level sees: the levels' locals spread root first (inner keys win), null
- * levels skipped. A single non-null local is passed as it is; none gives null.
- */
-export function mergeLocals(locals: readonly unknown[]): unknown {
-  const present = locals.filter((local) => local !== null);
-  if (present.length < 2) return present[0] ?? null;
-  // Every one is non-null here: an object that is not an array can be spread.
-  if (!present.every((local) => typeof local === "object" && !Array.isArray(local))) {
-    throw new ActorKitError(
-      "invalid_local",
-      "Nested states merge their locals, so each local on a path must be an object (declare it with z.object).",
-    );
-  }
-  return Object.assign({}, ...present);
 }
 
 /**

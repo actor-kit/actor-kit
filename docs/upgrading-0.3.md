@@ -300,6 +300,18 @@ import { roomRoles, roomViews } from "./room.views"; // no zod
 const RoomClient = actorClient<typeof RoomContract>({ roles: roomRoles, views: roomViews });
 ```
 
+Views and roles of an actor with states narrow with `matches()` and `localOf()`; import them (and the
+types `PathsOf`, `MergedLocal`, `PhasedState`) from `@actor-kit/core`, which imports no zod at runtime,
+rather than from `@actor-kit/worker`, whose runtime does:
+
+```ts
+// Before: the views module pulled in the worker, and zod
+import { localOf, matches } from "@actor-kit/worker";
+
+// After (the worker still exports the same functions, for actor code)
+import { localOf, matches } from "@actor-kit/core";
+```
+
 A decoded view carries no `role`; read `client.role` (React: `useRole()`).
 
 ## A new Durable Object class blocks `wrangler rollback`
