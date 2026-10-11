@@ -7,7 +7,7 @@ export { defineActor } from "./define";
 // Identity (Worker-trust model)
 export { CALLER_ID_HEADER, CALLER_TYPE_HEADER, withCallerIdentity } from "./identity";
 // Link declaration
-export type { LinkDef, LinkErrorCode } from "./link";
+export type { LinkContext, LinkDef, LinkErrorCode, LinkHandlers } from "./link";
 export { link } from "./link";
 // Message builder
 export type { PlainMessageContext } from "./message";
@@ -89,6 +89,7 @@ export {
   rebuildFromJournal,
   resolveJournalConfig,
   snapshotSeq,
+  upcastEmitted,
 } from "./runtime/journal";
 // Studio timeline read from the journal (ADR-017 §5)
 export type { TimelinePageQuery, TimelineSource } from "./runtime/journal-timeline";
@@ -161,6 +162,16 @@ export {
   refuseNoRole,
   refuseNotInitialized,
 } from "./runtime/refusal";
+// Rejections outside the journal (ADR-018 F)
+export type { Rejection, RejectionEvent, RejectionFields } from "./runtime/rejections";
+export {
+  payloadHash,
+  REJECTIONS_KEEP,
+  readRejections,
+  recordRejection,
+  rejectionCounts,
+  rejectionEvent,
+} from "./runtime/rejections";
 // Namespace resolution
 export { resolveNamespace } from "./runtime/resolve-namespace";
 export type { RestorePlan } from "./runtime/restore";
@@ -286,6 +297,7 @@ export type {
   KitActorDef,
   KitContractDef,
   KitDefCheck,
+  KitServiceDef,
   LocalOf,
   PhaseContext,
   PhasedState,

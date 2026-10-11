@@ -25,7 +25,7 @@ import type { ZodType } from "zod";
 import type { EffectInfo } from "./runtime/effect-info";
 import type { BuiltInError } from "./runtime/service-error";
 import type { ChainIsTyped, CurrentState } from "./runtime/versions";
-import type { EventSchemas, KitActorDef, KitContractDef, Setup, StateDecls } from "./setup";
+import type { EventPayloads, EventSchemas, KitActorDef, KitContractDef, Setup, StateDecls, TypedEmit } from "./setup";
 
 /**
  * A typed contract that preserves the full definition type.
@@ -57,7 +57,7 @@ export function defineActor<
   name: TName,
   def: TDef &
     VersionsCheck<TDef> &
-    PublishCheck<TDef> & { env?: TEnvSchema } & TypedServices<TState, TErrors, EnvOf<TEnvSchema>>,
+    PublishCheck<TDef> & { env?: TEnvSchema } & TypedServices<TState, TErrors, EnvOf<TEnvSchema>, DefEvents<TDef>>,
 ): ActorContract<TName, TDef>;
 export function defineActor<
   TName extends string,
@@ -94,15 +94,20 @@ export type ServiceErrorOf<TDeclared> = unknown extends TDeclared ? BuiltInError
 /** What handlers see as `env`: the `env` schema's output (ADR-016 §4), or `unknown` without one. */
 export type EnvOf<TEnvSchema> = TEnvSchema extends ZodType<infer TEnv> ? TEnv : unknown;
 
-/** What a service's onDone / onError get as their last argument: also the call's effect id (ADR-018 G). */
-export type ServiceCallbackContext<TEnv = unknown> = DeterministicContext & {
+/**
+ * What a service's onDone / onError get as their last argument: the call's effect id (ADR-018 G) and
+ * `emit` (ADR-018 F), typed by the actor's events when defined through a kit.
+ */
+export type ServiceCallbackContext<TEnv = unknown, E = Record<never, never>> = DeterministicContext & {
   readonly env: TEnv;
   /** The effect id ctx.execute() returned for this call. */
   readonly effectId: string;
+  readonly emit: TypedEmit<E>;
 };
 
-/** What lifecycle.connect / disconnect get as ctx. */
-export interface LifecycleContext<TEnv = unknown> extends DeterministicContext {
+/** What lifecycle.connect / disconnect get as ctx; `emit` is typed by the actor's events (ADR-018 F). */
+export interface LifecycleContext<TEnv = unknown, E = Record<never, never>> extends DeterministicContext {
+  readonly emit: TypedEmit<E>;
   readonly caller: string;
   readonly callerType: "user" | "service";
   readonly env: TEnv;
@@ -130,7 +135,7 @@ export interface ServiceRetry<TError> {
  * A service in the `services` block, as defineActor types it. Methods (not function properties), so a
  * handler may annotate a narrower input or result.
  */
-export interface ServiceDef<TState, TDeclared = unknown, TEnv = unknown, TResult = unknown> {
+export interface ServiceDef<TState, TDeclared = unknown, TEnv = unknown, TResult = unknown, E = Record<never, never>> {
   /** Declared failures: a `z.discriminatedUnion("_tag", [...])`. `throw fail(error)` values parse against it. */
   readonly errors?: ZodType<TDeclared>;
   /**
@@ -150,23 +155,33 @@ export interface ServiceDef<TState, TDeclared = unknown, TEnv = unknown, TResult
   readonly retry?: ServiceRetry<ServiceErrorOf<TDeclared>>;
   /** Time limit per try, in ms (default 30 000). On expiry `effect.signal` is aborted and the try is a Timeout. */
   readonly timeoutMs?: number;
-  onDone?(state: TState, result: TResult, input: unknown, ctx: ServiceCallbackContext<TEnv>): TState;
+  onDone?(state: TState, result: TResult, input: unknown, ctx: ServiceCallbackContext<TEnv, E>): TState;
   /** Runs once, after the last try failed (or at once for an error `retry.while` does not retry). */
-  onError?(state: TState, error: ServiceErrorOf<TDeclared>, input: unknown, ctx: ServiceCallbackContext<TEnv>): TState;
+  onError?(
+    state: TState,
+    error: ServiceErrorOf<TDeclared>,
+    input: unknown,
+    ctx: ServiceCallbackContext<TEnv, E>,
+  ): TState;
 }
 
 /**
  * The typed parts of a definition: the state comes from init, each service's error union from its
  * `errors` (inferred per service, so every onError sees its own).
  */
-export type TypedServices<TState, TErrors, TEnv> = {
+export type TypedServices<TState, TErrors, TEnv, E = Record<never, never>> = {
   init(...args: never[]): TState | PromiseLike<TState>;
-  services?: { [K in keyof TErrors]: ServiceDef<TState, TErrors[K], TEnv> };
+  services?: { [K in keyof TErrors]: ServiceDef<TState, TErrors[K], TEnv, unknown, E> };
   lifecycle?: {
-    connect?(state: TState, event: LifecycleEvent, ctx: LifecycleContext<TEnv>): TState;
-    disconnect?(state: TState, event: LifecycleEvent, ctx: LifecycleContext<TEnv>): TState;
+    connect?(state: TState, event: LifecycleEvent, ctx: LifecycleContext<TEnv, E>): TState;
+    disconnect?(state: TState, event: LifecycleEvent, ctx: LifecycleContext<TEnv, E>): TState;
   };
 };
+
+/** The payload type of each event a definition declares (none without `events`). */
+type DefEvents<TDef> = TDef extends { events: infer ES extends EventSchemas }
+  ? EventPayloads<ES>
+  : Record<never, never>;
 
 /**
  * ADR-017 §3: `publish.events` may only name events the actor declares in `events`. With a typed

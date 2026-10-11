@@ -684,8 +684,19 @@ function firstEmittedDifference(expected: readonly EmittedEvent[], actual: reado
   return -1;
 }
 
-function verifyEmitted(event: JournalEvent, actual: readonly EmittedEvent[]): void {
-  const expected = event.emitted ?? [];
+/**
+ * The events a journal entry recorded, in the current vocabulary: renamed and upcast through every
+ * version after the one that wrote it (ADR-018 F). Journal readers (read models, Studio) use this too.
+ */
+export function upcastEmitted(def: Pick<ReplayableDef, "upcastEmitted">, event: JournalEvent): EmittedEvent[] {
+  const recorded = event.emitted ?? [];
+  const upcast = def.upcastEmitted;
+  if (upcast === undefined) return [...recorded];
+  return recorded.map((emitted) => upcast(emitted, event.codeVersion));
+}
+
+function verifyEmitted(def: ReplayableDef, event: JournalEvent, actual: readonly EmittedEvent[]): void {
+  const expected = upcastEmitted(def, event);
   const index = firstEmittedDifference(expected, actual);
   if (index !== -1) {
     throw new JournalEmittedDivergenceError(event.seq, event.causeType, index, expected[index], actual[index]);
@@ -789,10 +800,10 @@ async function foldToEnd(
     }
     const folded = await foldEventEmitting(def, point, event, points, options);
     point = folded.point;
-    if (options.rebuild !== true) {
-      verifyChecksum(def, point, event);
-      verifyEmitted(event, folded.emitted);
-    }
+    // A rebuild replays under new handlers, so states differ by design; the events they emit must still
+    // match what was recorded, once upcast to the current version (ADR-018 F).
+    if (options.rebuild !== true) verifyChecksum(def, point, event);
+    verifyEmitted(def, event, folded.emitted);
     points.set(event.seq, point);
     expectedSeq += 1;
   }

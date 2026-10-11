@@ -51,12 +51,26 @@ function ActorDetail({ actorType, actorId, entry }: { actorType: string; actorId
         </h1>
         <p className="text-zinc-500 text-sm mt-1">
           Version {inspect.version}
+          <RejectionsCount rejections={inspect.rejections} />
           <StatusBadge status={status} />
         </p>
       </div>
       <ErrorBanner error={error} />
       <ActorTabs actorType={actorType} actorId={actorId} inspect={inspect} timeline={timeline} entry={entry} />
     </div>
+  );
+}
+
+/** How many messages the actor refused (ADR-018 F), by code on hover; nothing for older actors. */
+function RejectionsCount({ rejections }: { rejections: InspectResult["rejections"] }) {
+  if (rejections === undefined) return null;
+  const byCode = Object.entries(rejections.byCode)
+    .map(([code, count]) => `${code}: ${count}`)
+    .join(", ");
+  return (
+    <span className="ml-2" data-testid="rejections-count" title={byCode}>
+      · {rejections.total} rejected
+    </span>
   );
 }
 

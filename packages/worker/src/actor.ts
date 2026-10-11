@@ -91,6 +91,7 @@ import {
 import type { StepStateDef } from "./runtime/phases";
 import { PUBLISH_SERVICE, type PublishOption, publishedMessages, resolvePublish, sendToQueue } from "./runtime/publish";
 import { refuseAdmission, refuseInvalidDelivery, refuseNoRole, refuseNotInitialized } from "./runtime/refusal";
+import { recordRejection, rejectionCounts, rejectionEvent } from "./runtime/rejections";
 import { resolveNamespace } from "./runtime/resolve-namespace";
 import { planRestore } from "./runtime/restore";
 import {
@@ -403,10 +404,14 @@ async function trySend(
   }
 }
 
-/** A transition declared effects to persist: executions, forwards, or timer schedules / cancels. */
+/**
+ * A transition declared something to persist: executions, forwards, timer schedules / cancels, or domain
+ * events (a transition that only emits is still journaled, ADR-017 §2 / ADR-018 F).
+ */
 function declaresEffects(result: StepResult): boolean {
   const { effects } = result;
-  return effects.getExecutions().length > 0 || effects.getForwards().length > 0 || effects.toTimerOps().length > 0;
+  const timersOrEvents = effects.toTimerOps().length + effects.getEmitted().length;
+  return effects.getExecutions().length > 0 || effects.getForwards().length > 0 || timersOrEvents > 0;
 }
 
 /** The __error frame a socket gets for a message the actor refused (ADR-018 C): the refusal and the message's type. */
@@ -1085,12 +1090,20 @@ export function actor(
         ? { type: "service.onDone", service, input, result: outcome.result, effectId, ...recorded }
         : { type: "service.onError", service, input, error: { ...outcome.error }, effectId, ...recorded };
       const result = this.runStep({ ...cause, trace: this.effectTrace(effectId) });
-      if (result.state === this.state) {
+      if (result.state === this.state && !declaresEffects(result)) {
         settle();
         return;
       }
-      this.commit(result.state, result.event, settle);
-      this.broadcastViews();
+      this.commit(result.state, result.event, (seq) => {
+        settle();
+        this.writeEmitted(result, seq);
+      });
+      this.afterEffects(result);
+    }
+
+    /** A callback's emitted events (ADR-018 F): the outbox rows of those `publish` sends. */
+    writeEmitted(result: StepResult, seq: number): void {
+      insertExecutions(this.ctx.storage.sql, this.publishedRows(result, seq));
     }
 
     /** The id of an event of this actor (`type/id/seq`, ADR-017 §4). */
@@ -1480,9 +1493,9 @@ export function actor(
         targetId,
         error: { message: errorMessage, code: "unreachable" },
       });
-      if (result.state === this.state) return;
-      this.commit(result.state, result.event);
-      this.broadcastViews();
+      if (result.state === this.state && !declaresEffects(result)) return;
+      this.commit(result.state, result.event, (seq) => this.writeEmitted(result, seq));
+      this.afterEffects(result);
     }
 
     /**
@@ -1608,8 +1621,9 @@ export function actor(
 
       // Run onUpdate reducer
       const result = this.runStep({ type: "link.onUpdate", link: linkName, sourceId, view: viewWithRole, trace });
-      if (result.state === this.state) return;
-      this.commit(result.state, result.event, () => {
+      if (result.state === this.state && !declaresEffects(result)) return;
+      this.commit(result.state, result.event, (seq) => {
+        this.writeEmitted(result, seq);
         this.ctx.storage.sql.exec(
           "UPDATE active_links SET version = ? WHERE target_type = ? AND target_id = ? AND link_name = ?",
           version,
@@ -1619,7 +1633,7 @@ export function actor(
         );
         this.pushStudioLinks();
       });
-      this.broadcastViews();
+      this.afterEffects(result);
     }
 
     // --- Source-side push to DO subscribers ---
@@ -1804,10 +1818,31 @@ export function actor(
       if (!forwarded.ok) return refuseInvalidDelivery(forwarded.detail);
       await this.loadState();
       const admitted = this.admit(caller, callerType, event);
-      if (!admitted.ok) return admitted;
+      if (!admitted.ok) {
+        this.recordRefusal(admitted, caller, callerType, event);
+        return admitted;
+      }
       const { delivery, trace } = forwarded;
       this.applyMessage(event, admitted.role, admitted.payload, { caller, callerType }, { delivery, trace });
       return { ok: true };
+    }
+
+    /**
+     * A refused message leaves a trace outside the journal (ADR-018 F): a rejections row, its code's count
+     * and a log line. Refusals before the actor exists are not recorded (there is no actor to record them on).
+     */
+    recordRefusal(
+      refused: Refusal,
+      caller: string,
+      callerType: "user" | "service",
+      event: { type: string; [key: string]: unknown },
+    ): void {
+      if (refused.code === "not_initialized") return;
+      const { type: messageName, ...payload } = event;
+      const role = resolveRole(def.roles, this.state, caller, { callerType });
+      const fields = { code: refused.code, messageName, caller, callerType, role, payload, at: Date.now() };
+      recordRejection(this.ctx.storage.sql, fields);
+      console.log(JSON.stringify(rejectionEvent(_actorName, this.subscriberId(), fields)));
     }
 
     /** Whether the actor takes this message from this caller: its role, and the parsed payload. */
@@ -2337,6 +2372,7 @@ export function actor(
         connections: this.liveConnections(),
         outbox: this.readOutbox(),
         timers: readTimers(this.ctx.storage.sql),
+        rejections: rejectionCounts(this.ctx.storage.sql),
         activeLinks: this.readActiveLinks(),
         linkSubscribers: this.readLinkSubscribers(),
         actorId: this.actorId ?? this.ctx.id.toString(),
@@ -2357,6 +2393,7 @@ export function actor(
         connections: await projectConnections(snapshot.connections, projection),
         outbox: snapshot.outbox.map((row) => projectOutboxRow(row, projection)),
         timers: snapshot.timers.map((row) => projectTimerRow(row, projection)),
+        rejections: snapshot.rejections,
         activeLinks: snapshot.activeLinks,
         linkSubscribers: snapshot.linkSubscribers,
         actorType: _actorName,
@@ -2467,6 +2504,8 @@ export function actor(
       outbox: StudioOutboxRow[];
       /** Pending timers (ADR-015 D2). Absent for an actor that does not exist. */
       timers?: TimerRow[];
+      /** Refused messages ever counted, in total and by code (ADR-018 F). Absent for an actor that does not exist. */
+      rejections?: { total: number; byCode: Record<string, number> };
       activeLinks: Array<{
         targetType: string;
         targetId: string;
@@ -2505,6 +2544,7 @@ export function actor(
         actorId: this.actorId ?? null,
         outbox: this.readOutbox().map((row) => projectOutboxRow(row, projection)),
         timers: readTimers(this.ctx.storage.sql).map((row) => projectTimerRow(row, projection)),
+        rejections: rejectionCounts(this.ctx.storage.sql),
         activeLinks: this.readActiveLinks(),
         linkSubscribers: this.readLinkSubscribers(),
       };
@@ -2643,8 +2683,8 @@ export function actor(
               effectId: payload.effectId,
             };
       const result = this.runStep({ ...cause, trace: this.effectTrace(payload.effectId) });
-      if (result.state === this.state) return;
-      this.commit(result.state, result.event);
+      if (result.state === this.state && !declaresEffects(result)) return;
+      this.commit(result.state, result.event, (seq) => this.writeEmitted(result, seq));
     }
 
     /** Studio RPC: one role's view, as `studio.requestView` would return it, redacted (ADR-014). */
@@ -2773,6 +2813,7 @@ export interface TypedActorClass<TContract> {
         lastError: string | null;
       }>;
       timers?: Array<{ id: string; name: string; key: string; payload: string; fireAt: number; createdAt: number }>;
+      rejections?: { total: number; byCode: Record<string, number> };
       activeLinks: Array<{
         targetType: string;
         targetId: string;

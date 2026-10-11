@@ -217,7 +217,7 @@ describe("step: lifecycle", () => {
       {},
     );
     expect(result.state).toEqual({
-      log: ["disconnect:bob:caller,callerType,cancel,env,execute,forward,id,now,random,schedule", "promoted"],
+      log: ["disconnect:bob:caller,callerType,cancel,emit,env,execute,forward,id,now,random,schedule", "promoted"],
     });
     expect(result.event).toMatchObject({ causeType: "lifecycle.disconnect", role: "admin", callerType: "service" });
   });

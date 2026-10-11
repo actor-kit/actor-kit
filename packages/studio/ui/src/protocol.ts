@@ -95,6 +95,8 @@ export const InspectSchema = z.object({
   outbox: z.array(OutboxEntrySchema),
   /** Absent from actors older than ADR-015 and for actors that do not exist. */
   timers: z.array(TimerEntrySchema).optional(),
+  /** Refused messages ever counted (ADR-018 F); absent from older actors. */
+  rejections: z.object({ total: z.number(), byCode: z.record(z.string(), z.number()) }).optional(),
   activeLinks: z.array(ActiveLinkSchema),
   linkSubscribers: z.array(LinkSubscriberSchema),
 });

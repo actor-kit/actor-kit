@@ -9,7 +9,7 @@ export { defineActor } from "./define";
 // Identity (Worker-trust model)
 export { CALLER_ID_HEADER, CALLER_TYPE_HEADER, withCallerIdentity } from "./identity";
 // Link declaration
-export type { LinkDef, LinkErrorCode } from "./link";
+export type { LinkContext, LinkDef, LinkErrorCode, LinkHandlers } from "./link";
 export { link } from "./link";
 // Message helpers
 export type { PlainMessageContext } from "./message";
@@ -44,6 +44,7 @@ export type {
   KitActorDef,
   KitContractDef,
   KitDefCheck,
+  KitServiceDef,
   LocalOf,
   PhasedState,
   PhasedStateOf,

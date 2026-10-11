@@ -205,4 +205,24 @@ export const ACTOR_KIT_MIGRATIONS: ReadonlyArray<{ readonly name: string; readon
     name: "0017_emitted",
     sql: "ALTER TABLE events ADD COLUMN emitted TEXT;",
   },
+  {
+    // Rejections (ADR-018 F): refused messages, outside the journal; the newest rows and a count per code.
+    name: "0018_rejections",
+    sql: `
+      CREATE TABLE IF NOT EXISTS rejections (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        code TEXT NOT NULL,
+        message_name TEXT NOT NULL,
+        caller TEXT NOT NULL,
+        caller_type TEXT NOT NULL,
+        role TEXT,
+        payload_hash TEXT NOT NULL,
+        at INTEGER NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS rejection_counts (
+        code TEXT PRIMARY KEY,
+        count INTEGER NOT NULL
+      );
+    `,
+  },
 ];

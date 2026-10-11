@@ -160,3 +160,21 @@ With `keep`, events at or below the newest checkpoint `B` with `B <= lastSeq - k
 - The Studio timeline kept its own table until ADR-017 §5, which made it a view over `events` and dropped the table.
 - `runtime/cdc.ts` (the unbuilt CDC delta log) is superseded: a delta log can't replay through new code; an event log can.
 - A journal that spans a `version` bump doesn't replay under the new handlers until step 4 adds upcasters.
+
+## Addendum: the format frozen for 0.3 (ADR-018 F, 2026-10-11)
+
+- **Emitted events across versions.** A `versions` step may declare `emitted: { Name: (old) => new }` and
+  `renames: { Old: "New" }`, both keyed by the event's name before that step (payload upcast first, then
+  the rename). Replay upcasts each entry's recorded `emitted` from the version that wrote it before
+  comparing them with what the handlers emit now. A rebuild by replay (`rebuild: "replay"`) still skips
+  checksums, but now compares emitted events (upcast), so handler drift during a rebuild is caught.
+  `upcastEmitted(def, event)` gives journal readers the events in the current vocabulary.
+- **Rejections are not journaled.** A refused message is a row in `rejections` (code, message name,
+  caller, role, payload hash, time; the newest 1000 kept) plus a count per code in `rejection_counts`
+  (never pruned) and a `actor_kit.message.rejected` log line. Nothing replays them; the payload is never
+  stored. Studio shows the counts (`__inspect().rejections`). Migration `0018_rejections`.
+- **Every callback can emit.** `lifecycle.connect`/`disconnect`, service `onDone`/`onError` and link
+  `onUpdate`/`onError`/`onUnlink` get `ctx.emit`, with the same effect index rules as handlers. A callback
+  transition that only emits is still journaled, and its published events get outbox rows like any other.
+- **Restore notifies links**: the `restore` entry's commit pushes the restored view to link subscribers
+  (verified by `tests/integration/journal-format.test.ts`).

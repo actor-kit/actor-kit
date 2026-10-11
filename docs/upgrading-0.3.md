@@ -189,3 +189,42 @@ ctx.cancel(id); // later, from another handler
 
 `effectInfo()` (from `@actor-kit/worker/testing`, for hand-built service tests) now takes an `audit` object
 and returns `record()`.
+
+## Journal format for 0.3 (ADR-018 F)
+
+**Callbacks can emit, and a callback that only emits is journaled.** Lifecycle, service and link
+callbacks get `ctx.emit` (typed by the kit's events; use `kit.service()` and `kit.link()` for services
+and links). Before, a lifecycle or service callback that changed nothing was not journaled.
+
+```ts
+// Before: no emit in callbacks; events had to be emitted by a follow-up message
+services: { charge: { fn, onDone: (s, r) => ({ ...s, paid: true }) } },
+
+// After
+services: {
+  charge: kit.service({ fn, onDone: (s: S, r, _i, ctx) => { ctx.emit("Paid", { id: ctx.effectId }); return { ...s, paid: true }; } }),
+},
+links: { feed: kit.link(Feed, { onUpdate: (s: S, view, _id, ctx) => { ctx.emit("Synced", view); return s; } }) },
+```
+
+**A standalone `link()` types `ctx.emit` like a kit without events** (no event accepted); use
+`kit.link()` to emit from link callbacks.
+
+**Rebuilds by replay compare emitted events.** A `rebuild: "replay"` version now fails with
+`JournalEmittedDivergenceError` when the new handlers emit different events than were recorded. If you
+renamed or reshaped an event on purpose, say so in the step:
+
+```ts
+// Before
+version(2, StateV2, { rebuild: "replay" }),
+
+// After
+version(2, StateV2, {
+  rebuild: "replay",
+  renames: { BidPlaced: "BidMade" },
+  emitted: { BidPlaced: (p) => ({ ...p, currency: "USD" }) },
+}),
+```
+
+**Refused messages are recorded** (a new `rejections` table, migration `0018_rejections`, created on
+wake); nothing to change in your code.
