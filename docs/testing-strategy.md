@@ -183,6 +183,18 @@ globals. Globals are restored from their own property descriptors when the handl
 A service's `fn` is exempt, and an async `init` is guarded until its first `await`. `ctx.now()`/`id()`/`random()` read
 the guard's saved originals, so they keep working (fake timers included).
 
+### One test path: testActor over the step core (ADR-018 D)
+
+`testActor(contract, { env })` is a single-actor wrapper over the runtime's pure `step()` core, as
+`simulate()` is for many actors: admission (`admitStepMessage`), handlers, states (phases, locals,
+`enter`, `scope: "state"` timers), declared-timer and declared-event checks and the determinism guard
+are the Durable Object's own code. `init` returns the persisted state (`{ shared, phase, local,
+stateTimers }` for an actor with states, typed per phase). `send` returns the next state plus the
+effects as data: `executions`, `links`, `unlinks`, `forwards`, `schedules` (each `ctx.schedule()` call
+as made; timers never run, use `simulate().advance()`), `cancels` (including the scoped timers a phase
+change cancels), `emitted`. A refused message throws a `RefusalError` whose `code` is `unknown_message`,
+`invalid_payload`, `guard_failed`, `wrong_state` or `no_role`.
+
 ### Multi-actor simulations (ADR-015 D4)
 
 `simulate()` (`@actor-kit/test`) runs many actors through the runtime's own step core on a virtual clock: services

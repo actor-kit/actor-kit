@@ -113,6 +113,7 @@ export type {
   ForwardCall,
   ForwardEntry,
   LinkCall,
+  ScheduleRequest,
   TimerOp,
   TimerSchedule,
   UnlinkCall,
@@ -148,6 +149,9 @@ export { phasedState } from "./runtime/phases";
 // Outbound event stream (ADR-017 §3)
 export type { PublishConfig, PublishedBody, PublishedMessage, PublishOption } from "./runtime/publish";
 export { PUBLISH_SERVICE, publishedMessages, resolvePublish, sendToQueue } from "./runtime/publish";
+// Typed refusals (ADR-018 C, D)
+export type { AdmissionError, RefusalCode } from "./runtime/refusal";
+export { RefusalError, refusalCode } from "./runtime/refusal";
 // Namespace resolution
 export { resolveNamespace } from "./runtime/resolve-namespace";
 export type { RestorePlan } from "./runtime/restore";
@@ -205,6 +209,7 @@ export type {
 export {
   admitMessage,
   admitStepMessage,
+  initialState,
   liveStepFacts,
   liveUnlinkTargets,
   replayStepFacts,
@@ -267,6 +272,7 @@ export type {
   StateDef,
   StatePart,
   TypedEmit,
+  TypedStateDef,
 } from "./setup";
 export { goto, PhaseTransition, setup, stay } from "./setup";
 // Timer helper (ADR-015 D2)

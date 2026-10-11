@@ -17,7 +17,7 @@ export {
 // Hashing
 export { xxh64 } from "./hash";
 // Schema builder
-export type { FieldDescriptor, Infer, SchemaDefinition } from "./schema";
+export type { FieldDescriptor, Infer, PrimitiveDescriptor, SchemaDefinition } from "./schema";
 export { array, boolean, float32, float64, nullable, schema, string, uint8, uint16, uint32 } from "./schema";
 
 // Shared types

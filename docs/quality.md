@@ -87,6 +87,12 @@ CRAP over `packages/worker/src/runtime`, `packages/test/src`, `packages/core/src
   state did not declare the message; `declaredInAnotherState` is now `declaredInSomeState`).
 - CRAP after: studio UI max 7.0 (0 ≥ 8); worker with `pnpm crap:worker` max 7.6 (0 ≥ 8).
 
+## ADR-018 (agent-first API), per step
+
+| Step | Mutated | Score | Survivors | Max CRAP |
+|---|---|---|---|---|
+| 2. D testActor over `step()` (`test-actor.ts` whole, `refusal.ts`, `outbox.ts` `getSchedules`, `step.ts` `initialState`) | 171 | 95.95% (166/173) first run; then tests for the `wrong_state` message and `unlink(name)` (testActor has no stored links: targets come from the same transition) and the unreachable `detail ?? "unknown"` fallback removed; re-run of `test-actor.ts`: **98.52% (133/135)** | 2 equivalent (test-actor.ts:171, :190, below) | test 7.1, runtime 7.0, core 6.0, worker (`crap:worker`) 7.6; 0 ≥ 8 |
+
 ## Equivalent mutants
 
 Surviving mutants that no test can kill, because the mutated program behaves identically. One line each.
@@ -105,9 +111,8 @@ Surviving mutants that no test can kill, because the mutated program behaves ide
 | react | context.ts:67 | `client.view !== undefined` → `true` | Only adds `setView(undefined)` when the state is already `undefined`. |
 | react | context.ts:91 | `client.role !== role` → `true` | Setting the same state value is a React no-op. |
 | react | context.ts:135 | effect deps `[client]` → `[]` | The client comes from a `useState` initializer and never changes. |
-| test | test-actor.ts:148 | `typeof record !== "object" \|\| record === null` → `false` | A primitive role entry still yields no messages. |
-| test | test-actor.ts:167 | `slots !== undefined` → `true` | The router treats an `undefined` role entry as "message not found" anyway. |
-| test | test-actor.ts:372 | `if (def.observe)` → `true` | Assigns `undefined`, which `send` reads with optional chaining. |
+| test | test-actor.ts:171 | `typeof record !== "object" \|\| record === null` → `false` | A primitive role entry still yields no messages. |
+| test | test-actor.ts:190 | `slots !== undefined` → `true` | The router treats an `undefined` role entry as "message not found" anyway. |
 | studio | access.ts:161 | `catch` block → `{}` | Falls through to the same 401 "Invalid Cloudflare Access token". |
 | studio | middleware.ts:147 | `join(".")` → `join("")` | Every request schema's error paths have a single segment, so there is nothing to join. |
 | studio | middleware.ts:237 (×3) | `rawType !== undefined && rawId !== undefined` → `\|\|` / `true` | Both regex groups are required, so a match always fills both; the check exists for the type checker. |
@@ -157,7 +162,6 @@ Surviving mutants that no test can kill, because the mutated program behaves ide
 | worker, studio UI | trace.ts:48, cause-ref.ts:18 (×3 each) | destructuring defaults `= ""` → `"Stryker was here!"` | Groups 1-3 of the id pattern always match when the pattern does; the defaults exist for the type checker. |
 | worker | journal.ts:583, 813 | init `timerOps: []` / rebuild-skipped migrate `emitted: []` → `["Stryker was here"]` | Same family as journal.ts:535/750: init schedules nothing, and a rebuild compares neither checksums nor emitted events. |
 | worker | journal.ts:647 | `i < length` → `i <= length` | Past the end both lists give `undefined`, which describe the same ("nothing"): no difference is found there. |
-| test | test-actor.ts:386 | `if (def.events)` → `true` | Assigns `undefined` when absent; `emit` reads it with `?.` either way. |
 | test | simulate.ts:222 | initial `published: []` → `["Stryker was here"]` | `published(queue)` filters by `p.queue`; a string has none, so it is never listed. |
 | test | simulate.ts:256 | memo `if (config === undefined)` → `true` | Recomputes the same publish config each time; only slower. |
 | test | simulate.ts:301 | `parseEffectId(effectId)?.seq` → `.seq` | Simulated effect ids are always `seq:index`, so the parse never fails. |

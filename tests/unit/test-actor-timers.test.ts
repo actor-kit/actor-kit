@@ -1,6 +1,6 @@
 /** testActor() captures ctx.schedule and ctx.cancel calls instead of running timers (ADR-015 D2). */
 import { testActor } from "@actor-kit/test";
-import { message } from "@actor-kit/worker/testing";
+import { message, timer } from "@actor-kit/worker/testing";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 
@@ -24,6 +24,11 @@ const contract = {
         return { n: s.n + 1 };
       }),
       NOTHING: message(z.object({}), (s: State) => s),
+    },
+    // testActor runs the runtime's step core (ADR-018 D), which refuses undeclared timers.
+    timers: {
+      tick: timer(z.object({ n: z.number() }), (s: State) => s),
+      tock: timer(z.undefined(), (s: State) => s),
     },
     views: { any: { fn: (s: State) => s } },
   },

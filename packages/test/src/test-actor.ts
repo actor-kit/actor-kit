@@ -13,22 +13,37 @@ import type {
   Execution,
   ForwardCall,
   Infer,
-  MessageContext,
   ScheduleOptions,
   SchemaDefinition,
   TimelineEntry,
 } from "@actor-kit/core";
 import { xxh64 } from "@actor-kit/core";
-import type { EnvParser, LifecycleEvent, LinkCall, RolePredicate, UnlinkCall } from "@actor-kit/worker/testing";
+import type {
+  AdmissionError,
+  EnvParser,
+  LifecycleEvent,
+  LinkCall,
+  RolePredicate,
+  StepCause,
+  StepDef,
+  StepFacts,
+  UnlinkCall,
+} from "@actor-kit/worker/testing";
 import {
+  admitStepMessage,
   createLiveFacts,
   envErrorMessage,
+  initialState,
+  liveStepFacts,
   parseActorEnv,
+  RefusalError,
+  refusalCode,
   resolveRole,
-  routeMessage,
+  step,
   withDeterminismGuard,
 } from "@actor-kit/worker/testing";
 import type { z } from "zod";
+import type { ContractState } from "./contract-types";
 
 // --- Actor definition shape (minimal for testing) ---
 
@@ -70,11 +85,6 @@ interface TestableActorDef<TState, TInput> {
 }
 
 // --- Contract type inference helpers ---
-
-/**
- * Extract state type from a contract's init() return type.
- */
-type ContractState<T> = T extends { def: { init: (...args: never[]) => infer S } } ? S : unknown;
 
 /**
  * Extract input type from a contract's Zod input schema.
@@ -186,19 +196,15 @@ function roleNestedMessages(
 
 interface ContractShape {
   readonly name: string;
-  readonly def: {
+  readonly def: Omit<StepDef, "messages" | "init"> & {
     input: z.ZodType;
     /** The typed env schema (ADR-016 §4). */
     env?: EnvParser;
     init: (input: unknown, ctx?: { env: unknown; link: (name: string, id: string) => Promise<unknown> }) => unknown;
     roles: Record<string, RolePredicate<unknown>>;
-    messages: Record<string, unknown>;
+    messages?: Record<string, unknown>;
     views: Record<string, { readonly fn: (state: unknown, caller: string) => unknown }>;
     events?: Record<string, z.ZodType>;
-    lifecycle?: {
-      connect?(state: unknown, event: LifecycleEvent, ctx: unknown): unknown;
-      disconnect?(state: unknown, event: LifecycleEvent, ctx: unknown): unknown;
-    };
     observe?: {
       onTransition?(
         prevState: unknown,
@@ -214,80 +220,30 @@ function isContract(arg: TestableActorDef<unknown, unknown> | ContractShape): ar
   return "name" in arg && "def" in arg;
 }
 
-// --- Helpers ---
+// --- Refusals (ADR-018 C, D) ---
 
-const ROUTE_ERRORS = {
-  message_not_found: (type: string, role: string) => `Message "${type}" not found for role "${role}"`,
-  validation_failed: (type: string, _role: string, detail: string | undefined) =>
-    `Validation failed for "${type}": ${detail ?? "unknown"}`,
-  guard_failed: (type: string) => `Guard rejected "${type}"`,
-} as const;
+const ROUTE_ERRORS: Record<AdmissionError, (type: string, role: string, detail: string | undefined) => string> = {
+  message_not_found: (type, role) => `Message "${type}" not found for role "${role}"`,
+  validation_failed: (type, _role, detail) => `Validation failed for "${type}": ${detail}`,
+  guard_failed: (type) => `Guard rejected "${type}"`,
+  wrong_state: (type) => `Message "${type}" is not accepted in the actor's current state`,
+};
 
-/** Effect hooks for a message context, recording every call instead of performing it. */
-function recordEffects(events: Record<string, z.ZodType> | undefined) {
-  const captured: Pick<
-    SendResult<unknown>,
-    "executions" | "links" | "unlinks" | "forwards" | "schedules" | "cancels" | "emitted"
-  > = {
-    executions: [],
-    links: [],
-    unlinks: [],
-    forwards: [],
-    schedules: [],
-    cancels: [],
-    emitted: [],
-  };
-  const ctx: Pick<MessageContext, "execute" | "link" | "unlink" | "forward" | "schedule" | "cancel" | "emit"> = {
-    emit: (name, payload) => {
-      const schema = events?.[name];
-      if (schema === undefined) throw new Error(`Event "${name}" is not declared on this actor`);
-      const parsed = schema.safeParse(payload);
-      if (!parsed.success) throw new Error(`Event "${name}": invalid payload: ${parsed.error.message}`);
-      captured.emitted.push({ name, payload: parsed.data });
-    },
-    execute: (service, input) => {
-      captured.executions.push({ service, input });
-    },
-    link: (name, id) => {
-      captured.links.push({ name, id });
-    },
-    unlink: (name, id) => {
-      captured.unlinks.push({ name, id });
-    },
-    forward: (linkName, targetId, message) => {
-      captured.forwards.push({ linkName, targetId, message });
-    },
-    schedule: (timer, options) => {
-      captured.schedules.push({ timer, options });
-    },
-    cancel: (key) => {
-      captured.cancels.push(key);
-    },
-  };
-  return { captured, ctx };
+/** The caller's role, or a `no_role` refusal. */
+function roleOrRefuse(
+  roles: Record<string, RolePredicate<unknown>>,
+  state: unknown,
+  caller: string,
+  callerType: "user" | "service",
+): string {
+  const role = resolveRole(roles, state, caller, { callerType });
+  if (role === null) throw new RefusalError("no_role", `No role matched for caller "${caller}"`);
+  return role;
 }
 
-// --- Determinism guard (ADR-016 §5) ---
-
-/** The same messages, each handler run under withDeterminismGuard (schemas and guards unchanged). */
-function guardHandlers(
-  messages: TestableActorDef<unknown, unknown>["messages"],
-): TestableActorDef<unknown, unknown>["messages"] {
-  return Object.fromEntries(
-    Object.entries(messages).map(([role, slots]) => [
-      role,
-      Object.fromEntries(
-        Object.entries(slots).map(([name, slot]) => [
-          name,
-          {
-            ...slot,
-            handler: (state: unknown, payload: unknown, ctx: unknown) =>
-              withDeterminismGuard(() => slot.handler(state, payload, ctx)),
-          },
-        ]),
-      ),
-    ]),
-  );
+/** Live facts for one transition (real clock and ids), every handler under the determinism guard. */
+function harnessFacts(): StepFacts {
+  return { ...liveStepFacts(createLiveFacts(), () => []), guard: withDeterminismGuard };
 }
 
 // --- Typed env (ADR-016 §4) ---
@@ -310,7 +266,7 @@ function harnessEnv(name: string, schema: EnvParser | undefined, env: unknown): 
 
 // --- Implementation ---
 
-// Overload 1: Contract (from defineActor) — requires roles, messages, views
+// Overload 1: Contract (from defineActor) — requires roles and views; messages may all be in states
 export function testActor<
   TContract extends {
     readonly name: string;
@@ -318,7 +274,7 @@ export function testActor<
       readonly input: { _input: unknown; _output: unknown };
       readonly init: (...args: never[]) => unknown;
       readonly roles: Record<string, unknown>;
-      readonly messages: Record<string, unknown>;
+      readonly messages?: Record<string, unknown>;
       readonly views: Record<string, unknown>;
     };
   },
@@ -338,40 +294,38 @@ export function testActor<TState, TInput>(
   options?: { env?: unknown },
 ): TestHarness<TState, TInput>;
 
-// Implementation
+// Implementation: a single actor over the runtime's step core (ADR-018 D), as simulate() runs many.
 export function testActor(
   arg: TestableActorDef<unknown, unknown> | ContractShape,
   options: { env?: unknown } = {},
 ): TestHarness<unknown, unknown> | ContractTestHarness<unknown, unknown, unknown, unknown> {
-  // Extract def from contract or use directly
-  const unguarded = isContract(arg) ? extractDef(arg) : arg;
-  // Message handlers and init run under the determinism guard (ADR-016 §5).
-  const def = { ...unguarded, messages: guardHandlers(unguarded.messages) };
+  const def: TestableActorDef<unknown, unknown> & StepDef = isContract(arg) ? harnessDef(arg) : arg;
   const env = isContract(arg) ? harnessEnv(arg.name, arg.def.env, options.env) : (options.env ?? {});
 
-  // sendWithEffects as standalone function for safe destructuring
-  async function sendWithEffectsImpl(
+  async function send(
     state: unknown,
     caller: string,
     event: { type: string; [key: string]: unknown },
     opts?: SendOptions,
   ): Promise<SendResult<unknown>> {
     const callerType = opts?.callerType ?? "user";
-    const role = resolveRole(def.roles, state, caller, { callerType });
-    if (role === null) throw new Error(`No role matched for caller "${caller}"`);
-
-    const effects = recordEffects(def.events);
-    const result = routeMessage(def.messages, role, state, event, {
-      ...createLiveFacts().ctx,
+    const role = roleOrRefuse(def.roles, state, caller, callerType);
+    const admission = admitStepMessage(def, role, state, event, { caller, callerType, env });
+    if (!admission.ok) {
+      const detail = "detail" in admission ? admission.detail : undefined;
+      throw new RefusalError(refusalCode(admission.error), ROUTE_ERRORS[admission.error](event.type, role, detail));
+    }
+    const cause: StepCause = {
+      type: "message",
+      name: event.type,
+      payload: admission.payload,
       caller,
       callerType,
-      env,
-      ...(opts?.delivery === undefined ? {} : { delivery: opts.delivery }),
-      ...effects.ctx,
-    });
-    if (!result.ok) throw new Error(ROUTE_ERRORS[result.error](event.type, role, result.detail));
-
-    def.observe?.onTransition?.(state, result.state, event, { caller, role });
+      role,
+      delivery: opts?.delivery,
+    };
+    const result = step(def, state, cause, harnessFacts(), env);
+    def.observe?.onTransition?.(state, result.handlerState, event, { caller, role });
 
     const { type: messageType, ...payload } = event;
     const timeline: TimelineEntry[] = [
@@ -382,8 +336,18 @@ export function testActor(
         createdAt: Date.now(),
       },
     ];
-
-    return { state: result.state, ...effects.captured, timeline };
+    const effects = result.effects;
+    return {
+      state: result.state,
+      executions: effects.getExecutions(),
+      links: effects.getLinks(),
+      unlinks: effects.getUnlinks(),
+      forwards: effects.getForwards(),
+      schedules: effects.getSchedules(),
+      cancels: effects.toTimerOps().flatMap((op) => (op.op === "cancel" ? [op.key] : [])),
+      emitted: effects.getEmitted().map(({ name, payload }) => ({ name, payload })),
+      timeline,
+    };
   }
 
   return {
@@ -392,7 +356,7 @@ export function testActor(
       if (!parsed.success) {
         throw new Error(`Invalid input: ${parsed.error.message}`);
       }
-      return withDeterminismGuard(() =>
+      const shared = withDeterminismGuard(() =>
         def.init(parsed.data, {
           ...createLiveFacts().ctx,
           env,
@@ -401,6 +365,7 @@ export function testActor(
           },
         }),
       );
+      return initialState(def, shared);
     },
 
     role(state: unknown, caller: string, opts?: { callerType?: "user" | "service" }): string | null {
@@ -409,43 +374,21 @@ export function testActor(
       });
     },
 
-    send: sendWithEffectsImpl,
+    send,
 
     view(state: unknown, caller: string, opts?: { callerType?: "user" | "service" }): { role: string; data: unknown } {
-      const callerType = opts?.callerType ?? "user";
-      const role = resolveRole(def.roles, state, caller, { callerType });
-
-      if (role === null) {
-        throw new Error(`No role matched for caller "${caller}"`);
-      }
-
+      const role = roleOrRefuse(def.roles, state, caller, opts?.callerType ?? "user");
       const viewDef = def.views[role];
       if (viewDef === undefined) {
         throw new Error(`No view defined for role "${role}"`);
       }
-
-      return {
-        role,
-        data: viewDef.fn(state, caller),
-      };
+      return { role, data: viewDef.fn(state, caller) };
     },
   };
 }
 
-/**
- * Extract a TestableActorDef from a contract, handling flat → role-nested message conversion.
- */
-function extractDef(contract: ContractShape): TestableActorDef<unknown, unknown> {
-  const def = contract.def;
-  const result: TestableActorDef<unknown, unknown> = {
-    input: def.input,
-    init: def.init,
-    roles: def.roles,
-    messages: roleNestedMessages(def.messages, def.roles),
-    views: def.views,
-  };
-  // The harness never runs lifecycle handlers, so only observe is carried over.
-  if (def.observe) result.observe = def.observe;
-  if (def.events) result.events = def.events;
-  return result;
+/** The definition the step core runs for a contract: its messages role-nested, as the runtime stores them. */
+function harnessDef(contract: ContractShape): TestableActorDef<unknown, unknown> & StepDef {
+  const { messages, ...def } = contract.def;
+  return { ...def, messages: roleNestedMessages(messages ?? {}, def.roles) };
 }

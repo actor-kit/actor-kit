@@ -47,6 +47,7 @@ export type {
   Setup,
   StateDecl,
   TypedEmit,
+  TypedStateDef,
 } from "./setup";
 export { goto, PhaseTransition, setup, stay } from "./setup";
 // Timer helper (ADR-015 D2)

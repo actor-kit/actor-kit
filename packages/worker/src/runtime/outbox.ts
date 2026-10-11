@@ -6,7 +6,7 @@
  * deterministic effect ids `seq:index` (ADR-015 D1).
  */
 
-import type { Execution, ForwardCall } from "@actor-kit/core";
+import type { Execution, ForwardCall, ScheduleOptions } from "@actor-kit/core";
 import { formatEffectId } from "./effect-id";
 
 export type { ForwardCall };
@@ -92,8 +92,13 @@ interface OutboxCollector {
   toExecutionEntries(seq?: number): ExecutionEntry[];
   /** Forwards as outbox rows for the transition numbered `seq` (0 outside a runtime). */
   toForwardEntries(seq?: number): ForwardEntry[];
-  /** Record a timer (validated and given its deadline by the caller). Takes an effect index. */
-  schedule(timer: TimerSchedule): void;
+  /**
+   * Record a timer (validated and given its deadline by the caller). Takes an effect index.
+   * `requested`: the ctx.schedule() options as called, which testActor reports.
+   */
+  schedule(timer: TimerSchedule, requested: ScheduleRequest): void;
+  /** Every ctx.schedule() call, as made (ADR-018 D: testActor records timers). */
+  getSchedules(): ScheduleRequest[];
   cancel(key: string): void;
   /** Schedules and cancels, in declaration order, for the transition numbered `seq`. */
   toTimerOps(seq?: number): TimerOp[];
@@ -101,6 +106,12 @@ interface OutboxCollector {
   emit(name: string, payload: unknown): void;
   /** Emitted events in order, with their effect index. */
   getEmitted(): EmittedEffect[];
+}
+
+/** A ctx.schedule() call as the handler made it (scope: "state" keys filled in). */
+export interface ScheduleRequest {
+  readonly timer: string;
+  readonly options: ScheduleOptions;
 }
 
 /** A domain event a transition emitted, with its effect index (ADR-017 §2, §3). */
@@ -120,6 +131,7 @@ export function createOutbox(): OutboxCollector {
     | { readonly op: "cancel"; readonly key: string }
   > = [];
   const emitted: EmittedEffect[] = [];
+  const requests: ScheduleRequest[] = [];
   let effects = 0;
 
   return {
@@ -177,8 +189,13 @@ export function createOutbox(): OutboxCollector {
       }));
     },
 
-    schedule(timer: TimerSchedule): void {
+    schedule(timer: TimerSchedule, requested: ScheduleRequest): void {
       timerOps.push({ op: "schedule", timer, index: effects++ });
+      requests.push(requested);
+    },
+
+    getSchedules(): ScheduleRequest[] {
+      return [...requests];
     },
 
     cancel(key: string): void {

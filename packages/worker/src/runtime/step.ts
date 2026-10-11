@@ -386,12 +386,10 @@ function timerVerbs(def: StepDef, effects: StepEffects, det: DeterministicContex
       if (timer === undefined) throw new Error(`Timer "${name}" is not declared on this actor`);
       const parsed = timer.schema.safeParse(options.payload);
       if (!parsed.success) throw new Error(`Timer "${name}": invalid payload: ${parsed.error.message}`);
-      effects.schedule({
-        name,
-        key: options.key ?? null,
-        payload: parsed.data ?? null,
-        fireAt: fireAtOf(options, det),
-      });
+      effects.schedule(
+        { name, key: options.key ?? null, payload: parsed.data ?? null, fireAt: fireAtOf(options, det) },
+        { timer: name, options },
+      );
     },
     cancel: (key: string): void => effects.cancel(key),
   };
@@ -783,6 +781,11 @@ function stepCause(def: StepDef, state: unknown, cause: StepCause, facts: StepFa
 
 // --- init ---
 
+/** The persisted state init's result becomes: as it is, or the initial phase for an actor with states. */
+export function initialState(def: Pick<StepDef, "states" | "initial">, shared: unknown): unknown {
+  return def.states === undefined ? shared : initialPhase(def.states, def.initial, shared);
+}
+
 /** An actor with states starts in `initial`, which has no local (nothing to build it from yet). */
 function initialPhase(states: Record<string, StepStateDef>, initial: string | undefined, shared: unknown): PhasedState {
   if (initial === undefined) throw new Error("An actor with states needs `initial`");
@@ -809,9 +812,8 @@ export async function stepInit(
   if (init === undefined) throw new Error("This actor has no init");
   // Guarded until init's first await (an async init's later part runs outside the guard).
   const shared = await guarded(facts, () => init(cause.input, { env: io.env, link: io.link, ...facts.ctx }));
-  const state = def.states === undefined ? shared : initialPhase(def.states, def.initial, shared);
   return {
-    state,
+    state: initialState(def, shared),
     event: draft(
       { causeType: "init", name: null, payload: cause.input },
       { caller: cause.caller, callerType: cause.callerType, role: null },

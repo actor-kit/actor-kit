@@ -116,6 +116,16 @@ export interface StateDef<S> {
   readonly timers?: Record<string, StatePart<S>>;
 }
 
+/**
+ * A state as `kit.in(phase).state()` returns it: its messages keep their names and payloads, and the
+ * phantom `~local` (never set at runtime) carries the local's type, so contract-level types (typed
+ * client `send`, testActor/simulate snapshots) see them (ADR-018 B, D).
+ */
+export type TypedStateDef<S, L, M> = Omit<StateDef<S>, "messages"> & {
+  readonly messages?: M;
+  readonly "~local"?: L;
+};
+
 type PhaseCtx<TEnv, E, SD extends StateDecls, P extends keyof SD & string, S> = EmittingMessageContext<TEnv, E> &
   PhaseContext<SD, P, S>;
 type PhaseTimerCtx<TEnv, E, SD extends StateDecls, P extends keyof SD & string, S> = EmittingTimerContext<TEnv, E> &
@@ -148,7 +158,7 @@ export interface PhaseHelpers<SD extends StateDecls, E, P extends keyof SD & str
     ) => LocalOf<SD[P]>;
     messages?: M;
     timers?: Record<string, StatePart<S>>;
-  }): Omit<StateDef<S>, "messages"> & { readonly messages?: M };
+  }): TypedStateDef<S, LocalOf<SD[P]>, M>;
 }
 
 /** What handlers see as `ctx.env`: the `env` schema's output (ADR-016 §4), or `unknown` without one. */
