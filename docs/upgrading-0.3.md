@@ -228,3 +228,29 @@ version(2, StateV2, {
 
 **Refused messages are recorded** (a new `rejections` table, migration `0018_rejections`, created on
 wake); nothing to change in your code.
+
+## Determinism in production (ADR-018 E)
+
+Handlers now run under the determinism guard in the Worker too. With the default `determinism: "warn"`
+nothing fails: a handler that reads `Date.now()`, `new Date()`, `Math.random()`, `crypto.randomUUID()` and
+the like gets the real value, but the runtime logs an `actor_kit.handler.nondeterministic` line and flags
+the journal entry (replay cannot reproduce it). Fix the handler, or choose the mode:
+
+```ts
+// Before: no option; production never checked
+export const Game = defineActor("game", { ... });
+
+// After: the same behaviour plus the warning (default), or fail like the tests do
+export const Game = game.actor("game", { determinism: "throw", ... }); // "warn" | "throw" | "off"
+```
+
+```ts
+// Before (warned in production from 0.3, throws in tests)
+PLACE: game.message(z.object({}), (s: S) => ({ ...s, at: Date.now(), id: crypto.randomUUID() })),
+
+// After
+PLACE: game.message(z.object({}), (s: S, _p, ctx) => ({ ...s, at: ctx.now(), id: ctx.id() })),
+```
+
+To catch these before tests run, enable the Biome plugin:
+`"plugins": ["./node_modules/@actor-kit/worker/biome/no-nondeterminism.grit"]`.

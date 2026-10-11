@@ -216,6 +216,11 @@ export interface JournalDraft {
   readonly trace?: Trace;
   /** Domain events the transition emitted, in order (ADR-017 §2); absent when none. */
   readonly emitted?: readonly EmittedEvent[];
+  /**
+   * A handler read the clock or randomness directly in production (`determinism: "warn"`, ADR-018 E):
+   * replay cannot reproduce this transition. Absent otherwise.
+   */
+  readonly nondeterministic?: true;
 }
 
 export interface EmittedEvent {
@@ -327,7 +332,7 @@ interface PersistedEvent {
 function insertEvent(sql: JournalSql, draft: JournalDraft, persisted: PersistedEvent): number {
   const row = sql
     .exec(
-      "INSERT INTO events (seq, cause_type, name, payload, caller, caller_type, role, facts, code_version, state_checksum, created_at, correlation_id, causation_id, emitted) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING seq",
+      "INSERT INTO events (seq, cause_type, name, payload, caller, caller_type, role, facts, code_version, state_checksum, created_at, correlation_id, causation_id, emitted, nondeterministic) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING seq",
       persisted.seq,
       draft.causeType,
       draft.name,
@@ -342,6 +347,7 @@ function insertEvent(sql: JournalSql, draft: JournalDraft, persisted: PersistedE
       persisted.correlationId ?? null,
       persisted.causationId ?? null,
       draft.emitted === undefined ? null : JSON.stringify(draft.emitted),
+      draft.nondeterministic === true ? 1 : null,
     )
     .toArray()[0];
   return z.object({ seq: z.number() }).parse(row).seq;
@@ -424,6 +430,7 @@ const EventRowSchema = z.object({
   correlation_id: z.string().nullish(),
   causation_id: z.string().nullish(),
   emitted: z.string().nullish(),
+  nondeterministic: z.number().nullish(),
 });
 
 const EmittedSchema = z.array(z.object({ name: z.string(), payload: z.unknown() }));
@@ -438,7 +445,7 @@ const CheckpointRowSchema = z.object({
 
 /** The `events` columns, in the order every reader selects them. */
 export const JOURNAL_EVENT_COLUMNS =
-  "seq, cause_type, name, payload, caller, caller_type, role, facts, code_version, state_checksum, created_at, correlation_id, causation_id, emitted";
+  "seq, cause_type, name, payload, caller, caller_type, role, facts, code_version, state_checksum, created_at, correlation_id, causation_id, emitted, nondeterministic";
 
 /** Parse one `events` row (selected with JOURNAL_EVENT_COLUMNS) at the storage boundary. */
 export function parseJournalEventRow(raw: unknown): JournalEvent {
@@ -459,7 +466,8 @@ export function parseJournalEventRow(raw: unknown): JournalEvent {
   };
   const traced = withIds(event, row.correlation_id ?? null, row.causation_id ?? null);
   const emitted = row.emitted ?? null;
-  return emitted === null ? traced : { ...traced, emitted: EmittedSchema.parse(JSON.parse(emitted)) };
+  const withEmitted = emitted === null ? traced : { ...traced, emitted: EmittedSchema.parse(JSON.parse(emitted)) };
+  return row.nondeterministic === 1 ? { ...withEmitted, nondeterministic: true } : withEmitted;
 }
 
 /** The event with the ids that were recorded (none for rows written before ADR-017). */

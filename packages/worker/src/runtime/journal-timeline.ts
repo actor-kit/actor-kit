@@ -119,6 +119,7 @@ export function timelineEntry(
     correlationId: event.correlationId ?? null,
     causationId: event.causationId ?? null,
     emitted: event.emitted === undefined ? null : JSON.stringify(event.emitted),
+    nondeterministic: event.nondeterministic === true,
   };
 }
 

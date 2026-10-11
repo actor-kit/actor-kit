@@ -46,5 +46,8 @@
         "organizeImports": "on"
       }
     }
-  }
+  },
+  "plugins": [
+    "./packages/worker/biome/no-nondeterminism.grit"
+  ]
 }

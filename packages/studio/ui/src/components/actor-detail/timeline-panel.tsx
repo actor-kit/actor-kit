@@ -97,12 +97,27 @@ function TimelineRow({ actor, entry, previous, expanded, onToggle, onOpen }: Tim
             {entry.emitted.map((e) => e.name).join(", ")}
           </span>
         )}
+        <NondeterministicBadge entry={entry} />
         <span className="text-zinc-600 text-xs" title={new Date(entry.createdAt).toISOString()}>
           {recentTime(entry.createdAt)}
         </span>
       </button>
       {expanded && <EntryDetails actor={actor} entry={entry} previous={previous} onOpen={onOpen} />}
     </div>
+  );
+}
+
+/** A handler of this entry read the clock or randomness directly (ADR-018 E): replay cannot reproduce it. */
+function NondeterministicBadge({ entry }: { entry: TimelineItem }) {
+  if (entry.nondeterministic !== true) return null;
+  return (
+    <span
+      className="text-xs text-amber-300"
+      data-testid={`timeline-nondeterministic-${entry.id}`}
+      title="A handler read the clock or randomness directly: use ctx.now(), ctx.random() or ctx.id()"
+    >
+      nondeterministic
+    </span>
   );
 }
 

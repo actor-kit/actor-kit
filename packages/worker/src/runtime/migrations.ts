@@ -225,4 +225,9 @@ export const ACTOR_KIT_MIGRATIONS: ReadonlyArray<{ readonly name: string; readon
       );
     `,
   },
+  {
+    // A transition whose handler read the clock or randomness directly (ADR-018 E): 1, NULL otherwise.
+    name: "0019_nondeterministic",
+    sql: "ALTER TABLE events ADD COLUMN nondeterministic INTEGER;",
+  },
 ];

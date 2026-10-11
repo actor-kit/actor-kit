@@ -41,6 +41,13 @@ import {
 } from "./runtime/attempt";
 import { closeCodeToSend } from "./runtime/close-code";
 import { type ConnectRequest, parseConnectRequest } from "./runtime/connect-request";
+import {
+  type DeterminismWatch,
+  determinismWatch,
+  flagNondeterministic,
+  nondeterministicEvent,
+  resolveDeterminism,
+} from "./runtime/determinism";
 import { parseEffectId } from "./runtime/effect-id";
 import { type DeliveryInfo, deliveryInfo, type EffectInfo, effectInfo } from "./runtime/effect-info";
 import { type EnvParser, envErrorMessage, envInvalidEvent, parseActorEnv } from "./runtime/env";
@@ -112,7 +119,16 @@ import {
   serviceAttemptEvent,
   settleInterrupted,
 } from "./runtime/service-options";
-import { admitStepMessage, liveStepFacts, type StepCause, type StepResult, step, stepInit } from "./runtime/step";
+import {
+  admitStepMessage,
+  type InitCause,
+  liveStepFacts,
+  type StepCause,
+  type StepFacts,
+  type StepResult,
+  step,
+  stepInit,
+} from "./runtime/step";
 import {
   type CallerHasher,
   createCallerHasher,
@@ -231,6 +247,11 @@ interface ActorDef {
   events?: Record<string, z.ZodType>;
   /** Outbound stream (ADR-017 §3): emitted events named here are sent to the Queue binding `queue`. */
   publish?: PublishOption;
+  /**
+   * Handlers that read the clock or randomness directly (ADR-018 E): `"warn"` (default) logs a line and
+   * flags the journal entry, `"throw"` fails the transition, `"off"` patches nothing.
+   */
+  determinism?: unknown;
   /** States with typed locals (ADR-017 §1). */
   initial?: string;
   states?: Record<string, StepStateDef>;
@@ -466,6 +487,7 @@ export function actor(
   // Validate studio config at definition time, not on the first mutation.
   const studioRedactor = compileRedaction(def.studio?.redact);
   const journalConfig = resolveJournalConfig(def.journal);
+  const determinism = resolveDeterminism(def.determinism);
   // Delivery mode, result schema and size limit, retries (ADR-016, ADR-018 G), validated at definition time.
   const serviceOptions = new Map<string, ServiceOptions>(
     Object.entries(def.services ?? {}).map(([name, service]) => [name, resolveServiceOptions(name, service)]),
@@ -704,8 +726,7 @@ export function actor(
       if (!emptyParsed.success) return;
 
       this.actorId = this.ctx.id.toString();
-      const init = await stepInit(
-        def,
+      const init = await this.runInit(
         { input: emptyParsed.data, caller: null, callerType: null },
         liveStepFacts(createLiveFacts(), () => []),
         {
@@ -1145,7 +1166,27 @@ export function actor(
       const facts = liveStepFacts(live, (name) => this.readLinkTargets(name));
       // The seq commit() will give this transition, so ctx.execute() returns its effect ids (ADR-018 G).
       const seq = nextTransitionSeq(this.ctx.storage.sql);
-      return step(def, this.state, cause, { ...facts, seq }, this.handlerEnv);
+      const watch = determinismWatch(determinism);
+      const result = step(def, this.state, cause, { ...facts, seq, guard: watch.guard }, this.handlerEnv);
+      return { ...result, event: this.watched(result.event, watch) };
+    }
+
+    /** A transition's journal draft, flagged and logged when its handlers were nondeterministic (ADR-018 E). */
+    watched(draft: JournalDraft, watch: DeterminismWatch): JournalDraft {
+      if (watch.violations.length === 0) return draft;
+      console.warn(JSON.stringify(nondeterministicEvent(_actorName, this.subscriberId(), draft, watch.violations)));
+      return flagNondeterministic(draft, watch.violations);
+    }
+
+    /** Run init through the step core under the actor's determinism mode. */
+    async runInit(
+      cause: InitCause,
+      facts: StepFacts,
+      io: { env: unknown; link: (name: string, id: string) => Promise<unknown> },
+    ): Promise<{ state: unknown; event: JournalDraft }> {
+      const watch = determinismWatch(determinism);
+      const init = await stepInit(def, cause, { ...facts, guard: watch.guard }, io);
+      return { ...init, event: this.watched(init.event, watch) };
     }
 
     /** The snapshot (at this code version) is behind the journal's last seq. */
@@ -1747,8 +1788,7 @@ export function actor(
         return view;
       };
 
-      const init = await stepInit(
-        def,
+      const init = await this.runInit(
         { input: parsed.data, caller: input.caller, callerType: input.callerType },
         liveStepFacts(live, () => []),
         { env: this.handlerEnv, link },

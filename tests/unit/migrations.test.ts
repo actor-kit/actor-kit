@@ -38,6 +38,7 @@ describe("ACTOR_KIT_MIGRATIONS", () => {
       "0016_trace_ids",
       "0017_emitted",
       "0018_rejections",
+      "0019_nondeterministic",
     ]);
   });
 

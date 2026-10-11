@@ -192,6 +192,20 @@ as made; timers never run, use `simulate().advance()`), `cancels` (including the
 change cancels), `emitted`. A refused message throws a `RefusalError` whose `code` is `unknown_message`,
 `invalid_payload`, `guard_failed`, `wrong_state` or `no_role`.
 
+### Determinism in production (ADR-018 E)
+
+The Durable Object runs handlers under the same guard, configured by the actor's `determinism` option:
+`"warn"` (default) reports each call (`withDeterminismWarnings`), answers it with the real global, logs an
+`actor_kit.handler.nondeterministic` line and flags the journal entry `nondeterministic: true` (column
+`events.nondeterministic`, Studio badge); `"throw"` uses `withDeterminismGuard`; `"off"` patches nothing.
+The harness always throws. `tests/integration/determinism.test.ts` covers the three modes in workerd.
+
+The Biome GritQL plugin `packages/worker/biome/no-nondeterminism.grit` is enabled in this repo's
+`biome.json`, so `pnpm lint` fails on such calls inside handler bodies. The two test files that read the
+clock in handlers on purpose (`determinism-guard.test.ts`, `replay-journal.test.ts`) opt out with
+`// biome-ignore-all lint/plugin`. `tests/unit/lint-determinism.test.ts` runs Biome on fixtures to pin what
+the rule flags.
+
 ### Multi-actor simulations (ADR-015 D4)
 
 `simulate()` (`@actor-kit/test`) runs many actors through the runtime's own step core on a virtual clock: services

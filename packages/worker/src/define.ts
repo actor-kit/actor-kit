@@ -22,6 +22,7 @@
 
 import type { CancelFn, DeterministicContext, ExecuteFn, ForwardFn, ScheduleFn } from "@actor-kit/core";
 import type { ZodType } from "zod";
+import type { DeterminismMode } from "./runtime/determinism";
 import type { EffectInfo } from "./runtime/effect-info";
 import type { BuiltInError } from "./runtime/service-error";
 import type { ChainIsTyped, CurrentState } from "./runtime/versions";
@@ -57,7 +58,12 @@ export function defineActor<
   name: TName,
   def: TDef &
     VersionsCheck<TDef> &
-    PublishCheck<TDef> & { env?: TEnvSchema } & TypedServices<TState, TErrors, EnvOf<TEnvSchema>, DefEvents<TDef>>,
+    PublishCheck<TDef> & { env?: TEnvSchema; determinism?: DeterminismMode } & TypedServices<
+      TState,
+      TErrors,
+      EnvOf<TEnvSchema>,
+      DefEvents<TDef>
+    >,
 ): ActorContract<TName, TDef>;
 export function defineActor<
   TName extends string,

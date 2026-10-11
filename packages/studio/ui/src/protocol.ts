@@ -128,7 +128,11 @@ export interface TimelineItem {
   emitted: Array<{ name: string; payload: unknown }> | undefined;
   /** Set when the journal could not rebuild the after-state. */
   stateUnavailable?: true;
+  /** A handler read the clock or randomness directly (ADR-018 E): replay cannot reproduce the entry. */
+  nondeterministic?: true;
 }
+
+const NONDETERMINISTIC: { nondeterministic: true } = { nondeterministic: true };
 
 /** Wire entry → domain entry with cause and state already parsed. */
 export const TimelineEntrySchema = z
@@ -147,6 +151,7 @@ export const TimelineEntrySchema = z
     emitted: JsonText.pipe(z.array(z.object({ name: z.string(), payload: z.unknown() })))
       .nullable()
       .optional(),
+    nondeterministic: z.boolean().optional(),
   })
   .transform((entry): TimelineItem => {
     const item = {
@@ -163,6 +168,7 @@ export const TimelineEntrySchema = z
       correlationId: entry.correlationId,
       causationId: entry.causationId,
       emitted: entry.emitted ?? undefined,
+      ...(entry.nondeterministic === true ? NONDETERMINISTIC : {}),
     };
     return entry.stateSnapshot.known ? withSeq : { ...withSeq, stateUnavailable: true };
   });

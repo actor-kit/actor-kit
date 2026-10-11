@@ -37,6 +37,7 @@ import type {
   VersionsCheck,
 } from "./define";
 import { type LinkDef, type LinkHandlers, link } from "./link";
+import type { DeterminismMode } from "./runtime/determinism";
 import type { EffectInfo } from "./runtime/effect-info";
 import { goto as gotoPhase, PhaseTransition, stay as stayInPhase } from "./runtime/phases";
 
@@ -233,7 +234,9 @@ export interface Setup<ES extends EventSchemas, SD extends StateDecls, TEnvSchem
  * What the kit fixes in a definition: an actor with declared states names its `initial` among them and
  * defines every one; an actor without has neither. `events` and `env` come from the kit.
  */
-export type KitDefCheck<SD> = { events?: never; env?: never } & ([keyof SD] extends [never]
+export type KitDefCheck<SD> = { events?: never; env?: never; determinism?: DeterminismMode } & ([keyof SD] extends [
+  never,
+]
   ? { initial?: never; states?: never }
   : { initial: keyof SD & string; states: { [P in keyof SD]: unknown } });
 

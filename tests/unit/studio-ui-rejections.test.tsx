@@ -44,3 +44,15 @@ describe("rejections counter", () => {
     expect(screen.queryByTestId("rejections-count")).toBeNull();
   });
 });
+
+describe("nondeterministic badge (ADR-018 E)", () => {
+  it("marks a timeline entry whose handler read the clock or randomness directly", async () => {
+    const entry = { ...timelineEntry(2, { count: 1 }), nondeterministic: true };
+    await open(snapshotFrame({ count: 1 }, [entry, timelineEntry(1, { count: 0 }, "init", {})]));
+    act(() => {
+      screen.getByTestId("tab-timeline").click();
+    });
+    expect(screen.getByTestId("timeline-nondeterministic-2").textContent).toBe("nondeterministic");
+    expect(screen.queryByTestId("timeline-nondeterministic-1")).toBeNull();
+  });
+});

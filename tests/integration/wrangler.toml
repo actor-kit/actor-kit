@@ -287,3 +287,20 @@ class_name = "NoticeStudio"
 [[migrations]]
 tag = "v24"
 new_sqlite_classes = ["NoticeStudio"]
+
+# Determinism in production (ADR-018 E)
+[[durable_objects.bindings]]
+name = "STAMP_WARN"
+class_name = "StampWarn"
+
+[[durable_objects.bindings]]
+name = "STAMP_THROW"
+class_name = "StampThrow"
+
+[[durable_objects.bindings]]
+name = "STAMP_OFF"
+class_name = "StampOff"
+
+[[migrations]]
+tag = "v25"
+new_sqlite_classes = ["StampWarn", "StampThrow", "StampOff"]
