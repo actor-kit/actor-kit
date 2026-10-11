@@ -90,6 +90,15 @@ export {
   snapshotSeq,
 } from "./runtime/journal";
 // Studio timeline read from the journal (ADR-017 §5)
+export type {
+  JournalEntry,
+  JournalEntryEmitted,
+  JournalOptions,
+  JournalPage,
+  JournalQuery,
+  JournalReadContext,
+} from "./runtime/journal-query";
+export { JOURNAL_QUERY_MAX_LIMIT, parseJournalOptions, readJournalPage } from "./runtime/journal-query";
 export type { TimelinePageQuery, TimelineSource } from "./runtime/journal-timeline";
 export { readStudioTimeline, timelineCause, timelineEntry } from "./runtime/journal-timeline";
 // Live app connections from held sockets (pure)

@@ -7,7 +7,7 @@
 import { parseArgs } from "node:util";
 import { authFromEnv, createStudioClient, type FetchFn, type StudioClient } from "./client";
 import { defined } from "./present";
-import { timelineShape } from "./shape";
+import { journalShape, timelineShape } from "./shape";
 
 export interface CliIo {
   stdout(text: string): void;
@@ -25,6 +25,10 @@ Commands:
   inspect <type> <id>          Current state, connections, outbox and links (redacted by the actor)
   timeline <type> <id>         Timeline entries, newest first   [--limit <n>] [--before <id>]
                                --shape: cause types, payload keys, changed paths and checksums only
+  journal <type> <id>          Journal entries (causes, emitted events, trace ids), newest first
+                               [--from <seq>] [--to <seq>] [--before <seq>] [--limit <n>]
+                               [--cause-type <t>] [--event <name>] [--correlation-id <id>]
+                               [--order asc|desc]   --shape: names, keys and checksums only
   view <type> <id> --role <r>  A role's view   [--caller <id>]
 
 Options:
@@ -62,6 +66,12 @@ const OPTIONS = {
   before: { type: "string" },
   role: { type: "string" },
   caller: { type: "string" },
+  from: { type: "string" },
+  to: { type: "string" },
+  "cause-type": { type: "string" },
+  event: { type: "string" },
+  "correlation-id": { type: "string" },
+  order: { type: "string" },
   shape: { type: "boolean" },
   help: { type: "boolean" },
 } as const;
@@ -75,6 +85,27 @@ async function timeline(client: StudioClient, positionals: readonly string[], va
   const opts = defined({ limit: positiveInt("limit", values.limit), before: positiveInt("before", values.before) });
   const page = await client.timeline(actorType, actorId, opts);
   return values.shape === true ? timelineShape(page.entries) : page;
+}
+
+function order(value: string | undefined): "asc" | "desc" | undefined {
+  if (value === undefined || value === "asc" || value === "desc") return value;
+  throw new UsageError("--order must be asc or desc");
+}
+
+async function journal(client: StudioClient, positionals: readonly string[], values: Values): Promise<unknown> {
+  const [actorType, actorId] = actorArgs("journal", positionals);
+  const opts = defined({
+    from: positiveInt("from", values.from),
+    to: positiveInt("to", values.to),
+    before: positiveInt("before", values.before),
+    causeType: values["cause-type"],
+    event: values.event,
+    correlationId: values["correlation-id"],
+    limit: positiveInt("limit", values.limit),
+    order: order(values.order),
+  });
+  const page = await client.journal(actorType, actorId, opts);
+  return values.shape === true ? journalShape(page.entries) : page;
 }
 
 function view(client: StudioClient, positionals: readonly string[], values: Values): Promise<unknown> {
@@ -99,6 +130,7 @@ const COMMANDS = new Map<string, Command>([
   ["types", (client) => client.types()],
   ["inspect", (client, positionals) => client.inspect(...actorArgs("inspect", positionals))],
   ["timeline", timeline],
+  ["journal", journal],
   ["view", view],
 ]);
 

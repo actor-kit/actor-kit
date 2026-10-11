@@ -10,7 +10,7 @@ import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
 import type { StudioClient } from "./client";
 import { defined } from "./present";
-import { timelineShape } from "./shape";
+import { journalShape, timelineShape } from "./shape";
 
 const READ_ONLY = { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true } as const;
 
@@ -84,6 +84,33 @@ export function createStudioMcpServer(client: StudioClient): McpServer {
           defined({ limit: args.limit, before: args.before }),
         );
         return args.shape === false ? page : { shape: timelineShape(page.entries), hasMore: page.hasMore };
+      }),
+  );
+
+  server.registerTool(
+    "studio_journal",
+    {
+      description:
+        "Journal entries (ADR-019 F): causes, emitted domain events (marked when published), correlation and causation ids, newest first. Filter by seq range, cause type, emitted event name or correlation id. By default returns only the shape (names, payload keys, published flags, checksums); pass shape:false for the full server-redacted entries.",
+      inputSchema: {
+        actorType,
+        actorId,
+        from: z.number().int().min(1).optional().describe("Inclusive lowest seq"),
+        to: z.number().int().min(1).optional().describe("Inclusive highest seq"),
+        before: z.number().int().min(1).optional().describe("Exclusive seq cursor for older pages"),
+        causeType: z.string().min(1).max(64).optional().describe('e.g. "message", "timer", "service.onDone"'),
+        event: z.string().min(1).max(256).optional().describe("Only entries that emitted this domain event"),
+        correlationId: z.string().min(1).max(1024).optional().describe("Only entries in this flow"),
+        limit: z.number().int().min(1).max(1000).optional(),
+        order: z.enum(["asc", "desc"]).optional().describe("Default desc (newest first)"),
+        shape: z.boolean().optional().describe("Default true"),
+      },
+      annotations: READ_ONLY,
+    },
+    ({ actorType: type, actorId: id, shape, ...filters }) =>
+      respond(async () => {
+        const page = await client.journal(type, id, defined(filters));
+        return shape === false ? page : { shape: journalShape(page.entries), hasMore: page.hasMore };
       }),
   );
 

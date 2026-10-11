@@ -103,10 +103,17 @@ export CF_ACCESS_CLIENT_ID=... CF_ACCESS_CLIENT_SECRET=...   # agent service tok
 actor-kit studio list --type game
 actor-kit studio inspect game room-7
 actor-kit studio timeline game room-7 --limit 20 --shape   # no values: safe for a public issue
+actor-kit studio journal game room-7 --event RoundWon --order asc   # entries that emitted RoundWon, oldest first
+actor-kit studio journal game room-7 --correlation-id game/room-7/12   # one flow: a message and everything it caused
 actor-kit studio view game room-7 --role player --caller <id>
 ```
 
-`actor-kit-studio-mcp` serves the same tools over stdio: `studio_list_actors`, `studio_actor_types`, `studio_inspect`, `studio_timeline` (shape by default) and `studio_view`.
+`actor-kit-studio-mcp` serves the same tools over stdio: `studio_list_actors`, `studio_actor_types`, `studio_inspect`, `studio_timeline` and `studio_journal` (shape by default) and `studio_view`.
+
+The journal query (`GET /__studio/api/actors/:type/:id/journal`, the `__journal()` RPC) filters journal
+entries by seq range (`from`, `to`, `before`), `causeType`, emitted `event` name and `correlationId`,
+newest first or `order=asc`. Each entry has its cause, the domain events it emitted (marked `published`
+when `publish` sends them) and its correlation and causation ids, redacted like everything else.
 
 ## Enable timeline without StudioRegistry
 

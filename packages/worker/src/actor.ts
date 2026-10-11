@@ -45,6 +45,7 @@ import {
   resolveJournalConfig,
   snapshotSeq,
 } from "./runtime/journal";
+import { type JournalOptions, type JournalPage, parseJournalOptions, readJournalPage } from "./runtime/journal-query";
 import { readStudioTimeline, timelineEntry } from "./runtime/journal-timeline";
 import {
   isStudioSocket,
@@ -95,6 +96,7 @@ import {
   createCallerHasher,
   projectCaller,
   projectConnections,
+  projectJournalEntry,
   projectOutboxRow,
   projectState,
   projectTimelineEntry,
@@ -2445,6 +2447,25 @@ export function actor(
       }));
     }
 
+    /** Studio RPC (ADR-019 F): journal entries matching a query (seq range, cause type, emitted event
+     * name, correlation id), newest first unless `order: "asc"`, redacted (ADR-014). Read-only. */
+    __journal(opts?: JournalOptions): Promise<JournalPage> {
+      this.loadPersisted({ create: false });
+      this.assertStudioEnabled();
+      const { query, viewer } = parseJournalOptions(opts);
+      const projection = this.studioProjection(viewer);
+      if (!this.persistedLoaded) return Promise.resolve({ entries: [], hasMore: false });
+      const page = readJournalPage(this.ctx.storage.sql, query, {
+        published: publishConfig?.events ?? new Set(),
+        eventId: (seq) => this.eventIdOf(seq),
+        sourceType: linkSourceType,
+      });
+      return Promise.all(page.entries.map((entry) => projectJournalEntry(entry, projection))).then((entries) => ({
+        entries,
+        hasMore: page.hasMore,
+      }));
+    }
+
     /**
      * Studio RPC (mutate scope, ADR-014): move a dead letter (`failed` execution) back to `pending`
      * under the same effect id, then run it. Any other row, or an unknown id, is refused.
@@ -2713,6 +2734,7 @@ export interface TypedActorClass<TContract> {
       }>;
       hasMore: boolean;
     }>;
+    __journal(opts?: JournalOptions): Promise<JournalPage>;
     __redrive(opts: { effectId: string }): Promise<{ ok: true } | { ok: false; error: string }>;
     __fireTimer(opts: { key: string }): Promise<{ ok: true } | { ok: false; error: string }>;
     __restore(opts: { toSeq: number }): Promise<{ ok: true } | { ok: false; error: string }>;

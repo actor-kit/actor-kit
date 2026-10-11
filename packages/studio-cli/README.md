@@ -23,6 +23,7 @@ actor-kit studio view quiz room-42 --role player --caller alice
 | `types` | Actor types |
 | `inspect <type> <id>` | State, connections, outbox and links |
 | `timeline <type> <id>` | Journal entries, newest first (`--limit`, `--before`); `--shape` returns cause types, payload keys, changed paths and checksums only |
+| `journal <type> <id>` | Journal query: causes, emitted events (with `published`), correlation and causation ids. Filters `--from`, `--to`, `--before`, `--cause-type`, `--event`, `--correlation-id`, `--limit`, `--order asc\|desc`; `--shape` keeps names, keys and checksums only |
 | `view <type> <id> --role <r>` | What a role sees (`--caller` for per-caller views) |
 
 The Worker origin comes from `--url` or `ACTOR_KIT_STUDIO_URL`.
@@ -37,7 +38,7 @@ The Worker origin comes from `--url` or `ACTOR_KIT_STUDIO_URL`.
 
 ## MCP
 
-`actor-kit-studio-mcp` serves the same read-only tools over stdio. `timeline` defaults to `--shape`, so an agent sees what changed without seeing values.
+`actor-kit-studio-mcp` serves the same read-only tools over stdio. `timeline` and `journal` (`studio_journal`) default to `--shape`, so an agent sees what changed without seeing values.
 
 ## License
 

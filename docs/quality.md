@@ -104,6 +104,22 @@ CRAP over `packages/worker/src/runtime`, `packages/test/src`, `packages/core/src
 - CRAP: core max 7.0 (0 ≥ 8). client max 10.0: `url.ts buildUrl` (CC 10, 100% covered), unchanged by this work
   (came in with `a2594c6`, same-origin socket scheme); listed as a follow-up.
 
+## ADR-019 F (journal query)
+
+Stryker on `worker/runtime/journal-query.ts` (whole), `studio-cli/src/shape.ts` (whole) and the changed
+ranges of `studio-project.ts` (`projectJournalEntry`), `studio/src/middleware.ts` (journal query schema,
+`handleJournal`), `studio-cli/src/cli.ts` (`journal`, `order`), `client.ts` (journal schema and call) and
+`mcp.ts` (`studio_journal`).
+
+| Run | Score | Survivors |
+|---|---|---|
+| First | 91.73% (233/254) | 23: CLI and MCP messages and descriptions, `order=desc` accepted, malformed id / unbound type on the journal route, `hasMore` with a page that holds exactly the rest, ORDER BY `""` |
+| After | **99.28% (273/275)** | 2, equivalent: journal-query.ts:111 (below) and the existing shape.ts:43 row |
+
+- CRAP: studio max 7.0, studio-cli max 7.0, worker (`pnpm crap:worker`, unit + integration) max 7.6; 0 functions ≥ 8.
+- `studio-mcp.test.ts` "exposes exactly the read-only tools" now lists `studio_journal`: ADR-019 F adds that
+  read-only tool, and the test's point (every tool is read-only) is unchanged.
+
 ## Equivalent mutants
 
 Surviving mutants that no test can kill, because the mutated program behaves identically. One line each.
@@ -180,6 +196,7 @@ Surviving mutants that no test can kill, because the mutated program behaves ide
 | test | simulate.ts:301 | `parseEffectId(effectId)?.seq` → `.seq` | Simulated effect ids are always `seq:index`, so the parse never fails. |
 | worker | journal-timeline.ts:202 | init start `timers: []` → `["Stryker was here"]` | Same as journal.ts:535/750: an init event schedules nothing from its start point, and timeline states never read the pending timers. |
 | worker | journal-timeline.ts:203 | `from === undefined \|\| …` → `false \|\| …` | Folding a non-init event onto no point throws inside the try, which returns null: the same "state not available". |
+| worker | journal-query.ts:111 | `query.order === "asc" ? "ASC" : …` → `""` | `ORDER BY seq` with no direction is ascending in SQLite. |
 | worker | setup.ts:226 | `local === undefined ? def : { ...def, local }` → always spread | Adds `local: undefined` to a state without a local schema; the runtime only reads `def.local === undefined` (phases.ts `parseLocal`, step.ts initial check). |
 
 ## Bugs found while hardening (2026-10-07)

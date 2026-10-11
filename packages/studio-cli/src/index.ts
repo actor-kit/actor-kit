@@ -5,6 +5,9 @@ export {
   authFromEnv,
   createStudioClient,
   type FetchFn,
+  type JournalEntry,
+  type JournalPage,
+  type JournalQuery,
   type StudioAuth,
   type StudioClient,
   StudioClientError,
@@ -12,4 +15,4 @@ export {
   type TimelinePage,
 } from "./client";
 export { createStudioMcpServer } from "./mcp";
-export { changedPaths, type TimelineShapeEntry, timelineShape } from "./shape";
+export { changedPaths, type JournalShapeEntry, journalShape, type TimelineShapeEntry, timelineShape } from "./shape";
