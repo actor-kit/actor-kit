@@ -49,6 +49,7 @@ type PlayerViewType = Infer<typeof PlayerView>;
 | `uint8` | 1 | `number` |
 | `uint16` | 2 | `number` |
 | `uint32` | 4 | `number` |
+| `int8` / `int16` / `int32` | 1 / 2 / 4 (two's complement) | `number` |
 | `float32` | 4 | `number` |
 | `float64` | 8 | `number` |
 | `string` | 2 + UTF-8 | `string` |
@@ -59,6 +60,37 @@ type PlayerViewType = Infer<typeof PlayerView>;
 - `array(T)` — array of any schema type
 - `nullable(T)` — field that can be `null` (adds a compact null bitmask to the wire format)
 - Nested `schema({...})` — objects within objects
+- `enumOf(["lobby", "playing"])` — one of a fixed list (strings, numbers or booleans), sent as its index (1 byte up to 256 values); `literal("card")` is a one-value enum that takes no bytes
+- `record(T)` — a string-keyed record (`Record<string, T>`); a delta sends only removed, changed and added keys
+- `union(tag, { name: schema({...}) })` — a discriminated union `{ [tag]: name, ...fields }`; a delta sends only the changed fields while the variant stays the same, the whole variant when it changes
+- `json(zodSchema)` — escape hatch for shapes the binary types cannot express: sent as JSON text, parsed with the Zod schema on the client, resent whole when it changes
+
+```typescript
+import { enumOf, int16, json, record, schema, uint8, union } from "@actor-kit/core";
+import { z } from "zod";
+
+const PlayerView = schema({
+  phase: enumOf(["lobby", "playing", "done"]),
+  scores: record(int16), // signed: scores can go negative
+  turn: union("kind", {
+    waiting: schema({}),
+    acting: schema({ player: uint8, seconds: uint8 }),
+  }),
+  settings: json(z.object({ theme: z.string() })),
+});
+
+type PlayerViewType = Infer<typeof PlayerView>;
+// {
+//   phase: "lobby" | "playing" | "done";
+//   scores: Record<string, number>;
+//   turn: { kind: "waiting" } | { kind: "acting"; player: number; seconds: number };
+//   settings: { theme: string };
+// }
+```
+
+All of these nest (a record of unions, an array of enums, a nullable union, ...). Encoding a value
+outside an enum or an unknown union variant throws; the server never sends a frame the client cannot
+decode.
 
 ## Binary Sync
 

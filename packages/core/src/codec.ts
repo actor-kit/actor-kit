@@ -6,8 +6,16 @@
  * All multi-byte numbers are big-endian. See docs/binary-protocol.md.
  */
 
-import type { FieldDescriptor, FieldMeta, PrimitiveTypeName, SchemaDefinition, ValueMeta } from "./schema";
-import { valueMetaOf } from "./schema";
+import type {
+  EnumValue,
+  FieldDescriptor,
+  FieldMeta,
+  PrimitiveTypeName,
+  SchemaDefinition,
+  ValueMeta,
+  VariantMeta,
+} from "./schema";
+import { show, valueMetaOf } from "./schema";
 
 export type AnySchema = SchemaDefinition<Record<string, FieldDescriptor>>;
 
@@ -68,6 +76,7 @@ export function isNullField(field: FieldMeta, value: unknown): boolean {
 // --- Fixed-width primitives ---
 
 type FixedTypeName = Exclude<PrimitiveTypeName, "string">;
+type UintTypeName = "uint8" | "uint16" | "uint32";
 
 interface FixedCodec {
   readonly size: number;
@@ -81,27 +90,137 @@ const FIXED: { readonly [K in FixedTypeName]: FixedCodec } = {
   uint8: { size: 1, write: (v, o, x) => v.setUint8(o, num(x)), read: (v, o) => v.getUint8(o) },
   uint16: { size: 2, write: (v, o, x) => v.setUint16(o, num(x)), read: (v, o) => v.getUint16(o) },
   uint32: { size: 4, write: (v, o, x) => v.setUint32(o, num(x)), read: (v, o) => v.getUint32(o) },
+  int8: { size: 1, write: (v, o, x) => v.setInt8(o, num(x)), read: (v, o) => v.getInt8(o) },
+  int16: { size: 2, write: (v, o, x) => v.setInt16(o, num(x)), read: (v, o) => v.getInt16(o) },
+  int32: { size: 4, write: (v, o, x) => v.setInt32(o, num(x)), read: (v, o) => v.getInt32(o) },
   float32: { size: 4, write: (v, o, x) => v.setFloat32(o, num(x)), read: (v, o) => v.getFloat32(o) },
   float64: { size: 8, write: (v, o, x) => v.setFloat64(o, num(x)), read: (v, o) => v.getFloat64(o) },
   boolean: { size: 1, write: (v, o, x) => v.setUint8(o, x ? 1 : 0), read: (v, o) => v.getUint8(o) !== 0 },
 };
+
+function writeFixed(c: Cursor, type: FixedTypeName, value: unknown): void {
+  FIXED[type].write(c.view, c.offset, value);
+  c.offset += FIXED[type].size;
+}
+
+function readFixed(c: Cursor, type: FixedTypeName): number | boolean {
+  const value = FIXED[type].read(c.view, c.offset);
+  c.offset += FIXED[type].size;
+  return value;
+}
+
+export function readUint(c: Cursor, type: UintTypeName): number {
+  return Number(readFixed(c, type));
+}
 
 const textEncoder = new TextEncoder();
 const textDecoder = new TextDecoder();
 
 const utf8 = (value: unknown): Uint8Array => textEncoder.encode(String(value ?? ""));
 const items = (value: unknown): readonly unknown[] => (Array.isArray(value) ? value : []);
+const jsonText = (value: unknown): string => JSON.stringify(value) ?? "null";
+
+/** A record's entries in key order; anything that is not an object has none. */
+export function entriesOf(value: unknown): [string, unknown][] {
+  return isRecord(value) ? Object.entries(value) : [];
+}
+
+function writeText(c: Cursor, encoded: Uint8Array, lengthType: UintTypeName): void {
+  writeFixed(c, lengthType, encoded.byteLength);
+  c.bytes.set(encoded, c.offset);
+  c.offset += encoded.byteLength;
+}
+
+function readText(c: Cursor, lengthType: UintTypeName): string {
+  const length = readUint(c, lengthType);
+  const start = c.offset;
+  c.offset = start + length;
+  return textDecoder.decode(c.bytes.subarray(start, start + length));
+}
+
+// --- Enums and unions ---
+
+/** The index width of an enum: none for one value, one byte up to 256 values, else two. */
+function enumIndexType(values: readonly EnumValue[]): UintTypeName | null {
+  if (values.length === 1) return null;
+  return values.length <= 0x100 ? "uint8" : "uint16";
+}
+
+function enumIndexSize(values: readonly EnumValue[]): number {
+  const type = enumIndexType(values);
+  return type === null ? 0 : FIXED[type].size;
+}
+
+function enumIndex(values: readonly EnumValue[], value: unknown): number {
+  // biome-ignore lint/complexity/useIndexOf: indexOf takes an EnumValue and `value` is not narrowed yet
+  const index = values.findIndex((v) => v === value);
+  if (index < 0) throw new Error(`enum: ${show(value)} is not one of ${values.map(show).join(", ")}`);
+  return index;
+}
+
+function readEnum(values: readonly EnumValue[], c: Cursor): EnumValue {
+  const type = enumIndexType(values);
+  const index = type === null ? 0 : readUint(c, type);
+  const value = values[index];
+  if (value === undefined) throw new Error(`enum index ${index} is out of range (${values.length} values)`);
+  return value;
+}
+
+type UnionMeta = Extract<ValueMeta, { type: "union" }>;
+
+/** The variant a union value's tag names, and its wire index. */
+export function variantOf(meta: UnionMeta, value: unknown): { readonly index: number; readonly variant: VariantMeta } {
+  const tag = asRecord(value)[meta.tag];
+  const index = meta.variants.findIndex((v) => v.name === tag);
+  const variant = meta.variants[index];
+  if (variant === undefined) {
+    throw new Error(
+      `union "${meta.tag}": ${show(tag)} is not one of ${meta.variants.map((v) => show(v.name)).join(", ")}`,
+    );
+  }
+  return { index, variant };
+}
+
+/** Reads a union's variant index and returns that variant. */
+export function readVariant(meta: UnionMeta, c: Cursor): VariantMeta {
+  const index = readUint(c, "uint8");
+  const variant = meta.variants[index];
+  if (variant === undefined) {
+    throw new Error(`union "${meta.tag}": variant index ${index} is out of range (${meta.variants.length} variants)`);
+  }
+  return variant;
+}
 
 // --- Size ---
 
+type LeafMeta = Extract<ValueMeta, { type: PrimitiveTypeName | "enum" | "json" }>;
+
 export function valueSize(meta: ValueMeta, value: unknown): number {
+  switch (meta.type) {
+    case "array":
+      return items(value).reduce<number>((size, item) => size + valueSize(meta.element, item), 2);
+    case "record":
+      return entriesOf(value).reduce<number>(
+        (size, [key, item]) => size + 2 + utf8(key).byteLength + valueSize(meta.element, item),
+        2,
+      );
+    case "schema":
+      return recordSize(meta.schema, asRecord(value));
+    case "union":
+      return 1 + recordSize(variantOf(meta, value).variant.schema, asRecord(value));
+    default:
+      return leafSize(meta, value);
+  }
+}
+
+function leafSize(meta: LeafMeta, value: unknown): number {
   switch (meta.type) {
     case "string":
       return 2 + utf8(value).byteLength;
-    case "array":
-      return items(value).reduce<number>((size, item) => size + valueSize(meta.element, item), 2);
-    case "schema":
-      return recordSize(meta.schema, asRecord(value));
+    case "json":
+      return 4 + utf8(jsonText(value)).byteLength;
+    case "enum":
+      return enumIndexSize(meta.values);
     default:
       return FIXED[meta.type].size;
   }
@@ -120,28 +239,51 @@ export function recordSize(schemaDef: AnySchema, record: Record<string, unknown>
 
 export function writeValue(meta: ValueMeta, value: unknown, c: Cursor): void {
   switch (meta.type) {
-    case "string": {
-      const encoded = utf8(value);
-      c.view.setUint16(c.offset, encoded.byteLength);
-      c.bytes.set(encoded, c.offset + 2);
-      c.offset += 2 + encoded.byteLength;
-      return;
-    }
     case "array": {
       const list = items(value);
-      c.view.setUint16(c.offset, list.length);
-      c.offset += 2;
+      writeFixed(c, "uint16", list.length);
       for (const item of list) writeValue(meta.element, item, c);
+      return;
+    }
+    case "record": {
+      const entries = entriesOf(value);
+      writeFixed(c, "uint16", entries.length);
+      for (const [key, item] of entries) {
+        writeText(c, utf8(key), "uint16");
+        writeValue(meta.element, item, c);
+      }
       return;
     }
     case "schema":
       writeRecord(meta.schema, asRecord(value), c);
       return;
-    default: {
-      const fixed = FIXED[meta.type];
-      fixed.write(c.view, c.offset, value);
-      c.offset += fixed.size;
+    case "union": {
+      const { index, variant } = variantOf(meta, value);
+      writeFixed(c, "uint8", index);
+      writeRecord(variant.schema, asRecord(value), c);
+      return;
     }
+    default:
+      writeLeaf(meta, value, c);
+  }
+}
+
+function writeLeaf(meta: LeafMeta, value: unknown, c: Cursor): void {
+  switch (meta.type) {
+    case "string":
+      writeText(c, utf8(value), "uint16");
+      return;
+    case "json":
+      writeText(c, utf8(jsonText(value)), "uint32");
+      return;
+    case "enum": {
+      const index = enumIndex(meta.values, value);
+      const type = enumIndexType(meta.values);
+      if (type !== null) writeFixed(c, type, index);
+      return;
+    }
+    default:
+      writeFixed(c, meta.type, value);
   }
 }
 
@@ -164,26 +306,44 @@ export function writeRecord(schemaDef: AnySchema, record: Record<string, unknown
 
 export function readValue(meta: ValueMeta, c: Cursor): unknown {
   switch (meta.type) {
-    case "string": {
-      const length = c.view.getUint16(c.offset);
-      const start = c.offset + 2;
-      c.offset = start + length;
-      return textDecoder.decode(c.bytes.subarray(start, start + length));
-    }
     case "array": {
-      const count = c.view.getUint16(c.offset);
-      c.offset += 2;
+      const count = readUint(c, "uint16");
       return Array.from({ length: count }, () => readValue(meta.element, c));
+    }
+    case "record": {
+      const count = readUint(c, "uint16");
+      // fromEntries defines own keys, so a key named "__proto__" stays a key.
+      return Object.fromEntries(
+        Array.from({ length: count }, () => [readText(c, "uint16"), readValue(meta.element, c)]),
+      );
     }
     case "schema":
       return readRecord(meta.schema, c);
-    default: {
-      const fixed = FIXED[meta.type];
-      const value = fixed.read(c.view, c.offset);
-      c.offset += fixed.size;
-      return value;
+    case "union": {
+      const variant = readVariant(meta, c);
+      return { [meta.tag]: variant.name, ...readRecord(variant.schema, c) };
     }
+    default:
+      return readLeaf(meta, c);
   }
+}
+
+function readLeaf(meta: LeafMeta, c: Cursor): unknown {
+  switch (meta.type) {
+    case "string":
+      return readText(c, "uint16");
+    case "json":
+      return meta.json.parse(JSON.parse(readText(c, "uint32")));
+    case "enum":
+      return readEnum(meta.values, c);
+    default:
+      return readFixed(c, meta.type);
+  }
+}
+
+/** Reads a string key (uint16 length + UTF-8), as record keys are written. */
+export function readKey(c: Cursor): string {
+  return readText(c, "uint16");
 }
 
 export function readRecord(schemaDef: AnySchema, c: Cursor): Record<string, unknown> {

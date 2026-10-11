@@ -87,13 +87,30 @@ CRAP over `packages/worker/src/runtime`, `packages/test/src`, `packages/core/src
   state did not declare the message; `declaredInAnotherState` is now `declaredInSomeState`).
 - CRAP after: studio UI max 7.0 (0 ≥ 8); worker with `pnpm crap:worker` max 7.6 (0 ≥ 8).
 
+## ADR-019 C (richer view schemas), Stryker on `core/src/schema.ts`, `codec.ts`, `delta.ts` (whole files)
+
+| Run | Score | Survivors |
+|---|---|---|
+| First | 98.64% (574/582) | 8: `isFloat` float32 arm (×2), nullable float vs `null` (×2), `nextEntries[i]?.[0]`, `valueMetaOf` guard (×2, one NoCoverage), `a === b` fast path |
+| After | **99.83% (586/587)** | 1, equivalent (delta.ts:58 fast path, below) |
+
+- Killed by `core-rich-schemas.test.ts` "float tolerance in deltas" (float32 tolerance; a `null` previous or next
+  value is never "within 1e-6" of a number) and "are read through the schema that built them".
+- Removed by simplifying: the record order check walks `nextEntries` (always defined) instead of indexing it.
+- Found by the property tests (`core-rich-schemas.property.test.ts`, fast-check over random nested schemas):
+  the 1e-6 float tolerance also hid small changes in `json`, enum and integer values (it now applies to float
+  fields only). Found by `pnpm crap`'s coverage run: the enum distinct-values check was O(n²) (65536 values took
+  over 5s); it is a Set now.
+- CRAP: core max 7.0 (0 ≥ 8). client max 10.0: `url.ts buildUrl` (CC 10, 100% covered), unchanged by this work
+  (came in with `a2594c6`, same-origin socket scheme); listed as a follow-up.
+
 ## Equivalent mutants
 
 Surviving mutants that no test can kill, because the mutated program behaves identically. One line each.
 
 | Package | Location | Mutant | Why it is equivalent |
 |---|---|---|---|
-| core | delta.ts:28 | `if (a === b) return true` → `if (false)` | Fast path only; the number and JSON comparisons below return the same result. |
+| core | delta.ts:58 | `if (a === b) return true` → `if (false)` | Fast path only; the number and JSON comparisons below return the same result. |
 | client | builder.ts:90 | `"name" in arg && "def" in arg` → `\|\|` | A SchemaDefinition has neither key, a contract has both. |
 | client | builder.ts:99, 103 (×3) | `isRecord` / `isViewSchema` → `true` | A non-schema registered for a role makes decode throw, which the client catches and ignores, the same as having no schema. |
 | client | builder.ts:116 | `if (isViewSchema(...))` → `true` | Registers `undefined` for the role; `viewSchemas[role] ?? viewSchema` falls back exactly as when it is absent. |

@@ -269,3 +269,12 @@ class_name = "Reader"
 [[migrations]]
 tag = "v22"
 new_sqlite_classes = ["Notice", "NoticeNoJournal", "Reader"]
+
+# ADR-019 C: richer view schemas
+[[durable_objects.bindings]]
+name = "SCOREBOARD"
+class_name = "Scoreboard"
+
+[[migrations]]
+tag = "adr019-rich-views"
+new_sqlite_classes = ["Scoreboard"]
