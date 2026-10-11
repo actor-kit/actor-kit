@@ -136,6 +136,16 @@ Stryker on `packages/projection/src/**` (all but `index.ts`) and `worker/runtime
 - `simulate()`'s position (`packages/test`): covered by `publish.test.ts`; CRAP for `packages/test/src` max 7.1.
 - CRAP: projection max 7.0, test max 7.1, worker (`pnpm crap:worker`) max 7.6; 0 functions ≥ 8.
 
+## View schema validation (StandardSchemaV1), Stryker on `core/src/validate.ts`, `meta.ts`, `schema.ts`
+
+| Run | Score | Survivors |
+|---|---|---|
+| First | 94.95% (339/357) | 18: messages (array, object, number, boolean), the 65535 boundaries (`>` vs `>=`), the `or null` path of a top-level nullable, `SchemaValidationError` name and path separator, nullable array elements, and checks that did not read their argument |
+| After | **99.73% (365/366)** | 1: validate.ts `validates` body emptied, which leaves every descriptor without a validator at module load; Stryker's Vitest runner reports a module-load failure as survived (same family as retry.ts:64) |
+
+- Removed by simplifying: the string byte-length check moved into its own `checkString`; `checkFields` takes the schema, not a meta it did not read; `issuesOf`'s `nullable` has no default.
+- CRAP: core max 7.0 (0 ≥ 8).
+
 ## Equivalent mutants
 
 Surviving mutants that no test can kill, because the mutated program behaves identically. One line each.

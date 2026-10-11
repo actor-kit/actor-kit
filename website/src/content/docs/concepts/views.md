@@ -92,6 +92,20 @@ All of these nest (a record of unions, an array of enums, a nullable union, ...)
 outside an enum or an unknown union variant throws; the server never sends a frame the client cannot
 decode.
 
+### Validating a view
+
+Every schema (and every field type) is a [Standard Schema](https://standardschema.dev): it validates
+the decoded JS value, with a path for each problem. Use it for a boot view a Worker inlined as JSON:
+
+```typescript
+const view = PlayerView.parse(JSON.parse(script.textContent ?? "null")); // throws SchemaValidationError
+const result = PlayerView["~standard"].validate(untrusted); // { value } or { issues: [{ message, path }] }
+```
+
+Values the wire format cannot hold (a string over 65535 UTF-8 bytes, an array or record over 65535
+entries) are rejected too. Extra keys are allowed (a view may carry its `role`). A `json(zodSchema)`
+field is checked with its Zod schema.
+
 ## Binary Sync
 
 Views defined with `view.shared(schema, fn)` or `view.perCaller(schema, fn)` are automatically encoded as compact binary frames with delta encoding — only changed fields are sent. A position update (3 float32 fields) is 15 bytes as a binary delta vs ~100 bytes as JSON.

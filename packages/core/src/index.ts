@@ -49,7 +49,6 @@ export {
   uint32,
   union,
 } from "./schema";
-
 // Shared types
 export type {
   CancelFn,
@@ -76,6 +75,9 @@ export type {
   TimerDef,
   UnlinkFn,
 } from "./types";
+// Validation (StandardSchemaV1)
+export type { StandardIssue, StandardProps, StandardResult, Validates } from "./validate";
+export { SchemaValidationError } from "./validate";
 
 // View
 export type { PerCallerViewDef, SharedViewDef, ViewDef } from "./view";
