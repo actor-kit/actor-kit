@@ -108,9 +108,20 @@ type InspectPatchFrame = Extract<
 
 function applySnapshot(state: StudioViewState, frame: SnapshotFrame): StudioViewState {
   const { state: actorState, version, actorId, connections, outbox, timers, activeLinks, linkSubscribers } = frame;
+  const rejections = frame.rejections === undefined ? {} : { rejections: frame.rejections };
   return {
     ...state,
-    inspect: { state: actorState, version, actorId, connections, outbox, timers, activeLinks, linkSubscribers },
+    inspect: {
+      state: actorState,
+      version,
+      actorId,
+      connections,
+      outbox,
+      timers,
+      activeLinks,
+      linkSubscribers,
+      ...rejections,
+    },
     timeline: capTimeline(frame.timeline),
     error: null,
   };

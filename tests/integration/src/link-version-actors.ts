@@ -24,8 +24,12 @@ export const NoticeContract = defineActor("notice", {
 
 export const NoticeNoJournalContract = defineActor("notice-no-journal", { ...NoticeContract.def, journal: false });
 
+/** The same Notice with Studio (its __restore RPC), for "restore notifies links" (ADR-018 F). */
+export const NoticeStudioContract = defineActor("notice-studio", { ...NoticeContract.def, studio: { enabled: true } });
+
 export const Notice = createActorClass(NoticeContract);
 export const NoticeNoJournal = createActorClass(NoticeNoJournalContract);
+export const NoticeStudio = createActorClass(NoticeStudioContract);
 
 type ReaderState = { text: string; updates: number };
 
@@ -42,12 +46,16 @@ export const ReaderContract = defineActor("reader", {
   links: {
     notice: link(NoticeContract, { onUpdate }),
     quiet: link(NoticeNoJournalContract, { onUpdate }),
+    studio: link(NoticeStudioContract, { onUpdate }),
   },
   messages: {
-    FOLLOW: message(z.object({ via: z.enum(["notice", "quiet"]), id: z.string() }), (state: ReaderState, p, ctx) => {
-      ctx.link(p.via, p.id);
-      return state;
-    }),
+    FOLLOW: message(
+      z.object({ via: z.enum(["notice", "quiet", "studio"]), id: z.string() }),
+      (state: ReaderState, p, ctx) => {
+        ctx.link(p.via, p.id);
+        return state;
+      },
+    ),
   },
   views: {
     viewer: view.shared(schema({ text: string, updates: uint32 }), (state: ReaderState) => ({

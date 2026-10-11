@@ -14,7 +14,8 @@
     "./token": {
       "types": "./dist/token.d.ts",
       "import": "./dist/token.js"
-    }
+    },
+    "./biome/no-nondeterminism.grit": "./biome/no-nondeterminism.grit"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
@@ -54,6 +55,8 @@
   ],
   "files": [
     "dist",
+    "docs",
+    "biome",
     "README.md",
     "LICENSE"
   ]

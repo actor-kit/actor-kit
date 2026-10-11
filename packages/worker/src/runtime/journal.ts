@@ -216,6 +216,11 @@ export interface JournalDraft {
   readonly trace?: Trace;
   /** Domain events the transition emitted, in order (ADR-017 §2); absent when none. */
   readonly emitted?: readonly EmittedEvent[];
+  /**
+   * A handler read the clock or randomness directly in production (`determinism: "warn"`, ADR-018 E):
+   * replay cannot reproduce this transition. Absent otherwise.
+   */
+  readonly nondeterministic?: true;
 }
 
 export interface EmittedEvent {
@@ -327,7 +332,7 @@ interface PersistedEvent {
 function insertEvent(sql: JournalSql, draft: JournalDraft, persisted: PersistedEvent): number {
   const row = sql
     .exec(
-      "INSERT INTO events (seq, cause_type, name, payload, caller, caller_type, role, facts, code_version, state_checksum, created_at, correlation_id, causation_id, emitted) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING seq",
+      "INSERT INTO events (seq, cause_type, name, payload, caller, caller_type, role, facts, code_version, state_checksum, created_at, correlation_id, causation_id, emitted, nondeterministic) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING seq",
       persisted.seq,
       draft.causeType,
       draft.name,
@@ -342,6 +347,7 @@ function insertEvent(sql: JournalSql, draft: JournalDraft, persisted: PersistedE
       persisted.correlationId ?? null,
       persisted.causationId ?? null,
       draft.emitted === undefined ? null : JSON.stringify(draft.emitted),
+      draft.nondeterministic === true ? 1 : null,
     )
     .toArray()[0];
   return z.object({ seq: z.number() }).parse(row).seq;
@@ -424,6 +430,7 @@ const EventRowSchema = z.object({
   correlation_id: z.string().nullish(),
   causation_id: z.string().nullish(),
   emitted: z.string().nullish(),
+  nondeterministic: z.number().nullish(),
 });
 
 const EmittedSchema = z.array(z.object({ name: z.string(), payload: z.unknown() }));
@@ -438,7 +445,7 @@ const CheckpointRowSchema = z.object({
 
 /** The `events` columns, in the order every reader selects them. */
 export const JOURNAL_EVENT_COLUMNS =
-  "seq, cause_type, name, payload, caller, caller_type, role, facts, code_version, state_checksum, created_at, correlation_id, causation_id, emitted";
+  "seq, cause_type, name, payload, caller, caller_type, role, facts, code_version, state_checksum, created_at, correlation_id, causation_id, emitted, nondeterministic";
 
 /** Parse one `events` row (selected with JOURNAL_EVENT_COLUMNS) at the storage boundary. */
 export function parseJournalEventRow(raw: unknown): JournalEvent {
@@ -459,7 +466,8 @@ export function parseJournalEventRow(raw: unknown): JournalEvent {
   };
   const traced = withIds(event, row.correlation_id ?? null, row.causation_id ?? null);
   const emitted = row.emitted ?? null;
-  return emitted === null ? traced : { ...traced, emitted: EmittedSchema.parse(JSON.parse(emitted)) };
+  const withEmitted = emitted === null ? traced : { ...traced, emitted: EmittedSchema.parse(JSON.parse(emitted)) };
+  return row.nondeterministic === 1 ? { ...withEmitted, nondeterministic: true } : withEmitted;
 }
 
 /** The event with the ids that were recorded (none for rows written before ADR-017). */
@@ -684,8 +692,19 @@ function firstEmittedDifference(expected: readonly EmittedEvent[], actual: reado
   return -1;
 }
 
-function verifyEmitted(event: JournalEvent, actual: readonly EmittedEvent[]): void {
-  const expected = event.emitted ?? [];
+/**
+ * The events a journal entry recorded, in the current vocabulary: renamed and upcast through every
+ * version after the one that wrote it (ADR-018 F). Journal readers (read models, Studio) use this too.
+ */
+export function upcastEmitted(def: Pick<ReplayableDef, "upcastEmitted">, event: JournalEvent): EmittedEvent[] {
+  const recorded = event.emitted ?? [];
+  const upcast = def.upcastEmitted;
+  if (upcast === undefined) return [...recorded];
+  return recorded.map((emitted) => upcast(emitted, event.codeVersion));
+}
+
+function verifyEmitted(def: ReplayableDef, event: JournalEvent, actual: readonly EmittedEvent[]): void {
+  const expected = upcastEmitted(def, event);
   const index = firstEmittedDifference(expected, actual);
   if (index !== -1) {
     throw new JournalEmittedDivergenceError(event.seq, event.causeType, index, expected[index], actual[index]);
@@ -789,10 +808,10 @@ async function foldToEnd(
     }
     const folded = await foldEventEmitting(def, point, event, points, options);
     point = folded.point;
-    if (options.rebuild !== true) {
-      verifyChecksum(def, point, event);
-      verifyEmitted(event, folded.emitted);
-    }
+    // A rebuild replays under new handlers, so states differ by design; the events they emit must still
+    // match what was recorded, once upcast to the current version (ADR-018 F).
+    if (options.rebuild !== true) verifyChecksum(def, point, event);
+    verifyEmitted(def, event, folded.emitted);
     points.set(event.seq, point);
     expectedSeq += 1;
   }

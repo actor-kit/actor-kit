@@ -8,7 +8,7 @@ import { testActor } from "@actor-kit/test";
 import { defineActor, link, localOf, matches, message, setup, timer } from "@actor-kit/worker/testing";
 import { describe, expect, expectTypeOf, it } from "vitest";
 import { z } from "zod";
-import { CORRECT, QuizContract } from "../../examples/quiz/quiz";
+import { CORRECT, QuizContract, type QuizState } from "../../examples/quiz/quiz";
 
 function refusal(run: () => unknown): { code: unknown; message: string } {
   try {
@@ -196,5 +196,25 @@ describe("testActor over step(): links", () => {
     const result = await testActor(Lobby).send({ unlinked: [] }, "u", { type: "SWAP" });
     expect(result.state).toEqual({ unlinked: ["a"] });
     expect(result.unlinks).toEqual([{ name: "room", id: undefined }]);
+  });
+});
+
+describe("simulate() snapshots of an actor with states are typed as the persisted phased state", () => {
+  it("SimActor.state is { shared, phase, locals, stateTimers }, narrowed by phase (Run Set Jimmy feedback)", async () => {
+    const { simulate } = await import("@actor-kit/test");
+    const q = await simulate({ contracts: [QuizContract] }).spawn(QuizContract, "q", {});
+    const state = q.state;
+    expectTypeOf(state.phase).toEqualTypeOf<readonly ["lobby"] | readonly ["round"] | readonly ["reveal"]>();
+    expectTypeOf(state.shared).toEqualTypeOf<{ players: string[]; scores: Record<string, number> }>();
+    if (matches(state, "round"))
+      expectTypeOf(localOf(state)).toEqualTypeOf<{ n: number; answers: Record<string, string> }>();
+    expect(state).toEqual({ shared: { players: [], scores: {} }, phase: ["lobby"], locals: [null], stateTimers: [[]] });
+  });
+
+  it("matches PhasedStateOf<kit, Shared>", async () => {
+    const { simulate } = await import("@actor-kit/test");
+    const q = await simulate({ contracts: [QuizContract] }).spawn(QuizContract, "q", {});
+    const typed: QuizState = q.state;
+    expect(typed.phase).toEqual(["lobby"]);
   });
 });

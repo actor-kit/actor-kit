@@ -1,5 +1,8 @@
 # @actor-kit/studio
 
+> **Docs for agents and humans:** this package ships its documentation in [`docs/`](docs/README.md) (matching the installed version). The whole site is at https://actorkit.dev, with https://actorkit.dev/llms.txt (an index) and https://actorkit.dev/llms-full.txt (everything in one file) for agents. Every error and refusal carries a `code` documented at https://actorkit.dev/errors/.
+
+
 Devtools for Actor Kit: a dashboard of every actor, and for each one its live state and phase, a timeline built from the journal (diffs, emitted events, causation links, restore), connections, outbox (with redrive), timers and links. Served by your Worker at `/__studio`.
 
 ## Install

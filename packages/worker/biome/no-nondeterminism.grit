@@ -1,0 +1,26 @@
+// actor-kit (ADR-018 E): handlers must not read the clock or randomness directly.
+//
+// Flags Date.now(), new Date(), Math.random() and crypto.randomUUID() inside handler bodies: the handler
+// passed to message() / timer() (also kit.message, kit.in(...).message, kit.timer), and the callbacks
+// onDone, onError, onUpdate, onUnlink, connect, disconnect, enter and init. A service's `fn` is not a
+// handler and may use them. Handlers use ctx.now(), ctx.random() and ctx.id(), which the journal
+// records so replay reproduces them.
+//
+// Enable it in biome.json:  "plugins": ["./node_modules/@actor-kit/worker/biome/no-nondeterminism.grit"]
+// Silence one line on purpose:  // biome-ignore lint/plugin: <why>
+language js
+
+or {
+  `$_.message($_, $handler)`,
+  `message($_, $handler)`,
+  `$_.timer($_, $handler)`,
+  `timer($_, $handler)`,
+  `$key: $handler` where $key <: or { `onDone`, `onError`, `onUpdate`, `onUnlink`, `connect`, `disconnect`, `enter`, `init` }
+} where {
+  $handler <: contains bubble or { `Date.now()`, `new Date()`, `Math.random()`, `crypto.randomUUID()` } as $call where {
+    register_diagnostic(
+      span = $call,
+      message = "Handlers must not read the clock or randomness directly: use ctx.now(), ctx.random() or ctx.id() (recorded in the journal, so replay reproduces them). See https://actorkit.dev/errors/nondeterminism/"
+    )
+  }
+}

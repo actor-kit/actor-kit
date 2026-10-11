@@ -7,7 +7,7 @@ export { defineActor } from "./define";
 // Identity (Worker-trust model)
 export { CALLER_ID_HEADER, CALLER_TYPE_HEADER, withCallerIdentity } from "./identity";
 // Link declaration
-export type { LinkDef, LinkErrorCode } from "./link";
+export type { LinkContext, LinkDef, LinkErrorCode, LinkHandlers } from "./link";
 export { link } from "./link";
 // Message builder
 export type { PlainMessageContext } from "./message";
@@ -26,7 +26,16 @@ export { closeCodeToSend } from "./runtime/close-code";
 export type { ConnectRequest } from "./runtime/connect-request";
 export { ACTOR_KIT_PROTOCOL, parseConnectRequest } from "./runtime/connect-request";
 // Determinism guards for the test harness (ADR-016 §5)
-export { NondeterminismError, withDeterminismGuard } from "./runtime/determinism";
+export type { DeterminismMode, DeterminismWatch, NondeterministicEvent, Violation } from "./runtime/determinism";
+export {
+  determinismWatch,
+  flagNondeterministic,
+  NondeterminismError,
+  nondeterministicEvent,
+  resolveDeterminism,
+  withDeterminismGuard,
+  withDeterminismWarnings,
+} from "./runtime/determinism";
 export { parseDuration } from "./runtime/duration";
 // Effect ids, retries, outbox store (ADR-015 D1)
 export type { EffectIdParts } from "./runtime/effect-id";
@@ -89,6 +98,7 @@ export {
   rebuildFromJournal,
   resolveJournalConfig,
   snapshotSeq,
+  upcastEmitted,
 } from "./runtime/journal";
 // Studio timeline read from the journal (ADR-017 §5)
 export type { TimelinePageQuery, TimelineSource } from "./runtime/journal-timeline";
@@ -161,6 +171,16 @@ export {
   refuseNoRole,
   refuseNotInitialized,
 } from "./runtime/refusal";
+// Rejections outside the journal (ADR-018 F)
+export type { Rejection, RejectionEvent, RejectionFields } from "./runtime/rejections";
+export {
+  payloadHash,
+  REJECTIONS_KEEP,
+  readRejections,
+  recordRejection,
+  rejectionCounts,
+  rejectionEvent,
+} from "./runtime/rejections";
 // Namespace resolution
 export { resolveNamespace } from "./runtime/resolve-namespace";
 export type { RestorePlan } from "./runtime/restore";
@@ -288,6 +308,7 @@ export type {
   KitActorDef,
   KitContractDef,
   KitDefCheck,
+  KitServiceDef,
   LocalOf,
   PhaseContext,
   PhasedState,

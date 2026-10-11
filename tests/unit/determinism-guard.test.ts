@@ -1,3 +1,4 @@
+// biome-ignore-all lint/plugin: these tests read the clock in handlers on purpose, to check the determinism guard
 /**
  * Determinism guards (ADR-016 §5). While a handler runs under testActor(), simulate() or replayJournal(),
  * the nondeterministic globals throw NondeterminismError (use ctx.now() / ctx.random() / ctx.id()). They

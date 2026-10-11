@@ -1,5 +1,8 @@
 # @actor-kit/studio-cli
 
+> **Docs for agents and humans:** this package ships its documentation in [`docs/`](docs/README.md) (matching the installed version). The whole site is at https://actorkit.dev, with https://actorkit.dev/llms.txt (an index) and https://actorkit.dev/llms-full.txt (everything in one file) for agents. Every error and refusal carries a `code` documented at https://actorkit.dev/errors/.
+
+
 Read-only access to [Actor Kit Studio](https://actorkit.dev/studio/overview/) from a terminal or an agent: a CLI and an MCP server. Values are redacted by the actor before they leave it, and agents see hashed callers.
 
 ## Install

@@ -191,6 +191,71 @@ ctx.cancel(id); // later, from another handler
 `effectInfo()` (from `@actor-kit/worker/testing`, for hand-built service tests) now takes an `audit` object
 and returns `record()`.
 
+## Journal format for 0.3 (ADR-018 F)
+
+**Callbacks can emit, and a callback that only emits is journaled.** Lifecycle, service and link
+callbacks get `ctx.emit` (typed by the kit's events; use `kit.service()` and `kit.link()` for services
+and links). Before, a lifecycle or service callback that changed nothing was not journaled.
+
+```ts
+// Before: no emit in callbacks; events had to be emitted by a follow-up message
+services: { charge: { fn, onDone: (s, r) => ({ ...s, paid: true }) } },
+
+// After
+services: {
+  charge: kit.service({ fn, onDone: (s: S, r, _i, ctx) => { ctx.emit("Paid", { id: ctx.effectId }); return { ...s, paid: true }; } }),
+},
+links: { feed: kit.link(Feed, { onUpdate: (s: S, view, _id, ctx) => { ctx.emit("Synced", view); return s; } }) },
+```
+
+**A standalone `link()` types `ctx.emit` like a kit without events** (no event accepted); use
+`kit.link()` to emit from link callbacks.
+
+**Rebuilds by replay compare emitted events.** A `rebuild: "replay"` version now fails with
+`JournalEmittedDivergenceError` when the new handlers emit different events than were recorded. If you
+renamed or reshaped an event on purpose, say so in the step:
+
+```ts
+// Before
+version(2, StateV2, { rebuild: "replay" }),
+
+// After
+version(2, StateV2, {
+  rebuild: "replay",
+  renames: { BidPlaced: "BidMade" },
+  emitted: { BidPlaced: (p) => ({ ...p, currency: "USD" }) },
+}),
+```
+
+**Refused messages are recorded** (a new `rejections` table, migration `0018_rejections`, created on
+wake); nothing to change in your code.
+
+## Determinism in production (ADR-018 E)
+
+Handlers now run under the determinism guard in the Worker too. With the default `determinism: "warn"`
+nothing fails: a handler that reads `Date.now()`, `new Date()`, `Math.random()`, `crypto.randomUUID()` and
+the like gets the real value, but the runtime logs an `actor_kit.handler.nondeterministic` line and flags
+the journal entry (replay cannot reproduce it). Fix the handler, or choose the mode:
+
+```ts
+// Before: no option; production never checked
+export const Game = defineActor("game", { ... });
+
+// After: the same behaviour plus the warning (default), or fail like the tests do
+export const Game = game.actor("game", { determinism: "throw", ... }); // "warn" | "throw" | "off"
+```
+
+```ts
+// Before (warned in production from 0.3, throws in tests)
+PLACE: game.message(z.object({}), (s: S) => ({ ...s, at: Date.now(), id: crypto.randomUUID() })),
+
+// After
+PLACE: game.message(z.object({}), (s: S, _p, ctx) => ({ ...s, at: ctx.now(), id: ctx.id() })),
+```
+
+To catch these before tests run, enable the Biome plugin:
+`"plugins": ["./node_modules/@actor-kit/worker/biome/no-nondeterminism.grit"]`.
+
 ## The phase is a path; locals and scoped timers are per level (ADR-019 A)
 
 States nest, so the persisted state of an actor with states is now

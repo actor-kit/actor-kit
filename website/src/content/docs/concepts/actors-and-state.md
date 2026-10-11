@@ -79,6 +79,33 @@ rebuilt) to the current version, and journaled as a `migrate` event with a check
 replays from that bump; `replayJournal()` refuses events written by a version that is not in the chain. Without
 `versions`, an actor is at version 1. The old `version` / `migrate` options are refused.
 
+## Time and randomness
+
+Handlers are replayed from the journal, so they read time and randomness only through `ctx.now()`,
+`ctx.random()` and `ctx.id()`: the journal records what they returned, and replay hands the same values
+back. Reading the globals directly (`Date.now()`, `new Date()`, `performance.now()`, `Math.random()`,
+`crypto.randomUUID()`, `crypto.getRandomValues()`) is caught three ways:
+
+- **In tests** (`testActor`, `simulate`, `replayJournal`) every such call throws a `NondeterminismError`.
+- **In production** the actor's `determinism` option decides. `"warn"` (the default) lets the call
+  return the real value, logs one `actor_kit.handler.nondeterministic` line naming what was called and
+  what to use instead, and flags the journal entry `nondeterministic` (Studio's timeline shows a badge).
+  `"throw"` fails the transition as in tests; `"off"` patches nothing.
+
+```typescript
+export const Game = game.actor("game", { determinism: "throw", ... });
+```
+
+- **In your editor and CI** with the Biome plugin that ships in `@actor-kit/worker`. It flags those calls
+  inside `message()` / `timer()` handlers and the `onDone`, `onError`, `onUpdate`, `onUnlink`, `connect`,
+  `disconnect`, `enter` and `init` callbacks (a service's `fn` is not a handler and may use them):
+
+```json
+{ "plugins": ["./node_modules/@actor-kit/worker/biome/no-nondeterminism.grit"] }
+```
+
+Silence a line on purpose with `// biome-ignore lint/plugin: <why>`.
+
 ## Persistence
 
 State is automatically persisted to DO SQLite after every transition. When the DO restarts (after hibernation or a deploy), state is restored.

@@ -459,7 +459,7 @@ function createSimulation(
   ): void {
     const cause: StepCause = { type: "link.onUpdate", link, sourceId, view, trace };
     const result = step(defOf(subscriber.type), subscriber.state, cause, factsFor(subscriber), envFor(subscriber.type));
-    if (result.state !== subscriber.state) commit(subscriber, result, null);
+    if (changed(subscriber, result)) commit(subscriber, result, null);
   }
 
   /** A new link gets the target's current view at once (if the target exists yet). */
@@ -544,11 +544,19 @@ function createSimulation(
     sendTo(to, as.caller, message, { callerType: as.callerType }, { delivery, trace });
   }
 
+  /**
+   * Whether a callback's transition is committed: it changed the state or declared something (executions,
+   * forwards, timers, emitted events: a transition that only emits is journaled, ADR-018 F).
+   */
+  function changed(actor: ActorData, result: StepResult): boolean {
+    const { effects } = result;
+    const declared = effects.getExecutions().length + effects.getForwards().length + effects.getEmitted().length;
+    return result.state !== actor.state || declared + effects.toTimerOps().length > 0;
+  }
+
   /** Commit a transition only when it changed something (lifecycle, service, link callbacks). */
   function commitIfChanged(actor: ActorData, result: StepResult, from: Caller): void {
-    const effects = result.effects.getExecutions().length + result.effects.getForwards().length;
-    const timers = result.effects.toTimerOps().length;
-    if (result.state !== actor.state || effects + timers > 0) commit(actor, result, from);
+    if (changed(actor, result)) commit(actor, result, from);
   }
 
   // --- Operations ---
@@ -642,7 +650,7 @@ function createSimulation(
     const actor = record(pending.actor);
     const traced = { ...settled, trace: effectTrace(actor, pending.effectId) };
     const result = step(defOf(actor.type), actor.state, traced, factsFor(actor), envFor(actor.type));
-    if (result.state !== actor.state) commit(actor, result, null);
+    if (changed(actor, result)) commit(actor, result, null);
   }
 
   /** A resolved result as onDone gets it (ADR-018 G): parsed by the service's `result`, within its size limit. */

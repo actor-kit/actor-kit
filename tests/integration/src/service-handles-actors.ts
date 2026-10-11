@@ -13,7 +13,7 @@ import { z } from "zod";
 
 export type CashierState = { ids: string[]; log: string[] };
 
-const cashier = setup({});
+const cashier = setup({ events: { Charged: z.object({ effectId: z.string() }) } });
 
 const log = (s: CashierState, line: string): CashierState => ({ ...s, log: [...s.log, line] });
 
@@ -38,7 +38,10 @@ const Cashier = cashier.actor("cashier", {
         effect.record("gateway", "test");
         return { receipt: "r-1", secret: "dropped" };
       },
-      onDone: (s: CashierState, result, _input, ctx) => log(s, `done ${ctx.effectId} ${JSON.stringify(result)}`),
+      onDone: (s: CashierState, result, _input, ctx) => {
+        ctx.emit("Charged", { effectId: ctx.effectId });
+        return log(s, `done ${ctx.effectId} ${JSON.stringify(result)}`);
+      },
     }),
     SLOW: cashier.service({
       timeoutMs: 60_000,

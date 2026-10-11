@@ -9,14 +9,17 @@ export { defineActor } from "./define";
 // Identity (Worker-trust model)
 export { CALLER_ID_HEADER, CALLER_TYPE_HEADER, withCallerIdentity } from "./identity";
 // Link declaration
-export type { LinkDef, LinkErrorCode } from "./link";
+export type { LinkContext, LinkDef, LinkErrorCode, LinkHandlers } from "./link";
 export { link } from "./link";
-// Message helpers
 export type { PlainMessageContext } from "./message";
 export { message } from "./message";
 // Actor references
 export type { ActorRef, LocationHint } from "./ref";
 export { createRef } from "./ref";
+// Message helpers
+// Determinism in production (ADR-018 E): the `determinism` option and the error "throw" raises
+export type { DeterminismMode } from "./runtime/determinism";
+export { NondeterminismError } from "./runtime/determinism";
 // Effect metadata (ADR-016 §1): what a service's third argument and a forward's ctx.delivery carry
 export type { DeliveryInfo, EffectInfo } from "./runtime/effect-info";
 // Typed env (ADR-016 §4): binding helpers for the `env` schema
@@ -46,6 +49,7 @@ export type {
   KitActorDef,
   KitContractDef,
   KitDefCheck,
+  KitServiceDef,
   LocalOf,
   PhasedState,
   PhasedStateOf,

@@ -1,5 +1,8 @@
 # @actor-kit/client
 
+> **Docs for agents and humans:** this package ships its documentation in [`docs/`](docs/README.md) (matching the installed version). The whole site is at https://actorkit.dev, with https://actorkit.dev/llms.txt (an index) and https://actorkit.dev/llms-full.txt (everything in one file) for agents. Every error and refusal carries a `code` documented at https://actorkit.dev/errors/.
+
+
 Browser and React Native client for connecting to Actor Kit actors via WebSocket with typed views and events.
 
 ## Install
@@ -15,9 +18,10 @@ import { actorClient } from "@actor-kit/client";
 import { counterContract } from "./contract";
 
 const client = actorClient(counterContract).create({
-  url: "wss://my-worker.example.com",
-  actorId: "counter-1",
+  path: "/api/counter/counter-1", // through your Worker; host defaults to the page's
+  initialView: { count: 0 },
 });
+client.connect();
 
 // Subscribe to view updates
 client.subscribe((view) => {
@@ -25,7 +29,7 @@ client.subscribe((view) => {
 });
 
 // Send typed messages
-client.send("increment", {});
+client.send({ type: "INCREMENT" });
 
 // Disconnect when done
 client.disconnect();

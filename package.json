@@ -16,7 +16,9 @@
     "crap": "vitest run --coverage --coverage.reporter=json --coverage.include='packages/*/src/**' --coverage.include='packages/studio/ui/src/**' --silent > /dev/null && node scripts/crap.mts",
     "crap:worker": "vitest run --coverage --coverage.reporter=json --coverage.include='packages/*/src/**' --silent > /dev/null && pnpm build > /dev/null && ACTOR_KIT_COVERAGE=1 pnpm --filter @actor-kit/integration-tests exec vitest run --coverage --silent > /dev/null && node scripts/crap.mts --coverage coverage/coverage-final.json --coverage coverage/integration/coverage-final.json packages/worker/src",
     "typecheck:types": "tsc -p tests/unit/tsconfig.types.json",
-    "typecheck:budget": "node scripts/type-budget.mts"
+    "typecheck:budget": "node scripts/type-budget.mts",
+    "docs:gen": "node scripts/gen-docs.mts",
+    "docs:check": "node scripts/gen-docs.mts --check"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.5.14",

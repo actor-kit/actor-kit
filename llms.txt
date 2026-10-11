@@ -1,0 +1,131 @@
+# Actor Kit
+
+> Actors on the edge: each actor is a Cloudflare Durable Object with synchronous reducer handlers, roles, per-role binary views, typed services through an outbox, durable timers, states with typed locals, domain events, and a journal with replay and restore. Packages: @actor-kit/core, worker, client, react, test, storybook, studio, studio-cli.
+
+For agents: define actors only with `setup()` and `kit.actor()`; handlers are synchronous and read time and randomness only through `ctx.now()`, `ctx.random()`, `ctx.id()`; every error and refusal carries a `code` with a page under /errors/. Each package also ships these docs in its `docs/` folder.
+
+## Getting started
+
+- [Overview](https://actorkit.dev/getting-started/overview/): When to use Actor Kit and how it compares to alternatives.
+- [Installation](https://actorkit.dev/getting-started/installation/): Install Actor Kit and set up your project.
+- [Quick Start](https://actorkit.dev/getting-started/quick-start/): Build a real-time counter in under 5 minutes.
+
+## Examples
+
+- [Counter](https://actorkit.dev/examples/counter/): A minimal shared counter with real-time sync.
+- [Todo List](https://actorkit.dev/examples/todo-list/): Multiple roles, guards, and flat messages.
+- [Chat Room](https://actorkit.dev/examples/chat-room/): Real-time messaging with connect/disconnect lifecycle.
+- [Auction](https://actorkit.dev/examples/auction/): Guards, competitive bidding, and real-time updates.
+
+## Concepts
+
+- [Actors & State](https://actorkit.dev/concepts/actors-and-state/): How actors work and how state is managed.
+- [Authentication](https://actorkit.dev/concepts/authentication/): How to authenticate clients connecting to your actors. The library is auth-agnostic — your Worker owns identity.
+- [Roles & Authorization](https://actorkit.dev/concepts/roles-and-authorization/): How roles work and how authorization is enforced.
+- [Messages & Guards](https://actorkit.dev/concepts/messages-and-guards/): How messages are validated and how guards work.
+- [Views](https://actorkit.dev/concepts/views/): Schema-defined views with per-role projections.
+- [Binary State Sync](https://actorkit.dev/concepts/binary-sync/): Schema-driven binary encoding with bitmask delta frames for minimal wire overhead.
+- [Side Effects](https://actorkit.dev/concepts/side-effects/): Durable async effects via services and execute().
+- [Timers](https://actorkit.dev/concepts/timers/): Durable timers that survive hibernation, restarts and deploys.
+- [Domain events](https://actorkit.dev/concepts/domain-events/): Record what happened, not only what was asked for, with typed ctx.emit.
+- [States](https://actorkit.dev/concepts/states/): Phases with typed locals and state-scoped timers, nested as deep as the game needs.
+- [Testing](https://actorkit.dev/concepts/testing/): How to test actors at every level — from pure functions to full-stack browser tests.
+- [Scalability](https://actorkit.dev/concepts/scalability/): How actor-kit scales — from single-user counters to multiplayer game worlds.
+
+## Recipes
+
+- [Actor-to-Actor Communication](https://actorkit.dev/recipes/actor-to-actor/): How actors sync state, forward events, and call each other using links, services, and DO stubs.
+- [Scaling with Relays](https://actorkit.dev/recipes/scaling-with-relays/): Handle thousands of connections using relay actors.
+- [Testing Side Effects](https://actorkit.dev/recipes/testing-side-effects/): How to verify execute() calls without running them.
+- [Storybook Testing](https://actorkit.dev/recipes/storybook/): Visual component testing with Storybook play functions and actor-kit mock clients.
+
+## Studio
+
+- [Studio](https://actorkit.dev/studio/overview/): Introspect and debug your actors in real-time with Actor Kit Studio.
+- [Studio Setup](https://actorkit.dev/studio/setup/): How to add Actor Kit Studio to your project.
+
+## FAQ
+
+- [FAQ](https://actorkit.dev/faq/): Frequently asked questions about Actor Kit.
+
+## API reference
+
+- [@actor-kit/core & @actor-kit/worker](https://actorkit.dev/api/core/): Server-side API reference.
+- [@actor-kit/client](https://actorkit.dev/api/client/): Browser client SDK reference.
+- [@actor-kit/react](https://actorkit.dev/api/react/): React SDK reference.
+- [@actor-kit/test](https://actorkit.dev/api/test/): Test helper reference.
+- [@actor-kit/storybook](https://actorkit.dev/api/storybook/): Storybook decorator and mock client for visual testing.
+- [@actor-kit/studio](https://actorkit.dev/api/studio/): Studio package API reference.
+
+## Upgrading
+
+- [Upgrading to 0.3](https://github.com/actor-kit/actor-kit/blob/main/docs/upgrading-0.3.md): one note per breaking change, with code before and after.
+
+## Errors
+
+- [unknown_message](https://actorkit.dev/errors/unknown_message/): The actor has no message of that name for the caller's role (and current state).
+- [invalid_payload](https://actorkit.dev/errors/invalid_payload/): The message's payload does not match its schema.
+- [guard_failed](https://actorkit.dev/errors/guard_failed/): The message's guard returned false for this caller in the current state.
+- [wrong_state](https://actorkit.dev/errors/wrong_state/): The message is declared only by other states than the one the actor is in.
+- [no_role](https://actorkit.dev/errors/no_role/): No role predicate matched the caller.
+- [not_initialized](https://actorkit.dev/errors/not_initialized/): The actor has not been spawned yet.
+- [invalid_delivery](https://actorkit.dev/errors/invalid_delivery/): A forwarded message carried delivery metadata that does not parse.
+- [invalid_actor_definition](https://actorkit.dev/errors/invalid_actor_definition/): An actor definition is missing a required part or is not an actor contract.
+- [invalid_versions](https://actorkit.dev/errors/invalid_versions/): The `versions` chain is malformed, or a state does not match its version's schema.
+- [no_version_path](https://actorkit.dev/errors/no_version_path/): There is no step in `versions` from a persisted version to the current one.
+- [invalid_retry](https://actorkit.dev/errors/invalid_retry/): A service's or link's `retry` option is invalid.
+- [invalid_timeout](https://actorkit.dev/errors/invalid_timeout/): A `timeoutMs` option is not a positive number of milliseconds.
+- [invalid_service_option](https://actorkit.dev/errors/invalid_service_option/): A service declares an invalid option (`delivery`, `result` or a reserved name).
+- [invalid_publish](https://actorkit.dev/errors/invalid_publish/): The `publish` option names no queue, an undeclared event, or a reserved service.
+- [invalid_journal_option](https://actorkit.dev/errors/invalid_journal_option/): A `journal` option is invalid.
+- [invalid_redact_pattern](https://actorkit.dev/errors/invalid_redact_pattern/): A `studio.redact` pattern is empty or malformed.
+- [invalid_determinism_option](https://actorkit.dev/errors/invalid_determinism_option/): The `determinism` option is not one of the allowed values.
+- [missing_initial](https://actorkit.dev/errors/missing_initial/): An actor with `states` has no `initial` state.
+- [initial_state_local](https://actorkit.dev/errors/initial_state_local/): The initial state declares a local, but nothing exists yet to build it from.
+- [async_handler](https://actorkit.dev/errors/async_handler/): A handler returned a Promise. Handlers are synchronous reducers.
+- [undeclared_event](https://actorkit.dev/errors/undeclared_event/): `ctx.emit` named an event the actor does not declare.
+- [invalid_event_payload](https://actorkit.dev/errors/invalid_event_payload/): An emitted event's payload does not match its schema.
+- [undeclared_timer](https://actorkit.dev/errors/undeclared_timer/): `ctx.schedule` named a timer the actor (or its current state) does not declare.
+- [invalid_timer_payload](https://actorkit.dev/errors/invalid_timer_payload/): A scheduled timer's payload does not match its schema.
+- [invalid_schedule](https://actorkit.dev/errors/invalid_schedule/): `ctx.schedule` options are invalid.
+- [invalid_duration](https://actorkit.dev/errors/invalid_duration/): A duration is not a number of ms or a number with a unit.
+- [undeclared_state](https://actorkit.dev/errors/undeclared_state/): `goto` (or a persisted phase) names a state the actor does not declare.
+- [invalid_local](https://actorkit.dev/errors/invalid_local/): A state's local does not match its schema.
+- [missing_state_input](https://actorkit.dev/errors/missing_state_input/): A state that declares an enter `input` was entered on the way to another state (or as an `initial` child).
+- [invalid_transition](https://actorkit.dev/errors/invalid_transition/): `enter` or `exit` returned a `goto` (or `exit` returned `stay`).
+- [invalid_phased_state](https://actorkit.dev/errors/invalid_phased_state/): The persisted state of an actor with states is not `{ shared, phase, locals, stateTimers }`.
+- [nondeterminism](https://actorkit.dev/errors/nondeterminism/): A handler read the clock or randomness directly (Date.now, new Date(), Math.random, crypto.randomUUID, ...).
+- [invalid_result](https://actorkit.dev/errors/invalid_result/): A service's result does not match its `result` schema, or is larger than the size limit.
+- [invalid_env](https://actorkit.dev/errors/invalid_env/): The Worker env does not match the actor's `env` schema (a binding is missing or of the wrong kind).
+- [queue_not_bound](https://actorkit.dev/errors/queue_not_bound/): The Queue binding `publish.queue` names is not bound in the Worker env.
+- [undeclared_link](https://actorkit.dev/errors/undeclared_link/): A link name is not declared in the actor's `links`.
+- [link_unavailable](https://actorkit.dev/errors/link_unavailable/): A link could not be made or read: the target is unreachable or has no role/view for the linking actor.
+- [actor_not_found](https://actorkit.dev/errors/actor_not_found/): No Durable Object namespace was found for an actor type, or the binding is not an actor-kit Durable Object.
+- [invalid_ref](https://actorkit.dev/errors/invalid_ref/): `createRef` was called with the wrong arguments.
+- [invalid_input](https://actorkit.dev/errors/invalid_input/): The spawn input does not match the actor's `input` schema, or the actor needs input it was not given.
+- [no_view](https://actorkit.dev/errors/no_view/): The caller's role has no view.
+- [invalid_token](https://actorkit.dev/errors/invalid_token/): The JWT is not valid for this actor (wrong actor id or type, missing `sub`, or an invalid `act`).
+- [journal_divergence](https://actorkit.dev/errors/journal_divergence/): Replaying the journal gave a different state than was recorded.
+- [journal_emitted_divergence](https://actorkit.dev/errors/journal_emitted_divergence/): Replaying the journal emitted different domain events than were recorded.
+- [journal_nondeterminism](https://actorkit.dev/errors/journal_nondeterminism/): A handler read a fact on replay that the journal did not record.
+- [journal_version](https://actorkit.dev/errors/journal_version/): A journal event was written by a version with no path to the current one.
+- [journal_invalid](https://actorkit.dev/errors/journal_invalid/): The journal is incomplete or out of order for what was asked of it.
+- [restore_out_of_range](https://actorkit.dev/errors/restore_out_of_range/): `restore` was asked for a seq the journal cannot rebuild.
+- [studio_disabled](https://actorkit.dev/errors/studio_disabled/): Studio is not enabled for this actor.
+- [studio_unavailable](https://actorkit.dev/errors/studio_unavailable/): Studio is missing a secret or got invalid options.
+- [studio_request_failed](https://actorkit.dev/errors/studio_request_failed/): The Studio API answered with an error or something that is not Studio.
+- [cli_usage](https://actorkit.dev/errors/cli_usage/): The `actor-kit studio` command line is incomplete or invalid.
+- [invalid_frame](https://actorkit.dev/errors/invalid_frame/): A frame from the server could not be read.
+- [missing_host](https://actorkit.dev/errors/missing_host/): The client has no host to connect to (no window.location).
+- [headers_in_browser](https://actorkit.dev/errors/headers_in_browser/): `getHeaders` was used in a browser, which cannot set WebSocket upgrade headers.
+- [missing_provider](https://actorkit.dev/errors/missing_provider/): A React hook was used outside its actor context's `<Provider>`.
+- [not_spawned](https://actorkit.dev/errors/not_spawned/): The simulation has no actor with that type and id.
+- [already_spawned](https://actorkit.dev/errors/already_spawned/): An actor with that type and id is already spawned in the simulation.
+- [unknown_effect](https://actorkit.dev/errors/unknown_effect/): No pending effect matches the id, or the id matches effects of several actors.
+- [invalid_rejection](https://actorkit.dev/errors/invalid_rejection/): A simulated rejection does not match the service's declared errors or a built-in error.
+- [timer_loop](https://actorkit.dev/errors/timer_loop/): More timers fired in one `advance()` than the simulation allows (a timer that reschedules itself at once?).
+- [connection_closed](https://actorkit.dev/errors/connection_closed/): A simulated connection was closed twice.
+
+## Optional
+
+- [Everything in one file](https://actorkit.dev/llms-full.txt)

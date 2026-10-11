@@ -13,6 +13,10 @@
  * - `state` steps the previous version's state to this one (no step: it must already match).
  * - `events` upcasts journaled message payloads, by message name, when replaying events written
  *   before this version.
+ * - `emitted` upcasts journaled domain-event payloads and `renames` renames domain events (ADR-018 F),
+ *   both keyed by the event's name before this version: replay upcasts recorded events through every
+ *   later step before comparing them with what the handlers emit now, and journal readers get them in
+ *   the current vocabulary (`upcastEmitted`).
  * - `rebuild: "replay"` rebuilds the state by replaying the journal under the new handlers instead
  *   of stepping it (needs the journal).
  *
@@ -30,6 +34,10 @@ export interface VersionOptions<S, P> {
   readonly state?: (previous: P) => S;
   /** Payload upcasts for messages journaled before this version, by message name. */
   readonly events?: Readonly<Record<string, (payload: Payload) => Payload>>;
+  /** Payload upcasts for domain events emitted before this version, by their name then (ADR-018 F). */
+  readonly emitted?: Readonly<Record<string, (payload: Payload) => Payload>>;
+  /** Domain events renamed in this version: `{ OldName: "NewName" }` (ADR-018 F). */
+  readonly renames?: Readonly<Record<string, string>>;
   /** Rebuild the state by replaying the journal under the new handlers. */
   readonly rebuild?: "replay";
 }
@@ -82,6 +90,8 @@ const StepSchema = z.object({
   schema: z.custom<SafeParser>(isSchema, "schema must be a Zod schema"),
   state: z.custom<(previous: unknown) => unknown>(isFunction).optional(),
   events: z.record(z.string(), z.custom<(payload: Payload) => Payload>(isFunction)).optional(),
+  emitted: z.record(z.string(), z.custom<(payload: Payload) => Payload>(isFunction)).optional(),
+  renames: z.record(z.string(), z.string().min(1)).optional(),
   rebuild: z.literal("replay").optional(),
 });
 type Step = z.infer<typeof StepSchema>;
@@ -97,6 +107,14 @@ export interface CompiledVersions {
   migrate(persisted: unknown, fromVersion: number): unknown;
   /** Upcast a message payload journaled at `fromVersion` through every later version. */
   upcast(message: string, payload: unknown, fromVersion: number): unknown;
+  /** A domain event emitted at `fromVersion`, renamed and upcast through every later version (ADR-018 F). */
+  upcastEmitted(event: EmittedUpcast, fromVersion: number): EmittedUpcast;
+}
+
+/** A domain event as the journal records it: its name and payload. */
+export interface EmittedUpcast {
+  readonly name: string;
+  readonly payload: unknown;
 }
 
 function parseAt(step: Step, state: unknown): unknown {
@@ -168,6 +186,15 @@ export function compileVersions(chain: unknown): CompiledVersions {
       }
       return next;
     },
+    upcastEmitted(event, fromVersion) {
+      let { name, payload } = event;
+      for (const step of steps.filter((s) => s.version > fromVersion)) {
+        const upcast = step.emitted?.[name];
+        if (upcast !== undefined && isRecord(payload)) payload = upcast(payload);
+        name = step.renames?.[name] ?? name;
+      }
+      return { name, payload };
+    },
   };
 }
 
@@ -178,6 +205,7 @@ export interface RuntimeVersioning {
   readonly rebuildVersion?: number | null;
   migrate?(persisted: unknown, fromVersion: number): unknown;
   upcast?(message: string, payload: unknown, fromVersion: number): unknown;
+  upcastEmitted?(event: EmittedUpcast, fromVersion: number): EmittedUpcast;
 }
 
 /**
@@ -204,5 +232,6 @@ export function toRuntimeDef<D extends object>(def: D): D & RuntimeVersioning {
     rebuildVersion: compiled.rebuildVersion,
     migrate: compiled.migrate,
     upcast: compiled.upcast,
+    upcastEmitted: compiled.upcastEmitted,
   };
 }

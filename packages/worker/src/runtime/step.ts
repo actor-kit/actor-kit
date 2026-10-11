@@ -62,16 +62,16 @@ export interface StepDef {
   links?: Record<
     string,
     {
-      onUpdate(state: unknown, view: unknown, id: string | undefined, ctx: DeterministicContext): unknown;
+      onUpdate(state: unknown, view: unknown, id: string | undefined, ctx: LinkCallbackCtx): unknown;
       onError?:
         | ((
             state: unknown,
             error: { message: string; code: string },
             id: string | undefined,
-            ctx: DeterministicContext,
+            ctx: LinkCallbackCtx,
           ) => unknown)
         | undefined;
-      onUnlink?: ((state: unknown, id: string | undefined, ctx: DeterministicContext) => unknown) | undefined;
+      onUnlink?: ((state: unknown, id: string | undefined, ctx: LinkCallbackCtx) => unknown) | undefined;
     }
   >;
   timers?: Record<
@@ -92,6 +92,11 @@ export interface StepDef {
   knownVersions?: readonly number[];
   /** Upcast a message payload journaled at `fromVersion` to the current version. */
   upcast?(message: string, payload: unknown, fromVersion: number): unknown;
+  /** Rename and upcast a domain event emitted at `fromVersion` to the current version (ADR-018 F). */
+  upcastEmitted?(
+    event: { readonly name: string; readonly payload: unknown },
+    fromVersion: number,
+  ): { readonly name: string; readonly payload: unknown };
 }
 
 interface SafeParser {
@@ -351,7 +356,8 @@ function applyUnlinks(def: StepDef, state: unknown, effects: StepEffects, facts:
             linked: links.filter((l) => l.name === call.name).map((l) => l.id),
             earlier: unlinks.slice(0, position),
           });
-    for (const id of ids) next = guarded(facts, () => onUnlink(next, id, facts.ctx));
+    const ctx = { ...facts.ctx, emit: emitVerb(def, effects) };
+    for (const id of ids) next = guarded(facts, () => onUnlink(next, id, ctx));
   });
   return next;
 }
@@ -589,6 +595,7 @@ function stepLifecycle(
               env,
               execute: effects.execute,
               forward: effects.forward,
+              emit: emitVerb(def, effects),
               ...timerVerbs(def, effects, facts.ctx),
             });
             assertSync(result, `lifecycle.${which} returned a Promise. Handlers must be synchronous.`);
@@ -623,12 +630,22 @@ function resultPayload<P extends object>(
   return cause.audit === undefined ? withId : { ...withId, audit: cause.audit };
 }
 
-/** What onDone / onError get as ctx: now/id/random, the actor's env (ADR-016 §4) and the call's effect id (ADR-018 G). */
-type ServiceCallbackCtx = DeterministicContext & { readonly env: unknown; readonly effectId: string };
+/**
+ * What onDone / onError get as ctx: now/id/random, the actor's env (ADR-016 §4), the call's effect id
+ * (ADR-018 G) and emit (ADR-018 F: callbacks emit domain events like handlers).
+ */
+type ServiceCallbackCtx = DeterministicContext & {
+  readonly env: unknown;
+  readonly effectId: string;
+  readonly emit: (name: string, payload: unknown) => void;
+};
+
+/** What link callbacks get as ctx: now/id/random and emit (ADR-018 F). */
+type LinkCallbackCtx = DeterministicContext & { readonly emit: (name: string, payload: unknown) => void };
 
 /** onDone / onError's ctx; an entry journaled before effect ids has an empty one. */
 function callbackCtx(
-  det: DeterministicContext,
+  det: LinkCallbackCtx,
   env: unknown,
   cause: { readonly effectId?: string | undefined },
 ): ServiceCallbackCtx {
@@ -653,7 +670,7 @@ function serviceError(def: StepDef, state: unknown, cause: On<"service.onError">
   };
 }
 
-function linkUpdate(def: StepDef, state: unknown, cause: On<"link.onUpdate">, det: DeterministicContext) {
+function linkUpdate(def: StepDef, state: unknown, cause: On<"link.onUpdate">, det: LinkCallbackCtx) {
   const linkDef = def.links?.[cause.link];
   return {
     next:
@@ -663,7 +680,7 @@ function linkUpdate(def: StepDef, state: unknown, cause: On<"link.onUpdate">, de
   };
 }
 
-function linkError(def: StepDef, state: unknown, cause: On<"link.onError">, det: DeterministicContext) {
+function linkError(def: StepDef, state: unknown, cause: On<"link.onError">, det: LinkCallbackCtx) {
   const onError = def.links?.[cause.link]?.onError;
   return {
     next: onError === undefined ? state : onShared(def, state, (s) => onError(s, cause.error, cause.targetId, det)),
@@ -685,7 +702,7 @@ function runCallback(
   def: StepDef,
   state: unknown,
   cause: CallbackCause,
-  det: DeterministicContext,
+  det: LinkCallbackCtx,
   env: unknown,
 ): CallbackOutcome {
   switch (cause.type) {
@@ -703,11 +720,13 @@ function runCallback(
 }
 
 function stepCallback(def: StepDef, state: unknown, cause: CallbackCause, facts: StepFacts, env: unknown): StepResult {
-  const { next, name, payload } = guarded(facts, () => runCallback(def, state, cause, facts.ctx, env));
+  const effects = createOutbox(facts.seq);
+  const det = { ...facts.ctx, emit: emitVerb(def, effects) };
+  const { next, name, payload } = guarded(facts, () => runCallback(def, state, cause, det, env));
   return {
     state: next,
     handlerState: next,
-    effects: createOutbox(facts.seq),
+    effects,
     event: draft({ causeType: cause.type, name, payload }, NOBODY, facts),
   };
 }

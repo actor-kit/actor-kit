@@ -1,3 +1,4 @@
+// biome-ignore-all lint/plugin: these tests read the clock in handlers on purpose, to check the determinism guard
 import { JournalDivergenceError, NondeterminismError, replayJournal } from "@actor-kit/test";
 import {
   checksumState,

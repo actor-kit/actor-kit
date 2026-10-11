@@ -97,6 +97,8 @@ export interface StudioTimelineEntry {
   causationId: string | null;
   /** Domain events the transition emitted (ADR-017 §2), as a JSON array of `{ name, payload }`; null when none. */
   emitted: string | null;
+  /** The handler read the clock or randomness directly (ADR-018 E): replay cannot reproduce it. */
+  nondeterministic: boolean;
 }
 
 // --- Outbox and links (shared by __inspect, the snapshot and live pushes) ---

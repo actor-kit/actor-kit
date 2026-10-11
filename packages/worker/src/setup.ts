@@ -36,6 +36,8 @@ import type {
   TypedServices,
   VersionsCheck,
 } from "./define";
+import { type LinkDef, type LinkHandlers, link } from "./link";
+import type { DeterminismMode } from "./runtime/determinism";
 import type { EffectInfo } from "./runtime/effect-info";
 import { goto as gotoPhase, PhaseTransition, pathOf, stay as stayInPhase } from "./runtime/phases";
 import type {
@@ -263,8 +265,17 @@ export interface Setup<ES extends EventSchemas, SD extends StateDecls, TEnvSchem
    * output), onError's error union (its `errors` plus the built-ins) and both callbacks' ctx (env, effectId).
    */
   service<S, TResult = unknown, TDeclared = unknown>(
-    def: KitServiceDef<S, TResult, TDeclared, SetupEnv<TEnvSchema>>,
-  ): ServiceDef<S, TDeclared, SetupEnv<TEnvSchema>, TResult>;
+    def: KitServiceDef<S, TResult, TDeclared, SetupEnv<TEnvSchema>, EventPayloads<ES>>,
+  ): ServiceDef<S, TDeclared, SetupEnv<TEnvSchema>, TResult, EventPayloads<ES>>;
+  /** A link (ADR-011) whose callbacks' ctx.emit is typed by the kit's events (ADR-018 F). */
+  link<
+    TContract extends { readonly name: string; readonly def: Record<string, unknown> },
+    TState = unknown,
+    TView = unknown,
+  >(
+    contract: TContract,
+    handlers: LinkHandlers<TState, TView, EventPayloads<ES>>,
+  ): LinkDef<TContract, TView, TState, EventPayloads<ES>>;
   /**
    * Helpers for one declared state, by name (`"round"`) or path (`["playing", "window"]`): its
    * messages, timers, `enter` and `exit` see its typed (merged) local.
@@ -289,22 +300,24 @@ export interface Setup<ES extends EventSchemas, SD extends StateDecls, TEnvSchem
  * What the kit fixes in a definition: an actor with declared states names its `initial` among them and
  * defines every one; an actor without has neither. `events` and `env` come from the kit.
  */
-export type KitDefCheck<SD> = { events?: never; env?: never } & ([keyof SD] extends [never]
+export type KitDefCheck<SD> = { events?: never; env?: never; determinism?: DeterminismMode } & ([keyof SD] extends [
+  never,
+]
   ? { initial?: never; states?: never }
   : { initial: keyof SD & string; states: { [P in keyof SD]: unknown } });
 
 /** A definition for `kit.actor`: defineActor's checks, with the kit's events, env and states. */
-export type KitActorDef<TDef, TState, TErrors, ES, SD, TEnvSchema> = TDef &
+export type KitActorDef<TDef, TState, TErrors, ES extends EventSchemas, SD, TEnvSchema> = TDef &
   KitDefCheck<SD> &
   VersionsCheck<TDef> &
   PublishCheck<KitContractDef<TDef, ES, TEnvSchema>> &
-  TypedServices<TState, TErrors, SetupEnv<TEnvSchema>>;
+  TypedServices<TState, TErrors, SetupEnv<TEnvSchema>, EventPayloads<ES>>;
 
 /** The contract's definition: the actor's own, plus the kit's events and env. */
 export type KitContractDef<TDef, ES, TEnvSchema> = TDef & { readonly events: ES; readonly env: TEnvSchema };
 
 /** What `kit.service()` takes: a service definition whose callbacks are typed by the kit. */
-export interface KitServiceDef<S, TResult, TDeclared, TEnv> {
+export interface KitServiceDef<S, TResult, TDeclared, TEnv, E = Record<never, never>> {
   readonly errors?: z.ZodType<TDeclared>;
   readonly result?: z.ZodType<TResult>;
   readonly maxResultBytes?: number;
@@ -312,8 +325,8 @@ export interface KitServiceDef<S, TResult, TDeclared, TEnv> {
   fn(input: unknown, env: TEnv, effect: EffectInfo): Promise<unknown>;
   readonly retry?: ServiceRetry<ServiceErrorOf<TDeclared>>;
   readonly timeoutMs?: number;
-  onDone?(state: S, result: TResult, input: unknown, ctx: ServiceCallbackContext<TEnv>): S;
-  onError?(state: S, error: ServiceErrorOf<TDeclared>, input: unknown, ctx: ServiceCallbackContext<TEnv>): S;
+  onDone?(state: S, result: TResult, input: unknown, ctx: ServiceCallbackContext<TEnv, E>): S;
+  onError?(state: S, error: ServiceErrorOf<TDeclared>, input: unknown, ctx: ServiceCallbackContext<TEnv, E>): S;
 }
 
 /** The persisted state of an actor declared with `kit`, for views and roles: `PhasedStateOf<typeof kit, Shared>`. */
@@ -366,6 +379,7 @@ function kitOf<ES extends EventSchemas, SD extends StateDecls, TEnvSchema>(
       return { schema, handler: typed(handler) };
     },
     service: (def) => def,
+    link: (contract, handlers) => link(contract, handlers),
     in(target) {
       const decl = declAt(states, pathOf(target));
       const declared = {

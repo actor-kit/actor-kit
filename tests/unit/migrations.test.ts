@@ -37,6 +37,8 @@ describe("ACTOR_KIT_MIGRATIONS", () => {
       "0015_drop_timeline",
       "0016_trace_ids",
       "0017_emitted",
+      "0018_rejections",
+      "0019_nondeterministic",
     ]);
   });
 
@@ -56,6 +58,8 @@ describe("ACTOR_KIT_MIGRATIONS", () => {
       "table:journal_checkpoints",
       "table:link_subscribers",
       "table:outbox",
+      "table:rejection_counts",
+      "table:rejections",
       "table:snapshots",
       "table:timers",
     ]);

@@ -279,11 +279,37 @@ class_name = "CashierActor"
 tag = "v23"
 new_sqlite_classes = ["CashierActor"]
 
+# Restore notifies links (ADR-018 F): a link source with Studio's __restore
+[[durable_objects.bindings]]
+name = "NOTICE_STUDIO"
+class_name = "NoticeStudio"
+
+[[migrations]]
+tag = "v24"
+new_sqlite_classes = ["NoticeStudio"]
+
+# Determinism in production (ADR-018 E)
+[[durable_objects.bindings]]
+name = "STAMP_WARN"
+class_name = "StampWarn"
+
+[[durable_objects.bindings]]
+name = "STAMP_THROW"
+class_name = "StampThrow"
+
+[[durable_objects.bindings]]
+name = "STAMP_OFF"
+class_name = "StampOff"
+
+[[migrations]]
+tag = "v25"
+new_sqlite_classes = ["StampWarn", "StampThrow", "StampOff"]
+
 # Hierarchical states (ADR-019 A)
 [[durable_objects.bindings]]
 name = "ROUNDS"
 class_name = "RoundsActor"
 
 [[migrations]]
-tag = "v24"
+tag = "v26"
 new_sqlite_classes = ["RoundsActor"]

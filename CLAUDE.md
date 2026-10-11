@@ -169,6 +169,8 @@ Do NOT load all docs upfront. Load only when relevant to the current task.
 | Studio instrumentation | [docs/specs/actor-kit-studio.md](docs/specs/actor-kit-studio.md) |
 | Journal tables, causes or facts | [docs/adrs/013-actor-journal.md](docs/adrs/013-actor-journal.md) |
 | Any architectural decision | Create new ADR in [docs/adrs/](docs/adrs/) |
+| Website docs, `ERROR_CODES` (`packages/core/src/errors.ts`) or `docs/upgrading-0.3.md` | Run `pnpm docs:gen` (error pages, every package's `docs/`, `llms.txt`, `llms-full.txt`); `docs-generated.test.ts` fails until you do |
+| A breaking change | A note with code before and after in [docs/upgrading-0.3.md](docs/upgrading-0.3.md), and a changeset |
 
 ## Off-limits
 
