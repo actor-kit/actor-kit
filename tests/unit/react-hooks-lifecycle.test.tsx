@@ -100,6 +100,19 @@ describe("hooks outside a Provider", () => {
     }
     expect(() => render(<Bad />)).toThrow("useView/useSend/useRole must be used inside <Provider>");
   });
+
+  it.each([
+    ["useView", () => Ctx.useView()],
+    ["useSend", () => Ctx.useSend()],
+    ["useRole", () => Ctx.useRole()],
+  ])("%s outside a Provider is a missing_provider error", (_name, hook) => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    function Bad() {
+      hook();
+      return null;
+    }
+    expect(() => render(<Bad />)).toThrow(expect.objectContaining({ code: "missing_provider" }));
+  });
 });
 
 describe("useView", () => {

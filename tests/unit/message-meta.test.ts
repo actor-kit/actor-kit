@@ -54,6 +54,14 @@ describe("parseMessageMeta", () => {
     }
   });
 
+  it("says why metadata that is not an object is refused", () => {
+    expect(parseMessageMeta("teller/t-1/4:0")).toEqual({
+      ok: false,
+      error: "invalid_delivery",
+      detail: "message metadata must be an object",
+    });
+  });
+
   it("keeps only the delivery's own fields", () => {
     const parsed = parseMessageMeta({ ...delivery, ...trace, extra: 1 });
     expect(parsed).toEqual({ ok: true, delivery, trace });

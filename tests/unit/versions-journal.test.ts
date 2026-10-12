@@ -98,6 +98,11 @@ describe("foldJournal across a version bump", () => {
     await expect(foldJournal(v3, journal)).rejects.toThrow("Journal replay: no checkpoint at the version bump (seq 4)");
   });
 
+  it("a missing checkpoint at the bump is a journal_invalid error", async () => {
+    const journal = { ...spanningJournal(), checkpoints: [] };
+    await expect(foldJournal(v3, journal)).rejects.toMatchObject({ code: "journal_invalid" });
+  });
+
   it("refuses an event written by a version with no path to the current one", async () => {
     const journal = spanningJournal();
     const unknown = { ...journal, events: journal.events.map((e) => (e.seq === 2 ? { ...e, codeVersion: 7 } : e)) };
@@ -141,6 +146,13 @@ describe("rebuildFromJournal", () => {
       "Rebuilding by replay needs the whole journal: it starts at seq 3",
     );
   });
+
+  it("a journal without its init is a journal_invalid error", async () => {
+    const journal = spanningJournal();
+    await expect(rebuildFromJournal(v3, { ...journal, events: journal.events.slice(2) })).rejects.toMatchObject({
+      code: "journal_invalid",
+    });
+  });
 });
 
 describe("restore across a version bump", () => {
@@ -149,6 +161,10 @@ describe("restore across a version bump", () => {
       "Cannot restore to seq 3: it was written by version 1 (current: 3)",
     );
     expect((await planRestore(v3, spanningJournal(), 4)).state).toEqual({ names: ["a:null", "b:null"] });
+  });
+
+  it("a seq written by an older version is a restore_out_of_range error", async () => {
+    await expect(planRestore(v3, spanningJournal(), 3)).rejects.toMatchObject({ code: "restore_out_of_range" });
   });
 });
 

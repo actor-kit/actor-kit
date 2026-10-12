@@ -110,6 +110,14 @@ describe("planRestore: state", () => {
     }
   });
 
+  it("a seq outside the journal is a restore_out_of_range error", async () => {
+    const { journal } = await shop((_sim, send) => send({ type: "INC" }));
+    await expect(planRestore(ShopDef, journal, 3)).rejects.toMatchObject({
+      code: "restore_out_of_range",
+      message: "Cannot restore to seq 3: the journal runs from 1 to 2",
+    });
+  });
+
   it("refuses a seq the pruned journal no longer covers", async () => {
     const { journal } = await shop((_sim, send) => {
       for (let i = 0; i < 7; i++) send({ type: "INC" });
@@ -121,6 +129,20 @@ describe("planRestore: state", () => {
     expect((await planRestore(ShopDef, pruned, 5)).state).toEqual({ n: 4, log: [] });
     expect((await planRestore(ShopDef, pruned, 3)).state).toEqual({ n: 2, log: [] });
     await expect(planRestore(ShopDef, pruned, 2)).rejects.toThrow(/pruned/);
+  });
+
+  it("a seq the pruned journal no longer covers is a restore_out_of_range error", async () => {
+    const { journal } = await shop((_sim, send) => {
+      for (let i = 0; i < 7; i++) send({ type: "INC" });
+    });
+    const pruned: Journal = {
+      events: journal.events.filter((e) => e.seq > 3),
+      checkpoints: journal.checkpoints.filter((c) => c.seq >= 3),
+    };
+    await expect(planRestore(ShopDef, pruned, 2)).rejects.toMatchObject({
+      code: "restore_out_of_range",
+      message: "Cannot restore to seq 2: the journal is pruned before it",
+    });
   });
 });
 
@@ -255,6 +277,26 @@ describe("foldJournal: restore events", () => {
     };
     await expect(foldJournal(ShopDef, { events: [...journal.events, restore], checkpoints: [] })).rejects.toThrow(
       /restores to seq 9/,
+    );
+  });
+
+  it("a restore event whose target is not in the replayed journal is a journal_invalid error", async () => {
+    const { journal } = await shop((_sim, send) => send({ type: "INC" }));
+    const restore: JournalEvent = {
+      seq: 3,
+      causeType: "restore",
+      name: null,
+      payload: { toSeq: 9 },
+      caller: null,
+      callerType: null,
+      role: null,
+      facts: {},
+      codeVersion: 1,
+      stateChecksum: "x",
+      createdAt: 0,
+    };
+    await expect(foldJournal(ShopDef, { events: [...journal.events, restore], checkpoints: [] })).rejects.toMatchObject(
+      { code: "journal_invalid" },
     );
   });
 });

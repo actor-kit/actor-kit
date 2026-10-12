@@ -9,22 +9,27 @@
  */
 
 import { ActorKitError } from "@actor-kit/core";
+import { z } from "zod";
 import { parseEffectId } from "./effect-id";
 import type { TryOutcome } from "./retry";
 import { classifyFailure, timeoutError } from "./service-error";
 
 export const DEFAULT_TIMEOUT_MS = 30_000;
 
+/** A finite number of ms above 0 (zod's number() takes no NaN or Infinity). */
+const TimeoutMsSchema = z.number().positive();
+
 /** Validate a service's or link's `timeoutMs` at definition time. `owner` names it in the error. */
 export function resolveTimeoutMs(option: unknown, owner: string): number {
   if (option === undefined) return DEFAULT_TIMEOUT_MS;
-  if (typeof option !== "number" || !Number.isFinite(option) || option <= 0) {
+  const parsed = TimeoutMsSchema.safeParse(option);
+  if (!parsed.success) {
     throw new ActorKitError(
       "invalid_timeout",
       `Invalid ${owner} timeoutMs: expected a positive number of ms, got ${String(option)}`,
     );
   }
-  return option;
+  return parsed.data;
 }
 
 /** A try's end: its outcome (a timeout is a failed outcome), or aborted from outside (discard it). */

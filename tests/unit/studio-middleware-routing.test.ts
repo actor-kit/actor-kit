@@ -81,6 +81,30 @@ describe("unknown API routes", () => {
   });
 });
 
+describe("actor routes match whole paths", () => {
+  it.each(["/__studio/api/actors/counter/abc/journal/extra", "/__studio/api/actors/counter/abc/view/extra"])(
+    "%s (a known route with more after it) is a JSON 404 and contacts nothing",
+    async (path) => {
+      const registry = fakeNamespace({ hasActor: () => true });
+      const counter = fakeNamespace({
+        __journal: () => ({ entries: [], hasMore: false }),
+        __getView: () => ({ role: "r", view: {} }),
+      });
+      const res = await handle(path, {}, { STUDIO_REGISTRY: registry.ns, COUNTER: counter.ns });
+      expect(res.status).toBe(404);
+      expect(await res.json()).toEqual({ error: expect.any(String) });
+      expect(registry.calls).toEqual([]);
+      expect(counter.calls).toEqual([]);
+    },
+  );
+
+  it("a path that only ends like an actor route is the SPA shell, not that route", async () => {
+    const res = await handle("/__studio/app/api/actors/counter/abc/journal");
+    expect(res.status).toBe(200);
+    expect(res.headers.get("Content-Type")).toBe("text/html");
+  });
+});
+
 describe("HTTP methods", () => {
   it.each([
     ["POST", "/__studio/api/actors"],

@@ -124,6 +124,13 @@ describe("simulate().reject with typed errors", () => {
     expect(actor.state.errors).toEqual([]);
   });
 
+  it("a rejection that does not match the service's errors is an invalid_rejection error", async () => {
+    const { sim } = await paying("charge");
+    expect(() => sim.reject("2:0", { _tag: "CardDeclined", reason: 7 })).toThrow(
+      expect.objectContaining({ code: "invalid_rejection" }),
+    );
+  });
+
   it("refuses a declared tag for a service that declares no errors", async () => {
     const { sim } = await paying("plain");
     expect(() => sim.reject("2:0", { _tag: "CardDeclined", reason: "x" })).toThrow(

@@ -60,9 +60,9 @@ function step(cursors: readonly Cursor[], key: string): Cursor[] {
   for (const [p, pattern, i] of cursors) {
     const segment = pattern[i];
     if (segment === undefined) continue;
+    // Kinds are any, one and literal: past the first two checks, the segment is a literal.
     if (segment.kind === "any") next.push([p, pattern, i]);
-    else if (segment.kind === "one" || (segment.kind === "literal" && segment.key === key))
-      next.push([p, pattern, i + 1]);
+    else if (segment.kind === "one" || segment.key === key) next.push([p, pattern, i + 1]);
   }
   return closure(next);
 }

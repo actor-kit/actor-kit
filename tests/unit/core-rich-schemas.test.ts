@@ -208,6 +208,12 @@ describe("record", () => {
     it("rejects an unknown mode byte", () => {
       expect(() => applyDelta(S, { scores: {} }, bytes(0b1, 7))).toThrow("record delta mode 7 is not 0 or 1");
     });
+
+    it("an unknown mode byte is an invalid_frame error", () => {
+      expect(() => applyDelta(S, { scores: {} }, bytes(0b1, 7))).toThrow(
+        expect.objectContaining({ code: "invalid_frame" }),
+      );
+    });
   });
 });
 

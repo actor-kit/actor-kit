@@ -66,7 +66,9 @@ export const realSources = {
 
 function replace(target: object, key: PropertyKey, value: unknown): void {
   saved.push({ target, key, descriptor: Object.getOwnPropertyDescriptor(target, key) });
-  Object.defineProperty(target, key, { value, configurable: true, writable: true, enumerable: false });
+  // Every replaced global is non-enumerable already (own builtins) or new on the instance (defaults to
+  // non-enumerable), so the replacement keeps its enumerability.
+  Object.defineProperty(target, key, { value, configurable: true, writable: true });
 }
 
 /** Date without the arguments-free forms: `new Date(x)`, Date.UTC, Date.parse still work. */
@@ -102,7 +104,8 @@ function patch(): void {
 }
 
 function restore(): void {
-  for (const { target, key, descriptor } of saved.reverse()) {
+  // Each saved entry is a different (target, key), so the order they are put back in does not matter.
+  for (const { target, key, descriptor } of saved) {
     if (descriptor === undefined) Reflect.deleteProperty(target, key);
     else Object.defineProperty(target, key, descriptor);
   }

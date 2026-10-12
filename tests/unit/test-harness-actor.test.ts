@@ -139,6 +139,25 @@ describe("testActor: init context", () => {
     expect(typeof seen?.now).toBe("number");
     await expect(seen?.link).rejects.toThrow("link() not available in test harness init — use send() for link testing");
   });
+
+  it("init's link() refuses with a link_unavailable error", async () => {
+    let attempt: Promise<unknown> | undefined;
+    const t = testActor({
+      name: "c",
+      def: {
+        input,
+        init: (i: { n: number }, ctx: { link: (a: string, b: string) => Promise<unknown> }) => {
+          attempt = ctx.link("peer", "id");
+          return { n: i.n };
+        },
+        roles: { player: anyone },
+        messages: { INC: inc },
+        views,
+      },
+    });
+    t.init({ n: 1 });
+    await expect(attempt).rejects.toMatchObject({ code: "link_unavailable" });
+  });
 });
 
 describe("testActor: observe", () => {

@@ -42,7 +42,7 @@ Auth (environment):
 `;
 
 /** A command line the CLI cannot run (ADR-018 C: a stable code and a docs URL). */
-class UsageError extends Error {
+export class UsageError extends Error {
   readonly code = "cli_usage";
   readonly docs = "https://actorkit.dev/errors/cli_usage/";
 }

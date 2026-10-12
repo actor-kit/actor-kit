@@ -137,6 +137,18 @@ describe("in-flight tries", () => {
     expect(done.signal.aborted).toBe(false);
   });
 
+  it("finishing a try that was already aborted (or never started) does nothing", () => {
+    const inFlight = createInFlight();
+    const aborted = new AbortController();
+    inFlight.start("executions", "3:0", aborted);
+    inFlight.abort("executions", "3:0", "redriven");
+    expect(() => inFlight.finish("executions", "3:0", aborted)).not.toThrow();
+    expect(() => inFlight.finish("forwards", "9:0", new AbortController())).not.toThrow();
+    const next = new AbortController();
+    inFlight.start("executions", "3:0", next);
+    expect(inFlight.abort("executions", "3:0", "x")).toBe(true);
+  });
+
   it("aborts every try of effects declared after a seq (restore)", () => {
     const inFlight = createInFlight();
     const kept = new AbortController();

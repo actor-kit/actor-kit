@@ -333,14 +333,8 @@ function createSimulation(
   }
 
   /** The contract's publish config, validated (as the runtime does when it defines the actor). */
-  const publishConfigs = new WeakMap<SimDef, PublishConfig | null>();
   function publishOf(def: SimDef): PublishConfig | null {
-    let config = publishConfigs.get(def);
-    if (config === undefined) {
-      config = resolvePublish(def.publish, def.events, def.services);
-      publishConfigs.set(def, config);
-    }
-    return config;
+    return resolvePublish(def.publish, def.events, def.services);
   }
 
   function record(address: ActorAddress): ActorData {
@@ -384,10 +378,9 @@ function createSimulation(
   /** The flow an effect continues: its declaring event's correlation id, caused by the effect (ADR-017 §4). */
   function effectTrace(actor: ActorData, effectId: string): Trace {
     const seq = parseEffectId(effectId)?.seq ?? 0;
-    // Seqs are contiguous in a simulated journal: index, not search (timer loops fire thousands).
-    const { events } = actor.journal;
-    const candidate = events[seq - (events[0]?.seq ?? 1)];
-    const declared = candidate?.seq === seq ? candidate.correlationId : undefined;
+    // A simulated journal starts at init (seq 1) and is never pruned, so seq N is at index N - 1:
+    // index, not search (timer loops fire thousands). Without a journal there is no event to read.
+    const declared = actor.journal.events[seq - 1]?.correlationId;
     return {
       correlationId: declared ?? eventId(actor.type, actor.id, seq),
       causationId: effectCauseId(actor.type, actor.id, effectId),
@@ -501,11 +494,11 @@ function createSimulation(
    * A call cancelled because its state was left (ADR-019 B) is kept aside: its late result goes to onStale.
    */
   function cancelPending(actor: ActorData, result: StepResult): void {
-    const cancels = result.effects.toTimerOps().flatMap((op) => (op.op === "cancel" ? [op] : []));
+    const cancels = result.effects.toTimerOps().filter((op) => op.op === "cancel");
     const ofActor = (p: PendingEffect, keys: ReadonlySet<string>) =>
       keyOf(p.actor) === keyOf(actor) && keys.has(p.effectId);
     const all = new Set(cancels.map((op) => op.key));
-    const stale = new Set(cancels.flatMap((op) => (op.stale === true ? [op.key] : [])));
+    const stale = new Set(cancels.filter((op) => op.stale === true).map((op) => op.key));
     data.stale.push(...data.pending.filter((p) => ofActor(p, stale)));
     data.pending = data.pending.filter((p) => !ofActor(p, all));
   }
@@ -828,7 +821,7 @@ function createSimulation(
     const parsed = def.input.safeParse(input);
     if (!parsed.success) throw new ActorKitError("invalid_input", `Invalid input: ${parsed.error.message}`);
     const live = createLiveFacts(sources);
-    const facts = { ...liveStepFacts(live, () => []), guard: withDeterminismGuard };
+    const facts = { ...liveStepFacts(live), guard: withDeterminismGuard };
     const cause = {
       input: parsed.data,
       caller: options.caller ?? "system",

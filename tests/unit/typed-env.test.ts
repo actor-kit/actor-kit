@@ -149,6 +149,12 @@ describe("testActor(contract, { env })", () => {
     );
     expect(() => testActor(Checkout)).toThrow("- (env):");
   });
+
+  it("fakes that don't match the schema are an invalid_env error", () => {
+    expect(() => testActor(Checkout, { env: { STRIPE_KEY: "" } })).toThrow(
+      expect.objectContaining({ code: "invalid_env" }),
+    );
+  });
 });
 
 describe("simulate({ env: { contract: fakes } })", () => {

@@ -126,6 +126,26 @@ describe("roles on messages", () => {
   });
 });
 
+describe("roles on messages: testActor", () => {
+  it("testActor refuses a message naming a role the actor does not declare, before anything runs", () => {
+    const Bad = kit.actor("bad", {
+      input: z.object({}),
+      init: (): S => ({ draws: 0, names: [] }),
+      roles: { host: isHost },
+      initial: "lobby",
+      messages: { PING: kit.message(z.object({}), { roles: ["hots"], handler: (s: S) => s }) },
+      states: { lobby: lobby.state({}), playing: playing.state({}) },
+      views: {},
+    });
+    expect(() => testActor(Bad)).toThrow(
+      expect.objectContaining({
+        code: "invalid_actor_definition",
+        message: 'Message "PING" names role "hots", which this actor does not declare. Its roles are: host.',
+      }),
+    );
+  });
+});
+
 describe("roles on messages: edges", () => {
   const slot = (roles?: string[]) => ({
     schema: z.object({}),

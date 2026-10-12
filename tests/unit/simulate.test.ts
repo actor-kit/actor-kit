@@ -189,6 +189,17 @@ describe("simulate: effects as data", () => {
     expect(sim.actor(Store, "s1").state.status).toBe("charging");
   });
 
+  it("an effect id shared by two actors is an unknown_effect error when given as a bare id", async () => {
+    const sim = simulate({ contracts });
+    for (const id of ["s1", "s2"]) {
+      const store = await sim.spawn(Store, id, { item: id });
+      store.send("clerk-1", { type: "CHARGE", cents: 100 });
+    }
+    expect(() => sim.resolve("2:0", {})).toThrow(
+      expect.objectContaining({ code: "unknown_effect", message: expect.stringContaining("ambiguous (2 actors)") }),
+    );
+  });
+
   it("forwards are delivered to the target actor with the original caller", async () => {
     const sim = simulate({ contracts });
     const a = await sim.spawn(Store, "a", { item: "a" });

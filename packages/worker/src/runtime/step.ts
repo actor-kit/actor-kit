@@ -240,8 +240,11 @@ export function liveUnlinkTargets(read: (name: string) => string[], name: string
   return [...targets].filter((id) => !removed.has(id));
 }
 
-/** Step facts for a live transition: real sources, recorded; unlink targets read from storage. */
-export function liveStepFacts(live: LiveFacts, read: (name: string) => string[]): StepFacts {
+/**
+ * Step facts for a live transition: real sources, recorded; unlink targets read from storage
+ * (`read`; none stored by default: init, and testActor, which keeps no links).
+ */
+export function liveStepFacts(live: LiveFacts, read: (name: string) => string[] = () => []): StepFacts {
   return {
     ctx: live.ctx,
     unlinkTargets(name, pending) {

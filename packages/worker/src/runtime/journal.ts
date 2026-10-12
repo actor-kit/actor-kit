@@ -709,11 +709,8 @@ function describeEmitted(event: EmittedEvent | undefined): string {
 
 /** The first position where two emitted lists differ (by name and JSON payload), or -1. */
 function firstEmittedDifference(expected: readonly EmittedEvent[], actual: readonly EmittedEvent[]): number {
-  const length = Math.max(expected.length, actual.length);
-  for (let i = 0; i < length; i++) {
-    if (describeEmitted(expected[i]) !== describeEmitted(actual[i])) return i;
-  }
-  return -1;
+  const positions = Array.from({ length: Math.max(expected.length, actual.length) }, (_, i) => i);
+  return positions.findIndex((i) => describeEmitted(expected[i]) !== describeEmitted(actual[i]));
 }
 
 /**

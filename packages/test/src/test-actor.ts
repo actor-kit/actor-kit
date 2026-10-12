@@ -236,7 +236,7 @@ function roleOrRefuse(
 
 /** Live facts for one transition (real clock and ids), every handler under the determinism guard. */
 function harnessFacts(): StepFacts {
-  return { ...liveStepFacts(createLiveFacts(), () => []), guard: withDeterminismGuard };
+  return { ...liveStepFacts(createLiveFacts()), guard: withDeterminismGuard };
 }
 
 // --- Typed env (ADR-016 §4) ---

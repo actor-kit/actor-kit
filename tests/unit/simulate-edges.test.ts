@@ -300,6 +300,12 @@ describe("simulate: timers across actors", () => {
     sim.actor(Hub, "h1").send("bob", { type: "LOOP" });
     expect(() => sim.advance(1)).toThrow("simulate: more than 10000 timers fired in one advance (a timer loop?)");
   });
+
+  it("a timer that reschedules itself forever is a timer_loop error", async () => {
+    const sim = await hubs();
+    sim.actor(Hub, "h1").send("bob", { type: "LOOP" });
+    expect(() => sim.advance(1)).toThrow(expect.objectContaining({ code: "timer_loop" }));
+  });
 });
 
 describe("simulate: forwards and links", () => {

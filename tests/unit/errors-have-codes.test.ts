@@ -59,4 +59,13 @@ describe("library errors have codes", () => {
       docs: "https://actorkit.dev/errors/studio_request_failed/",
     });
   });
+
+  it("the CLI's usage errors carry the cli_usage code and its docs URL", async () => {
+    const { UsageError } = await import("../../packages/studio-cli/src/cli");
+    expect(new UsageError("bad flags")).toMatchObject({
+      message: "bad flags",
+      code: "cli_usage",
+      docs: "https://actorkit.dev/errors/cli_usage/",
+    });
+  });
 });
