@@ -221,6 +221,54 @@ Migrations renumbered: `0020_publish_position`, `0021_journal_archive`.
 | 18. Typed Durable Object stub (`worker/src/rpc-types.ts`, `TypedActorClass` in `actor.ts`, `core/src/contract-types.ts`) | 0 | types only, no runtime code (nothing for Stryker to mutate); pinned by `typed-stub.types.test.ts` against Cloudflare's `DurableObjectNamespace` / RPC types (every result not `never`, role-narrowed views, the persisted state) | — | unchanged (no functions changed) |
 | 19. Timer latency | n/a | investigated, nothing to fix: `syncAlarm` sets the alarm to `MIN(fire_at)` exactly, `alarm()` fires every due timer in the same invocation with synchronous SQLite reads, and a timer is never re-armed past its deadline; a real-alarm experiment in workerd (300 ms timers, warm and after `evictDurableObject`) measured 0-2 ms from deadline to alarm and 0-1 ms from alarm to handler. Production lateness (243 ms) is alarm delivery and wake; documented in the timers page. No source changed | — | unchanged |
 
+## Full run before main (2026-10-11)
+
+A full Stryker run over every package (98.03% overall, at `7df80f1`) left six packages below their last recorded
+full-package score. Their survivors were killed with behaviour-level tests or removed by simplifying redundant
+code (no behaviour change, the existing tests unchanged and passing); each package was then re-run whole
+(`--mutate 'packages/<pkg>/src/**/*.ts'` with the excludes of `stryker.config.json`; worker with its config list,
+`actor.ts` excluded). Score = (killed + timeout) / (killed + timeout + survived + no coverage).
+
+| Package | Full run | After | Target |
+|---|---|---|---|
+| core | 99.71% (1033/1036) | **99.81% (1034/1036)** | ≥ 99.77% |
+| client | 97.38% (520/534) | unchanged | ≥ 97.02% |
+| react | 92.45% (49/53) | **94.34% (50/53)** | ≥ 94.23% |
+| test | 96.78% (901/931) | **98.14% (899/916)** | ≥ 97.92% |
+| storybook | 100% (35/35) | unchanged | 100% |
+| studio (server, `src`) | 98.97% (862/871) | **99.20% (864/871)** | ≥ 99.19% |
+| studio UI (`ui/src`) | 94.98% (1742/1834) | unchanged | ≥ 93.05% |
+| studio-cli | 99.01% (498/503) | **99.40% (500/503)** | ≥ 99.28% |
+| worker (`src`, minus `actor.ts`) | 98.90% (4399/4448) | **99.34% (4393/4422)** | ≥ 99.32% |
+| projection | 100% (199/199) | unchanged | 100% |
+
+Killed by new tests:
+- Error codes asserted where tests pinned only the message: core `delta.ts` record delta mode (`invalid_frame`),
+  React hooks outside a Provider (`missing_provider`), simulate rejections that do not parse (`invalid_rejection`),
+  an ambiguous bare effect id (`unknown_effect`), a timer loop (`timer_loop`), testActor env fakes (`invalid_env`),
+  testActor init's `link()` (`link_unavailable`), journal fold/rebuild/checkpoint errors (`journal_invalid` ×3),
+  `planRestore` refusals (`restore_out_of_range` ×3), and the CLI's `UsageError` (`cli_usage` and its docs URL;
+  the class is now exported from `cli.ts` for that test, like `StudioClientError`).
+- Studio actor routes match whole paths: `.../journal/extra` is a 404 that contacts nothing, and a path that only
+  ends like an actor route is the SPA shell (the regex `^` / `$` anchors).
+- testActor checks message roles (`checkMessageRoles` in `harnessDef`).
+- Shared-state handlers in an actor with states (`step.ts` `onShared`, 4 NoCoverage + 1 survived):
+  `states-shared-callbacks.test.ts`.
+- `createInFlight().finish` after the try was aborted; the metadata refusal's `detail`.
+- `journal-archive.ts:281` `segment.from <= high`: only the property test killed it, by chance (it survived the
+  first re-run); a window ending at a segment's first seq now pins it.
+
+Removed by simplifying (no behaviour change): simulate's publish-config memo, its effect-trace index offset (a
+simulated journal starts at seq 1 and is never pruned) and two `flatMap(... ? [x] : [])` filters; `liveStepFacts`
+reads no stored links by default (init and testActor passed `() => []`); `closeCodeToSend(code = 1000)` instead
+of an `undefined` check; the determinism guard's `enumerable: false` (the replaced globals are non-enumerable
+already, or new on the instance) and its reversed restore; the emitted-diff loop bound (`findIndex`);
+`resolveTimeoutMs` through `z.number().positive()`; message-roles' non-record guards (`entriesOf`). A
+`studio-redact.ts` simplification was reverted: it made the `"literal"` kind literal equivalent instead.
+
+Every remaining survivor is in "Equivalent mutants" below (some line numbers there are from earlier runs; the
+mutated construct is the same). No real bug was found.
+
 ## Equivalent mutants
 
 Surviving mutants that no test can kill, because the mutated program behaves identically. One line each.
@@ -260,7 +308,6 @@ Surviving mutants that no test can kill, because the mutated program behaves ide
 | studio UI | use-actor-list.ts:37,38,44 | empty catch, `[]` deps, initial `{ kind: "loading" }` | The effect sets loading before first paint; same behaviour. |
 | studio UI | timers-panel.tsx:21 | `useNow` effect deps `[]` → `["Stryker was here"]` | A constant dependency never changes, so the interval starts once either way. |
 | worker | identity.ts:32, 33 | `headers.delete(CALLER_ID_HEADER / CALLER_TYPE_HEADER)` → removed | `headers.set()` just after replaces every inbound value of the name; the explicit scrub is kept on purpose (security code reads as intended). |
-| worker | close-code.ts:7 | `code !== undefined && …` → `true && …` | `isSendable(undefined)` is false (every comparison with `undefined` is false); the check is for the type checker. |
 | worker | route-to-actor.ts:23 | `actorType === undefined \|\| …` → `false \|\| …` | Parts come from `filter(Boolean)`, so `actorId` (`parts[2]`) is undefined whenever `actorType` (`parts[1]`) is. |
 | worker | journal.ts:112, 113 | `facts.unlinked ?? []` / `facts.linkViews ?? []` → `["Stryker was here"]` | Only `findIndex` on `.name` / `.id`: a string has neither, so the same "missing fact" error. |
 | worker | journal.ts:310 | `if (base !== null)` → `true` | With `base` NULL, `WHERE seq <= NULL` matches no rows in SQLite. |
@@ -276,38 +323,35 @@ Surviving mutants that no test can kill, because the mutated program behaves ide
 | worker | journal-query.ts:154 | `event.emitted ?? []` → `["Stryker was here"]` | A string has no `name`, so the event filter matches nothing either way. |
 | worker | journal-archive.ts:62 | `if (base === null) return null` → `if (false)` | With no checkpoint the next query asks `MIN(seq) ... WHERE seq <= NULL`, which SQLite answers with NULL, so the same null comes back. |
 | studio UI | studio-state.ts:111, :112 | `frame.rejections === undefined ? {} : {...}` / the same for `journal` → always the object | Sets the key to `undefined` instead of leaving it out; every reader treats both the same. |
-| test | simulate.ts:491, :495 | `flatMap(... ? [op] : [])` / `? [op.key] : []` → `["Stryker was here"]` | The strings have no `key`, and a set of keys with `undefined` in it never matches an effect id (`seq:index`), so the same calls are cancelled or kept aside. |
 | test | simulate.ts:257 | undeclared or present link `return false` → `true` | Subscribing such a link pushes nothing: an undeclared link has no source, and a present one's view is already pushed (dedupe). |
 | test | simulate.ts:265 | unlink(name) unsubscribes `[]` → `["Stryker was here"]` | A string has no `name`, so it points at no source and nothing is forgotten. |
 | test | simulate.ts:276 (×2) | `def.links?.[name]?.contract` → without `?.` | Only declared links are ever recorded on an actor, so the link definition always exists. |
 | test | simulate.ts:305 | `if (role === null) return` → `if (false)` | `def.views[null]` is `views["null"]`, undefined, so the next check returns. |
 | test | simulate.ts:391 | `if (from !== null)` before delivering forwards → `true` | `from` is null only for callbacks (onDone, onError, onUpdate), whose step has an empty outbox: there are no forwards to deliver. |
-| worker | determinism.ts:44 (×2) | the temporary replacement's `writable` / `enumerable` flags flipped | Handlers only call the replaced functions; whether they are writable or enumerable for the length of a handler is not observable, and the original descriptor is put back exactly. |
-| worker | determinism.ts:75 | `saved.reverse()` → `saved` | Every saved entry is a different (target, key) pair, so the restore order does not matter. |
+| worker | determinism.ts:71 | the temporary replacement's `writable: true` → `false` | Handlers only call the replaced functions; whether they are writable for the length of a handler is not observable, and the original descriptor is put back exactly. |
 | test | simulate.ts:248 | `if (!envs.has(type))` → `true` | Only a memo: parsing the same fakes again gives the same env. |
-| test | simulate.ts:620, :783 | init's unlink targets `() => []` → `() => undefined` / `["…"]` | Same as the existing simulate.ts:562 row (moved): `init` has no unlink. |
 | worker | service-error.ts:39 | `Symbol.for("actor-kit.service-failure")` → `Symbol.for("")` | The same registered symbol is used to mark and to read a failure, so any key works. |
 | worker | service-error.ts:68 | whole `if (!(thrown instanceof Error) \|\| !(FAILURE in thrown))` → `false` | A thrown value that is not a failure has no `[FAILURE]`, so it reads `undefined`, which isTaggedError rejects: still null. |
 | worker | retry.ts:64 | `parseOption(...)?.while` → `.while` | Kills by throwing a TypeError while test modules load (resolveRetryRule(undefined) via defineActor/link at module level), which Stryker's Vitest runner reports as survived (testing-strategy gotcha); run by hand it fails `service-errors.test.ts`. |
-| worker | attempt.ts:20 | `typeof option !== "number"` → `false` | `Number.isFinite` is false for every non-number, so the same error is thrown; the typeof is for the type checker. |
-| test | simulate.ts:562 (×2, one NoCoverage) | init's unlink targets `() => []` → `undefined` / `["…"]` | `init` gets no `unlink`, so the fact is never read. |
 | worker, studio UI | trace.ts:48, cause-ref.ts:18 (×3 each) | destructuring defaults `= ""` → `"Stryker was here!"` | Groups 1-3 of the id pattern always match when the pattern does; the defaults exist for the type checker. |
 | worker | journal.ts:583, 813 | init `timerOps: []` / rebuild-skipped migrate `emitted: []` → `["Stryker was here"]` | Same family as journal.ts:535/750: init schedules nothing, and a rebuild compares neither checksums nor emitted events. |
-| worker | journal.ts:647 | `i < length` → `i <= length` | Past the end both lists give `undefined`, which describe the same ("nothing"): no difference is found there. |
 | test | simulate.ts:222 | initial `published: []` → `["Stryker was here"]` | `published(queue)` filters by `p.queue`; a string has none, so it is never listed. |
-| test | simulate.ts:256 | memo `if (config === undefined)` → `true` | Recomputes the same publish config each time; only slower. |
 | test | simulate.ts:301 | `parseEffectId(effectId)?.seq` → `.seq` | Simulated effect ids are always `seq:index`, so the parse never fails. |
 | worker | journal-timeline.ts:202 | init start `timers: []` → `["Stryker was here"]` | Same as journal.ts:535/750: an init event schedules nothing from its start point, and timeline states never read the pending timers. |
 | worker | journal-timeline.ts:203 | `from === undefined \|\| …` → `false \|\| …` | Folding a non-init event onto no point throws inside the try, which returns null: the same "state not available". |
 | worker | service-options.ts:139 | `"aborted" in tried \|\| !tried.ok` → `"" in tried \|\| …` | An aborted try has no `ok`, so `!tried.ok` is already true for it. |
-| test | simulate.ts:485 | non-cancel op → `["Stryker was here"]` | That string is never an effect id, so no pending effect is removed. |
 | studio UI | studio-state.ts:111 | `frame.rejections === undefined ? {} : { rejections }` → always the spread | A `rejections: undefined` key renders the same nothing as an absent one. |
-| worker | message-roles.ts:23, :26, :28 | an empty list → `["Stryker was here"]` | Destructuring a string gives a one-letter "slot" with no `roles`, which names no role, so nothing is refused. |
+| worker | message-roles.ts:32 | a role-nested entry that is not a message → `["Stryker was here"]` | Destructuring a string gives a one-letter "slot" with no `roles`, which names no role, so nothing is refused. |
 | worker | step.ts:312 | `roleMessages[role]?.[type]` → without `?.` | Every contract's messages are nested under every role (createActorClass, toSimDef, testActor), so the role's entry always exists. |
 | core | errors.ts:333 | `Object.keys(ERROR_CODES).filter(isErrorCode)` → without the filter | Every key of the registry is an ErrorCode; the filter exists for the type checker. |
 | worker | setup.ts:278 | `local === undefined ? def : { ...def, local }` → always spread | Adds `local: undefined` to a state without a local schema; the runtime only reads `def.local === undefined` (phases.ts `parseLocal`, step.ts initial check). |
 | worker | journal-query.ts:113 | `query.order === "asc" ? "ASC" : …` → `""` | `ORDER BY seq` with no direction is ascending in SQLite. |
 | worker | setup.ts:226 | `local === undefined ? def : { ...def, local }` → always spread | Adds `local: undefined` to a state without a local schema; the runtime only reads `def.local === undefined` (phases.ts `parseLocal`, step.ts initial check). |
+| worker | journal-archive.ts:298 | `overlapping.length === 0` → `false` | With no segment in the window the merge reads the same local rows through the same filter (`matchesJournalQuery`, the SQL WHERE's twin), order, limit and `journalEntry`: the same page, only slower. |
+| worker | journal-timeline.ts:216 | `catch { return null }` → `{}` | The point is then `undefined` instead of `null`; every reader treats both alike (`known?.point`, `?.json ?? null`, `target?.point === undefined`). |
+| studio | middleware.ts:78 | RPC-not-found code `"studio_unavailable"` → `""` | The error reaches the client only as its message (asyncJson's 500 body, pinned by `studio-server-middleware.test.ts`); the code is never sent. |
+| studio | middleware.ts:178 | `issue.path.join(".")` → `join("")` | Same as the middleware.ts:147 row (renumbered): every request schema is flat. |
+| test | simulate.ts:295 | initial `stale: []` → `["Stryker was here"]` | `matching()` compares `p.effectId` first, which a string lacks, so no late result ever matches it. |
 
 ## Bugs found while hardening (2026-10-07)
 

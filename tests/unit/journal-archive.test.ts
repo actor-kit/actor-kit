@@ -591,4 +591,12 @@ describe("journal query windows", () => {
     expect(exact).toMatchObject({ hasMore: false });
     expect(exact.entries.map((e) => e.seq)).toEqual([2, 1]);
   });
+
+  it("a window ending at a segment's first seq reads that segment", async () => {
+    const { sql, bucket } = await twoSegments();
+    const upTo = await readArchivedJournalPage(sql, bucket, { limit: 9, order: "asc", to: 3 }, ctx);
+    expect(upTo.entries.map((e) => e.seq)).toEqual([1, 2, 3]);
+    const below = await readArchivedJournalPage(sql, bucket, { limit: 9, order: "desc", before: 4 }, ctx);
+    expect(below.entries.map((e) => e.seq)).toEqual([3, 2, 1]);
+  });
 });
