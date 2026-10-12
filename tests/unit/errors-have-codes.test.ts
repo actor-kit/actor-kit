@@ -19,12 +19,34 @@ function sourceFiles(dir: string): string[] {
   });
 }
 
+/** Stryker's instrumentation adds this guard to every file it mutates; it is not library code. */
+const STRYKER_HIT_COUNT_GUARD = /new Error\('Stryker: Hit count limit reached/;
+
+/** 1-based line numbers that construct a plain Error, TypeError or RangeError. */
+function plainErrorLines(source: string): number[] {
+  return source
+    .split("\n")
+    .flatMap((line, i) =>
+      /new (Type|Range)?Error\(/.test(line) && !STRYKER_HIT_COUNT_GUARD.test(line) ? [i + 1] : [],
+    );
+}
+
+describe("plain error scan", () => {
+  it("flags a plain Error, TypeError or RangeError in library code", () => {
+    expect(plainErrorLines('const a = 1;\nthrow new Error("x");\nthrow new RangeError("y");')).toEqual([2, 3]);
+  });
+
+  it("ignores the hit-count guard that Stryker's instrumentation adds to every mutated file", () => {
+    const instrumented =
+      "function stryNS_9fa48() {\n        throw new Error('Stryker: Hit count limit reached (' + ns.hitCount + ')');\n}";
+    expect(plainErrorLines(instrumented)).toEqual([]);
+  });
+});
+
 describe("library errors have codes", () => {
   it("no library source constructs a plain Error, TypeError or RangeError", () => {
     const offenders = SOURCES.flatMap(sourceFiles).flatMap((file) =>
-      readFileSync(file, "utf8")
-        .split("\n")
-        .flatMap((line, i) => (/new (Type|Range)?Error\(/.test(line) ? [`${file.slice(ROOT.length)}:${i + 1}`] : [])),
+      plainErrorLines(readFileSync(file, "utf8")).map((line) => `${file.slice(ROOT.length)}:${line}`),
     );
     expect(offenders).toEqual([]);
   });
