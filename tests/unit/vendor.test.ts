@@ -5,14 +5,17 @@
  * internal `workspace:*` dependencies pinned to it.
  */
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import { tarballName, vendorManifest, vendorVersion } from "../../scripts/vendor.mts";
 
 const root = resolve(import.meta.dirname, "../..");
-const packageDirs = readdirSync(resolve(root, "packages"));
+/** Package directories, as scripts/vendor.mts finds them (stray files such as macOS .DS_Store are not packages). */
+const packageDirs = readdirSync(resolve(root, "packages")).filter((dir) =>
+  existsSync(resolve(root, "packages", dir, "package.json")),
+);
 
 function manifest(dir: string): { name: string; version: string } {
   const parsed: unknown = JSON.parse(readFileSync(resolve(root, "packages", dir, "package.json"), "utf8"));
