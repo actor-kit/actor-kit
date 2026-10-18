@@ -79,10 +79,10 @@ got explicit timeouts, assertions unchanged.
 | Mutation, changed files (client, liveness, frame, binary, delta, codec, React context) | full-run scores above | first run 98.06% (1064/1086); after: liveness 100%, client 97.70%, React 96.55%, frame/binary/codec 100%, delta 99.44%; every survivor equivalent (docs/quality.md) |
 | Mutation, core whole package (measured both on this machine) | 99.90% (1035/1036) | 99.82% (1082/1084; 48 more mutants from the frame/payload checks); both survivors equivalent |
 | CRAP, core / React | 7.0 / 2.0 | 7.0 / 6.0 (`useSelector`'s cache read), 0 ≥ 8 |
-| Seam tests, real client ↔ real actor | 0 | 25, all passing: drops, restarts, hibernation, sleep/wake, an iPad suspended during a turn timer (3), two tabs of one player (4), ghost presence (3, opt-in) |
+| Seam tests, real client ↔ real actor | 0 | 28, all passing: a role that changes under a client (3), drops, restarts, hibernation, sleep/wake, an iPad suspended during a turn timer (3), two tabs of one player (4), ghost presence (3, opt-in) |
 | Unit tests | 3058 | 3152 |
 | Integration tests | 383 | 406 |
-| CI | failing at setup on main since 2026-10-10 (pnpm version given twice) | setup fixed: `quality` (typecheck, lint, unit, integration) and `docs` pass; `e2e` 77/78 (below) |
+| CI | failing at setup on main since 2026-10-10 (pnpm version given twice) | all green on 3909400: `quality` (typecheck, lint, unit, integration), `docs`, `e2e` (the Linux-only restart test frees its port now) |
 
 Commits: 9677dd0 seam harness; 0a6bfef core frame + React; c0b3ea6 ADR-020 heartbeat/resync/queue;
 6884ef4 whole-payload decode + undecodable report + docs; 0db4d4b ghost presence (it.fails);
@@ -94,12 +94,9 @@ Commits: 9677dd0 seam harness; 0a6bfef core frame + React; c0b3ea6 ADR-020 heart
 
 1. ADR-020 E is opt-in; making it the default is Jon's call (on the coordinator's morning list).
 2. Catancast bugs on actor-kit-2 come first when they arrive.
-3. Message ids the actor dedupes on, so a send on a dead-but-OPEN socket can be retried
-   (delivery is at most once today).
+3. Exactly-once sends (message ids, acks, resend): proposed as its own session (ADR-021 first, Jon's
+   call); delivery is at most once today.
 5. A schema hash in the frame (ADR-020 "not decided").
-6. CI e2e: `studio-ui.spec.ts` "server restart" fails only on the Linux runner: after SIGTERM to the
-   `wrangler dev` process group the server still answers 10 s later (harness `stop()`, line 252).
-   Passes locally on this branch (6.3 s). Fix the helper's kill on Linux.
 7. `typecheck:budget` fails commits on a busy machine: its check-time limit is wall clock (2 s; seen
    3-15 s at load 45-300 with instantiations unchanged at 693 431). Needs Jon's call: fail only on
    instantiations and warn on time, or keep it.
