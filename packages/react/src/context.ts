@@ -44,6 +44,8 @@ interface ProviderProps<TView, TEvent extends { type: string }> {
 interface ActorContext<TView = unknown, TEvent extends { type: string } = { type: string; [key: string]: unknown }> {
   Provider: (props: ProviderProps<TView, TEvent>) => ReactNode;
   useClient: (options: CreateOptions<TView>) => ActorClient<TView, TEvent>;
+  /** The Provider's client, for work with it directly (subscribe to every change, read `client.view` in an effect). */
+  useActorClient: () => ActorClient<TView, TEvent>;
   useView: () => TView;
   useSend: () => (event: TEvent) => void;
   useRole: () => string | undefined;
@@ -162,6 +164,7 @@ export function createActorContext<
   return {
     Provider,
     useClient: useClientHook,
+    useActorClient: useClient,
     useView,
     useSend,
     useRole,

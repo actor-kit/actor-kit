@@ -195,6 +195,12 @@ function pinnedPackages(manifest: Record<string, unknown>): string[] {
   );
 }
 
+/** What the game uses, from its sources: React (either import path, moved or not) and token signing. */
+export function usesOf(sources: readonly string[]): MigrateOptions["uses"] {
+  const all = sources.join("\n");
+  return { react: /["'](@actor-kit|actor-kit)\/react["']/.test(all), token: /\bcreateAccessToken\b/.test(all) };
+}
+
 /** The build tag of a vendor directory, read from its core tarball's name. */
 export function tagOf(files: readonly string[]): string {
   for (const name of files) {
@@ -218,11 +224,7 @@ function main(game: string, tarballs: string, dry: boolean): void {
   const tag = tagOf(readdirSync(tarballs));
   const files = ["src", "app", "test", "tests", "e2e"].flatMap((d) => sourceFiles(join(game, d)));
   const sources = new Map(files.map((f) => [f, readFileSync(f, "utf8")]));
-  const all = [...sources.values()].join("\n");
-  const uses = {
-    react: /["']actor-kit\/react["']/.test(all),
-    token: /\bcreateAccessToken\b/.test(all),
-  };
+  const uses = usesOf([...sources.values()]);
 
   const manifestPath = join(game, "package.json");
   const { manifest, notes } = migrateManifest(JSON.parse(readFileSync(manifestPath, "utf8")), { tag, uses });

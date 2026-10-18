@@ -10,6 +10,7 @@ import {
   rewriteImports,
   tagOf,
   tarballsFor,
+  usesOf,
 } from "../../scripts/migrate-from-0.52.mts";
 
 const TAG = "0.3.0-next.0-abc1234";
@@ -230,5 +231,17 @@ describe("tarballsFor", () => {
     expect(() => tarballsFor([`actor-kit-core-${TAG}.tgz`], TAG, ["core", "worker"])).toThrow(
       `no actor-kit-worker-${TAG}.tgz in the tarball directory`,
     );
+  });
+});
+
+describe("usesOf", () => {
+  it("React is used when anything imports actor-kit/react, before or after the import was moved", () => {
+    expect(usesOf(['import { createActorKitContext } from "actor-kit/react";'])).toEqual({ react: true, token: false });
+    expect(usesOf(["import { actorContext } from '@actor-kit/react';"])).toEqual({ react: true, token: false });
+    expect(usesOf(['import { x } from "actor-kit/reactive";'])).toEqual({ react: false, token: false });
+  });
+
+  it("token signing is used when anything calls createAccessToken", () => {
+    expect(usesOf(["await createAccessToken({ secret })"])).toEqual({ react: false, token: true });
   });
 });

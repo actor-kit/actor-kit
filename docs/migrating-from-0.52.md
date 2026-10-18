@@ -61,7 +61,8 @@ covers coming from 0.52.
 | `createAccessToken({ signingKey, actorId, actorType, callerId, callerType })` (`actor-kit/server`) | `createAccessToken({ secret, actorId, actorType, callerId, callerType })` from `@actor-kit/worker/token` (`signingKey` is now `secret`), and `getCallerFromToken` to verify. A Worker that signs its own ids needs neither. |
 | `stub.spawn({ actorType, actorId, caller, input })` | `stub.spawn({ actorId, caller, callerType, input })` |
 | `stub.getSnapshot(caller)` → `{ checksum, snapshot }` | `stub.getSnapshot(caller, callerType)` → `{ checksum, snapshot, role }` |
-| `createActorKitContext<typeof machine>("room")` | `actorContext(Contract)`. Hooks: `useClient({ path, initialView })`, `useView`, `useSelector`, `useSend`, `useRole`, `useConnectionState`. |
+| `createActorKitContext<typeof machine>("room")` | `actorContext(Contract)`. Hooks: `useClient({ path, initialView })` (creates the client), `useView`, `useSelector`, `useSend`, `useRole`, `useConnectionState`. |
+| `RoomContext.useClient()` (no argument: the Provider's client) and `client.getState()` | `RoomContext.useActorClient()` and `client.view`. `client.subscribe(fn)` is the same. |
 | `createActorKitClient({ host, actorType, actorId, accessToken, checksum, initialSnapshot })` | `actorClient(Contract).create({ path, host, initialView, getToken })` or `createActorClient(...)`. Reconnect, heartbeat and resync are built in. |
 | `ActorKitEnv`, `ACTOR_KIT_SECRET` | Your own `Env`; an optional `env` Zod schema on the actor types `ctx.env` (ADR-016). |
 | Tests: `createActor(roomMachine, { clock: new SimulatedClock(), input })` | `testActor(Contract)` for one transition at a time, or `simulate({ contracts, now })` with `sim.advance("5s")` for whole games on a virtual clock (timers fire). |
