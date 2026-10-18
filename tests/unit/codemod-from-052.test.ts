@@ -9,6 +9,7 @@ import {
   renameTokenOptions,
   rewriteImports,
   tagOf,
+  tarballsFor,
 } from "../../scripts/migrate-from-0.52.mts";
 
 const TAG = "0.3.0-next.0-abc1234";
@@ -102,7 +103,7 @@ describe("migrateManifest", () => {
   };
 
   it("swaps actor-kit for the vendored packages, pins every one, and drops the 0.52 patch", () => {
-    const { manifest, notes } = migrateManifest(before, { tag: TAG, uses: { react: true, test: true } });
+    const { manifest, notes } = migrateManifest(before, { tag: TAG, uses: { react: true, token: false } });
     expect(manifest).toEqual({
       name: "game",
       dependencies: {
@@ -132,14 +133,14 @@ describe("migrateManifest", () => {
     ]);
   });
 
-  it("without React or test imports, only core, worker and client", () => {
+  it("without React imports: core, worker and client, and always @actor-kit/test (the machine's test helpers move to simulate())", () => {
     const { manifest } = migrateManifest(
       { name: "g", devDependencies: { "actor-kit": "^0.52.5" } },
-      { tag: TAG, uses: { react: false, test: false } },
+      { tag: TAG, uses: { react: false, token: false } },
     );
     expect(manifest).toEqual({
       name: "g",
-      devDependencies: {},
+      devDependencies: { "@actor-kit/test": file("test") },
       dependencies: {
         "@actor-kit/core": file("core"),
         "@actor-kit/worker": file("worker"),
@@ -150,9 +151,37 @@ describe("migrateManifest", () => {
           "@actor-kit/core": file("core"),
           "@actor-kit/worker": file("worker"),
           "@actor-kit/client": file("client"),
+          "@actor-kit/test": file("test"),
         },
       },
     });
+  });
+
+  it("keeps the manifest's key order (name, scripts, … stay where they were)", () => {
+    const { manifest } = migrateManifest(
+      { name: "g", private: true, scripts: { test: "vitest" }, dependencies: { "actor-kit": "0.52.6" }, pnpm: {} },
+      { tag: TAG, uses: { react: false, token: false } },
+    );
+    expect(Object.keys(manifest)).toEqual(["name", "private", "scripts", "dependencies", "pnpm", "devDependencies"]);
+  });
+
+  it("adds jose when the game signs tokens (createAccessToken), and moves zod 3 to zod 4", () => {
+    const { manifest, notes } = migrateManifest(
+      { name: "g", dependencies: { "actor-kit": "0.52.6", zod: "^3.25.76" } },
+      { tag: TAG, uses: { react: false, token: true } },
+    );
+    expect(manifest["dependencies"]).toMatchObject({ zod: "^4.6.5", jose: "^6.2.12" });
+    expect(notes).toContain("zod ^3.25.76 → ^4.6.5: message schemas are zod 4 (check z.record and error messages)");
+    expect(notes).toContain("added jose (createAccessToken signs actor-kit tokens with it)");
+  });
+
+  it("leaves zod 4 and an existing jose alone", () => {
+    const { manifest, notes } = migrateManifest(
+      { name: "g", dependencies: { "actor-kit": "0.52.6", zod: "^4.1.0", jose: "^6.0.1" } },
+      { tag: TAG, uses: { react: false, token: true } },
+    );
+    expect(manifest["dependencies"]).toMatchObject({ zod: "^4.1.0", jose: "^6.0.1" });
+    expect(notes.some((n) => n.startsWith("zod") || n.startsWith("added jose"))).toBe(false);
   });
 
   it("keeps other patched dependencies", () => {
@@ -162,14 +191,14 @@ describe("migrateManifest", () => {
         dependencies: { "actor-kit": "0.52.6" },
         pnpm: { patchedDependencies: { "actor-kit@0.52.6": "a", "x@1": "b" } },
       },
-      { tag: TAG, uses: { react: false, test: false } },
+      { tag: TAG, uses: { react: false, token: false } },
     );
     expect(manifest["pnpm"]).toMatchObject({ patchedDependencies: { "x@1": "b" } });
   });
 
   it("refuses a manifest without actor-kit (nothing to migrate)", () => {
     expect(() =>
-      migrateManifest({ name: "g", dependencies: {} }, { tag: TAG, uses: { react: false, test: false } }),
+      migrateManifest({ name: "g", dependencies: {} }, { tag: TAG, uses: { react: false, token: false } }),
     ).toThrow("package.json has no actor-kit dependency: nothing to migrate");
   });
 });
@@ -181,5 +210,25 @@ describe("tagOf", () => {
 
   it("refuses a directory without a core tarball", () => {
     expect(() => tagOf(["readme.md"])).toThrow("no actor-kit-core-<version>.tgz");
+  });
+});
+
+describe("tarballsFor", () => {
+  it("copies only the packages the manifest pins, not every tarball in the directory", () => {
+    const files = ["core", "worker", "client", "react", "test", "studio", "storybook", "projection", "studio-cli"].map(
+      (p) => `actor-kit-${p}-${TAG}.tgz`,
+    );
+    expect(tarballsFor(files, TAG, ["core", "worker", "client", "test"])).toEqual([
+      `actor-kit-core-${TAG}.tgz`,
+      `actor-kit-worker-${TAG}.tgz`,
+      `actor-kit-client-${TAG}.tgz`,
+      `actor-kit-test-${TAG}.tgz`,
+    ]);
+  });
+
+  it("refuses a pinned package with no tarball", () => {
+    expect(() => tarballsFor([`actor-kit-core-${TAG}.tgz`], TAG, ["core", "worker"])).toThrow(
+      `no actor-kit-worker-${TAG}.tgz in the tarball directory`,
+    );
   });
 });

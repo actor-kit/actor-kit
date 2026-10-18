@@ -68,47 +68,68 @@ covers coming from 0.52.
 
 ## 3. The room, step by step (little-vigilante)
 
-1. **State.** Keep `server` as your state: `{ tvId, seats, match, tvAway, seed }`. `public` and
-   `private` become views.
-2. **Input.** `input: RoomInputPropsSchema` plus `init: (input) => ({ … })`. The TV caller came from
-   `input.caller.id` in 0.52; pass it in the input (`{ tvId }`), since `init` has no caller.
+Done for real on little-vigilante (branch `claude/actor-kit-2-migration` in its repo): its 210-line
+machine became `src/room.actor.ts`, about 280 lines, over the unchanged `src/game/*` rules.
+
+1. **State.** The machine's `server` context becomes the state (`{ tvId, seats, match, tvAway, seed }`),
+   plus `roomCode` and `updatedAt` (step 6). `public` and `private` become views; `withViews()` goes.
+2. **Input.** `input: z.object({ roomCode, tvId, seed? })` plus `init`. 0.52 took the TV from
+   `input.caller.id` and the code from `input.id`; `init` has neither, so the Worker passes both.
 3. **Roles.** In order, first match wins:
    `system: (_, __, { callerType }) => callerType === "service"`,
-   `tv: (s, c) => c === s.tvId`, `player: (s, c) => s.seats.some(x => x.id === c)`,
-   `guest: () => true` (a phone not yet seated can only send `JOIN` / `OGS_JOIN`).
-4. **Messages.** Each XState event with its action becomes one `message()`. Guards move into
-   `guard`. A shared "for this seat" helper (`forSeat`) stays a plain function that handlers call
-   with `ctx.caller`.
-5. **The clock.** The `tick` delay becomes a timer the handlers reschedule:
-   `ctx.schedule("tick", { in: tickDelay(state, ctx.now()), key: "tick" })` at the end of every
-   handler that can move a deadline, and in the tick handler itself. `RESUME` goes away.
-6. **Views.** `tv: view.shared(TvView, s => publicView(s))`,
-   `player: view.perCaller(PlayerView, (s, c) => playerView(s, c))`. Write the view schemas with
-   `schema({ … })` from `@actor-kit/core` so frames are binary. `nullable(...)`, `array(...)`,
-   `record(...)`, `union(...)` and `json(zod)` cover most game views.
+   `tv: (s, c) => c === s.tvId`, `player: (s, c) => s.seats.some(x => x.id === c)`, and a catch-all
+   `guest: () => true` for a phone that has not joined yet.
+4. **Messages.** Each event becomes one `message()` whose payload is the event schema without its
+   type: export each event schema by name and pass `JoinEventSchema.omit({ type: true })` (picking
+   members out of a `discriminatedUnion` loses their types). The machine's per-state `on` becomes a
+   `guard` on the phase (`CONFIGURE` and `START` only in the lobby, `NEXT` only while playing), and
+   `fromTv` becomes `roles: ["tv"]`. A refused message (failed guard or wrong role) changes nothing,
+   as before; the phone also gets an `__error` frame now. Helpers like `forSeat` stay plain functions
+   that handlers call with `ctx.caller`.
+5. **The clock.** `after: { tick }` becomes a timer the handlers re-arm:
+   `ctx.schedule("tick", { in: tickDelay(state, ctx.now()), key: "tick" })` wherever the machine
+   re-entered `playing` (`reenter: true`), and in the tick handler itself; `ctx.cancel("tick")` back
+   in the lobby. `RESUME` goes away. Seeds come from `ctx.random()`, never `Math.random()`.
+6. **Views.** A view can't read the clock (views are pure functions of state). A `serverNow` that
+   0.52 stamped in `withViews(context, clock.now())` becomes `updatedAt: ctx.now()` set by every
+   change, and the view reads that. **Keep the 0.52 snapshot's shape** and the client code stays as
+   it is: one `screen(state, caller)` returning `{ public, private, value }`, with
+   `schema({ public: json(PublicZ), private: json(PrivateZ), value: json(ValueZ) })` and
+   `view.perCaller(ScreenView, screen)` for every role. (little-vigilante: 110 `useSelector` calls,
+   none changed.) Smaller binary frames, with field schemas instead of `json()`, can come later.
 7. **The OGS join.** 0.52 games override `webSocketMessage` to verify an OGS token before the event
-   reaches the machine. In 0.3, verify it in the Worker, then deliver the result as a service message
-   (`stub.send("worker", "service", { type: "ADMIT", … })`) that only the `system` role may send.
-   Codebreakers does this (`src/worker.ts`).
-8. **Worker.** Replace `createActorKitRouter` with your `/api/<code>/ws` route: check the caller
-   (signed id, OGS token), then `stub.fetch(withCallerIdentity(req, { callerId, callerType: "user",
-   supportsBinary: true }))`. **Pass `supportsBinary: true`**, or every phone gets JSON frames
-   despite the binary schemas.
-9. **wrangler.toml.** The Durable Object class changes. Add a migration with
-   `new_sqlite_classes = ["<NewClass>"]`, and keep the old class exported as a placeholder if
-   `wrangler rollback` should still work (see upgrading-0.3 "A new Durable Object class blocks
-   `wrangler rollback`"). Rooms are short-lived, so old rooms are not migrated.
-10. **Client.** Pages boot from the Worker's `getSnapshot()` as before. Hand `initialView` and a
-    `path` to `useClient`, and delete hand-rolled reconnect, ping and visibility code.
+   reaches the machine. The Worker never sees socket messages in 0.3, so the check moves inside the
+   room as a **service**: `JOIN` with an `ogsToken` calls `ctx.execute("verifyOgs", { caller, token,
+   name })`, the service's `fn` verifies (it gets the env), and `onDone` seats the phone. Two catches:
+   a service callback gets `(state, result: unknown, input: unknown, ctx)`, so parse both with zod;
+   and its `ctx` has only `now` / `id` / `random` (no timers). Keep a `system`-only `OGS_JOIN` message
+   for tests and other server-side callers.
+8. **Worker.** Replace `createActorKitRouter` with your own `/api/room/<code>` route. Keep the page's
+   actor-kit token: `getTokenFromRequest(req)` reads it from the socket's protocol header,
+   `getCallerFromToken(token, "room", code, secret)` checks it, then
+   `stub.fetch(withCallerIdentity(req, { callerId: caller.caller, callerType: caller.callerType }))`.
+   `stub.spawn({ actorId, caller, callerType: "user", input })` and `stub.getSnapshot(caller, "user")`
+   take the caller as a string now. A spawn of an existing room is refused (catch it where a reload
+   can spawn again). Pass `supportsBinary: true` once the views have field schemas and the client
+   decodes them (§6 in codebreakers).
+9. **wrangler.toml.** If the 0.52 class was already a SQLite class (`new_sqlite_classes`, as
+   little-vigilante's `Room`), keep its name: no migration. Rooms persisted by 0.52 won't load (no
+   actor-kit tables), which is fine for short-lived rooms. A KV-backed class needs a new class
+   name and a migration (upgrading-0.3, "A new Durable Object class blocks `wrangler rollback`").
+10. **Client.** `actorContext<typeof RoomContract>()` with `import type`, so zod, the rules and the
+    OGS check stay out of the page bundle. Boot mounts `RoomContext.useClient({ path, host,
+    initialView, getToken: () => boot.accessToken })` and its Provider. The typed view carries a
+    `role` tag (`LinkedView`), so `initialView` is `{ role, ...snapshot }` with the role from
+    `getSnapshot()`. Delete hand-rolled reconnect, ping and visibility code.
 
 ## 4. Tests
 
-- Tests above the machine (the rules in `src/game/*`, URL helpers, OGS join parsing, seam and e2e
-  tests that drive pages) carry over **unchanged**. Keep them unedited: they are the check that the
-  migration changed nothing.
-- Tests that drove the XState actor (`room.machine.test.ts` through `test/room-test-helpers.ts`) are
-  tied to XState. Keep each test's body. Rewrite only the helpers (`createTestRoom`, `send`,
-  `advance`, `view`, `player`) over `simulate()`:
+- Tests above the machine (the rules in `src/game/*`, URL helpers, OGS join parsing) carry over
+  **unchanged**, and so do seam tests that drive pages. Keep them unedited: they are the check that
+  the migration changed nothing.
+- Tests that drove the XState actor (`room.machine.test.ts` through `test/room-test-helpers.ts`)
+  also stay unedited. Rewrite only the helpers, keeping their names and signatures, over
+  `simulate()`. Little-vigilante's 30 machine tests passed this way unchanged:
 
   ```ts
   // Before (0.52): an XState actor on a SimulatedClock
@@ -116,11 +137,17 @@ covers coming from 0.52.
   actor.send({ type: "JOIN", name, caller: { type: "client", id }, env, storage });
   // After (0.3): the same helpers over simulate()
   const sim = simulate({ contracts: [RoomContract], now: START });
-  const room = await sim.spawn(RoomContract, "ABCD", { tvId: TV });
-  room.send(id, { type: "JOIN", name });
-  sim.advance(ms);                    // timers fire in order on the virtual clock
-  room.view(id);                      // what that caller's screen shows
+  const actor = sim.spawnSync(RoomContract, "ABCD", { roomCode: "ABCD", tvId });
+  actor.send(id, { type: "JOIN", name });
+  sim.advance("250ms");               // timers fire in order on the virtual clock
+  ScreenSchema.parse(actor.view(id)); // what that caller's screen shows (parsed: views are data)
   ```
+
+  - `snap(room).value` becomes the view's `value`.
+  - A helper that sent a server-made event (OGS_JOIN) sends it as the `system` role:
+    `actor.send("worker", { type: "OGS_JOIN", id, profile }, { callerType: "service" })`.
+  - `restart()` and `sendSystem("RESUME")` become no-ops, each with a comment: 0.3 restores state
+    and timers itself, and actor-kit's own tests cover the restore.
 
   If a test's body has to change, it was testing XState, not the game. Say so in the commit.
 
@@ -134,7 +161,23 @@ covers coming from 0.52.
 - [ ] Unit tests (rules) unchanged and green; machine-test helpers rewritten over `simulate()`
 - [ ] Seam tests (real Worker) green: reconnect, a phone that slept, two tabs, the OGS join
 
-## 6. Worked example: codebreakers (0.0.1 → 0.3)
+## 6. Worked examples
+
+**little-vigilante (0.52.6 → 0.3), the full migration** (§3; branch `claude/actor-kit-2-migration`):
+
+- The codemod (§7), then the contract, Worker route, two client files and the test helpers, by hand.
+- Typecheck green. All 204 unit tests green, none edited, including the 30 machine tests through the new helpers.
+- Seam tests (wrangler dev, real browsers, OGS tokens): 16 of 17 in a full run. Every test passed in
+  at least one run; the failures were bug-bash games timing out at load average 150–200, as on the
+  0.52 baseline.
+- An OGS-profile join test that failed twice on 0.52 in the same setup passes on 0.3.
+- First real use found three codemod bugs, now fixed: it scrambled package.json's key order, left
+  out `@actor-kit/test`, and copied every tarball instead of the pinned ones.
+- It also showed that zod 3 games must move to zod 4 and that token signing needs `jose`; the
+  codemod now does both.
+
+**codebreakers (0.0.1 → 0.3)**, the 0.3 end state:
+
 
 Codebreakers was already a contract (`defineActor`, `message`, `view.shared` / `view.perCaller`,
 `createActorClass`, `actorContext`, `testActor`) on an early vendored build (`@actor-kit/*` 0.0.1).
@@ -163,9 +206,11 @@ node scripts/migrate-from-0.52.mts ~/src/<game> /tmp/ak --dry      # the plan; w
 node scripts/migrate-from-0.52.mts ~/src/<game> /tmp/ak            # do it
 ```
 
-- **What it does.** Swaps `actor-kit` for the `@actor-kit/*` tarballs (react and test only if
-  imported) and pins every one in `pnpm.overrides`. Deletes `patches/actor-kit@*.patch` and its
-  `patchedDependencies` entry. Copies the tarballs to `vendor/actor-kit/`. Moves import paths
+- **What it does.** Swaps `actor-kit` for the `@actor-kit/*` tarballs: core, worker and client,
+  react if imported, and always test (for the `simulate()` helpers, §4). It pins every one in
+  `pnpm.overrides` and keeps package.json's key order. It moves zod 3 to `^4.6.5`, and adds `jose`
+  if the game calls `createAccessToken`. It deletes `patches/actor-kit@*.patch` and its
+  `patchedDependencies` entry, and copies only the pinned tarballs to `vendor/actor-kit/`. Moves import paths
   (`actor-kit/worker` → `@actor-kit/worker`, `actor-kit/react` → `@actor-kit/react`,
   `actor-kit/server` → `@actor-kit/worker/token`, `actor-kit/test`, `actor-kit/storybook`). Renames
   `createAccessToken({ signingKey })` to `{ secret }`.
@@ -173,6 +218,7 @@ node scripts/migrate-from-0.52.mts ~/src/<game> /tmp/ak            # do it
   `createActorKitRouter`, `createActorKitContext`, `WithActorKitEvent`, `ActorKitEnv`, `Caller`, …),
   every `xstate` import and every bare `"actor-kit"` import, each with a hint pointing into this
   guide. For little-vigilante that's 28 lines in 7 files, nearly all in the machine, its types and
-  its test helpers.
+  its test helpers; the hand-written part of its migration took the contract, the Worker route, two
+  client files and the helpers (§6).
 - **What it can't do.** Rewrite the machine. Events, guards and actions map one to one (§2), but
   `always`, `after` and `reenter`, and the `public`/`private` split, need a person who knows the game.

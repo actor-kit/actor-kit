@@ -119,11 +119,14 @@ const Manifest = z.looseObject({
   pnpm: z.looseObject({ overrides: Deps.optional(), patchedDependencies: Deps.optional() }).optional(),
 });
 
+const ZOD = "^4.6.5";
+const JOSE = "^6.2.12";
+
 export interface MigrateOptions {
   /** The build tag in the tarball names, e.g. "0.3.0-next.0-abc1234". */
   tag: string;
-  /** Which optional packages the game imports. */
-  uses: { react: boolean; test: boolean };
+  /** Whether the game imports actor-kit/react, and whether it signs tokens (createAccessToken). */
+  uses: { react: boolean; token: boolean };
 }
 
 /** package.json for 0.3: actor-kit swapped for the vendored packages (all pinned), the 0.52 patch dropped. */
@@ -132,6 +135,8 @@ export function migrateManifest(
   options: MigrateOptions,
 ): { manifest: Record<string, unknown>; notes: string[] } {
   const manifest = Manifest.parse(raw);
+  // The raw object keeps the file's key order (the parse puts known keys first).
+  const original = z.record(z.string(), z.unknown()).parse(raw);
   const notes: string[] = [];
   const dependencies = { ...manifest.dependencies };
   const devDependencies = { ...manifest.devDependencies };
@@ -144,8 +149,19 @@ export function migrateManifest(
   const file = (pkg: string) => `file:vendor/actor-kit/actor-kit-${pkg}-${options.tag}.tgz`;
   const runtime = ["core", "worker", "client", ...(options.uses.react ? ["react"] : [])];
   for (const pkg of runtime) dependencies[`@actor-kit/${pkg}`] = file(pkg);
-  if (options.uses.test) devDependencies["@actor-kit/test"] = file("test");
-  const pinned = [...runtime, ...(options.uses.test ? ["test"] : [])];
+  // Always: the machine's test helpers move to simulate() (guide §4), even when 0.52 tests drove XState directly.
+  devDependencies["@actor-kit/test"] = file("test");
+  // @actor-kit/worker's message() takes zod 4 schemas; its token helpers need jose (an optional peer).
+  const zod = dependencies["zod"];
+  if (zod !== undefined && !/^[\^~]?4\./.test(zod)) {
+    dependencies["zod"] = ZOD;
+    notes.push(`zod ${zod} → ${ZOD}: message schemas are zod 4 (check z.record and error messages)`);
+  }
+  if (options.uses.token && dependencies["jose"] === undefined) {
+    dependencies["jose"] = JOSE;
+    notes.push("added jose (createAccessToken signs actor-kit tokens with it)");
+  }
+  const pinned = [...runtime, "test"];
   const overrides = { ...manifest.pnpm?.overrides };
   for (const pkg of pinned) overrides[`@actor-kit/${pkg}`] = file(pkg);
 
@@ -159,7 +175,24 @@ export function migrateManifest(
   if (dependencies["xstate"] !== undefined || devDependencies["xstate"] !== undefined) {
     notes.push("xstate is still a dependency: remove it once the machine is rewritten, if nothing else uses it");
   }
-  return { manifest: { ...manifest, dependencies, devDependencies, pnpm }, notes };
+  return { manifest: { ...original, dependencies, devDependencies, pnpm }, notes };
+}
+
+/** The tarballs to vendor: one per pinned package (not every package in the directory). */
+export function tarballsFor(files: readonly string[], tag: string, packages: readonly string[]): string[] {
+  return packages.map((pkg) => {
+    const name = `actor-kit-${pkg}-${tag}.tgz`;
+    if (!files.includes(name)) throw new Error(`no ${name} in the tarball directory`);
+    return name;
+  });
+}
+
+/** The packages a migrated manifest pins (`@actor-kit/<name>` in pnpm.overrides). */
+function pinnedPackages(manifest: Record<string, unknown>): string[] {
+  const overrides = Manifest.parse(manifest).pnpm?.overrides ?? {};
+  return Object.keys(overrides).flatMap((name) =>
+    name.startsWith("@actor-kit/") ? [name.slice("@actor-kit/".length)] : [],
+  );
 }
 
 /** The build tag of a vendor directory, read from its core tarball's name. */
@@ -186,7 +219,10 @@ function main(game: string, tarballs: string, dry: boolean): void {
   const files = ["src", "app", "test", "tests", "e2e"].flatMap((d) => sourceFiles(join(game, d)));
   const sources = new Map(files.map((f) => [f, readFileSync(f, "utf8")]));
   const all = [...sources.values()].join("\n");
-  const uses = { react: /["']actor-kit\/react["']/.test(all), test: /["']actor-kit\/test["']/.test(all) };
+  const uses = {
+    react: /["']actor-kit\/react["']/.test(all),
+    token: /\bcreateAccessToken\b/.test(all),
+  };
 
   const manifestPath = join(game, "package.json");
   const { manifest, notes } = migrateManifest(JSON.parse(readFileSync(manifestPath, "utf8")), { tag, uses });
@@ -209,7 +245,7 @@ function main(game: string, tarballs: string, dry: boolean): void {
     writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
     for (const p of patches) rmSync(join(game, "patches", p));
     mkdirSync(join(game, "vendor/actor-kit"), { recursive: true });
-    for (const t of readdirSync(tarballs).filter((t) => t.endsWith(`${tag}.tgz`))) {
+    for (const t of tarballsFor(readdirSync(tarballs), tag, pinnedPackages(manifest))) {
       copyFileSync(join(tarballs, t), join(game, "vendor/actor-kit", t));
     }
   }
