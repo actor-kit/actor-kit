@@ -22,7 +22,13 @@
  *   const CounterCtx = actorContext<typeof CounterClient>();
  */
 
-import type { ActorClientFactory, ContractMessages, InferMessage, InferView } from "@actor-kit/client";
+import {
+  type ActorClientFactory,
+  type ContractMessages,
+  contractSchemas,
+  type InferMessage,
+  type InferView,
+} from "@actor-kit/client";
 import type { LinkedView } from "@actor-kit/core";
 import { createActorContext } from "./context";
 
@@ -52,6 +58,7 @@ export function actorContext<TFactory extends ActorClientFactory<unknown, { type
 
 // Implementation — overloads provide the real types, implementation is loosely typed
 // biome-ignore lint/suspicious/noExplicitAny: implementation must be loose to satisfy all overload return types
-export function actorContext(_contract?: unknown): any {
-  return createActorContext();
+export function actorContext(contract?: { readonly def: { readonly roles?: unknown; readonly views?: unknown } }): any {
+  // With the contract value, useClient decodes binary views with its per-role schemas.
+  return createActorContext(contract === undefined ? undefined : contractSchemas(contract.def));
 }

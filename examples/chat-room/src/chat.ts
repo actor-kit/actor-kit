@@ -54,6 +54,11 @@ export const ChatRoomContract = chat.actor("chat-room", {
 
   studio: { enabled: true },
 
+  // A phone that slept leaves a socket open on this side that will never close by itself; close
+  // sockets whose heartbeat stopped for a minute (three client intervals), so the user goes offline
+  // (ADR-020 E).
+  heartbeat: { staleMs: 60_000 },
+
   // Lifecycle fires per socket, so a user with two tabs connects twice.
   // They stay online until their last tab closes (callerConnections === 0).
   lifecycle: {

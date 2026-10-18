@@ -32,6 +32,35 @@ export function cursorOver(bytes: Uint8Array, offset: number): Cursor {
   return { view: new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength), bytes, offset };
 }
 
+const bytesOf = (n: number): string => `${n} ${n === 1 ? "byte" : "bytes"}`;
+const SAME_SCHEMA = "Use the same view schema on the client and the Worker.";
+
+/**
+ * Reads a whole payload (ADR-020 D): one that ends early or has bytes left over was written with
+ * another schema or damaged, and is invalid_frame rather than a view with a field cut short.
+ */
+export function readWhole<T>(what: string, bytes: Uint8Array, read: (c: Cursor) => T): T {
+  const c = cursorOver(bytes, 0);
+  let value: T;
+  try {
+    value = read(c);
+  } catch (error) {
+    // A fixed-width read past the end (DataView); a string past the end moves the cursor instead.
+    if (error instanceof RangeError) throw new ActorKitError("invalid_frame", `${what} ends early. ${SAME_SCHEMA}`);
+    throw error;
+  }
+  const extra = bytes.byteLength - c.offset;
+  if (extra < 0)
+    throw new ActorKitError("invalid_frame", `${what} ends early: it needs ${bytesOf(-extra)} more. ${SAME_SCHEMA}`);
+  if (extra > 0) {
+    throw new ActorKitError(
+      "invalid_frame",
+      `${what} has ${bytesOf(extra)} left over after its last field. ${SAME_SCHEMA}`,
+    );
+  }
+  return value;
+}
+
 export function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
 }

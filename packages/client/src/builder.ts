@@ -20,6 +20,7 @@
 import type { ContractMessages, FieldDescriptor, Infer, SchemaDefinition } from "@actor-kit/core";
 import { type ActorClient, type ClientError, createActorClient, type WebSocketConstructor } from "./client";
 import { checkContractView, checkViewAgainst } from "./initial-view";
+import type { HeartbeatOptions } from "./liveness";
 
 /** Runtime options for creating a client connection. */
 export interface CreateOptions<TView = unknown> {
@@ -36,6 +37,8 @@ export interface CreateOptions<TView = unknown> {
   WebSocketImpl?: WebSocketConstructor;
   onRedirect?: (target: { actorType: string; actorId: string }) => void;
   onError?: (error: ClientError) => void;
+  /** Liveness check of the open socket (ADR-020). Default `{ intervalMs: 20_000, timeoutMs: 5_000 }`; false turns it off. */
+  heartbeat?: HeartbeatOptions | false;
 }
 
 /** Typed actor client factory — knows TView and TEvent at compile time. */
@@ -121,7 +124,12 @@ function isViewSchema(value: unknown): value is SchemaDefinition<Record<string, 
 }
 
 /** Role names in definition order (the server's roleIndex) and the schema of each role's view, if any. */
-function contractSchemas(def: { readonly roles?: unknown; readonly views?: unknown }): {
+/**
+ * How a client decodes a contract's views: its role names in definition order (a snapshot frame
+ * names its role by index) and each role's view schema. `actorContext(Contract)` passes this to
+ * `useClient`.
+ */
+export function contractSchemas(def: { readonly roles?: unknown; readonly views?: unknown }): {
   roleNames: string[] | undefined;
   viewSchemas: Record<string, SchemaDefinition<Record<string, FieldDescriptor>>>;
 } {

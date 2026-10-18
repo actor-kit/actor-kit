@@ -516,3 +516,71 @@ String, record-key and JSON lengths and array and record counts used to be a big
 unsigned LEB128 varints now (`docs/binary-protocol.md`), so large values round-trip. Server and client
 must both run 0.3: a 0.2 client cannot decode 0.3 frames. Views with only short strings and small
 arrays get slightly smaller frames.
+
+## The client pings, and a silent socket is replaced (ADR-020)
+
+A client now sends `{"type":"__ping"}` every 20 s while its socket is open, and at once when the
+page becomes visible or the browser comes online; the actor's runtime answers `{"type":"__pong"}`
+without waking the actor. A socket that answers nothing for 5 s after a ping is closed and a new one
+opens at once. Update the client and the Worker together: an older Worker refuses `__ping` as an
+unknown message (an `onError` every 20 s). To keep the old behaviour, or in tests that leave a fake
+socket silent:
+
+```ts
+// Before: a socket that died without a close event was kept forever
+const client = actorClient(Room).create({ path, initialView });
+// After: on by default; tune it or turn it off
+const client = actorClient(Room).create({ path, initialView, heartbeat: { intervalMs: 20_000, timeoutMs: 5_000 } });
+const quiet = actorClient(Room).create({ path, initialView, heartbeat: false });
+```
+
+Also: a message sent while the socket is closing waits for the next socket instead of being dropped;
+a view frame that does not decode makes the client ask for the view again, and one that still does
+not is reported through `onError` (`invalid_frame`: reload the page). `decode` and `applyDelta` throw
+`invalid_frame` for a payload that ends early or has bytes left over, and `parseFrame` for a frame
+shorter than its header says.
+
+## `useClient(options)` follows a new room
+
+`Ctx.useClient({ path, host, ... })` used to keep the client it made on the first render for the
+life of the component, so a component given another `path` stayed connected to the old room. A new
+`path` or `host` now makes a new client (connected on commit) and disconnects the old one; other
+options are read when a room's client is made.
+
+```tsx
+// Before: navigating from /room/a to /room/b inside one <Room> kept the socket to room a
+const client = Ctx.useClient({ path: `/api/room/${roomId}`, initialView });
+// After: the same code connects to room b and closes room a's socket; a key is no longer needed
+```
+
+## Timer payloads are parsed once, when the timer fires
+
+A timer scheduled without a payload under `timer(z.object({}).optional(), ...)` was dropped by the
+Durable Object (`actor_kit.timer.failed`, "expected object, received null") while `simulate()` ran
+it with `null`. Now every runtime (Durable Object, `simulate()`, `replayJournal()`) fires through
+the step core, which parses the stored payload with the timer's schema; a stored `null` is read as
+absent when the schema rejects `null` but accepts `undefined`. A timer row (and Studio's timers
+panel) holds the payload as it was given to `ctx.schedule`; the schema still validates it then, and
+its transforms and defaults apply once, when it fires (a `z.string().transform(Number)` timer used
+to fail on every firing).
+
+```ts
+// Before: dropped in production, ran with null in simulate()
+ctx.schedule("bot", { at, key: "bot" }); // timers: { bot: kit.timer(z.object({}).optional(), handler) }
+ctx.schedule("bot", { at, key: "bot", payload: {} }); // the workaround
+// After: both fire everywhere; the handler gets undefined and {} respectively
+```
+
+## Opt in: close sockets whose heartbeat stopped (ADR-020 E)
+
+A phone that slept leaves its old socket open on the actor's side, so its player stays online after
+leaving. An actor can now close such sockets: a socket that pinged and then sent nothing for longer
+than `staleMs` is closed (code 4001) when the actor next runs, and its disconnect lifecycle runs.
+Off unless set; sockets that never pinged are never closed.
+
+```ts
+// Before: no option; a dead socket counted as a connection until the runtime noticed (maybe never)
+export const Room = kit.actor("room", { /* ... */ });
+// After: opt in
+export const Room = kit.actor("room", { /* ... */ heartbeat: { staleMs: 60_000 } });
+```

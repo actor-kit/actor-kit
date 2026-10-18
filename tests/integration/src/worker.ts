@@ -13,6 +13,7 @@ export { Kiosk } from "./init-link-actors";
 export { JournalKeep, JournalOff, JournalProbe, NotAnActor } from "./journal-actors";
 export { Notice, NoticeNoJournal, NoticeStudio, Reader } from "./link-version-actors";
 export { RoundLocalsActor, RoundsActor, ScopedCallsActor } from "./nested-states";
+export { OptionalTimers } from "./optional-timers";
 export { Retrier, RetrierNoJournal } from "./outbox-retry";
 export { Lot, LotTyped, LotUnbound } from "./publish-actors";
 export { QuizStates } from "./quiz-states";
@@ -165,6 +166,11 @@ export const NullableCounter = createActorClass(NullableCounterContract);
 // --- ChatRoom actor: the examples/chat-room contract, unchanged (presence per socket) ---
 
 export const ChatRoom = createActorClass(ChatRoomContract);
+
+/** The chat room with a short stale window, so a test sees a dead socket reaped (ADR-020 E). */
+export const ChatRoomReaping = createActorClass(
+  defineActor("chat-room-reaping", { ...ChatRoomContract.def, heartbeat: { staleMs: 300 } }),
+);
 
 // --- Worker entrypoint ---
 

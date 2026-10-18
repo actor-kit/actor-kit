@@ -10,7 +10,7 @@ export type {
   InferEvent as InferMessage,
   InferView,
 } from "./builder";
-export { actorClient } from "./builder";
+export { actorClient, contractSchemas } from "./builder";
 export type {
   ActorClient,
   ClientError,
@@ -21,4 +21,5 @@ export type {
 } from "./client";
 export { createActorClient } from "./client";
 export { InitialViewError } from "./initial-view";
+export type { HeartbeatOptions } from "./liveness";
 export { buildUrl, inferProtocol } from "./url";

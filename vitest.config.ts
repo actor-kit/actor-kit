@@ -4,6 +4,9 @@ import { defineConfig } from "vitest/config";
 export default defineConfig({
   test: {
     include: ["tests/unit/**/*.test.{ts,tsx}"],
+    // The pre-commit hook runs this suite while other sessions load the machine (load average 45+
+    // seen): CPU-heavy tests that take ~1 s alone went past the 5 s default and failed commits.
+    testTimeout: 30_000,
   },
   resolve: {
     alias: {

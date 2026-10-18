@@ -81,7 +81,8 @@ describe("large values round-trip", () => {
     const delta = encodeDelta(S, prev, next);
     if (delta === null) throw new Error("expected a delta");
     expect(applyDelta(S, prev, delta)).toEqual(next);
-  });
+    // 280 000 keys: ~1 s alone, several on a loaded machine; the 5 s default made it flaky.
+  }, 60_000);
 });
 
 describe("long and multi-byte strings (property)", () => {

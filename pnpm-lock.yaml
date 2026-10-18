@@ -597,6 +597,9 @@ importers:
 
   tests/integration:
     dependencies:
+      '@actor-kit/client':
+        specifier: workspace:*
+        version: link:../../packages/client
       '@actor-kit/core':
         specifier: workspace:*
         version: link:../../packages/core

@@ -190,22 +190,31 @@ Comparison is by value for primitives, by reference + deep equality for objects/
 
 The checksum is the xxHash64 (seed 0, 16 lowercase hex chars) of the view's JSON — `xxh64(JSON.stringify(view))` from `@actor-kit/core`, computed identically by the server and the client. It serves two purposes:
 1. **Deduplication**: if the checksum hasn't changed since the last send, skip the frame entirely
-2. **Reconnection**: client sends its last checksum on reconnect, server uses it to compute a delta
+2. **Reconnection and resync**: the client sends `{"type":"__reconnect","lastChecksum"}` when a socket
+   reopens, and on an open socket after a frame it could not decode (ADR-020 D). The server answers
+   `__reconnect_ack` when its current view has that checksum, else a full SNAPSHOT. (Every new socket
+   also gets a SNAPSHOT first, before the client's `__reconnect` arrives.)
 
-## Schema version negotiation
+## Lengths are exact
 
-```
-Client connects:
-  → Sends { lastChecksum, schemaVersion } in first WS message
+A frame must carry at least the payload bytes its header promises (`parseFrame` throws
+`invalid_frame` "Frame cut short" otherwise). `decode` and `applyDelta` must consume the payload
+exactly: one that ends early or has bytes left over is `invalid_frame`. Most view schema changes
+(a field added, removed or retyped) change the byte layout, so a client decoding with an older
+schema finds out instead of showing a wrong value; the client then asks for the view again and, if
+that fails too, reports `invalid_frame` through `onError` so the app can reload.
 
-Server checks schemaVersion:
-  Match → proceed normally (DELTA if checksum known, SNAPSHOT if not)
-  Mismatch → send SCHEMA_CHANGED control frame + full SNAPSHOT in new schema
+## Heartbeat
 
-Mid-session deploy:
-  → Server detects schema version changed
-  → Sends SCHEMA_CHANGED + SNAPSHOT to all connected clients
-  → Clients re-initialize their decoders
-```
+While a socket is open the client sends the text `{"type":"__ping"}` every 20 s (and at once on
+page visible / browser online); the actor registers `setWebSocketAutoResponse` so the runtime
+answers `{"type":"__pong"}` without waking it. A ping with no frame of any kind within 5 s abandons
+the socket (ADR-020 A, B).
 
-The client SDK handles this transparently. User code sees a new view arrive — it doesn't need to know about schema negotiation.
+## Schema changes across a deploy
+
+There is no schema negotiation on the wire: the frame's version byte is the actor's state
+`version`, and `ControlType.SCHEMA_CHANGED` is reserved but never sent. A deploy restarts the actor,
+which closes every socket; clients reconnect and get a SNAPSHOT in the new schema. A client bundle
+that is older than the new schema is caught by the exact-length rule above in most cases (a change
+that keeps every byte length is not).

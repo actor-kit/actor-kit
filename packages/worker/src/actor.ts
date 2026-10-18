@@ -52,6 +52,7 @@ import {
 import { parseEffectId } from "./runtime/effect-id";
 import { type DeliveryInfo, deliveryInfo, type EffectInfo, effectInfo } from "./runtime/effect-info";
 import { type EnvParser, envErrorMessage, envInvalidEvent, parseActorEnv } from "./runtime/env";
+import { HEARTBEAT_PING, HEARTBEAT_PONG } from "./runtime/heartbeat";
 import {
   appendJournalEvent,
   clockedSources,
@@ -140,6 +141,7 @@ import {
   serviceAttemptEvent,
   settleInterrupted,
 } from "./runtime/service-options";
+import { reapedAttachment, STALE_CLOSE_CODE, staleSockets } from "./runtime/stale-sockets";
 import {
   admitStepMessage,
   type InitCause,
@@ -331,6 +333,13 @@ interface ActorDef {
   restore?(serialized: unknown): unknown;
   /** Event journal (ADR-013). Omitted: on, keep everything. `false`: off. `{ keep }`: prune. */
   journal?: JournalOption;
+  /**
+   * Close app sockets whose client heartbeat stopped (ADR-020 E): a socket that pinged and then sent
+   * nothing for longer than `staleMs` (for example 60 000, three client intervals) is closed and its
+   * disconnect lifecycle runs. Checked whenever the actor runs (a message, a close, a connect).
+   * Omitted: off. Sockets that never pinged are never closed.
+   */
+  heartbeat?: { staleMs: number };
   studio?: {
     /**
      * true: force-enable Studio regardless of registry detection.
@@ -588,6 +597,8 @@ export function actor(
       super(ctx, env);
       this.envBindings = env;
       this.version = def.version ?? 1;
+      // Client heartbeats (ADR-020 B) are answered by the runtime, without waking a hibernated actor.
+      this.ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair(HEARTBEAT_PING, HEARTBEAT_PONG));
       // Typed env (ADR-016 §4): parsed once, before anything is served. One that does not parse is
       // logged once; then every request is refused and no handler ever runs.
       const parsedEnv = parseActorEnv(def.env, env);
@@ -1034,12 +1045,10 @@ export function actor(
     fireTimer(due: DueTimer, now: number): void {
       const sql = this.ctx.storage.sql;
       const lateBy = Math.max(0, now - due.fireAt);
-      const parsed = def.timers?.[due.name]?.schema.safeParse(due.payload);
       try {
-        if (parsed !== undefined && !parsed.success)
-          throw new ActorKitError("invalid_timer_payload", `invalid payload: ${parsed.error.message}`);
-        const payload = parsed?.success ? parsed.data : due.payload;
-        const result = this.runStep({ type: "timer", ...due, payload, lateBy, trace: this.effectTrace(due.id) }, now);
+        // The step core parses the stored payload with the timer's schema (timer-payload.ts), as in
+        // simulate() and replay; one that no longer parses throws invalid_timer_payload.
+        const result = this.runStep({ type: "timer", ...due, lateBy, trace: this.effectTrace(due.id) }, now);
         this.commit(result.state, result.event, (seq) => {
           deleteTimer(sql, due.id);
           this.writeEffects(result, seq, `timer:${due.name}`, "service");
@@ -1994,6 +2003,7 @@ export function actor(
       const forwarded = parseMessageMeta(meta);
       if (!forwarded.ok) return refuseInvalidDelivery(forwarded.detail);
       await this.loadState();
+      this.reapStaleSockets();
       const admitted = this.admit(caller, callerType, event);
       if (!admitted.ok) {
         this.recordRefusal(admitted, caller, callerType, event);
@@ -2203,6 +2213,7 @@ export function actor(
         return new Response("Forbidden", { status: 403 });
       }
 
+      this.reapStaleSockets();
       const client = this.acceptAppSocket(connect, role);
       this.runConnectLifecycle(connect.caller, connect.callerType, role);
 
@@ -2419,14 +2430,48 @@ export function actor(
         return;
       }
 
+      // Closed by the actor for a stopped heartbeat: its disconnect already ran (reapSocket).
+      if (readConnectionAttachment(ws.deserializeAttachment())?.reaped) return;
       const info = this.getCallerFromWs(ws);
       if (!info) return;
 
+      this.endAppSocket(ws, info.caller, info.callerType);
+      this.reapStaleSockets();
+    }
+
+    /** An app socket is gone: forget it, tell Studio and the registry, run the disconnect lifecycle. */
+    endAppSocket(ws: WebSocket, caller: string, callerType: "user" | "service"): void {
       this.forgetSocket(ws);
-      this.announceDisconnect(ws, info.caller, info.callerType);
+      this.announceDisconnect(ws, caller, callerType);
       // Update registry connection count (the closing socket may still be listed)
       this.updateRegistryConnections(ws);
-      this.runDisconnectLifecycle(ws, info.caller, info.callerType);
+      this.runDisconnectLifecycle(ws, caller, callerType);
+    }
+
+    /** Close app sockets whose heartbeat stopped, when the actor opted in (ADR-020 E). */
+    reapStaleSockets(): void {
+      const staleMs = def.heartbeat?.staleMs;
+      if (staleMs === undefined) return;
+      const sockets = this.ctx.getWebSockets().map((ws) => ({
+        socket: ws,
+        tags: this.ctx.getTags(ws),
+        attachment: ws.deserializeAttachment(),
+        lastPing: this.ctx.getWebSocketAutoResponseTimestamp(ws),
+      }));
+      for (const ws of staleSockets(sockets, Date.now(), staleMs)) this.reapSocket(ws);
+    }
+
+    reapSocket(ws: WebSocket): void {
+      const attachment = readConnectionAttachment(ws.deserializeAttachment());
+      const info = this.getCallerFromWs(ws);
+      if (attachment === null || info === null) return;
+      ws.serializeAttachment(reapedAttachment(attachment));
+      try {
+        ws.close(STALE_CLOSE_CODE, "heartbeat stopped");
+      } catch {
+        // Already closing.
+      }
+      this.endAppSocket(ws, info.caller, info.callerType);
     }
 
     forgetSocket(ws: WebSocket): void {

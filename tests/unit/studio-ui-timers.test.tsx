@@ -124,11 +124,18 @@ describe("Timers panel: due-in", () => {
   };
 
   it("counts seconds up to a minute, minutes up to an hour, then shows the time", async () => {
-    expect(await due(400)).toBe("in 0s");
-    expect(await due(59_000)).toBe("in 59s");
-    expect(await due(60_000)).toBe("in 1m");
-    expect(await due(3_599_000)).toBe("in 60m");
-    expect(await due(3_600_000)).not.toMatch(/^in /);
+    // The offset is taken from Date.now() and the panel reads it again on render: on a loaded
+    // machine the clock moved in between ("in 59s" for 60 s). Freeze Date only.
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      expect(await due(400)).toBe("in 0s");
+      expect(await due(59_000)).toBe("in 59s");
+      expect(await due(60_000)).toBe("in 1m");
+      expect(await due(3_599_000)).toBe("in 60m");
+      expect(await due(3_600_000)).not.toMatch(/^in /);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("counts down while the panel is open", async () => {

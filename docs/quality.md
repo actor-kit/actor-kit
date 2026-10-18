@@ -269,6 +269,44 @@ already, or new on the instance) and its reversed restore; the emitted-diff loop
 Every remaining survivor is in "Equivalent mutants" below (some line numbers there are from earlier runs; the
 mutated construct is the same). No real bug was found.
 
+## ADR-020 (client liveness and resync), Stryker on the changed files
+
+Whole files: `client/src/liveness.ts`, `client/src/client.ts`, `core/src/frame.ts`, `binary.ts`,
+`delta.ts`, `codec.ts`, `react/src/context.ts`. Seam tests (`tests/integration/client-seam.test.ts`)
+run in workerd and do not count for Stryker.
+
+| Run | Score | Survivors |
+|---|---|---|
+| First | 98.06% (1064/1086) | 21 survived, 1 no coverage: client 12 (+1), liveness 2, delta 1, React 6 |
+| After (client, liveness, React re-run) | client **97.70%**, liveness **100%**, React **96.55%**; core files 100% / 99.44% (delta.ts:63, the listed fast path) | client 9, React 2, all equivalent (below or listed above at earlier line numbers) |
+
+Killed by new tests: no ping on a closing socket; a closed socket's heartbeat stops (only the backoff
+reconnects); no timer left after a dead socket or `stop()`; a control frame without `onRedirect` is not
+a resync (that `onRedirect?.` mutant is no longer equivalent: its TypeError now asks for the view);
+an inline object selector neither loops nor re-renders; `useView` follows every frame and renders once
+on mount. Removed by simplifying: `useView` kept a copy of the view next to the client's own (four
+`{}` / `false` mutants showed the copy was redundant); it now renders `client.view` and only asks for
+renders.
+
+## Core, whole package, before and after the hardening branch (2026-10-18)
+
+Stryker on `packages/core/src/**/*.ts` (minus `index.ts`), both runs on the same machine:
+
+| Run | Score | Survivors |
+|---|---|---|
+| Before (`d881766`, main) | **99.90%** (1035/1036) | errors.ts:338 (listed as errors.ts:333) |
+| After (`claude/harden-72e4ea`, frame and whole-payload checks added) | **99.82%** (1082/1084; 48 more mutants) | errors.ts:338, delta.ts:63 (the fast path, listed as delta.ts:61) |
+
+Both survivors are equivalent (table below). CRAP after: core max 7.0 (`writeValue`, CC 7, fully
+covered), React max 6.0 (`useSelector`'s cache read); 0 functions ≥ 8 in either.
+
+## actorContext(Contract) decodes binary (codebreakers migration, 2026-10-18)
+
+`actorContext(Contract).useClient` ignored the contract, so a React app could not decode binary views.
+`react-contract-binary.test.tsx` red before (2 tests). Stryker: `actor-context.ts` **100%** (4/4) after
+removing an `isContract` guard the overloads made redundant; `builder.ts` 92.59%, its 4 survivors the
+listed equivalents (renumbered); `context.ts` 97.10%, the 2 listed equivalents.
+
 ## Equivalent mutants
 
 Surviving mutants that no test can kill, because the mutated program behaves identically. One line each.
@@ -276,8 +314,8 @@ Surviving mutants that no test can kill, because the mutated program behaves ide
 | Package | Location | Mutant | Why it is equivalent |
 |---|---|---|---|
 | core | delta.ts:61 | `if (a === b) return true` → `if (false)` | Fast path only; the number and JSON comparisons below return the same result. |
-| client | builder.ts:108, :109 | `"name" in arg && "def" in arg` / `"roles" in arg && "views" in arg` → `\|\|` | A SchemaDefinition has none of these keys; a contract has both name and def, the roles-and-views form both roles and views. |
-| client | builder.ts:116, 120 (×3) | `isRecord` / `isViewSchema` → `true` | A non-schema registered for a role makes decode throw, which the client catches and ignores, the same as having no schema. |
+| client | builder.ts:111, :112 (were :108, :109) | `"name" in arg && "def" in arg` / `"roles" in arg && "views" in arg` → `\|\|` | A SchemaDefinition has none of these keys; a contract has both name and def, the roles-and-views form both roles and views. |
+| client | builder.ts:119, 123 (were 116, 120) | `isRecord` / `isViewSchema` → `true` | A non-schema registered for a role makes decode throw, which the client catches and ignores, the same as having no schema. |
 | client | builder.ts:131 | `if (isViewSchema(...))` → `true` | Registers `undefined` for the role; `viewSchemas[role] ?? viewSchema` falls back exactly as when it is absent. |
 | client | client.ts:155, 156, 164 | `roleIndex === undefined ? …` / `roleName === undefined ? …` → `false` | parseFrame always sets roleIndex on snapshots, and indexing with `undefined` yields `undefined` anyway. |
 | client | client.ts:179 | `onRedirect?.(…)` → `onRedirect(…)` | Binary path only: the TypeError is caught by handleBinaryMessage's try/catch, same as doing nothing. |
@@ -287,6 +325,11 @@ Surviving mutants that no test can kill, because the mutated program behaves ide
 | react | context.ts:67 | `client.view !== undefined` → `true` | Only adds `setView(undefined)` when the state is already `undefined`. |
 | react | context.ts:91 | `client.role !== role` → `true` | Setting the same state value is a React no-op. |
 | react | context.ts:135 | effect deps `[client]` → `[]` | The client comes from a `useState` initializer and never changes. |
+| client | client.ts:203 | `let resyncPending = false` → `true` | `onOpen` resets it before any frame can arrive. |
+| client | client.ts:234 | `ws?.readyState` → `ws.readyState` | `sendRaw` runs only for the open socket (heartbeat started on open, resync on its own message), so `ws` is set. |
+| client | client.ts:352 | `dead?.close()` → `dead.close()` | The liveness only declares a socket dead while it runs, which is only while `ws` is open. |
+| react | context.ts:81 | reducer `n + 1` → `n - 1` | Any new number re-renders. |
+| react | context.ts:138 | room key `options.host ?? ""` → `?? "Stryker was here!"` | The key only has to be the same for the same room. |
 | test | test-actor.ts:171 | `typeof record !== "object" \|\| record === null` → `false` | A primitive role entry still yields no messages. |
 | test | test-actor.ts:190 | `slots !== undefined` → `true` | The router treats an `undefined` role entry as "message not found" anyway. |
 | studio | access.ts:161 | `catch` block → `{}` | Falls through to the same 401 "Invalid Cloudflare Access token". |

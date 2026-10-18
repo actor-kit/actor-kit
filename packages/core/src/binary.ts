@@ -9,7 +9,7 @@
  * The value layout lives in codec.ts, shared with delta encoding.
  */
 
-import { cursorOver, readRecord, recordSize, writeRecord } from "./codec";
+import { cursorOver, readRecord, readWhole, recordSize, writeRecord } from "./codec";
 import type { FieldDescriptor, Infer, SchemaDefinition } from "./schema";
 
 export function encode<TShape extends Record<string, FieldDescriptor>>(
@@ -25,7 +25,7 @@ export function decode<TShape extends Record<string, FieldDescriptor>>(
   schemaDef: SchemaDefinition<TShape>,
   bytes: Uint8Array,
 ): Infer<SchemaDefinition<TShape>> {
-  const decoded = readRecord(schemaDef, cursorOver(bytes, 0));
+  const decoded = readWhole("View payload", bytes, (c) => readRecord(schemaDef, c));
   // Generic boundary cast: readRecord builds exactly one entry per schema field, each read by
   // that field's descriptor, which is what Infer<> describes; the compiler cannot relate a
   // runtime walk over `fields` to the mapped type over TShape.

@@ -358,6 +358,24 @@ class_name = "RoundLocalsActor"
 tag = "v30"
 new_sqlite_classes = ["RoundLocalsActor"]
 
+# Optional and nullable timer payloads (Catancast, 2026-10-18)
+[[durable_objects.bindings]]
+name = "OPTIONAL_TIMERS"
+class_name = "OptionalTimers"
+
+[[migrations]]
+tag = "v31"
+new_sqlite_classes = ["OptionalTimers"]
+
+# Stale sockets closed for a stopped heartbeat (ADR-020 E)
+[[durable_objects.bindings]]
+name = "CHAT_ROOM_REAPING"
+class_name = "ChatRoomReaping"
+
+[[migrations]]
+tag = "v32"
+new_sqlite_classes = ["ChatRoomReaping"]
+
 
 # ADR-019 E: @actor-kit/projection consumes lot-events into D1
 [[d1_databases]]

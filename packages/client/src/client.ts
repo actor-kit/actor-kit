@@ -12,6 +12,11 @@
  * with a generation; events from a socket that a newer connect/disconnect superseded are ignored.
  * On reopen the client sends `__reconnect` with the checksum of the last view it applied.
  *
+ * Liveness (ADR-020): a socket can die without a close event (iOS froze the page). While open, the
+ * client pings every `heartbeat.intervalMs`; a ping unanswered for `timeoutMs` (any frame answers)
+ * abandons the socket and opens a new one at once. Visible/online ping at once. Sends while the
+ * socket is not open wait for the next one. A frame that does not decode asks for the view again.
+ *
  * Auth: getToken() is called on every (re)connect and sent via Sec-WebSocket-Protocol.
  * Native (RN/Node): getHeaders() can be passed as the third arg to WebSocket.
  *
@@ -29,6 +34,7 @@ import {
   parseFrame,
   xxh64,
 } from "@actor-kit/core";
+import { createLiveness, type HeartbeatOptions, NO_LIVENESS, resolveHeartbeat } from "./liveness";
 import { buildUrl } from "./url";
 
 export type ConnectionState = "connecting" | "connected" | "disconnected" | "reconnecting";
@@ -70,6 +76,8 @@ interface ClientOptions<TView = unknown> {
   onRedirect?: ((target: { actorType: string; actorId: string }) => void) | undefined;
   /** A message the actor refused (ADR-018 C), or a server error frame this client cannot read (`invalid_frame`). */
   onError?: ((error: ClientError) => void) | undefined;
+  /** Liveness check of the open socket (ADR-020). Default `{ intervalMs: 20_000, timeoutMs: 5_000 }`; false turns it off. */
+  heartbeat?: HeartbeatOptions | false | undefined;
 }
 
 /**
@@ -88,6 +96,15 @@ export interface ClientError {
 function stringList(value: unknown): readonly string[] | undefined {
   return Array.isArray(value) && value.every((item) => typeof item === "string") ? value : undefined;
 }
+
+/** A view frame that does not decode, also after asking again: the client bundle predates the Worker's schema. */
+const UNDECODABLE_VIEW: ClientError = {
+  messageType: "",
+  code: "invalid_frame",
+  message:
+    "A view from the server does not decode with this client's view schema, also after asking again. Reload the page: the Worker was probably deployed with a newer schema.",
+  docs: docsUrl("invalid_frame"),
+};
 
 function invalidFrame(messageType: string): ClientError {
   return {
@@ -133,6 +150,7 @@ export type WebSocketConstructor = new (
 ) => WebSocketLike;
 
 const WS_OPEN = 1;
+const PING = JSON.stringify({ type: "__ping" });
 const BASE_RECONNECT_DELAY_MS = 1000;
 const MAX_RECONNECT_DELAY_MS = 30_000;
 
@@ -181,6 +199,13 @@ export function createActorClient(options: ClientOptions<unknown>): ActorClient<
   let lastChecksum: string | undefined;
   let activeSchema: SchemaDefinition<Record<string, FieldDescriptor>> | undefined = viewSchema;
   const messageQueue: Array<{ type: string; [key: string]: unknown }> = [];
+  // A `__reconnect` sent after a frame that did not decode, not yet answered by a frame that applied.
+  let resyncPending = false;
+  // onError was told that views do not decode; told again only after a frame applies.
+  let undecodableReported = false;
+  const heartbeat = resolveHeartbeat(options.heartbeat);
+  const liveness =
+    heartbeat === null ? NO_LIVENESS : createLiveness(heartbeat, { ping: () => sendRaw(PING), onDead: abandonSocket });
 
   function notifyListeners() {
     for (const listener of listeners) {
@@ -200,6 +225,23 @@ export function createActorClient(options: ClientOptions<unknown>): ActorClient<
   function applyView(view: unknown) {
     currentView = view;
     lastChecksum = xxh64(JSON.stringify(view));
+    resyncPending = false;
+    undecodableReported = false;
+  }
+
+  /** Text on the socket if it is open; otherwise nothing (pings and resyncs are not queued). */
+  function sendRaw(text: string) {
+    if (ws?.readyState === WS_OPEN) ws.send(text);
+  }
+
+  /** A frame did not decode: ask for the view again, one request until a frame applies (ADR-020 D). */
+  function requestResync() {
+    if (resyncPending || lastChecksum === undefined) {
+      reportUndecodable();
+      return;
+    }
+    resyncPending = true;
+    sendRaw(JSON.stringify({ type: "__reconnect", lastChecksum }));
   }
 
   function resolveSchema(roleIndex: number | undefined): SchemaDefinition<Record<string, FieldDescriptor>> | undefined {
@@ -238,7 +280,8 @@ export function createActorClient(options: ClientOptions<unknown>): ActorClient<
       else if (frame.type === FrameType.DELTA) handleDeltaFrame(frame);
       else handleControlFrame(frame);
     } catch {
-      // Binary decode error: keep the last good view (and its checksum).
+      // Binary decode error: keep the last good view (and its checksum) and ask for the view again.
+      requestResync();
     }
   }
 
@@ -281,11 +324,37 @@ export function createActorClient(options: ClientOptions<unknown>): ActorClient<
     }, delay);
   }
 
-  /** "online" / page visible: skip the rest of the backoff wait. */
+  /** Views still do not decode (nothing to resync from, or the resync's answer did not either). */
+  function reportUndecodable() {
+    if (undecodableReported) return;
+    undecodableReported = true;
+    onError?.(UNDECODABLE_VIEW);
+  }
+
+  /** "online" / page visible: skip the rest of the backoff wait, or check that the open socket still answers. */
   function reconnectNow() {
-    if (reconnectTimer === undefined) return;
+    if (reconnectTimer === undefined) {
+      liveness.probe();
+      return;
+    }
     clearReconnectTimer();
     void openSocket();
+  }
+
+  /** The open socket stopped answering: give up on it and open a new one now (ADR-020 A). */
+  function abandonSocket() {
+    const dead = ws;
+    ws = undefined;
+    setConnectionState("reconnecting");
+    // openSocket() bumps the generation before its first await, so the dead socket's close event
+    // is stale even when close() dispatches it at once (it would otherwise start a backoff retry).
+    void openSocket();
+    dead?.close();
+  }
+
+  function onClose() {
+    liveness.stop();
+    scheduleReconnect();
   }
 
   function onVisibilityChange() {
@@ -304,6 +373,8 @@ export function createActorClient(options: ClientOptions<unknown>): ActorClient<
 
   function onOpen(socket: WebSocketLike) {
     reconnectAttempts = 0;
+    resyncPending = false;
+    liveness.start();
     if (lastChecksum !== undefined) {
       socket.send(JSON.stringify({ type: "__reconnect", lastChecksum }));
     }
@@ -311,6 +382,7 @@ export function createActorClient(options: ClientOptions<unknown>): ActorClient<
   }
 
   function onMessage(data: unknown) {
+    liveness.heard();
     if (data instanceof ArrayBuffer) handleBinaryMessage(data);
     else if (typeof data === "string") handleJsonMessage(data);
   }
@@ -333,7 +405,7 @@ export function createActorClient(options: ClientOptions<unknown>): ActorClient<
     opened.binaryType = "arraybuffer";
     opened.addEventListener("open", () => current() && onOpen(opened));
     opened.addEventListener("message", (event) => current() && onMessage(event.data));
-    opened.addEventListener("close", () => current() && scheduleReconnect());
+    opened.addEventListener("close", () => current() && onClose());
     // "error" is always followed by "close", which handles reconnection.
   }
 
@@ -391,7 +463,8 @@ export function createActorClient(options: ClientOptions<unknown>): ActorClient<
     send(event: { type: string; [key: string]: unknown }) {
       if (ws && ws.readyState === WS_OPEN) {
         ws.send(JSON.stringify(event));
-      } else if (connectionState === "reconnecting" || connectionState === "connecting") {
+      } else if (connectionState !== "disconnected") {
+        // Connecting, reconnecting, or connected while the socket closes (before its close event).
         messageQueue.push(event);
       }
     },
@@ -403,6 +476,7 @@ export function createActorClient(options: ClientOptions<unknown>): ActorClient<
       setConnectionState("disconnected");
       messageQueue.length = 0;
       clearReconnectTimer();
+      liveness.stop();
       detachBrowserListeners();
       reconnectAttempts = 0;
       lastChecksum = undefined;

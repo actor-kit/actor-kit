@@ -3,7 +3,7 @@
  * filter and pagination; manual connect; error states; live timeline;
  * reconnect after a network blip and after a server restart; socket cleanup.
  */
-import { type ChildProcess, spawn } from "node:child_process";
+import { type ChildProcess, execFileSync, spawn } from "node:child_process";
 import { expect, type Page, test, type WebSocketRoute } from "@playwright/test";
 
 const BASE_URL = process.env["STUDIO_E2E_URL"] ?? "http://localhost:8810";
@@ -209,10 +209,38 @@ interface RestartableWorker {
   isUp: () => Promise<boolean>;
 }
 
+/** SIGKILL every process listening on `port` (lsof on macOS and Linux); nothing when none is. */
+function killListeners(port: number): void {
+  let pids: string[] = [];
+  try {
+    pids = execFileSync("lsof", ["-ti", `tcp:${port}`, "-sTCP:LISTEN"], { encoding: "utf8" })
+      .split("\n")
+      .filter(Boolean);
+  } catch {
+    return; // lsof exits 1 when nothing listens
+  }
+  for (const pid of pids) {
+    try {
+      process.kill(Number(pid), "SIGKILL");
+    } catch {
+      // already gone
+    }
+  }
+}
+
 function restartableWorker(index: number): RestartableWorker {
   const port = RESTART_BASE_PORT + index;
   const url = `http://localhost:${port}`;
   let child: ChildProcess | null = null;
+
+  const downWithin = async (ms: number) => {
+    const deadline = Date.now() + ms;
+    while (Date.now() < deadline) {
+      if (!(await isUp())) return true;
+      await new Promise((resolve) => setTimeout(resolve, 200));
+    }
+    return false;
+  };
 
   const isUp = async () => {
     try {
@@ -249,6 +277,10 @@ function restartableWorker(index: number): RestartableWorker {
       const exited = new Promise<void>((resolve) => running.once("exit", () => resolve()));
       process.kill(-running.pid, "SIGTERM");
       await exited;
+      if (await downWithin(5_000)) return;
+      // On the Linux CI runner the port was still served 10 s after the group's SIGTERM: workerd
+      // outlived wrangler. Kill whatever still listens on the port.
+      killListeners(port);
       await expect.poll(isUp, { timeout: 10_000 }).toBe(false);
     },
   };

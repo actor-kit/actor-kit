@@ -30,6 +30,7 @@ import { dotted, innermost, mergeLocals, phasedState, type StepStateDef, statesD
 import type { ParseIssue } from "./refusal";
 import { resolveRole } from "./roles";
 import type { ErrorsParser } from "./service-error";
+import { timerPayload } from "./timer-payload";
 import type { Trace } from "./trace";
 
 // --- Definition (runtime-shaped: unknown-typed, bivariant methods) ---
@@ -481,7 +482,9 @@ function timerVerbs(
         throw new ActorKitError("invalid_timer_payload", `Timer "${name}": invalid payload: ${parsed.error.message}`);
       }
       effects.schedule(
-        { name, key: options.key ?? null, payload: parsed.data ?? null, fireAt: fireAtOf(options, det) },
+        // The payload as given (validated above): the step core parses it once when the timer fires
+        // (timer-payload.ts), so a schema's transforms and defaults apply exactly once.
+        { name, key: options.key ?? null, payload: options.payload ?? null, fireAt: fireAtOf(options, det) },
         { timer: name, options },
       );
     },
@@ -859,7 +862,8 @@ function stepTimer(
             state,
             found.depth,
             (current, phaseCtx) => {
-              const result = found.timer.handler(current, cause.payload, { ...base, ...phaseCtx });
+              const payload = timerPayload(cause.name, found.timer.schema, cause.payload);
+              const result = found.timer.handler(current, payload, { ...base, ...phaseCtx });
               assertSync(
                 result,
                 `Timer "${cause.name}" returned a Promise. Handlers must be synchronous — use execute() for async side effects.`,

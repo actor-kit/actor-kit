@@ -96,7 +96,9 @@ function track<T extends { disconnect(): void }>(client: T): T {
   return client;
 }
 
-function makeClient(overrides: { getToken?: () => string | Promise<string>; initialView?: unknown } = {}) {
+function makeClient(
+  overrides: { getToken?: () => string | Promise<string>; initialView?: unknown; heartbeat?: false } = {},
+) {
   return track(
     createActorClient({
       path: "/api/counter/c1",
@@ -104,6 +106,7 @@ function makeClient(overrides: { getToken?: () => string | Promise<string>; init
       initialView: overrides.initialView,
       getToken: overrides.getToken ?? (() => "token"),
       WebSocketImpl: ManualSocket,
+      ...(overrides.heartbeat === undefined ? {} : { heartbeat: overrides.heartbeat }),
     }),
   );
 }
@@ -285,7 +288,9 @@ describe("reconnect triggers (bug b: online / visibility)", () => {
 
 describe("superseded sockets and disconnect (bug b)", () => {
   it("ignores a late close event from the socket a disconnect() replaced", async () => {
-    const client = makeClient();
+    // The fake server stays silent for 60 s below; with the heartbeat (ADR-020) that socket would be
+    // replaced as dead, which is not what this test is about (approved by Jon, 2026-10-18).
+    const client = makeClient({ heartbeat: false });
     client.connect();
     await settle();
     const first = latestSocket();
