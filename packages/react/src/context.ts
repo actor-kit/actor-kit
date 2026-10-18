@@ -28,6 +28,7 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useLayoutEffect,
   useReducer,
   useRef,
   useState,
@@ -54,6 +55,9 @@ interface ActorContext<TView = unknown, TEvent extends { type: string } = { type
 }
 
 // --- Implementation ---
+
+/** useLayoutEffect in the browser; useEffect on the server, where layout effects never run. */
+const useIsomorphicLayoutEffect = typeof window === "undefined" ? useEffect : useLayoutEffect;
 
 export function createActorContext<
   TView = unknown,
@@ -151,7 +155,9 @@ export function createActorContext<
       setOwned({ room, client });
     }
 
-    useEffect(() => {
+    // A layout effect: React runs it before any passive effect, so a child that sends on mount
+    // (useEffect) sends on a connecting client, which queues it, not on one not yet connected.
+    useIsomorphicLayoutEffect(() => {
       client.connect();
       return () => {
         client.disconnect();
