@@ -146,6 +146,23 @@ or has many guards and actions, translating handler by handler is risky. Instead
 story-nook's 466-line machine became `src/room.actor.ts` this way. All of its tests passed unedited,
 including whole stories read through the helpers.
 
+**Nested states (bake-shop).** A machine with child states (`day.baking.ovenGolden`), `always` and
+guarded `after` needs a little more than a flat table:
+
+- Keep the active **leaf** in `server.phase`, with a `PARENT` map and each parent's `INITIAL` child, and
+  rebuild the state value from the leaf for the view (`{ day: { baking: "ovenGolden" } }`).
+- Pick a transition the way XState did: the leaf's `on` first, then each parent's, then the root's.
+- Taking it: exit actions from the leaf up to the deepest state source and target share (for a
+  `reenter: true` self-transition, the source's parent), then the transition's actions, then entry
+  actions down to the target's initial leaf.
+- Each timed state's `after` is one durable timer, key `"after"`, payload the leaf it was armed for.
+  Entering a timed leaf schedules it (the same key replaces any older one); entering an untimed leaf
+  cancels it; the handler ignores a payload whose leaf the room has left. A guarded `after` whose guard
+  fails just lapses, as in XState (bake-shop re-enters the oven state on un-pause to re-arm it).
+- After every step, check the `always` of each active state.
+- **`Math.random()` in the machine's `context` factory**: `init` has no `ctx.random()`. Make the seed
+  part of the input and have the Worker roll it (`crypto.getRandomValues`) when the page names none.
+
 ## 4. Tests
 
 - Tests above the machine (the rules in `src/game/*`, URL helpers, OGS join parsing) carry over
@@ -174,6 +191,12 @@ including whole stories read through the helpers.
     and timers itself, and actor-kit's own tests cover the restore.
   - Helpers can keep the XState snapshot's shape where tests read it: `actor.getSnapshot()` as
     `{ value, context: state }` and `clock.increment(ms)` as `sim.advance(...)` (story-nook).
+  - A test of a Durable Object restart (`getPersistedSnapshot()`, a new actor, `RESUME`) becomes
+    `room.sim.branch()`: a copy of the state and its pending timers, which is what a restarted room
+    has (bake-shop's `room.resume.test.ts`, same names and assertions).
+  - In-page rooms (a TV preview, scenario tests) that used `actor.subscribe` and `clock.increment`:
+    `simulate()` has no subscribe, so wrap `send` and `advance` and tell listeners when `actor.state`
+    changed (bake-shop's `src/game/memoryRoom.ts`). `@actor-kit/test` runs in the browser.
   - Each `simulate()` starts from the same seed. Tests that compare two rooms ("books get fresh ids")
     need `simulate({ seed })` with a seed per room, as production rooms each draw their own.
 - **Seam-test helpers on 0.52's client** (an `e2e/wire.ts` with `createActorKitClient`): keep their

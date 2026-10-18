@@ -80,6 +80,16 @@ const HINTS: Record<string, string> = {
   ActorKitStateMachine: "Gone: there is no machine",
 };
 
+/** 0.52 client calls that compile against nothing in 0.3, matched by shape (the names are common words). */
+const CALLS: { what: string; pattern: RegExp; hint: string }[] = [
+  {
+    what: "useClient()",
+    pattern: /\.useClient\(\s*\)/,
+    hint: "The Provider's client is useActorClient(); useClient(options) now creates one (guide §2)",
+  },
+  { what: "getState()", pattern: /\.getState\(\s*\)/, hint: "The client's current view is client.view (guide §2)" },
+];
+
 export interface ManualWork {
   file: string;
   line: number;
@@ -105,6 +115,7 @@ export function manualWork(file: string, source: string): ManualWork[] {
       .filter((f) => f.at >= 0)
       .sort((a, b) => a.at - b.at);
     for (const { symbol } of found) work.push({ file, line, what: symbol, hint: HINTS[symbol] ?? "" });
+    for (const call of CALLS) if (call.pattern.test(text)) work.push({ file, line, what: call.what, hint: call.hint });
     if (/\bfrom\s+["']xstate["']/.test(text)) {
       work.push({ file, line, what: "xstate", hint: "XState goes away with the machine (guide §2)" });
     }
