@@ -52,6 +52,7 @@ import {
 import { parseEffectId } from "./runtime/effect-id";
 import { type DeliveryInfo, deliveryInfo, type EffectInfo, effectInfo } from "./runtime/effect-info";
 import { type EnvParser, envErrorMessage, envInvalidEvent, parseActorEnv } from "./runtime/env";
+import { HEARTBEAT_PING, HEARTBEAT_PONG } from "./runtime/heartbeat";
 import {
   appendJournalEvent,
   clockedSources,
@@ -588,6 +589,8 @@ export function actor(
       super(ctx, env);
       this.envBindings = env;
       this.version = def.version ?? 1;
+      // Client heartbeats (ADR-020 B) are answered by the runtime, without waking a hibernated actor.
+      this.ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair(HEARTBEAT_PING, HEARTBEAT_PONG));
       // Typed env (ADR-016 §4): parsed once, before anything is served. One that does not parse is
       // logged once; then every request is refused and no handler ever runs.
       const parsedEnv = parseActorEnv(def.env, env);

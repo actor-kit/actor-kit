@@ -21,4 +21,5 @@ export type {
 } from "./client";
 export { createActorClient } from "./client";
 export { InitialViewError } from "./initial-view";
+export type { HeartbeatOptions } from "./liveness";
 export { buildUrl, inferProtocol } from "./url";

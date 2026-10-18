@@ -25,6 +25,8 @@ export default defineConfig({
     // on an 18-core machine, CPU-bound tests (510 sequential DO RPCs in studio.test.ts's ring buffer
     // test) ran ~3.2s instead of ~0.4s and the suite took 13-15s instead of ~9s.
     maxWorkers: "25%",
+    // CPU-heavy tests (studio.test.ts's 510 RPCs) went past the 5 s default on a loaded machine.
+    testTimeout: 30_000,
     coverage: {
       provider: "istanbul",
       reporter: ["json"],

@@ -93,6 +93,15 @@ describe("Outbox panel: retries and dead letters", () => {
 });
 
 describe("Outbox panel: formatting", () => {
+  // The offsets are taken from Date.now() here and the panel reads Date.now() again when it renders:
+  // on a loaded machine the clock moved in between ("(in 4s)"). Freeze Date only; timers stay real.
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   const nextTry = (offsetMs: number) => {
     cleanup();
     return openOutbox([row("1:0", "retrying", { nextAttemptAt: Date.now() + offsetMs })]).then(

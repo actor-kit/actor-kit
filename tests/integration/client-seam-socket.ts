@@ -25,6 +25,7 @@ export class SeamSocket implements WebSocketLike {
   private server: WebSocket | null = null;
   private zombie = false;
   private closed = false;
+  private corruptNext = false;
 
   constructor(upgrade: () => Promise<WebSocket>) {
     void upgrade().then(
@@ -69,6 +70,11 @@ export class SeamSocket implements WebSocketLike {
     this.close();
   }
 
+  /** The next binary frame from the server arrives cut short (its header promises bytes that never come). */
+  corruptNextFrame(): void {
+    this.corruptNext = true;
+  }
+
   /** Deliver a frame as if the server had sent it. */
   inject(data: ArrayBuffer | string): void {
     this.emit("message", { data });
@@ -82,7 +88,14 @@ export class SeamSocket implements WebSocketLike {
     this.server = ws;
     ws.accept();
     ws.addEventListener("message", (event) => {
-      if (!this.zombie) this.emit("message", { data: event.data });
+      if (this.zombie) return;
+      const data = event.data;
+      if (this.corruptNext && data instanceof ArrayBuffer) {
+        this.corruptNext = false;
+        this.emit("message", { data: data.slice(0, 6) });
+        return;
+      }
+      this.emit("message", { data });
     });
     ws.addEventListener("close", () => {
       if (!this.zombie) this.finish();

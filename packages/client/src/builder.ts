@@ -20,6 +20,7 @@
 import type { ContractMessages, FieldDescriptor, Infer, SchemaDefinition } from "@actor-kit/core";
 import { type ActorClient, type ClientError, createActorClient, type WebSocketConstructor } from "./client";
 import { checkContractView, checkViewAgainst } from "./initial-view";
+import type { HeartbeatOptions } from "./liveness";
 
 /** Runtime options for creating a client connection. */
 export interface CreateOptions<TView = unknown> {
@@ -36,6 +37,8 @@ export interface CreateOptions<TView = unknown> {
   WebSocketImpl?: WebSocketConstructor;
   onRedirect?: (target: { actorType: string; actorId: string }) => void;
   onError?: (error: ClientError) => void;
+  /** Liveness check of the open socket (ADR-020). Default `{ intervalMs: 20_000, timeoutMs: 5_000 }`; false turns it off. */
+  heartbeat?: HeartbeatOptions | false;
 }
 
 /** Typed actor client factory — knows TView and TEvent at compile time. */

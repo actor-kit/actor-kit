@@ -8,7 +8,7 @@
 import { env, evictDurableObject } from "cloudflare:test";
 import { createActorClient } from "@actor-kit/client";
 import { schema, string, uint32 } from "@actor-kit/core";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { eventually, type SeamNetwork, seamNetwork } from "./client-seam-socket";
 
 const CounterView = schema({ count: uint32, lastCaller: string });
@@ -202,5 +202,134 @@ describe("client ↔ actor seam: drops and restarts", () => {
     await eventually(() => expect(b.client.view.count).toBe(2));
     expectNoRewind(a.shown);
     expectNoRewind(b.shown);
+  });
+});
+
+/** A page's `document` for the client's visibility listener (workerd has none). */
+function fakeDocument() {
+  const target = new EventTarget();
+  let visibilityState: "visible" | "hidden" = "visible";
+  const doc = {
+    get visibilityState() {
+      return visibilityState;
+    },
+    addEventListener: target.addEventListener.bind(target),
+    removeEventListener: target.removeEventListener.bind(target),
+  };
+  return {
+    doc,
+    hide() {
+      visibilityState = "hidden";
+      target.dispatchEvent(new Event("visibilitychange"));
+    },
+    show() {
+      visibilityState = "visible";
+      target.dispatchEvent(new Event("visibilitychange"));
+    },
+  };
+}
+
+/** A phone with a liveness check tuned for a test (production defaults are seconds). */
+function phoneWithHeartbeat(actorId: string, net: SeamNetwork, heartbeat: { intervalMs: number; timeoutMs: number }) {
+  const client = createActorClient({
+    path: `/api/counter/${actorId}`,
+    host: "localhost",
+    initialView: { count: 0, lastCaller: "" },
+    viewSchema: CounterView,
+    getToken: () => "phone",
+    WebSocketImpl: net.WebSocketImpl,
+    heartbeat,
+  });
+  const shown: number[] = [];
+  client.subscribe((view: View) => shown.push(view.count));
+  open.push(client);
+  client.connect();
+  return { client, shown };
+}
+
+describe("client ↔ actor seam: a page that slept (ADR-020)", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("a socket that went silent while the page was hidden is found out on show, and the view catches up", async () => {
+    const page = fakeDocument();
+    vi.stubGlobal("document", page.doc);
+    const { actorId, stub } = await spawnCounter("seam-wake");
+    const net = seamNetwork(stub);
+    const { client, shown } = phoneWithHeartbeat(actorId, net, { intervalMs: 60_000, timeoutMs: 150 });
+    await increment(stub);
+    await eventually(() => expect(client.view.count).toBe(1));
+
+    page.hide();
+    net.latest().goZombie();
+    await increment(stub);
+    await increment(stub);
+    page.show();
+
+    await eventually(() => expect(client.view.count).toBe(3), 2000);
+    expect(net.sockets).toHaveLength(2);
+    expect(client.connectionState).toBe("connected");
+    expectNoRewind(shown);
+  });
+
+  it("a socket that went silent while the page stayed visible is replaced by the heartbeat", async () => {
+    const { actorId, stub } = await spawnCounter("seam-silent");
+    const net = seamNetwork(stub);
+    const { client, shown } = phoneWithHeartbeat(actorId, net, { intervalMs: 100, timeoutMs: 150 });
+    await eventually(() => expect(client.connectionState).toBe("connected"));
+
+    net.latest().goZombie();
+    await increment(stub, 2);
+
+    await eventually(() => expect(client.view.count).toBe(2), 2000);
+    expect(net.sockets).toHaveLength(2);
+    expectNoRewind(shown);
+  });
+
+  it("a healthy socket answers the heartbeat, also while the actor hibernates: no reconnect", async () => {
+    const { actorId, stub } = await spawnCounter("seam-healthy");
+    const net = seamNetwork(stub);
+    const { client } = phoneWithHeartbeat(actorId, net, { intervalMs: 40, timeoutMs: 150 });
+    await eventually(() => expect(client.connectionState).toBe("connected"));
+
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    await evictDurableObject(stub);
+    await new Promise((resolve) => setTimeout(resolve, 300));
+
+    expect(net.sockets).toHaveLength(1);
+    expect(client.connectionState).toBe("connected");
+    const pings = net.latest().sent.filter((m) => JSON.parse(m).type === "__ping");
+    expect(pings.length).toBeGreaterThan(5);
+  });
+
+  it("a message sent while the socket is closing (before its close event) is delivered after the reconnect", async () => {
+    const { actorId, stub } = await spawnCounter("seam-closing");
+    const net = seamNetwork(stub);
+    const { client, shown } = phone(actorId, net);
+    await eventually(() => expect(client.connectionState).toBe("connected"));
+
+    const closing = net.latest();
+    closing.markClosedSilently();
+    client.send({ type: "INCREMENT", amount: 5 });
+    closing.dispatchClose();
+
+    await eventually(() => expect(client.view).toEqual({ count: 5, lastCaller: "phone" }));
+    expectNoRewind(shown);
+  });
+
+  it("a frame that cannot be decoded: the client asks for the view again instead of staying behind", async () => {
+    const { actorId, stub } = await spawnCounter("seam-corrupt");
+    const net = seamNetwork(stub);
+    const { client, shown } = phone(actorId, net);
+    await increment(stub);
+    await eventually(() => expect(client.view.count).toBe(1));
+
+    net.latest().corruptNextFrame();
+    await increment(stub);
+
+    await eventually(() => expect(client.view.count).toBe(2));
+    expect(net.sockets).toHaveLength(1);
+    expectNoRewind(shown);
   });
 });
