@@ -98,5 +98,6 @@ describe("vendoring", () => {
     } finally {
       rmSync(out, { recursive: true, force: true });
     }
-  });
+    // Nine `pnpm pack` subprocesses: seconds alone, more on a loaded machine; the 5 s default made it flaky.
+  }, 120_000);
 });

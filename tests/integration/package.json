@@ -6,6 +6,7 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@actor-kit/client": "workspace:*",
     "@actor-kit/core": "workspace:*",
     "@actor-kit/projection": "workspace:*",
     "@actor-kit/studio": "workspace:*",
