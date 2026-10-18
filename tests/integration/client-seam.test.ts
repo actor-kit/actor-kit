@@ -7,7 +7,7 @@
 
 import { env, evictDurableObject } from "cloudflare:test";
 import { createActorClient } from "@actor-kit/client";
-import { schema, string, uint32 } from "@actor-kit/core";
+import { array, schema, string, uint32 } from "@actor-kit/core";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { eventually, type SeamNetwork, seamNetwork } from "./client-seam-socket";
 
@@ -331,5 +331,42 @@ describe("client ↔ actor seam: a page that slept (ADR-020)", () => {
     await eventually(() => expect(client.view.count).toBe(2));
     expect(net.sockets).toHaveLength(1);
     expectNoRewind(shown);
+  });
+});
+
+const ChatView = schema({ messages: array(schema({ id: string, author: string, text: string })), onlineCount: uint32 });
+
+describe("client ↔ actor seam: presence after a silent socket", () => {
+  // Known bug (ADR-020 E, proposed): the actor keeps the half-open socket of a phone that slept, so
+  // the player stays online after leaving. it.fails flips to a failure once the fix lands: then make it it().
+  it.fails("a player whose phone slept, came back, then left for good is not kept online by the dead socket", async () => {
+    const actorId = uniqueName("seam-ghost");
+    const stub = env.CHAT_ROOM.get(env.CHAT_ROOM.idFromName(actorId));
+    await stub.spawn({ actorId, caller: "host", callerType: "user", input: {} });
+    const chatPhone = (caller: string, net: SeamNetwork) => {
+      const client = createActorClient({
+        path: `/api/chat-room/${actorId}`,
+        host: "localhost",
+        initialView: { messages: [], onlineCount: 0 },
+        viewSchema: ChatView,
+        getToken: () => caller,
+        WebSocketImpl: net.WebSocketImpl,
+        heartbeat: { intervalMs: 100, timeoutMs: 150 },
+      });
+      open.push(client);
+      client.connect();
+      return client;
+    };
+    const tv = chatPhone("tv", seamNetwork(stub));
+    const anaNet = seamNetwork(stub);
+    const ana = chatPhone("ana", anaNet);
+    await eventually(() => expect(tv.view.onlineCount).toBe(2));
+
+    anaNet.latest().goZombie();
+    await eventually(() => expect(anaNet.sockets).toHaveLength(2), 2000);
+    await eventually(() => expect(ana.connectionState).toBe("connected"));
+    ana.disconnect();
+
+    await eventually(() => expect(tv.view.onlineCount).toBe(1), 5000);
   });
 });

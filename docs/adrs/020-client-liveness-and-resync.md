@@ -66,6 +66,17 @@ outstanding, or before any view applied, is reported once through `onError` as `
 `invalid_frame` (it was written with another schema or damaged), never a view with a string cut
 short or a delta read as "nothing changed". `parseFrame` refuses a frame shorter than its header says.
 
+### E. (Proposed, awaiting Jon) The actor closes sockets whose heartbeat went silent
+
+A phone that slept leaves a half-open socket on the actor's side; the client opens a new one, but
+the actor never learns the old one died, so a player who later leaves stays online (the chat
+example counts them twice over; a seat stays "connected"). `client-seam.test.ts` pins this as
+`it.fails`. Proposal: whenever the actor runs (a message, a close, a commit), close app sockets
+whose last auto-answered ping (`ctx.getWebSocketAutoResponseTimestamp`) is older than
+`heartbeat.staleMs` on the actor (default 60 s, three client intervals) and run the disconnect
+lifecycle for them; sockets that never pinged are left alone. Cost to weigh: a device locked for
+longer than `staleMs` gets `disconnect`, then `connect` when it wakes.
+
 ## Consequences
 
 - A client and a Worker must both be at this version: an older actor has no auto-response, so its

@@ -46,7 +46,8 @@ export class SeamSocket implements WebSocketLike {
   }
 
   close(): void {
-    this.server?.close(1000);
+    // A zombie's close frame never reaches the server either: its end stays open.
+    if (!this.zombie) this.server?.close(1000);
     this.finish();
   }
 

@@ -34,6 +34,10 @@ Test infrastructure: two existing unit tests (a 280k-key record delta, nine `pnp
 subprocesses) timed out at the 5 s default on a loaded machine and failed the pre-commit hook; they
 got explicit timeouts, assertions unchanged.
 
+Open bug, awaiting a decision (ADR-020 E): after a phone's socket goes half-open and the client
+reconnects, the actor keeps the dead socket, so the player stays online after leaving for good
+(chat example: onlineCount 2, expected 1). Pinned as `it.fails` in `client-seam.test.ts`.
+
 ## Decisions
 
 - ADR-020 heartbeat on by default (Jon, 2026-10-18). One existing test that leaves its fake server
