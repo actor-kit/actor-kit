@@ -9,7 +9,7 @@ import { env, evictDurableObject } from "cloudflare:test";
 import { createActorClient } from "@actor-kit/client";
 import { array, schema, string, uint32 } from "@actor-kit/core";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { eventually, type SeamNetwork, seamNetwork } from "./client-seam-socket";
+import { eventually, fakeDocument, type SeamNetwork, seamNetwork } from "./client-seam-socket";
 
 const CounterView = schema({ count: uint32, lastCaller: string });
 type View = { count: number; lastCaller: string };
@@ -204,30 +204,6 @@ describe("client ↔ actor seam: drops and restarts", () => {
     expectNoRewind(b.shown);
   });
 });
-
-/** A page's `document` for the client's visibility listener (workerd has none). */
-function fakeDocument() {
-  const target = new EventTarget();
-  let visibilityState: "visible" | "hidden" = "visible";
-  const doc = {
-    get visibilityState() {
-      return visibilityState;
-    },
-    addEventListener: target.addEventListener.bind(target),
-    removeEventListener: target.removeEventListener.bind(target),
-  };
-  return {
-    doc,
-    hide() {
-      visibilityState = "hidden";
-      target.dispatchEvent(new Event("visibilitychange"));
-    },
-    show() {
-      visibilityState = "visible";
-      target.dispatchEvent(new Event("visibilitychange"));
-    },
-  };
-}
 
 /** A phone with a liveness check tuned for a test (production defaults are seconds). */
 function phoneWithHeartbeat(actorId: string, net: SeamNetwork, heartbeat: { intervalMs: number; timeoutMs: number }) {

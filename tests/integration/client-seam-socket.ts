@@ -174,3 +174,27 @@ export async function eventually(check: () => void | Promise<void>, timeoutMs = 
     }
   }
 }
+
+/** A page's `document` for the client's visibility listener (workerd has none). */
+export function fakeDocument() {
+  const target = new EventTarget();
+  let visibilityState: "visible" | "hidden" = "visible";
+  const doc = {
+    get visibilityState() {
+      return visibilityState;
+    },
+    addEventListener: target.addEventListener.bind(target),
+    removeEventListener: target.removeEventListener.bind(target),
+  };
+  return {
+    doc,
+    hide() {
+      visibilityState = "hidden";
+      target.dispatchEvent(new Event("visibilitychange"));
+    },
+    show() {
+      visibilityState = "visible";
+      target.dispatchEvent(new Event("visibilitychange"));
+    },
+  };
+}
