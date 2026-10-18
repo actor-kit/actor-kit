@@ -94,9 +94,12 @@ Commits: 9677dd0 seam harness; 0a6bfef core frame + React; c0b3ea6 ADR-020 heart
 
 1. ADR-020 E is opt-in; making it the default is Jon's call (on the coordinator's morning list).
 2. Catancast bugs on actor-kit-2 come first when they arrive.
-3. Exactly-once sends (message ids, acks, resend): proposed as its own session (ADR-021 first, Jon's
-   call); delivery is at most once today.
-5. A schema hash in the frame (ADR-020 "not decided").
-7. `typecheck:budget` fails commits on a busy machine: its check-time limit is wall clock (2 s; seen
-   3-15 s at load 45-300 with instantiations unchanged at 693 431). Needs Jon's call: fail only on
-   instantiations and warn on time, or keep it.
+3. Exactly-once sends (message ids, acks, resend): ADR-021 (Proposed) and a spike on branch
+   `claude/adr-021-spike`, kept out of this PR; adopting it is Jon's call. Delivery is at most once today.
+4. A schema hash in the frame (ADR-020 "not decided").
+5. **Commit hook vs a busy machine (needs Jon's decision, ADR-022).** `pnpm typecheck:budget` fails
+   on wall-clock check time (limit 2 s). With other sessions running (load average 30-300), it
+   measured 3.2-15.1 s with instantiations unchanged, and refused about seven commits on this branch
+   for time alone; each waited 30 s to 10 min for the load to drop. Options in
+   `docs/adrs/022-type-budget-on-busy-machines.md`: (A) fail on instantiations only and keep time
+   for CI, or (B) keep both. Nothing changed until Jon picks.
