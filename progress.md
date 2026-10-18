@@ -28,7 +28,8 @@ Bugs found (each red before its fix):
 | 3 | A frame that did not decode left the client one step behind until the next reconnect | stale view | ADR-020 D: resync with `__reconnect` |
 | 4 | `parseFrame` accepted a frame shorter than its header said (subarray clamps): a cut-short delta decoded as "nothing changed" | stale view, no error | core: `invalid_frame` "Frame cut short" |
 | 5 | React `useSelector` kept the old value when its selector changed or the Provider got another client, and missed a change between render and subscribe; `useRole` / `useConnectionState` the same | a screen behind the room | `useSyncExternalStore` |
-| 6 | React `useView` rendered the old client's view once after a Provider swap | one frame of the previous room | `useView` tracks its client |
+| 6 | React `useView` rendered the old client's view once after a Provider swap | one frame of the previous room | `useView` renders the client's own view |
+| 7 | React `useClient(options)` kept its first room's client for the life of the component | a screen moved to another room stays connected to the old one | one client per `host`+`path`; the old one is disconnected (React 97.01%, 2 equivalent) |
 
 Test infrastructure: two existing unit tests (a 280k-key record delta, nine `pnpm pack`
 subprocesses) timed out at the 5 s default on a loaded machine and failed the pre-commit hook; they
@@ -86,7 +87,6 @@ Commits: 9677dd0 seam harness; 0a6bfef core frame + React; c0b3ea6 ADR-020 heart
 2. Catancast bugs on actor-kit-2 come first when they arrive.
 3. Message ids the actor dedupes on, so a send on a dead-but-OPEN socket can be retried
    (delivery is at most once today).
-4. `useClient(options)` ignores a new `path` (same component, another room keeps the old room).
 5. A schema hash in the frame (ADR-020 "not decided").
 6. CI e2e: `studio-ui.spec.ts` "server restart" fails only on the Linux runner: after SIGTERM to the
    `wrangler dev` process group the server still answers 10 s later (harness `stop()`, line 252).

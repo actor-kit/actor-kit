@@ -133,7 +133,15 @@ export function createActorContext<
   }
 
   function useClientHook(options: CreateOptions<TView>): ActorClient<TView, TEvent> {
-    const [client] = useState(() => createActorClient<TView, TEvent>(options));
+    // One client per room: a new path or host is another room, so it gets its own client (and the
+    // effect below disconnects the old one). Other options are read when the room's client is made.
+    const room = `${options.host ?? ""}|${options.path}`;
+    const [owned, setOwned] = useState(() => ({ room, client: createActorClient<TView, TEvent>(options) }));
+    let client = owned.client;
+    if (owned.room !== room) {
+      client = createActorClient<TView, TEvent>(options);
+      setOwned({ room, client });
+    }
 
     useEffect(() => {
       client.connect();

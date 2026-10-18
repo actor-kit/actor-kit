@@ -539,3 +539,16 @@ a view frame that does not decode makes the client ask for the view again, and o
 not is reported through `onError` (`invalid_frame`: reload the page). `decode` and `applyDelta` throw
 `invalid_frame` for a payload that ends early or has bytes left over, and `parseFrame` for a frame
 shorter than its header says.
+
+## `useClient(options)` follows a new room
+
+`Ctx.useClient({ path, host, ... })` used to keep the client it made on the first render for the
+life of the component, so a component given another `path` stayed connected to the old room. A new
+`path` or `host` now makes a new client (connected on commit) and disconnects the old one; other
+options are read when a room's client is made.
+
+```tsx
+// Before: navigating from /room/a to /room/b inside one <Room> kept the socket to room a
+const client = Ctx.useClient({ path: `/api/room/${roomId}`, initialView });
+// After: the same code connects to room b and closes room a's socket; a key is no longer needed
+```
