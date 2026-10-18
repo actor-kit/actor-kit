@@ -21,7 +21,17 @@
 import type { ActorClient, ConnectionState, CreateOptions } from "@actor-kit/client";
 import { createActorClient } from "@actor-kit/client";
 import { ActorKitError } from "@actor-kit/core";
-import { createContext, createElement, type ReactNode, useContext, useEffect, useRef, useState } from "react";
+import {
+  createContext,
+  createElement,
+  type ReactNode,
+  useCallback,
+  useContext,
+  useEffect,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
 
 // --- Types ---
 
@@ -65,20 +75,20 @@ export function createActorContext<
 
   function useView(): TView {
     const client = useClient();
-    const [view, setView] = useState<TView>(() => client.view);
-
+    // Which client the stored view came from: after the Provider is given another client, the
+    // first render already shows the new client's view, not the old one's.
+    const [seen, setSeen] = useState(() => ({ client, view: client.view }));
     useEffect(() => {
-      if (client.view !== undefined) {
-        setView(client.view);
-      }
-      return client.subscribe((newView: TView) => {
-        setView(newView);
-      });
+      // Catch up with a view that changed between render and subscribe.
+      setSeen({ client, view: client.view });
+      return client.subscribe((view: TView) => setSeen({ client, view }));
     }, [client]);
-
-    return view;
+    return seen.client === client ? seen.view : client.view;
   }
 
+  // Role, connection state and selections read through useSyncExternalStore: what renders is the
+  // client's value at render time, also when it changed between render and subscribe or the
+  // Provider was given another client.
   function useSend(): (event: TEvent) => void {
     const client = useClient();
     const sendRef = useRef(client.send.bind(client));
@@ -88,44 +98,35 @@ export function createActorContext<
 
   function useRole(): string | undefined {
     const client = useClient();
-    const [role, setRole] = useState<string | undefined>(client.role);
-
-    useEffect(() => {
-      return client.subscribe(() => {
-        if (client.role !== role) {
-          setRole(client.role);
-        }
-      });
-    }, [client, role]);
-
-    return role;
+    // A role changes with a view frame, so the view subscription carries it.
+    const subscribe = useCallback((onChange: () => void) => client.subscribe(onChange), [client]);
+    const read = () => client.role;
+    return useSyncExternalStore(subscribe, read, read);
   }
 
   function useConnectionState(): ConnectionState {
     const client = useClient();
-    const [state, setState] = useState<ConnectionState>(client.connectionState);
-
-    useEffect(() => {
-      return client.onStateChange((newState) => {
-        setState(newState);
-      });
-    }, [client]);
-
-    return state;
+    const subscribe = useCallback((onChange: () => void) => client.onStateChange(onChange), [client]);
+    const read = () => client.connectionState;
+    return useSyncExternalStore(subscribe, read, read);
   }
 
   function useSelector<T>(selector: (view: TView) => T, equalityFn: (a: T, b: T) => boolean = Object.is): T {
     const client = useClient();
-    const [selected, setSelected] = useState<T>(() => selector(client.view));
-
-    useEffect(() => {
-      return client.subscribe((view: TView) => {
-        const next = selector(view);
-        setSelected((prev) => (equalityFn(prev, next) ? prev : next));
-      });
-    }, [client, selector, equalityFn]);
-
-    return selected;
+    const subscribe = useCallback((onChange: () => void) => client.subscribe(onChange), [client]);
+    // The last selection: kept while the view and selector are the same, and while equalityFn says
+    // a new selection equals it (so an unrelated frame does not re-render with a new object).
+    const last = useRef<{ view: TView; selector: (view: TView) => T; selected: T } | null>(null);
+    const read = () => {
+      const view = client.view;
+      const previous = last.current;
+      if (previous !== null && previous.view === view && previous.selector === selector) return previous.selected;
+      const next = selector(view);
+      const selected = previous !== null && equalityFn(previous.selected, next) ? previous.selected : next;
+      last.current = { view, selector, selected };
+      return selected;
+    };
+    return useSyncExternalStore(subscribe, read, read);
   }
 
   function useClientHook(options: CreateOptions<TView>): ActorClient<TView, TEvent> {

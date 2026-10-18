@@ -97,7 +97,15 @@ function controlTypeOf(byte: number): ControlType {
   return type;
 }
 
-/** Parses a frame. Throws on a short header or an unknown frame or control type. */
+/** Where the payload starts: after the role or control byte for snapshots and control frames. */
+function payloadStart(type: FrameType): number {
+  return type === FrameType.SNAPSHOT || type === FrameType.CONTROL ? HEADER_SIZE + 1 : HEADER_SIZE;
+}
+
+/**
+ * Parses a frame. Throws on a short header, an unknown frame or control type, or a frame cut short
+ * (fewer payload bytes than its header promises: decoding the rest could apply the wrong view).
+ */
 export function parseFrame(frame: Uint8Array): ParsedFrame {
   if (frame.byteLength < HEADER_SIZE) {
     throw new ActorKitError(
@@ -110,16 +118,22 @@ export function parseFrame(frame: Uint8Array): ParsedFrame {
   const version = view.getUint8(0);
   const type = frameTypeOf(view.getUint8(1));
   const payloadLength = view.getUint32(2, false);
-  const payloadAfter = (start: number) => frame.subarray(start, start + payloadLength);
+  const start = payloadStart(type);
+  const available = Math.max(0, frame.byteLength - start);
+  if (available < payloadLength) {
+    throw new ActorKitError(
+      "invalid_frame",
+      `Frame cut short: header promises ${payloadLength} payload bytes, got ${available}.`,
+    );
+  }
+  const payload = frame.subarray(start, start + payloadLength);
 
   switch (type) {
     case FrameType.SNAPSHOT:
-      return { version, type, payloadLength, payload: payloadAfter(HEADER_SIZE + 1), roleIndex: view.getUint8(6) };
-    case FrameType.CONTROL: {
-      const controlType = controlTypeOf(view.getUint8(6));
-      return { version, type, payloadLength, payload: payloadAfter(HEADER_SIZE + 1), controlType };
-    }
+      return { version, type, payloadLength, payload, roleIndex: view.getUint8(6) };
+    case FrameType.CONTROL:
+      return { version, type, payloadLength, payload, controlType: controlTypeOf(view.getUint8(6)) };
     default:
-      return { version, type, payloadLength, payload: payloadAfter(HEADER_SIZE) };
+      return { version, type, payloadLength, payload };
   }
 }
