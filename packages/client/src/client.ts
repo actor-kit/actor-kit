@@ -345,9 +345,11 @@ export function createActorClient(options: ClientOptions<unknown>): ActorClient<
   function abandonSocket() {
     const dead = ws;
     ws = undefined;
-    dead?.close();
     setConnectionState("reconnecting");
+    // openSocket() bumps the generation before its first await, so the dead socket's close event
+    // is stale even when close() dispatches it at once (it would otherwise start a backoff retry).
     void openSocket();
+    dead?.close();
   }
 
   function onClose() {

@@ -83,6 +83,8 @@ export class SeamSocket implements WebSocketLike {
 
   private attach(ws: WebSocket): void {
     if (this.closed) {
+      // The client gave up on this socket while it was upgrading: accept it only to close it.
+      ws.accept();
       ws.close(1000);
       return;
     }

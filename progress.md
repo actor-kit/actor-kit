@@ -31,6 +31,7 @@ Bugs found (each red before its fix):
 | 6 | React `useView` rendered the old client's view once after a Provider swap | one frame of the previous room | `useView` renders the client's own view |
 | 7 | React `useClient(options)` kept its first room's client for the life of the component | a screen moved to another room stays connected to the old one | one client per `host`+`path`; the old one is disconnected (React 97.01%, 2 equivalent) |
 | 8 | After a phone's socket went half-open and the client reconnected, the actor kept the dead socket: a player who then left stayed online (chat example: onlineCount 2, expected 1) | ghost players, seats stay "connected" | ADR-020 E, opt-in `heartbeat: { staleMs }`: the actor closes sockets whose pings stopped and runs their disconnect (chat example opts in, 60 s). The `it.fails` is now three passing seam tests; red with the window set huge. Stryker `stale-sockets.ts` + `live-connections.ts` 100% (82/82) |
+| 9 | When the heartbeat gave up on a dead socket, `close()` ran before the new socket bumped the generation: a socket whose close event fires at once (an adapter, some React Native / Node sockets) started a backoff retry next to the new socket, which then superseded it a second later | an extra socket and a reconnect cycle after every wake; the role-change-while-asleep seam test missed its 2 s window | the new socket opens first, then the dead one is closed (unit test red before: 4 sockets for 2) |
 
 Bugs reported by consumers:
 

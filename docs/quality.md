@@ -320,7 +320,7 @@ Surviving mutants that no test can kill, because the mutated program behaves ide
 | react | context.ts:135 | effect deps `[client]` → `[]` | The client comes from a `useState` initializer and never changes. |
 | client | client.ts:203 | `let resyncPending = false` → `true` | `onOpen` resets it before any frame can arrive. |
 | client | client.ts:234 | `ws?.readyState` → `ws.readyState` | `sendRaw` runs only for the open socket (heartbeat started on open, resync on its own message), so `ws` is set. |
-| client | client.ts:348 | `dead?.close()` → `dead.close()` | The liveness only declares a socket dead while it runs, which is only while `ws` is open. |
+| client | client.ts:352 | `dead?.close()` → `dead.close()` | The liveness only declares a socket dead while it runs, which is only while `ws` is open. |
 | react | context.ts:81 | reducer `n + 1` → `n - 1` | Any new number re-renders. |
 | react | context.ts:138 | room key `options.host ?? ""` → `?? "Stryker was here!"` | The key only has to be the same for the same room. |
 | test | test-actor.ts:171 | `typeof record !== "object" \|\| record === null` → `false` | A primitive role entry still yields no messages. |

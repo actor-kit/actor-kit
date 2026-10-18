@@ -190,6 +190,38 @@ describe("heartbeat (ADR-020 A)", () => {
     expect(states).toEqual(["reconnecting", "connected"]);
   });
 
+  it("a socket whose close() fires its close event at once does not start a second reconnect", async () => {
+    class EagerClose extends ManualSocket {
+      override close(): void {
+        super.close();
+        this.serverCloses();
+      }
+    }
+    const client = createActorClient({
+      path: "/api/counter/c1",
+      host: "example.com",
+      initialView: { count: 0 },
+      viewSchema: Counter,
+      getToken: () => "token",
+      WebSocketImpl: EagerClose,
+      heartbeat: { intervalMs: 1000, timeoutMs: 300 },
+    });
+    clients.push(client);
+    client.connect();
+    await settle();
+    latest().serverOpens();
+    latest().receiveFrame(createSnapshotFrame(1, 0, encode(Counter, { count: 1 })));
+
+    await vi.advanceTimersByTimeAsync(1300);
+    expect(ManualSocket.created).toHaveLength(2);
+    latest().serverOpens();
+    latest().receive(pong);
+    // A stray backoff reconnect would open a third socket 1 s after the abandon (the new socket's
+    // own next deadline is 1.3 s away).
+    await vi.advanceTimersByTimeAsync(1200);
+    expect(ManualSocket.created).toHaveLength(2);
+  });
+
   it("ignores everything the abandoned socket does afterwards", async () => {
     const { client, socket } = await connected();
     await vi.advanceTimersByTimeAsync(1300);
