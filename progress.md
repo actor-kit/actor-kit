@@ -31,6 +31,12 @@ Bugs found (each red before its fix):
 | 6 | React `useView` rendered the old client's view once after a Provider swap | one frame of the previous room | `useView` renders the client's own view |
 | 7 | React `useClient(options)` kept its first room's client for the life of the component | a screen moved to another room stays connected to the old one | one client per `host`+`path`; the old one is disconnected (React 97.01%, 2 equivalent) |
 
+Bugs reported by consumers:
+
+| # | Bug | Effect | Fix |
+|---|---|---|---|
+| C1 (Catancast) | A timer scheduled without a payload under `z.object({}).optional()` was stored as `null`; the DO parsed that against the schema at fire and dropped the timer, while `simulate()` handed the handler `null` unparsed | a bot game passed in simulate() and stalled in production | the step core parses the stored payload once at fire (`runtime/timer-payload.ts`, null read as absent when the schema rejects null); the timer row stores the payload as given. Found alongside: a schema with a transform could never fire (parsed at schedule, parsed again at fire). Unit + integration tests red before; Stryker 100% (14/14) |
+
 Test infrastructure: two existing unit tests (a 280k-key record delta, nine `pnpm pack`
 subprocesses) timed out at the 5 s default on a loaded machine and failed the pre-commit hook; they
 got explicit timeouts, assertions unchanged.

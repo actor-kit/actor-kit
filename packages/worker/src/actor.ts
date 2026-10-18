@@ -1037,12 +1037,10 @@ export function actor(
     fireTimer(due: DueTimer, now: number): void {
       const sql = this.ctx.storage.sql;
       const lateBy = Math.max(0, now - due.fireAt);
-      const parsed = def.timers?.[due.name]?.schema.safeParse(due.payload);
       try {
-        if (parsed !== undefined && !parsed.success)
-          throw new ActorKitError("invalid_timer_payload", `invalid payload: ${parsed.error.message}`);
-        const payload = parsed?.success ? parsed.data : due.payload;
-        const result = this.runStep({ type: "timer", ...due, payload, lateBy, trace: this.effectTrace(due.id) }, now);
+        // The step core parses the stored payload with the timer's schema (timer-payload.ts), as in
+        // simulate() and replay; one that no longer parses throws invalid_timer_payload.
+        const result = this.runStep({ type: "timer", ...due, lateBy, trace: this.effectTrace(due.id) }, now);
         this.commit(result.state, result.event, (seq) => {
           deleteTimer(sql, due.id);
           this.writeEffects(result, seq, `timer:${due.name}`, "service");

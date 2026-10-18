@@ -552,3 +552,21 @@ options are read when a room's client is made.
 const client = Ctx.useClient({ path: `/api/room/${roomId}`, initialView });
 // After: the same code connects to room b and closes room a's socket; a key is no longer needed
 ```
+
+## Timer payloads are parsed once, when the timer fires
+
+A timer scheduled without a payload under `timer(z.object({}).optional(), ...)` was dropped by the
+Durable Object (`actor_kit.timer.failed`, "expected object, received null") while `simulate()` ran
+it with `null`. Now every runtime (Durable Object, `simulate()`, `replayJournal()`) fires through
+the step core, which parses the stored payload with the timer's schema; a stored `null` is read as
+absent when the schema rejects `null` but accepts `undefined`. A timer row (and Studio's timers
+panel) holds the payload as it was given to `ctx.schedule`; the schema still validates it then, and
+its transforms and defaults apply once, when it fires (a `z.string().transform(Number)` timer used
+to fail on every firing).
+
+```ts
+// Before: dropped in production, ran with null in simulate()
+ctx.schedule("bot", { at, key: "bot" }); // timers: { bot: kit.timer(z.object({}).optional(), handler) }
+ctx.schedule("bot", { at, key: "bot", payload: {} }); // the workaround
+// After: both fire everywhere; the handler gets undefined and {} respectively
+```

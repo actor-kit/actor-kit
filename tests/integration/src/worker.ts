@@ -13,6 +13,7 @@ export { Kiosk } from "./init-link-actors";
 export { JournalKeep, JournalOff, JournalProbe, NotAnActor } from "./journal-actors";
 export { Notice, NoticeNoJournal, NoticeStudio, Reader } from "./link-version-actors";
 export { RoundLocalsActor, RoundsActor, ScopedCallsActor } from "./nested-states";
+export { OptionalTimers } from "./optional-timers";
 export { Retrier, RetrierNoJournal } from "./outbox-retry";
 export { Lot, LotTyped, LotUnbound } from "./publish-actors";
 export { QuizStates } from "./quiz-states";
