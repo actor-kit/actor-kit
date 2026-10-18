@@ -68,6 +68,20 @@ describe("createLiveness", () => {
     expect(ping).toHaveBeenCalledTimes(1);
   });
 
+  it("leaves no timer behind once the socket is dead, or after stop()", () => {
+    const dead = probeOf();
+    dead.liveness.start();
+    vi.advanceTimersByTime(1300);
+    expect(dead.onDead).toHaveBeenCalledTimes(1);
+    expect(vi.getTimerCount()).toBe(0);
+
+    const stopped = probeOf();
+    stopped.liveness.start();
+    stopped.liveness.probe();
+    stopped.liveness.stop();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
   it("anything heard before the deadline keeps the socket", () => {
     const { liveness, onDead } = probeOf();
     liveness.start();

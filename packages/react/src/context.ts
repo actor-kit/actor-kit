@@ -28,6 +28,7 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useReducer,
   useRef,
   useState,
   useSyncExternalStore,
@@ -75,15 +76,17 @@ export function createActorContext<
 
   function useView(): TView {
     const client = useClient();
-    // Which client the stored view came from: after the Provider is given another client, the
-    // first render already shows the new client's view, not the old one's.
-    const [seen, setSeen] = useState(() => ({ client, view: client.view }));
+    // Renders read the client's view itself, so a render never shows an older view or another
+    // client's; the subscription only asks for a render.
+    const [, rerender] = useReducer((n: number) => n + 1, 0);
+    const rendered = client.view;
+    // biome-ignore lint/correctness/useExhaustiveDependencies: compares with the view of the render that subscribed
     useEffect(() => {
       // Catch up with a view that changed between render and subscribe.
-      setSeen({ client, view: client.view });
-      return client.subscribe((view: TView) => setSeen({ client, view }));
+      if (client.view !== rendered) rerender();
+      return client.subscribe(() => rerender());
     }, [client]);
-    return seen.client === client ? seen.view : client.view;
+    return rendered;
   }
 
   // Role, connection state and selections read through useSyncExternalStore: what renders is the

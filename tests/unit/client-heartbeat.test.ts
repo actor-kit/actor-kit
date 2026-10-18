@@ -6,6 +6,8 @@
  */
 import { actorClient, createActorClient } from "@actor-kit/client";
 import {
+  ControlType,
+  createControlFrame,
   createDeltaFrame,
   createSnapshotFrame,
   docsUrl,
@@ -231,6 +233,22 @@ describe("heartbeat (ADR-020 A)", () => {
     expect(ManualSocket.created).toHaveLength(2);
   });
 
+  it("no ping goes out on a socket that is closing (before its close event)", async () => {
+    const { socket } = await connected();
+    socket.readyState = 2;
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(socket.sent).toEqual([]);
+  });
+
+  it("a closed socket's heartbeat is over: only the backoff reconnects", async () => {
+    const { socket } = await connected({ intervalMs: 200, timeoutMs: 100 });
+    socket.serverCloses();
+    await vi.advanceTimersByTimeAsync(900);
+    expect(ManualSocket.created).toHaveLength(1);
+    await vi.advanceTimersByTimeAsync(100);
+    expect(ManualSocket.created).toHaveLength(2);
+  });
+
   it("false: no pings, and visible/online on a connected client do nothing", async () => {
     const { socket } = await connected(false);
     await vi.advanceTimersByTimeAsync(60_000);
@@ -422,6 +440,12 @@ describe("resync after a frame that does not decode (ADR-020 D)", () => {
     socket.receiveFrame(createDeltaFrame(1, new Uint8Array([0xff])));
     socket.receiveFrame(createDeltaFrame(1, new Uint8Array([0xff])));
     expect(errors).toHaveLength(2);
+  });
+
+  it("a control frame with no onRedirect is not an undecodable frame (no resync)", async () => {
+    const { socket } = await connected(false);
+    socket.receiveFrame(createControlFrame(ControlType.REDIRECT, new TextEncoder().encode('{"actorId":"x"}')));
+    expect(socket.sent).toEqual([]);
   });
 
   it("nothing to ask with before any view applied (the first snapshot did not decode)", async () => {

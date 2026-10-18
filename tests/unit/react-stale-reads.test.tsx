@@ -161,6 +161,32 @@ describe("useSelector", () => {
   });
 });
 
+describe("useSelector with an inline selector that builds an object", () => {
+  it("renders without looping and keeps the same object while the view is the same", () => {
+    const f = fakeClient({ n: 2 });
+    const seen: Array<{ n: number }> = [];
+    function Wrap() {
+      const picked = Ctx.useSelector((v: View) => ({ n: v.n }));
+      seen.push(picked);
+      return <span data-testid="sel">{picked.n}</span>;
+    }
+    const { rerender } = render(
+      <Ctx.Provider client={f.client}>
+        <Wrap />
+      </Ctx.Provider>,
+    );
+    expect(screen.getByTestId("sel").textContent).toBe("2");
+    act(() => f.emit({ n: 3 }));
+    expect(screen.getByTestId("sel").textContent).toBe("3");
+    rerender(
+      <Ctx.Provider client={f.client}>
+        <Wrap />
+      </Ctx.Provider>,
+    );
+    expect(seen.length).toBeLessThan(10);
+  });
+});
+
 describe("useRole", () => {
   it("shows the new client's role at once when the Provider is given another client", () => {
     const a = fakeClient({ n: 1 }, "player");
@@ -249,6 +275,37 @@ describe("useConnectionState", () => {
 });
 
 describe("useView", () => {
+  it("follows every frame, not only the first", () => {
+    const f = fakeClient({ n: 1 });
+    function Probe() {
+      return <span data-testid="view">{Ctx.useView().n}</span>;
+    }
+    render(
+      <Ctx.Provider client={f.client}>
+        <Probe />
+      </Ctx.Provider>,
+    );
+    for (const n of [2, 3, 4]) {
+      act(() => f.emit({ n }));
+      expect(screen.getByTestId("view").textContent).toBe(String(n));
+    }
+  });
+
+  it("renders once on mount when nothing changed before it subscribed", () => {
+    const f = fakeClient({ n: 1 });
+    let renders = 0;
+    function Probe() {
+      renders++;
+      return <span>{Ctx.useView().n}</span>;
+    }
+    render(
+      <Ctx.Provider client={f.client}>
+        <Probe />
+      </Ctx.Provider>,
+    );
+    expect(renders).toBe(1);
+  });
+
   it("the first render after the Provider is given another client already shows that client's view", () => {
     const a = fakeClient({ n: 1 });
     const b = fakeClient({ n: 9 });
