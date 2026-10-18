@@ -78,6 +78,11 @@ interface ClientOptions<TView = unknown> {
   onError?: ((error: ClientError) => void) | undefined;
   /** Liveness check of the open socket (ADR-020). Default `{ intervalMs: 20_000, timeoutMs: 5_000 }`; false turns it off. */
   heartbeat?: HeartbeatOptions | false | undefined;
+  /**
+   * Exactly-once sends (ADR-021, proposed): each message carries an id and is kept until the actor
+   * acks it, then resent on the next socket if needed; the actor applies an id once. Default false.
+   */
+  exactlyOnce?: boolean | undefined;
 }
 
 /**
@@ -199,6 +204,11 @@ export function createActorClient(options: ClientOptions<unknown>): ActorClient<
   let lastChecksum: string | undefined;
   let activeSchema: SchemaDefinition<Record<string, FieldDescriptor>> | undefined = viewSchema;
   const messageQueue: Array<{ type: string; [key: string]: unknown }> = [];
+  // Exactly-once sends (ADR-021): messages sent and not yet acked, in the order first sent.
+  const exactlyOnce = options.exactlyOnce === true;
+  const clientId = newClientId();
+  let nextMessageId = 0;
+  const unacked = new Map<string, string>();
   // A `__reconnect` sent after a frame that did not decode, not yet answered by a frame that applied.
   let resyncPending = false;
   // onError was told that views do not decode; told again only after a frame applies.
@@ -306,6 +316,9 @@ export function createActorClient(options: ClientOptions<unknown>): ActorClient<
       case "__error":
         onError?.(clientError(msg));
         return;
+      case "__ack":
+        if (typeof msg["id"] === "string") unacked.delete(msg["id"]);
+        return;
     }
   }
 
@@ -378,7 +391,18 @@ export function createActorClient(options: ClientOptions<unknown>): ActorClient<
     if (lastChecksum !== undefined) {
       socket.send(JSON.stringify({ type: "__reconnect", lastChecksum }));
     }
+    for (const text of unacked.values()) socket.send(text);
     for (const queued of messageQueue.splice(0)) socket.send(JSON.stringify(queued));
+  }
+
+  /** ADR-021: give the message an id and keep it until acked; it goes out now if the socket is open. */
+  function sendOnce(event: { type: string; [key: string]: unknown }) {
+    if (connectionState === "disconnected") return;
+    nextMessageId += 1;
+    const id = `${clientId}:${nextMessageId}`;
+    const text = JSON.stringify({ ...event, __id: id });
+    unacked.set(id, text);
+    sendRaw(text);
   }
 
   function onMessage(data: unknown) {
@@ -461,7 +485,9 @@ export function createActorClient(options: ClientOptions<unknown>): ActorClient<
       };
     },
     send(event: { type: string; [key: string]: unknown }) {
-      if (ws && ws.readyState === WS_OPEN) {
+      if (exactlyOnce) {
+        sendOnce(event);
+      } else if (ws && ws.readyState === WS_OPEN) {
         ws.send(JSON.stringify(event));
       } else if (connectionState !== "disconnected") {
         // Connecting, reconnecting, or connected while the socket closes (before its close event).
@@ -475,6 +501,7 @@ export function createActorClient(options: ClientOptions<unknown>): ActorClient<
     disconnect() {
       setConnectionState("disconnected");
       messageQueue.length = 0;
+      unacked.clear();
       clearReconnectTimer();
       liveness.stop();
       detachBrowserListeners();
@@ -486,6 +513,13 @@ export function createActorClient(options: ClientOptions<unknown>): ActorClient<
       ws = undefined;
     },
   };
+}
+
+/** A random id for this client instance (message ids are `<client id>:<n>`). */
+function newClientId(): string {
+  return typeof crypto !== "undefined" && "randomUUID" in crypto
+    ? crypto.randomUUID()
+    : Math.random().toString(36).slice(2) + Date.now().toString(36);
 }
 
 function isBrowserEnv(): boolean {

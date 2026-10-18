@@ -24,6 +24,7 @@ export class SeamSocket implements WebSocketLike {
   private readonly listeners = new Map<EventName, Listener[]>();
   private server: WebSocket | null = null;
   private zombie = false;
+  private deaf = false;
   private closed = false;
   private corruptNext = false;
 
@@ -61,6 +62,11 @@ export class SeamSocket implements WebSocketLike {
     this.zombie = true;
   }
 
+  /** What the client sends still reaches the server, but nothing comes back (the answer is lost). */
+  goDeaf(): void {
+    this.deaf = true;
+  }
+
   /** Mark the socket closed the way a browser does before it dispatches the close event. */
   markClosedSilently(): void {
     this.readyState = CLOSED;
@@ -91,7 +97,7 @@ export class SeamSocket implements WebSocketLike {
     this.server = ws;
     ws.accept();
     ws.addEventListener("message", (event) => {
-      if (this.zombie) return;
+      if (this.zombie || this.deaf) return;
       const data = event.data;
       if (this.corruptNext && data instanceof ArrayBuffer) {
         this.corruptNext = false;

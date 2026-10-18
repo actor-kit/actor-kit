@@ -39,6 +39,8 @@ export interface CreateOptions<TView = unknown> {
   onError?: (error: ClientError) => void;
   /** Liveness check of the open socket (ADR-020). Default `{ intervalMs: 20_000, timeoutMs: 5_000 }`; false turns it off. */
   heartbeat?: HeartbeatOptions | false;
+  /** Exactly-once sends (ADR-021, proposed). Default false. */
+  exactlyOnce?: boolean;
 }
 
 /** Typed actor client factory — knows TView and TEvent at compile time. */

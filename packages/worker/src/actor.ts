@@ -42,6 +42,7 @@ import {
 } from "./runtime/attempt";
 import { closeCodeToSend } from "./runtime/close-code";
 import { type ConnectRequest, parseConnectRequest } from "./runtime/connect-request";
+import { ensureDeliveredTable, recordDelivered, wasDelivered } from "./runtime/delivered-store";
 import {
   type DeterminismWatch,
   determinismWatch,
@@ -2388,9 +2389,35 @@ export function actor(
         return;
       }
 
+      // Exactly-once sends (ADR-021 spike): a message with an id is applied once per caller.
+      const id = event["__id"];
+      if (typeof id === "string") {
+        await this.handleIdentified(ws, caller, callerType, id, event);
+        return;
+      }
+
       const result = await this.send(caller, callerType, event);
       // Send error frame back to client if message was rejected
       if (!result.ok) ws.send(JSON.stringify(rejectionFrame(event.type, result)));
+    }
+
+    /** Apply (or refuse) a message with an id once, then ack it; a repeat is only acked again. */
+    async handleIdentified(
+      ws: WebSocket,
+      caller: string,
+      callerType: "user" | "service",
+      id: string,
+      event: { type: string; [key: string]: unknown },
+    ): Promise<void> {
+      const sql = this.ctx.storage.sql;
+      ensureDeliveredTable(sql);
+      if (!wasDelivered(sql, caller, id)) {
+        const { __id: _id, ...message } = event;
+        const result = await this.send(caller, callerType, message);
+        recordDelivered(sql, caller, id, Date.now());
+        if (!result.ok) ws.send(JSON.stringify(rejectionFrame(event.type, result)));
+      }
+      ws.send(JSON.stringify({ type: "__ack", id }));
     }
 
     async handleReconnect(
