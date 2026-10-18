@@ -124,7 +124,12 @@ function isViewSchema(value: unknown): value is SchemaDefinition<Record<string, 
 }
 
 /** Role names in definition order (the server's roleIndex) and the schema of each role's view, if any. */
-function contractSchemas(def: { readonly roles?: unknown; readonly views?: unknown }): {
+/**
+ * How a client decodes a contract's views: its role names in definition order (a snapshot frame
+ * names its role by index) and each role's view schema. `actorContext(Contract)` passes this to
+ * `useClient`.
+ */
+export function contractSchemas(def: { readonly roles?: unknown; readonly views?: unknown }): {
   roleNames: string[] | undefined;
   viewSchemas: Record<string, SchemaDefinition<Record<string, FieldDescriptor>>>;
 } {

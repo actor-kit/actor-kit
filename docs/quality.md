@@ -300,6 +300,13 @@ Stryker on `packages/core/src/**/*.ts` (minus `index.ts`), both runs on the same
 Both survivors are equivalent (table below). CRAP after: core max 7.0 (`writeValue`, CC 7, fully
 covered), React max 6.0 (`useSelector`'s cache read); 0 functions ≥ 8 in either.
 
+## actorContext(Contract) decodes binary (codebreakers migration, 2026-10-18)
+
+`actorContext(Contract).useClient` ignored the contract, so a React app could not decode binary views.
+`react-contract-binary.test.tsx` red before (2 tests). Stryker: `actor-context.ts` **100%** (4/4) after
+removing an `isContract` guard the overloads made redundant; `builder.ts` 92.59%, its 4 survivors the
+listed equivalents (renumbered); `context.ts` 97.10%, the 2 listed equivalents.
+
 ## Equivalent mutants
 
 Surviving mutants that no test can kill, because the mutated program behaves identically. One line each.
@@ -307,8 +314,8 @@ Surviving mutants that no test can kill, because the mutated program behaves ide
 | Package | Location | Mutant | Why it is equivalent |
 |---|---|---|---|
 | core | delta.ts:61 | `if (a === b) return true` → `if (false)` | Fast path only; the number and JSON comparisons below return the same result. |
-| client | builder.ts:108, :109 | `"name" in arg && "def" in arg` / `"roles" in arg && "views" in arg` → `\|\|` | A SchemaDefinition has none of these keys; a contract has both name and def, the roles-and-views form both roles and views. |
-| client | builder.ts:116, 120 (×3) | `isRecord` / `isViewSchema` → `true` | A non-schema registered for a role makes decode throw, which the client catches and ignores, the same as having no schema. |
+| client | builder.ts:111, :112 (were :108, :109) | `"name" in arg && "def" in arg` / `"roles" in arg && "views" in arg` → `\|\|` | A SchemaDefinition has none of these keys; a contract has both name and def, the roles-and-views form both roles and views. |
+| client | builder.ts:119, 123 (were 116, 120) | `isRecord` / `isViewSchema` → `true` | A non-schema registered for a role makes decode throw, which the client catches and ignores, the same as having no schema. |
 | client | builder.ts:131 | `if (isViewSchema(...))` → `true` | Registers `undefined` for the role; `viewSchemas[role] ?? viewSchema` falls back exactly as when it is absent. |
 | client | client.ts:155, 156, 164 | `roleIndex === undefined ? …` / `roleName === undefined ? …` → `false` | parseFrame always sets roleIndex on snapshots, and indexing with `undefined` yields `undefined` anyway. |
 | client | client.ts:179 | `onRedirect?.(…)` → `onRedirect(…)` | Binary path only: the TypeError is caught by handleBinaryMessage's try/catch, same as doing nothing. |

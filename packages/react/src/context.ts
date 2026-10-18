@@ -18,7 +18,7 @@
  *   }
  */
 
-import type { ActorClient, ConnectionState, CreateOptions } from "@actor-kit/client";
+import type { ActorClient, ClientOptions, ConnectionState, CreateOptions } from "@actor-kit/client";
 import { createActorClient } from "@actor-kit/client";
 import { ActorKitError } from "@actor-kit/core";
 import {
@@ -56,7 +56,10 @@ interface ActorContext<TView = unknown, TEvent extends { type: string } = { type
 export function createActorContext<
   TView = unknown,
   TEvent extends { type: string } = { type: string; [key: string]: unknown },
->(): ActorContext<TView, TEvent> {
+>(
+  /** How `useClient` decodes binary views (a contract's role names and view schemas). */
+  decoding?: Pick<ClientOptions, "roleNames" | "viewSchemas">,
+): ActorContext<TView, TEvent> {
   const ClientContext = createContext<ActorClient<TView, TEvent> | null>(null);
 
   function useClient(): ActorClient<TView, TEvent> {
@@ -136,10 +139,13 @@ export function createActorContext<
     // One client per room: a new path or host is another room, so it gets its own client (and the
     // effect below disconnects the old one). Other options are read when the room's client is made.
     const room = `${options.host ?? ""}|${options.path}`;
-    const [owned, setOwned] = useState(() => ({ room, client: createActorClient<TView, TEvent>(options) }));
+    const [owned, setOwned] = useState(() => ({
+      room,
+      client: createActorClient<TView, TEvent>({ ...options, ...decoding }),
+    }));
     let client = owned.client;
     if (owned.room !== room) {
-      client = createActorClient<TView, TEvent>(options);
+      client = createActorClient<TView, TEvent>({ ...options, ...decoding });
       setOwned({ room, client });
     }
 
