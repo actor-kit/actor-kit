@@ -74,16 +74,18 @@ got explicit timeouts, assertions unchanged.
 | Gate | Before | After |
 |---|---|---|
 | CRAP, unit coverage, every package `src` + studio UI | max 7.1, 0 ≥ 8 | max 7.1 (`test`), 0 ≥ 8; client 7.0, core 7.0, React 6.0 (was 2.0: `useSelector`'s cache check) |
-| CRAP, worker with integration coverage (`crap:worker`) | 7.6 (docs/quality.md) | 7.6, 0 ≥ 8 |
+| CRAP, worker with integration coverage (`crap:worker`) | 7.6 (docs/quality.md) | 7.6, 0 ≥ 8 (after splitting `liveIdentity` out of `toLiveConnections`, which the reaped check had pushed to 8.0) |
 | Mutation, changed files (client, liveness, frame, binary, delta, codec, React context) | full-run scores above | first run 98.06% (1064/1086); after: liveness 100%, client 97.70%, React 96.55%, frame/binary/codec 100%, delta 99.44%; every survivor equivalent (docs/quality.md) |
-| Seam tests, real client ↔ real actor | 0 | 15 (14 pass, 1 `it.fails` pinning ghost presence) |
-| Unit tests | 3058 | 3129 |
-| Integration tests | 383 | 392 (+1 expected fail) |
+| Seam tests, real client ↔ real actor | 0 | 17, all passing (ghost presence fixed, opt-in) |
+| Unit tests | 3058 | 3152 |
+| Integration tests | 383 | 406 |
 | CI | failing at setup on main since 2026-10-10 (pnpm version given twice) | setup fixed: `quality` (typecheck, lint, unit, integration) and `docs` pass; `e2e` 77/78 (below) |
 
 Commits: 9677dd0 seam harness; 0a6bfef core frame + React; c0b3ea6 ADR-020 heartbeat/resync/queue;
 6884ef4 whole-payload decode + undecodable report + docs; 0db4d4b ghost presence (it.fails);
-74d6985 survivors killed, useView simplified; f005de7 CI.
+74d6985 survivors killed, useView simplified; f005de7 CI; 1e7eb03 progress + timers test;
+2dca205 useClient follows a new room; 63a45a1 timer payload (Catancast); 599272f stale-socket reaping
+(opt-in); 01c4b24 liveIdentity split.
 
 ## Next
 
