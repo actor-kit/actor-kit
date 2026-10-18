@@ -87,6 +87,18 @@ describe("manualWork", () => {
     expect(work.every((w) => w.file === "src/room.ts" && w.hint.length > 10)).toBe(true);
   });
 
+  it("lists the 0.52 context's client calls: useClient() with no options, and getState()", () => {
+    const source = [
+      "const client = RoomContext.useClient();",
+      "let prev = client.getState().public;",
+      "const c = RoomContext.useClient({ path, host, initialView, getToken });",
+    ].join("\n");
+    const work = manualWork("src/client/Tv.tsx", source);
+    expect(work.map((w) => `${w.line} ${w.what}`)).toEqual(["1 useClient()", "2 getState()"]);
+    expect(work[0]?.hint).toContain("useActorClient()");
+    expect(work[1]?.hint).toContain("client.view");
+  });
+
   it("finds nothing in 0.3 code", () => {
     expect(manualWork("a.ts", 'import { defineActor } from "@actor-kit/worker";')).toEqual([]);
   });
