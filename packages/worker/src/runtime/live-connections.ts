@@ -56,6 +56,21 @@ export function readConnectionAttachment(attachment: unknown): ConnectionAttachm
 }
 
 /**
+ * Who an app socket belongs to, from its tags and attachment; null for Studio, for a socket without
+ * a valid identity or attachment, and for one the actor closed for a stopped heartbeat.
+ */
+function liveIdentity(
+  socket: SocketRecord,
+): { caller: string; callerType: "user" | "service"; attachment: ConnectionAttachment } | null {
+  if (isStudioSocket(socket.tags)) return null;
+  const caller = tagValue(socket.tags, "caller:");
+  const callerType = CallerTypeSchema.safeParse(tagValue(socket.tags, "callerType:"));
+  const attachment = readConnectionAttachment(socket.attachment);
+  if (caller === undefined || !callerType.success || attachment === null || attachment.reaped) return null;
+  return { caller, callerType: callerType.data, attachment };
+}
+
+/**
  * Lists app connections from socket records, oldest first (by `connectedAt`, then connect sequence), with each caller's
  * current role. Studio sockets, and sockets without a valid identity or
  * attachment, are rejected rather than coerced.
@@ -67,19 +82,17 @@ export function toLiveConnections<TState>(
 ): LiveConnection[] {
   const connections: Array<{ connection: LiveConnection; seq: number }> = [];
   for (const socket of sockets) {
-    if (isStudioSocket(socket.tags)) continue;
-    const caller = tagValue(socket.tags, "caller:");
-    const callerType = CallerTypeSchema.safeParse(tagValue(socket.tags, "callerType:"));
-    const attachment = readConnectionAttachment(socket.attachment);
-    if (caller === undefined || !callerType.success || attachment === null || attachment.reaped) continue;
+    const identity = liveIdentity(socket);
+    if (identity === null) continue;
+    const { caller, callerType, attachment } = identity;
     connections.push({
       seq: attachment.seq ?? 0,
       connection: {
         connectionId: attachment.connectionId,
         caller,
-        callerType: callerType.data,
+        callerType,
         connectedAt: attachment.connectedAt,
-        role: resolveRole(roles, state, caller, { callerType: callerType.data }),
+        role: resolveRole(roles, state, caller, { callerType }),
       },
     });
   }
