@@ -18,6 +18,8 @@ const ConnectionAttachmentSchema = z.object({
   connectedAt: z.number(),
   /** Per-actor connect order; breaks `connectedAt` ties and survives hibernation with the socket. */
   seq: z.number().int().nonnegative().optional(),
+  /** Closed by the actor because its heartbeat stopped (ADR-020 E): no longer a live connection. */
+  reaped: z.literal(true).optional(),
 });
 export type ConnectionAttachment = z.infer<typeof ConnectionAttachmentSchema>;
 
@@ -69,7 +71,7 @@ export function toLiveConnections<TState>(
     const caller = tagValue(socket.tags, "caller:");
     const callerType = CallerTypeSchema.safeParse(tagValue(socket.tags, "callerType:"));
     const attachment = readConnectionAttachment(socket.attachment);
-    if (caller === undefined || !callerType.success || attachment === null) continue;
+    if (caller === undefined || !callerType.success || attachment === null || attachment.reaped) continue;
     connections.push({
       seq: attachment.seq ?? 0,
       connection: {

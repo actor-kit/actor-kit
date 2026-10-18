@@ -336,37 +336,87 @@ describe("client ↔ actor seam: a page that slept (ADR-020)", () => {
 
 const ChatView = schema({ messages: array(schema({ id: string, author: string, text: string })), onlineCount: uint32 });
 
-describe("client ↔ actor seam: presence after a silent socket", () => {
-  // Known bug (ADR-020 E, proposed): the actor keeps the half-open socket of a phone that slept, so
-  // the player stays online after leaving. it.fails flips to a failure once the fix lands: then make it it().
-  it.fails("a player whose phone slept, came back, then left for good is not kept online by the dead socket", async () => {
-    const actorId = uniqueName("seam-ghost");
-    const stub = env.CHAT_ROOM.get(env.CHAT_ROOM.idFromName(actorId));
-    await stub.spawn({ actorId, caller: "host", callerType: "user", input: {} });
-    const chatPhone = (caller: string, net: SeamNetwork) => {
-      const client = createActorClient({
-        path: `/api/chat-room/${actorId}`,
-        host: "localhost",
-        initialView: { messages: [], onlineCount: 0 },
-        viewSchema: ChatView,
-        getToken: () => caller,
-        WebSocketImpl: net.WebSocketImpl,
-        heartbeat: { intervalMs: 100, timeoutMs: 150 },
-      });
-      open.push(client);
-      client.connect();
-      return client;
-    };
-    const tv = chatPhone("tv", seamNetwork(stub));
+/** A chat phone on the reaping chat room (staleMs 300; the example itself uses 60 s). */
+function chatPhone(
+  stub: DurableObjectStub,
+  actorId: string,
+  caller: string,
+  net: SeamNetwork,
+  heartbeat: { intervalMs: number; timeoutMs: number } | false = { intervalMs: 100, timeoutMs: 150 },
+) {
+  const client = createActorClient({
+    path: `/api/chat-room-reaping/${actorId}`,
+    host: "localhost",
+    initialView: { messages: [], onlineCount: 0 },
+    viewSchema: ChatView,
+    getToken: () => caller,
+    WebSocketImpl: net.WebSocketImpl,
+    heartbeat,
+  });
+  open.push(client);
+  client.connect();
+  void stub;
+  return client;
+}
+
+async function reapingRoom(prefix: string) {
+  const actorId = uniqueName(prefix);
+  const stub = env.CHAT_ROOM_REAPING.get(env.CHAT_ROOM_REAPING.idFromName(actorId));
+  await stub.spawn({ actorId, caller: "host", callerType: "user", input: {} });
+  return { actorId, stub };
+}
+
+const pause = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+describe("client ↔ actor seam: presence after a silent socket (ADR-020 E, opt-in)", () => {
+  it("a player whose phone slept, came back, then left for good goes offline", async () => {
+    const { actorId, stub } = await reapingRoom("seam-ghost");
+    const tv = chatPhone(stub, actorId, "tv", seamNetwork(stub));
     const anaNet = seamNetwork(stub);
-    const ana = chatPhone("ana", anaNet);
+    const ana = chatPhone(stub, actorId, "ana", anaNet);
     await eventually(() => expect(tv.view.onlineCount).toBe(2));
+    await pause(250); // a ping or two reach the actor
 
     anaNet.latest().goZombie();
     await eventually(() => expect(anaNet.sockets).toHaveLength(2), 2000);
     await eventually(() => expect(ana.connectionState).toBe("connected"));
+    await pause(400); // the dead socket has been silent past staleMs
     ana.disconnect();
 
     await eventually(() => expect(tv.view.onlineCount).toBe(1), 5000);
+  });
+
+  it("closing the dead socket keeps the player online while their new socket lives", async () => {
+    const { actorId, stub } = await reapingRoom("seam-ghost-stay");
+    const tv = chatPhone(stub, actorId, "tv", seamNetwork(stub));
+    const anaNet = seamNetwork(stub);
+    chatPhone(stub, actorId, "ana", anaNet);
+    await eventually(() => expect(tv.view.onlineCount).toBe(2));
+    await pause(250);
+
+    anaNet.latest().goZombie();
+    await eventually(() => expect(anaNet.sockets).toHaveLength(2), 2000);
+    await pause(400);
+    const sent: unknown = await stub.send("tv", "user", { type: "SEND_MESSAGE", text: "anyone?" });
+    expect(sent).toMatchObject({ ok: true });
+
+    await pause(200);
+    expect(tv.view.onlineCount).toBe(2);
+  });
+
+  it("a socket that never pinged (heartbeat off, an older client) is never closed", async () => {
+    const { actorId, stub } = await reapingRoom("seam-no-ping");
+    const tv = chatPhone(stub, actorId, "tv", seamNetwork(stub));
+    const oldNet = seamNetwork(stub);
+    const old = chatPhone(stub, actorId, "old", oldNet, false);
+    await eventually(() => expect(tv.view.onlineCount).toBe(2));
+
+    await pause(500);
+    await stub.send("tv", "user", { type: "SEND_MESSAGE", text: "still there?" });
+    await pause(200);
+
+    expect(tv.view.onlineCount).toBe(2);
+    expect(old.connectionState).toBe("connected");
+    expect(oldNet.sockets).toHaveLength(1);
   });
 });

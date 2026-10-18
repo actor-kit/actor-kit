@@ -66,16 +66,27 @@ outstanding, or before any view applied, is reported once through `onError` as `
 `invalid_frame` (it was written with another schema or damaged), never a view with a string cut
 short or a delta read as "nothing changed". `parseFrame` refuses a frame shorter than its header says.
 
-### E. (Proposed, awaiting Jon) The actor closes sockets whose heartbeat went silent
+### E. The actor closes sockets whose heartbeat stopped (opt-in)
+
+**Accepted 2026-10-18 as opt-in** (coordinator, for Jon: new behaviour is additive; turning it on
+by default is Jon's decision).
 
 A phone that slept leaves a half-open socket on the actor's side; the client opens a new one, but
 the actor never learns the old one died, so a player who later leaves stays online (the chat
-example counts them twice over; a seat stays "connected"). `client-seam.test.ts` pins this as
-`it.fails`. Proposal: whenever the actor runs (a message, a close, a commit), close app sockets
-whose last auto-answered ping (`ctx.getWebSocketAutoResponseTimestamp`) is older than
-`heartbeat.staleMs` on the actor (default 60 s, three client intervals) and run the disconnect
-lifecycle for them; sockets that never pinged are left alone. Cost to weigh: a device locked for
-longer than `staleMs` gets `disconnect`, then `connect` when it wakes.
+example counted them twice over; a seat stays "connected").
+
+- `heartbeat: { staleMs }` on the actor turns it on; omitted, nothing changes. The chat example
+  opts in with 60 s (three client intervals).
+- Whenever the actor runs for an app (a message or RPC send, a socket closing, a new connection), it
+  closes app sockets whose last auto-answered ping (`ctx.getWebSocketAutoResponseTimestamp`) is more
+  than `staleMs` ago, with code 4001 "heartbeat stopped", and runs their disconnect lifecycle.
+  Sockets that never pinged (heartbeat off, an older client) are never closed.
+- A closed socket is marked `reaped` in its attachment: it is no longer a live connection, and if
+  its close event does arrive later, the disconnect lifecycle does not run twice.
+- Not on a timer: an idle room with nobody acting keeps the dead socket until the next event (no
+  alarm is spent on it).
+- Cost to weigh before a default: a device locked for longer than `staleMs` gets `disconnect`, then
+  `connect` when it wakes; a game that frees a seat on disconnect frees it.
 
 ## Consequences
 

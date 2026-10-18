@@ -30,6 +30,7 @@ Bugs found (each red before its fix):
 | 5 | React `useSelector` kept the old value when its selector changed or the Provider got another client, and missed a change between render and subscribe; `useRole` / `useConnectionState` the same | a screen behind the room | `useSyncExternalStore` |
 | 6 | React `useView` rendered the old client's view once after a Provider swap | one frame of the previous room | `useView` renders the client's own view |
 | 7 | React `useClient(options)` kept its first room's client for the life of the component | a screen moved to another room stays connected to the old one | one client per `host`+`path`; the old one is disconnected (React 97.01%, 2 equivalent) |
+| 8 | After a phone's socket went half-open and the client reconnected, the actor kept the dead socket: a player who then left stayed online (chat example: onlineCount 2, expected 1) | ghost players, seats stay "connected" | ADR-020 E, opt-in `heartbeat: { staleMs }`: the actor closes sockets whose pings stopped and runs their disconnect (chat example opts in, 60 s). The `it.fails` is now three passing seam tests; red with the window set huge. Stryker `stale-sockets.ts` + `live-connections.ts` 100% (82/82) |
 
 Bugs reported by consumers:
 
@@ -41,12 +42,10 @@ Test infrastructure: two existing unit tests (a 280k-key record delta, nine `pnp
 subprocesses) timed out at the 5 s default on a loaded machine and failed the pre-commit hook; they
 got explicit timeouts, assertions unchanged.
 
-Open bug, awaiting a decision (ADR-020 E): after a phone's socket goes half-open and the client
-reconnects, the actor keeps the dead socket, so the player stays online after leaving for good
-(chat example: onlineCount 2, expected 1). Pinned as `it.fails` in `client-seam.test.ts`.
 
 ## Decisions
 
+- ADR-020 E reaping is opt-in (coordinator for Jon, 2026-10-18); default-on is Jon's decision.
 - ADR-020 heartbeat on by default (Jon, 2026-10-18). One existing test that leaves its fake server
   silent for 60 s (`client-reconnect-resilience.test.ts` "ignores a late close event from the socket
   a disconnect() replaced") now passes `heartbeat: false`; what it checks is unchanged.
@@ -88,8 +87,7 @@ Commits: 9677dd0 seam harness; 0a6bfef core frame + React; c0b3ea6 ADR-020 heart
 
 ## Next
 
-1. ADR-020 E (ghost presence): waiting on Jon's answer; then implement the server-side sweep and
-   turn the `it.fails` into `it`.
+1. ADR-020 E is opt-in; making it the default is Jon's call (on the coordinator's morning list).
 2. Catancast bugs on actor-kit-2 come first when they arrive.
 3. Message ids the actor dedupes on, so a send on a dead-but-OPEN socket can be retried
    (delivery is at most once today).

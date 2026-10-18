@@ -167,6 +167,11 @@ export const NullableCounter = createActorClass(NullableCounterContract);
 
 export const ChatRoom = createActorClass(ChatRoomContract);
 
+/** The chat room with a short stale window, so a test sees a dead socket reaped (ADR-020 E). */
+export const ChatRoomReaping = createActorClass(
+  defineActor("chat-room-reaping", { ...ChatRoomContract.def, heartbeat: { staleMs: 300 } }),
+);
+
 // --- Worker entrypoint ---
 
 export default {
