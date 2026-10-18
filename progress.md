@@ -76,7 +76,9 @@ got explicit timeouts, assertions unchanged.
 | CRAP, unit coverage, every package `src` + studio UI | max 7.1, 0 ≥ 8 | max 7.1 (`test`), 0 ≥ 8; client 7.0, core 7.0, React 6.0 (was 2.0: `useSelector`'s cache check) |
 | CRAP, worker with integration coverage (`crap:worker`) | 7.6 (docs/quality.md) | 7.6, 0 ≥ 8 (after splitting `liveIdentity` out of `toLiveConnections`, which the reaped check had pushed to 8.0) |
 | Mutation, changed files (client, liveness, frame, binary, delta, codec, React context) | full-run scores above | first run 98.06% (1064/1086); after: liveness 100%, client 97.70%, React 96.55%, frame/binary/codec 100%, delta 99.44%; every survivor equivalent (docs/quality.md) |
-| Seam tests, real client ↔ real actor | 0 | 17, all passing (ghost presence fixed, opt-in) |
+| Mutation, core whole package (measured both on this machine) | 99.90% (1035/1036) | 99.82% (1082/1084; 48 more mutants from the frame/payload checks); both survivors equivalent |
+| CRAP, core / React | 7.0 / 2.0 | 7.0 / 6.0 (`useSelector`'s cache read), 0 ≥ 8 |
+| Seam tests, real client ↔ real actor | 0 | 25, all passing: drops, restarts, hibernation, sleep/wake, an iPad suspended during a turn timer (3), two tabs of one player (4), ghost presence (3, opt-in) |
 | Unit tests | 3058 | 3152 |
 | Integration tests | 383 | 406 |
 | CI | failing at setup on main since 2026-10-10 (pnpm version given twice) | setup fixed: `quality` (typecheck, lint, unit, integration) and `docs` pass; `e2e` 77/78 (below) |

@@ -288,6 +288,18 @@ on mount. Removed by simplifying: `useView` kept a copy of the view next to the 
 `{}` / `false` mutants showed the copy was redundant); it now renders `client.view` and only asks for
 renders.
 
+## Core, whole package, before and after the hardening branch (2026-10-18)
+
+Stryker on `packages/core/src/**/*.ts` (minus `index.ts`), both runs on the same machine:
+
+| Run | Score | Survivors |
+|---|---|---|
+| Before (`d881766`, main) | **99.90%** (1035/1036) | errors.ts:338 (listed as errors.ts:333) |
+| After (`claude/harden-72e4ea`, frame and whole-payload checks added) | **99.82%** (1082/1084; 48 more mutants) | errors.ts:338, delta.ts:63 (the fast path, listed as delta.ts:61) |
+
+Both survivors are equivalent (table below). CRAP after: core max 7.0 (`writeValue`, CC 7, fully
+covered), React max 6.0 (`useSelector`'s cache read); 0 functions ≥ 8 in either.
+
 ## Equivalent mutants
 
 Surviving mutants that no test can kill, because the mutated program behaves identically. One line each.
