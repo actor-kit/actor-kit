@@ -44,6 +44,18 @@ subprocesses) timed out at the 5 s default on a loaded machine and failed the pr
 got explicit timeouts, assertions unchanged.
 
 
+## Second consumer: codebreakers, and the 0.52 guide (2026-10-18)
+
+- `docs/migrating-from-0.52.md`: the guide from npm `actor-kit@0.52.6` (+ its patch, now unnecessary),
+  written from little-vigilante's real 0.52 room; `scripts/migrate-from-0.52.mts` does the mechanical
+  part (13 unit tests; a `--dry` run on little-vigilante lists 28 lines left for a person, nearly all
+  the machine). Catancast was not a 0.52 migration (hand-rolled DO → 0.3) and codebreakers was already
+  on an early 0.3 build, so neither proves the XState rewrite; which 0.52 game proves it is asked.
+- Codebreakers (branch `claude/actor-kit-2-migration` in its repo): 0.0.1 → 0.3 with no source change
+  (typecheck, 125 unit, 11 seam green, unedited); then `supportsBinary: true`, which found an actor-kit
+  bug: `actorContext(Contract).useClient` ignored the contract, so React screens could not decode binary.
+  Fixed here (`0075f2c`, test red before, Stryker 100%); the 11 seam tests pass on binary frames.
+
 ## Decisions
 
 - ADR-020 E reaping is opt-in (coordinator for Jon, 2026-10-18); default-on is Jon's decision.
