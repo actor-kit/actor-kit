@@ -52,6 +52,10 @@ got explicit timeouts, assertions unchanged.
   30 machine tests through the new helpers), seam 16/17 in a full run (each test passed in some run; the
   failures were bug-bash games timing out at load average 150-200, as on the 0.52 baseline). An OGS
   join test that failed twice on 0.52 here passes on 0.3.
+- **story-nook, a 0.52.6 migration with the context-as-state shortcut**: merged to its main (`a50d766`).
+  None of its tests edited: typecheck, 392 unit, CRAP 0 over 7.99, seam 10/10, try path 4/4, try-path load
+  (5 rooms) green. Found and fixed: `useActorClient()` (React had no hook for the Provider's client) and
+  `useClient` connecting before a child's mount-time send (it was dropped).
 - **codebreakers** (its own branch of the same name): 0.0.1 → 0.3 with no source change, then binary
   views, which found the `actorContext(Contract).useClient` decoding bug (fixed, `0075f2c`).
 - `docs/migrating-from-0.52.md` rewritten from little-vigilante's real migration; the codemod

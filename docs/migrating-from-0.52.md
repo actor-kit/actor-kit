@@ -123,6 +123,29 @@ machine became `src/room.actor.ts`, about 280 lines, over the unchanged `src/gam
     `role` tag (`LinkedView`), so `initialView` is `{ role, ...snapshot }` with the role from
     `getSnapshot()`. Delete hand-rolled reconnect, ping and visibility code.
 
+### A shortcut for big machines: keep the context as the state (story-nook)
+
+When the machine keeps state in `public` itself (story-nook's `paused`, `length` and effect counters)
+or has many guards and actions, translating handler by handler is risky. Instead:
+
+- **The state is the machine's context.** `{ public, private, server }`, still re-projected by
+  `withViews()` after every change. The view is
+  `{ public: state.public, private: state.private[caller] ?? {}, value: state.server.phase }`. Mirror
+  the machine's state value into the context if it doesn't already (story-nook kept it in
+  `server.phase`).
+- **Guards and actions stay as they are.** Copy them out of `setup({ guards, actions })` into plain
+  objects (an identity `assign` keeps the bodies unchanged), with `({ context, event })` built from
+  `(state, payload, ctx)`.
+- **The transitions become a table.** For each event: its transitions in order, under `any` for the
+  root `on` or under the phase for `states.<phase>.on`. A small `step()` takes the first transition
+  whose guard holds, runs its actions, then the target's entry actions. An `after` becomes a timer
+  that entry schedules.
+- **Thread `ctx.now()` / `ctx.id()` / `ctx.random()` into the actions** that called `Date.now()`,
+  `crypto.randomUUID()` or `crypto.getRandomValues()`.
+
+story-nook's 466-line machine became `src/room.actor.ts` this way. All of its tests passed unedited,
+including whole stories read through the helpers.
+
 ## 4. Tests
 
 - Tests above the machine (the rules in `src/game/*`, URL helpers, OGS join parsing) carry over
@@ -149,6 +172,14 @@ machine became `src/room.actor.ts`, about 280 lines, over the unchanged `src/gam
     `actor.send("worker", { type: "OGS_JOIN", id, profile }, { callerType: "service" })`.
   - `restart()` and `sendSystem("RESUME")` become no-ops, each with a comment: 0.3 restores state
     and timers itself, and actor-kit's own tests cover the restore.
+  - Helpers can keep the XState snapshot's shape where tests read it: `actor.getSnapshot()` as
+    `{ value, context: state }` and `clock.increment(ms)` as `sim.advance(...)` (story-nook).
+  - Each `simulate()` starts from the same seed. Tests that compare two rooms ("books get fresh ids")
+    need `simulate({ seed })` with a seed per room, as production rooms each draw their own.
+- **Seam-test helpers on 0.52's client** (an `e2e/wire.ts` with `createActorKitClient`): keep their
+  surface (`send`, `getState`, `waitFor`, `disconnect`) over `createActorClient`, and the tests stay
+  unedited. A test file that imports `actor-kit/browser` or `xstate` itself can't stay unedited; ask
+  before changing it (bake-shop).
 
   If a test's body has to change, it was testing XState, not the game. Say so in the commit.
 
@@ -195,7 +226,24 @@ That's where a 0.52 game is after step 3, which makes it the end-to-end check of
 
 Running a game's seam tests from a fresh git worktree needs the gitignored local files: copy
 `.dev.vars` and create `.wrangler/`, or wrangler dev never starts (every test then fails with
-`fetch failed`).
+`fetch failed`). A game with no `.dev.vars` needs `--var ACTOR_KIT_SECRET:<a throwaway value>` on its
+local wrangler dev, or every page that signs a token returns 500.
+
+**story-nook (0.52.6 → 0.3)**, with the context-as-state shortcut (§3); merged to its main:
+
+- `src/room.actor.ts` keeps the machine. `room.server.ts` subclasses `createActorClass(RoomContract)`
+  to add try-kit's room life (`life`, `claim`, `markOpened`, and the `fetch` / `webSocketClose`
+  hooks). The Worker calls `markOpened()` after a TV spawns the room, since the subclass can't see
+  actor-kit's storage.
+- `e2e/wire.ts` keeps 0.52's client surface over `createActorClient`. Three client files moved from
+  `useClient()` / `getState()` to `useActorClient()` / `view`.
+- None of the tests edited. Typecheck, 392 unit tests, CRAP < 8, 10 seam tests, 4 try-path tests and a
+  local try-path load run all green.
+- Two actor-kit bugs found and fixed:
+  - React had no hook for the Provider's client; `useActorClient()` is new.
+  - A child's mount-time `send` was dropped because `useClient` connected after children's effects;
+    it now connects in a layout effect.
+- One more codemod fix: React detection also counts an import already moved to `@actor-kit/react`.
 
 ## 7. What a codemod can and cannot do
 
