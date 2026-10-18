@@ -97,6 +97,15 @@ function stringList(value: unknown): readonly string[] | undefined {
   return Array.isArray(value) && value.every((item) => typeof item === "string") ? value : undefined;
 }
 
+/** A view frame that does not decode, also after asking again: the client bundle predates the Worker's schema. */
+const UNDECODABLE_VIEW: ClientError = {
+  messageType: "",
+  code: "invalid_frame",
+  message:
+    "A view from the server does not decode with this client's view schema, also after asking again. Reload the page: the Worker was probably deployed with a newer schema.",
+  docs: docsUrl("invalid_frame"),
+};
+
 function invalidFrame(messageType: string): ClientError {
   return {
     messageType,
@@ -192,6 +201,8 @@ export function createActorClient(options: ClientOptions<unknown>): ActorClient<
   const messageQueue: Array<{ type: string; [key: string]: unknown }> = [];
   // A `__reconnect` sent after a frame that did not decode, not yet answered by a frame that applied.
   let resyncPending = false;
+  // onError was told that views do not decode; told again only after a frame applies.
+  let undecodableReported = false;
   const heartbeat = resolveHeartbeat(options.heartbeat);
   const liveness =
     heartbeat === null ? NO_LIVENESS : createLiveness(heartbeat, { ping: () => sendRaw(PING), onDead: abandonSocket });
@@ -215,6 +226,7 @@ export function createActorClient(options: ClientOptions<unknown>): ActorClient<
     currentView = view;
     lastChecksum = xxh64(JSON.stringify(view));
     resyncPending = false;
+    undecodableReported = false;
   }
 
   /** Text on the socket if it is open; otherwise nothing (pings and resyncs are not queued). */
@@ -224,7 +236,10 @@ export function createActorClient(options: ClientOptions<unknown>): ActorClient<
 
   /** A frame did not decode: ask for the view again, one request until a frame applies (ADR-020 D). */
   function requestResync() {
-    if (resyncPending || lastChecksum === undefined) return;
+    if (resyncPending || lastChecksum === undefined) {
+      reportUndecodable();
+      return;
+    }
     resyncPending = true;
     sendRaw(JSON.stringify({ type: "__reconnect", lastChecksum }));
   }
@@ -307,6 +322,13 @@ export function createActorClient(options: ClientOptions<unknown>): ActorClient<
       reconnectTimer = undefined;
       void openSocket();
     }, delay);
+  }
+
+  /** Views still do not decode (nothing to resync from, or the resync's answer did not either). */
+  function reportUndecodable() {
+    if (undecodableReported) return;
+    undecodableReported = true;
+    onError?.(UNDECODABLE_VIEW);
   }
 
   /** "online" / page visible: skip the rest of the backoff wait, or check that the open socket still answers. */

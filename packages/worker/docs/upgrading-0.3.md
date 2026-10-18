@@ -518,3 +518,26 @@ String, record-key and JSON lengths and array and record counts used to be a big
 unsigned LEB128 varints now (`docs/binary-protocol.md`), so large values round-trip. Server and client
 must both run 0.3: a 0.2 client cannot decode 0.3 frames. Views with only short strings and small
 arrays get slightly smaller frames.
+
+## The client pings, and a silent socket is replaced (ADR-020)
+
+A client now sends `{"type":"__ping"}` every 20 s while its socket is open, and at once when the
+page becomes visible or the browser comes online; the actor's runtime answers `{"type":"__pong"}`
+without waking the actor. A socket that answers nothing for 5 s after a ping is closed and a new one
+opens at once. Update the client and the Worker together: an older Worker refuses `__ping` as an
+unknown message (an `onError` every 20 s). To keep the old behaviour, or in tests that leave a fake
+socket silent:
+
+```ts
+// Before: a socket that died without a close event was kept forever
+const client = actorClient(Room).create({ path, initialView });
+// After: on by default; tune it or turn it off
+const client = actorClient(Room).create({ path, initialView, heartbeat: { intervalMs: 20_000, timeoutMs: 5_000 } });
+const quiet = actorClient(Room).create({ path, initialView, heartbeat: false });
+```
+
+Also: a message sent while the socket is closing waits for the next socket instead of being dropped;
+a view frame that does not decode makes the client ask for the view again, and one that still does
+not is reported through `onError` (`invalid_frame`: reload the page). `decode` and `applyDelta` throw
+`invalid_frame` for a payload that ends early or has bytes left over, and `parseFrame` for a frame
+shorter than its header says.

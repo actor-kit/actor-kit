@@ -5,7 +5,16 @@
  * Seam: a hand-driven fake socket and fake timers; nothing inside the client is mocked.
  */
 import { actorClient, createActorClient } from "@actor-kit/client";
-import { createDeltaFrame, createSnapshotFrame, encode, encodeDelta, schema, uint32, xxh64 } from "@actor-kit/core";
+import {
+  createDeltaFrame,
+  createSnapshotFrame,
+  docsUrl,
+  encode,
+  encodeDelta,
+  schema,
+  uint32,
+  xxh64,
+} from "@actor-kit/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 type Listener = (event: { data?: unknown }) => void;
@@ -354,12 +363,94 @@ describe("resync after a frame that does not decode (ADR-020 D)", () => {
     expect(next.types()).toEqual(["__reconnect", "__reconnect"]);
   });
 
+  it("a frame that still does not decode after asking is reported once through onError (reload the page)", async () => {
+    const errors: unknown[] = [];
+    const client = createActorClient({
+      path: "/api/counter/c1",
+      host: "example.com",
+      initialView: { count: 0 },
+      viewSchema: Counter,
+      getToken: () => "token",
+      WebSocketImpl: ManualSocket,
+      heartbeat: false,
+      onError: (error) => errors.push(error),
+    });
+    clients.push(client);
+    client.connect();
+    await settle();
+    const socket = latest();
+    socket.serverOpens();
+    socket.receiveFrame(createSnapshotFrame(1, 0, encode(Counter, { count: 1 })));
+    socket.receiveFrame(createDeltaFrame(1, new Uint8Array([0xff])));
+    expect(errors).toEqual([]);
+
+    socket.receiveFrame(new Uint8Array([1, 1, 0, 0, 0, 9]));
+    socket.receiveFrame(new Uint8Array([1, 1, 0, 0, 0, 9]));
+    expect(errors).toEqual([
+      {
+        messageType: "",
+        code: "invalid_frame",
+        message:
+          "A view from the server does not decode with this client's view schema, also after asking again. Reload the page: the Worker was probably deployed with a newer schema.",
+        docs: docsUrl("invalid_frame"),
+      },
+    ]);
+    expect(client.view).toEqual({ count: 1 });
+  });
+
+  it("reports again only after a frame applied in between", async () => {
+    const errors: unknown[] = [];
+    const client = createActorClient({
+      path: "/api/counter/c1",
+      host: "example.com",
+      initialView: { count: 0 },
+      viewSchema: Counter,
+      getToken: () => "token",
+      WebSocketImpl: ManualSocket,
+      heartbeat: false,
+      onError: (error) => errors.push(error),
+    });
+    clients.push(client);
+    client.connect();
+    await settle();
+    const socket = latest();
+    socket.serverOpens();
+    socket.receiveFrame(createSnapshotFrame(1, 0, encode(Counter, { count: 1 })));
+    socket.receiveFrame(createDeltaFrame(1, new Uint8Array([0xff])));
+    socket.receiveFrame(createDeltaFrame(1, new Uint8Array([0xff])));
+    socket.receiveFrame(createSnapshotFrame(1, 0, encode(Counter, { count: 2 })));
+    socket.receiveFrame(createDeltaFrame(1, new Uint8Array([0xff])));
+    socket.receiveFrame(createDeltaFrame(1, new Uint8Array([0xff])));
+    expect(errors).toHaveLength(2);
+  });
+
   it("nothing to ask with before any view applied (the first snapshot did not decode)", async () => {
     const client = makeClient(false);
     client.connect();
     await settle();
     latest().serverOpens();
     latest().receiveFrame(new Uint8Array([1, 1, 0, 0, 0, 9]));
+    expect(latest().sent).toEqual([]);
+  });
+
+  it("a first snapshot that does not decode is reported at once (there is no view to ask from)", async () => {
+    const errors: unknown[] = [];
+    const client = createActorClient({
+      path: "/api/counter/c1",
+      host: "example.com",
+      initialView: { count: 0 },
+      viewSchema: Counter,
+      getToken: () => "token",
+      WebSocketImpl: ManualSocket,
+      heartbeat: false,
+      onError: (error) => errors.push(error),
+    });
+    clients.push(client);
+    client.connect();
+    await settle();
+    latest().serverOpens();
+    latest().receiveFrame(new Uint8Array([1, 1, 0, 0, 0, 9]));
+    expect(errors).toMatchObject([{ code: "invalid_frame", messageType: "" }]);
     expect(latest().sent).toEqual([]);
   });
 });

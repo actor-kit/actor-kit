@@ -45,7 +45,9 @@ describe("scoped calls in a Durable Object", () => {
 
   it("leaving the state aborts the call; its late result goes to onStale and is journaled", async () => {
     const stub = await spawn("scoped-stale");
-    await stub.send("u", "user", { type: "LOAD", q: "late", ms: 150 });
+    // 1 s, not 150 ms: under a full parallel run the CANCEL below arrived after a 150 ms call had
+    // already finished (row "done", not "cancelled"). The late result still lands within until().
+    await stub.send("u", "user", { type: "LOAD", q: "late", ms: 1000 });
     await new Promise((resolve) => setTimeout(resolve, 30)); // the tries are in flight
     await stub.send("u", "user", { type: "CANCEL" });
     const rows = await runInDurableObject(stub, (_i, s) =>

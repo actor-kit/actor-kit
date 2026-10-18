@@ -58,7 +58,13 @@ A binary frame that throws while parsing or decoding makes the client send
 `{"type":"__reconnect","lastChecksum":<last good view>}` on the open socket. The actor already
 answers that with `__reconnect_ack` (views equal) or a full snapshot. At most one request is
 outstanding: another is only sent after a frame has applied, so a snapshot that the client cannot
-decode (a client bundle older than the Worker) does not loop.
+decode (a client bundle older than the Worker) does not loop. A frame that fails while a request is
+outstanding, or before any view applied, is reported once through `onError` as `invalid_frame`
+("Reload the page"), again only after a frame applies in between.
+
+`decode` and `applyDelta` read the whole payload: one that ends early or has bytes left over is
+`invalid_frame` (it was written with another schema or damaged), never a view with a string cut
+short or a delta read as "nothing changed". `parseFrame` refuses a frame shorter than its header says.
 
 ## Consequences
 
@@ -74,5 +80,6 @@ decode (a client bundle older than the Worker) does not loop.
 
 ## Not decided here
 
-- A view schema change across a deploy (an old client decoding the new schema). The frame's version
-  byte is the actor's state version, not a schema hash; decision D only stops the loop.
+- A schema hash in the frame, so a client can tell a newer schema from damage. Today a mismatch is
+  caught when the payload does not fill exactly (most changes) and reported through `onError`; a
+  change that keeps every byte length (a `uint32` renamed) is not detected.

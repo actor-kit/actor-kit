@@ -42,10 +42,10 @@ got explicit timeouts, assertions unchanged.
 
 ## Flaky existing tests seen under load (not changed)
 
-- `tests/integration/scoped-invocations.test.ts` "leaving the state aborts the call…": sleeps 30 ms
-  and expects a 150 ms service call still in flight; under load the call finished first (`done`
-  instead of `cancelled`). Test timing race, not a runtime bug. Fix: have the service wait on a
-  signal the test releases.
+- `tests/integration/scoped-invocations.test.ts` "leaving the state aborts the call…": slept 30 ms
+  and expected a 150 ms service call still in flight; under a full parallel run the call finished
+  first (`done` instead of `cancelled`), at baseline and on this branch. Genuine test race: the call
+  now takes 1 s (assertions unchanged; the late result still lands inside the test's `until`).
 - `tests/integration/studio.test.ts` "lists every journaled event…": 5 s default timeout during the
   full parallel run; passes alone.
 - Root fix for the timeouts: `testTimeout: 30_000` in both vitest configs (no test changed). Two

@@ -33,6 +33,7 @@ import {
   readValue,
   readVariant,
   readVarint,
+  readWhole,
   recordSize,
   valueSize,
   variantOf,
@@ -258,7 +259,7 @@ export function applyDelta<TShape extends Record<string, FieldDescriptor>>(
   current: Infer<SchemaDefinition<TShape>>,
   deltaBytes: Uint8Array,
 ): Infer<SchemaDefinition<TShape>> {
-  const result = readFieldsDelta(schemaDef, current, cursorOver(deltaBytes, 0));
+  const result = readWhole("Delta payload", deltaBytes, (c) => readFieldsDelta(schemaDef, current, c));
   // Generic boundary cast: `current` already matches Infer<>, and every replaced entry is read
   // by that field's own descriptor; the compiler cannot relate the walk over `fields` to TShape.
   return result as Infer<SchemaDefinition<TShape>>;
