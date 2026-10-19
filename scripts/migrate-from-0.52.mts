@@ -88,6 +88,12 @@ const CALLS: { what: string; pattern: RegExp; hint: string }[] = [
     hint: "The Provider's client is useActorClient(); useClient(options) now creates one (guide §2)",
   },
   { what: "getState()", pattern: /\.getState\(\s*\)/, hint: "The client's current view is client.view (guide §2)" },
+  {
+    what: "z.record(enum)",
+    // A key that isn't z.string() / z.number(): an enum, a literal union, a named key schema.
+    pattern: /\bz\.record\(\s*(?!z\.(?:string|number)\(\))[^,]+,/,
+    hint: "zod 4 makes every key of an enum-keyed record required; z.partialRecord is zod 3's z.record (guide §1)",
+  },
 ];
 
 export interface ManualWork {

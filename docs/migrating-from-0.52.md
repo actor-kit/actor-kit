@@ -39,6 +39,9 @@ covers coming from 0.52.
 - **Delete `patches/actor-kit@0.52.6.patch`.** It made `webSocketClose` answer with a sendable close
   code instead of echoing a reserved one (1005/1006/1015). 0.3 does that itself
   (`runtime/close-code.ts`, `answerClose`).
+- **zod 3 → 4.** A `z.record` keyed by an enum (or any key schema but `z.string()` / `z.number()`)
+  requires every key in zod 4; zod 3's was partial. Use `z.partialRecord` where a record may hold only
+  some keys (peekaboo-garden's art manifest broke this way). The codemod lists each one.
 - Upgrade the client and the Worker together. The 0.3 client pings (`__ping`, ADR-020), and only a 0.3
   actor answers that.
 
@@ -197,8 +200,17 @@ guarded `after` needs a little more than a flat table:
   - In-page rooms (a TV preview, scenario tests) that used `actor.subscribe` and `clock.increment`:
     `simulate()` has no subscribe, so wrap `send` and `advance` and tell listeners when `actor.state`
     changed (bake-shop's `src/game/memoryRoom.ts`). `@actor-kit/test` runs in the browser.
+  - A helper that sent some events with a different env (0.52 carried `env` on every event, so a test
+    could switch a dev hook on for one send): a simulation has one env object, handed to handlers as is,
+    so the helper sets the flag on it around that send (peekaboo-garden's `send(..., hooks)`).
+  - A helper that rigged state by restoring a patched snapshot (night-flight-owls' `rig()`): spawn the
+    same contract with `init` returning the patched state,
+    `defineActor(name, { ...Contract.def, init: () => patched })`, in a fresh simulation. Like the 0.52
+    restore, it has no pending timers.
   - Each `simulate()` starts from the same seed. Tests that compare two rooms ("books get fresh ids")
     need `simulate({ seed })` with a seed per room, as production rooms each draw their own.
+- The 0.3 client has no `waitFor`; a seam helper or a dev hook that waited on the view subscribes
+  until its predicate holds (peekaboo-garden's `viewWhere`).
 - **Seam-test helpers on 0.52's client** (an `e2e/wire.ts` with `createActorKitClient`): keep their
   surface (`send`, `getState`, `waitFor`, `disconnect`) over `createActorClient`, and the tests stay
   unedited. A test file that imports `actor-kit/browser` or `xstate` itself can't stay unedited; ask
