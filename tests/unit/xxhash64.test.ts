@@ -1,5 +1,7 @@
 import { xxh64 } from "@actor-kit/core";
+import fc from "fast-check";
 import { describe, expect, it } from "vitest";
+import { referenceXxh64 } from "./fixtures/xxh64-bigint";
 
 // Reference values from the xxhash C library (python-xxhash xxh64, seed 0, UTF-8 input).
 describe("xxh64", () => {
@@ -44,5 +46,20 @@ describe("xxh64", () => {
     for (const input of ["", "a", "zz", base]) {
       expect(xxh64(input)).toMatch(/^[0-9a-f]{16}$/);
     }
+  });
+});
+
+describe("xxh64 (32-bit arithmetic) matches the BigInt implementation", () => {
+  it("for any string", () => {
+    fc.assert(
+      fc.property(fc.string({ unit: "binary", maxLength: 300 }), (input) => xxh64(input) === referenceXxh64(input)),
+      { numRuns: 2000 },
+    );
+  });
+
+  it("for long JSON states (the journal checksums whole states)", () => {
+    const state = { album: Array.from({ length: 300 }, (_, i) => ({ id: `card_${i}`, shiny: i % 10 === 0 })) };
+    const json = JSON.stringify(state);
+    expect(xxh64(json)).toBe(referenceXxh64(json));
   });
 });
