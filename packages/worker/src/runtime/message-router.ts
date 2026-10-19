@@ -6,9 +6,8 @@
  * Object admits and then runs the handler through the step core; testActor() uses this.
  */
 
-import type { GuardContext, MessageContext } from "@actor-kit/core";
+import type { GuardContext, MessageContext, StandardSchema } from "@actor-kit/core";
 import { ActorKitError } from "@actor-kit/core";
-import type { z } from "zod";
 import { admitMessage } from "./step";
 
 // --- Route result ---
@@ -26,7 +25,7 @@ export type RouteResult<TState> =
 // to be assignable without contravariance issues on the parameters. This is safe because
 // Zod validates the payload at runtime before the handler is called.
 interface RoutableMessage<TState> {
-  readonly schema: z.ZodType;
+  readonly schema: StandardSchema;
   // Method signature (bivariant in --strict) instead of property signature (contravariant)
   handler(state: TState, payload: unknown, ctx: MessageContext): TState;
   guard?(state: TState, payload: unknown, ctx: GuardContext): boolean;

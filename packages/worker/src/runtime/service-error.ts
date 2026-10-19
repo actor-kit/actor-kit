@@ -13,6 +13,7 @@
  * the same typed value.
  */
 
+import { type ParseableSchema, parseSchema } from "@actor-kit/core";
 import { z } from "zod";
 
 /** A value with a `_tag` naming the kind of failure. */
@@ -93,9 +94,8 @@ export function isBuiltInError(error: TaggedError): boolean {
 }
 
 /** The structural slice of a Zod schema the runtime needs to parse `errors`. */
-export interface ErrorsParser {
-  safeParse(value: unknown): { success: true; data: unknown } | { success: false; error: { message: string } };
-}
+/** The schema a service's declared errors parse with (any Standard Schema, ADR-024). */
+export type ErrorsParser = ParseableSchema;
 
 /** What a thrown value means: the declared error it parses to, or a Defect. */
 export function classifyFailure(thrown: unknown, errors: ErrorsParser | undefined): TaggedError {
@@ -103,8 +103,8 @@ export function classifyFailure(thrown: unknown, errors: ErrorsParser | undefine
   if (failure === null) return defectError(thrown instanceof Error ? thrown.message : String(thrown));
   const what = `fail({ _tag: ${JSON.stringify(failure._tag)} })`;
   if (errors === undefined) return defectError(`${what}: this service declares no errors`);
-  const parsed = errors.safeParse(failure);
-  if (!parsed.success) return defectError(`${what} does not match the service's errors: ${parsed.error.message}`);
+  const parsed = parseSchema(errors, failure);
+  if (!parsed.success) return defectError(`${what} does not match the service's errors: ${parsed.message}`);
   return isTaggedError(parsed.data) ? parsed.data : defectError(`${what}: the service's errors schema has no _tag`);
 }
 

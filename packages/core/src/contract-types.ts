@@ -4,6 +4,8 @@
  * them (Run Set Jimmy feedback 18).
  */
 
+import type { SchemaInput, StandardSchema } from "./standard";
+
 /** A state's local, as `kit.in(path).state()` carries it (phantom `~local`); unknown otherwise. */
 type PhaseLocal<D> = D extends { readonly "~local"?: infer L } ? L : unknown;
 
@@ -51,7 +53,7 @@ export type ContractState<T> = T extends { def: { init: (...args: never[]) => in
   : unknown;
 
 /** The spawn input: the input schema's input type (what callers pass before parsing). */
-export type ContractInput<T> = T extends { def: { input: { _input: infer I } } } ? I : unknown;
+export type ContractInput<T> = T extends { def: { input: infer S extends StandardSchema } } ? SchemaInput<S> : unknown;
 
 type JsonLeaf = string | number | boolean | null;
 type JsonDepth<D extends unknown[]> = D["length"] extends 8

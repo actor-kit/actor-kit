@@ -7,9 +7,9 @@
  *   // { count: number; name: string }
  */
 
-import type { z } from "zod";
 import { ActorKitError } from "./errors";
 import { registerInner } from "./meta";
+import type { SchemaOutput, StandardSchema } from "./standard";
 import { type Validates, validates } from "./validate";
 
 export { valueMetaOf } from "./meta";
@@ -184,19 +184,19 @@ export function union<const Tag extends string, const V extends Readonly<Record<
 
 // --- JSON escape hatch ---
 
-export interface JsonDescriptor<S extends z.ZodType> extends Validates<z.output<S>> {
+export interface JsonDescriptor<S extends StandardSchema> extends Validates<SchemaOutput<S>> {
   readonly kind: "json";
   readonly type: "json";
   readonly schema: S;
 }
 
-/** Any JSON value, sent as JSON text and parsed with `zodSchema` when decoded. Changes resend it whole. */
-export function json<S extends z.ZodType>(zodSchema: S): JsonDescriptor<S> {
+/** Any JSON value, sent as JSON text and parsed with `zodSchema` (any Standard Schema, ADR-024) when decoded. Changes resend it whole. */
+export function json<S extends StandardSchema>(zodSchema: S): JsonDescriptor<S> {
   return Object.freeze({
     kind: "json" as const,
     type: "json" as const,
     schema: zodSchema,
-    ...validates<z.output<S>>(() => ({ type: "json", json: zodSchema })),
+    ...validates<SchemaOutput<S>>(() => ({ type: "json", json: zodSchema })),
   });
 }
 
@@ -210,7 +210,7 @@ export type BaseFieldDescriptor =
   | RecordDescriptor<BaseFieldDescriptor>
   | EnumDescriptor<readonly EnumValue[]>
   | UnionDescriptor<string, Readonly<Record<string, AnySchema>>>
-  | JsonDescriptor<z.ZodType>
+  | JsonDescriptor<StandardSchema>
   | SchemaDefinition<Record<string, FieldDescriptor>>;
 
 export interface NullableDescriptor<F extends BaseFieldDescriptor> extends Validates<InferNonNullable<F> | null> {
@@ -248,7 +248,7 @@ interface Layout {
   readonly values: readonly EnumValue[];
   readonly tag: string;
   readonly variants: readonly VariantMeta[];
-  readonly json: z.ZodType;
+  readonly json: StandardSchema;
 }
 
 /** The layout keys `K`, with every other layout key named as `undefined` so `meta.element?.type` reads without narrowing. */
@@ -369,7 +369,7 @@ type InferNonNullable<F> =
           : F extends UnionDescriptor<infer Tag, infer V>
             ? InferUnion<Tag, V>
             : F extends JsonDescriptor<infer S>
-              ? z.output<S>
+              ? SchemaOutput<S>
               : F extends SchemaDefinition<infer S>
                 ? { [K in keyof S]: InferField<S[K]> }
                 : never;

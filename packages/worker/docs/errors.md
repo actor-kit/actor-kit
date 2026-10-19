@@ -362,6 +362,14 @@ Docs: https://actorkit.dev/errors/actor_not_found/
 
 Docs: https://actorkit.dev/errors/invalid_ref/
 
+## `async_schema`
+
+**What happened:** A schema validated asynchronously (ADR-024): actor-kit parses synchronously.
+
+**How to fix it:** Use a schema without async refinements or transforms for messages, timers, input and views.
+
+Docs: https://actorkit.dev/errors/async_schema/
+
 ## `invalid_input`
 
 **What happened:** The spawn input does not match the actor's `input` schema, or the actor needs input it was not given.

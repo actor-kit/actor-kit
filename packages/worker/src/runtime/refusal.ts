@@ -4,14 +4,12 @@
  * build them here, so a refusal reads the same everywhere.
  */
 
-import { type Refusal, type RefusalCode, refusal } from "@actor-kit/core";
+import { issuePath, type Refusal, type RefusalCode, refusal, type SchemaIssue } from "@actor-kit/core";
 import { dotted, levelsOf, phasedState } from "./phases";
 
 /** One issue of a failed parse (Zod's shape). */
-export interface ParseIssue {
-  readonly path: readonly PropertyKey[];
-  readonly message: string;
-}
+/** A payload issue (a Standard Schema issue; zod's own issue objects for zod). */
+export type ParseIssue = SchemaIssue;
 
 /** A refused admission from the step core (`admitStepMessage`). */
 export type RefusedAdmission =
@@ -66,7 +64,7 @@ export interface RefusedCaller {
 function issuesText(issues: readonly ParseIssue[]): string {
   return issues
     .map((issue) => {
-      const path = issue.path.map(String).join(".");
+      const path = issuePath(issue).map(String).join(".");
       return path === "" ? issue.message : `${path}: ${issue.message}`;
     })
     .join("; ");

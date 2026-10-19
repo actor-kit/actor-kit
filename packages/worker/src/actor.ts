@@ -18,6 +18,7 @@ import type {
   FieldDescriptor,
   Refusal,
   SchemaDefinition,
+  StandardSchema,
 } from "@actor-kit/core";
 import {
   ActorKitError,
@@ -25,6 +26,7 @@ import {
   createSnapshotFrame,
   encode,
   encodeDelta,
+  parseSchema,
   refusal,
   xxh64,
 } from "@actor-kit/core";
@@ -230,13 +232,13 @@ function resolveSingletonStub(binding: unknown, name: string): DurableObjectStub
 // Type safety is enforced at the definition site (message(), view(), etc.),
 // not at the runtime level. The DO class just needs schemas, handlers, and predicates.
 interface ActorMessageSlot {
-  readonly schema: z.ZodType;
+  readonly schema: StandardSchema;
   handler(state: unknown, payload: unknown, ctx: unknown): unknown;
   guard?(state: unknown, payload: unknown, ctx: unknown): boolean; // bivariant method signature
 }
 
 interface ActorDef {
-  input: z.ZodType;
+  input: StandardSchema;
   /** Typed env (ADR-016 §4): a Zod object, parsed once before the actor serves anything. */
   env?: EnvParser;
   init(
@@ -268,7 +270,7 @@ interface ActorDef {
     ): void;
   };
   /** Domain events (ADR-017 §2): payload schemas by name; `ctx.emit` parses by them. */
-  events?: Record<string, z.ZodType>;
+  events?: Record<string, StandardSchema>;
   /** Outbound stream (ADR-017 §3): emitted events named here are sent to the Queue binding `queue`. */
   publish?: PublishOption;
   /**
@@ -282,7 +284,7 @@ interface ActorDef {
   /** Durable timers (ADR-015 D2): `timer(schema, handler)` per name. */
   timers?: Record<
     string,
-    { readonly schema: z.ZodType; handler(state: unknown, payload: unknown, ctx: unknown): unknown }
+    { readonly schema: StandardSchema; handler(state: unknown, payload: unknown, ctx: unknown): unknown }
   >;
   services?: Record<
     string,
@@ -760,7 +762,7 @@ export function actor(
 
     /** No persisted state — try auto-spawn with empty input. */
     async autoSpawn(): Promise<void> {
-      const emptyParsed = def.input.safeParse({});
+      const emptyParsed = parseSchema(def.input, {});
       // If input requires fields, stay uninitialized — spawn() must be called explicitly
       if (!emptyParsed.success) return;
 
@@ -1912,11 +1914,11 @@ export function actor(
       }
 
       // Validate input
-      const parsed = def.input.safeParse(input.input);
+      const parsed = parseSchema(def.input, input.input);
       if (!parsed.success) {
         throw new ActorKitError(
           "invalid_input",
-          `Invalid input: ${parsed.error.message}. Spawn the actor with an input that matches its input schema.`,
+          `Invalid input: ${parsed.message}. Spawn the actor with an input that matches its input schema.`,
         );
       }
 

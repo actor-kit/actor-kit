@@ -21,7 +21,7 @@
  */
 
 import type { ContractMessages, Duration, Refusal } from "@actor-kit/core";
-import { ActorKitError } from "@actor-kit/core";
+import { ActorKitError, parseSchema } from "@actor-kit/core";
 import {
   admitStepMessage,
   checksumState,
@@ -271,11 +271,11 @@ function declaredError(
       "invalid_rejection",
       `simulate: service "${service}" declares no errors to reject with "${error._tag}"`,
     );
-  const parsed = errors.safeParse(error);
+  const parsed = parseSchema(errors, error);
   if (!parsed.success) {
     throw new ActorKitError(
       "invalid_rejection",
-      `simulate: "${error._tag}" does not match service "${service}"'s errors: ${parsed.error.message}`,
+      `simulate: "${error._tag}" does not match service "${service}"'s errors: ${parsed.message}`,
     );
   }
   return isTaggedError(parsed.data) ? { ...parsed.data } : defectError(`"${error._tag}" parsed to an untagged value`);
@@ -818,8 +818,8 @@ function createSimulation(
     if (data.actors[keyOf(address)] !== undefined)
       throw new ActorKitError("already_spawned", `simulate: ${keyOf(address)} is already spawned`);
     publishOf(def);
-    const parsed = def.input.safeParse(input);
-    if (!parsed.success) throw new ActorKitError("invalid_input", `Invalid input: ${parsed.error.message}`);
+    const parsed = parseSchema(def.input, input);
+    if (!parsed.success) throw new ActorKitError("invalid_input", `Invalid input: ${parsed.message}`);
     const live = createLiveFacts(sources);
     const facts = { ...liveStepFacts(live), guard: withDeterminismGuard };
     const cause = {

@@ -24,8 +24,15 @@
  * checked at runtime: emitted payloads and locals are parsed by their schemas.
  */
 
-import type { GuardContext, MessageContext, MessageDef, TimerContext, TimerDef } from "@actor-kit/core";
-import type { z } from "zod";
+import type {
+  GuardContext,
+  MessageContext,
+  MessageDef,
+  SchemaOutput,
+  StandardSchema,
+  TimerContext,
+  TimerDef,
+} from "@actor-kit/core";
 import type {
   ActorContract,
   PublishCheck,
@@ -60,10 +67,10 @@ import type {
 
 export { PhaseTransition };
 
-export type EventSchemas = Record<string, z.ZodType>;
+export type EventSchemas = Record<string, StandardSchema>;
 
 /** Payload type of each declared event. */
-export type EventPayloads<T extends EventSchemas> = { [K in keyof T]: z.output<T[K]> };
+export type EventPayloads<T extends EventSchemas> = { [K in keyof T]: SchemaOutput<T[K]> };
 
 /** emit() typed by an actor's declared events. */
 export type TypedEmit<E> = <K extends keyof E & string>(name: K, payload: E[K]) => void;
@@ -141,7 +148,7 @@ type Guard<S, P, Ctx> = (state: S, payload: P, ctx: Ctx) => boolean;
  * context it was written against fits the runtime's, which passes phase, local, stay and goto.
  */
 export interface PhaseMessageDef<S, P> {
-  readonly schema: z.ZodType<P>;
+  readonly schema: StandardSchema<unknown, P>;
   handler(state: S, payload: P, ctx: never): PhaseResult<S>;
   guard?(state: S, payload: P, ctx: never): boolean;
   /** The roles that may send it; any other role is refused with `wrong_role` (all roles when absent). */
@@ -149,7 +156,7 @@ export interface PhaseMessageDef<S, P> {
 }
 
 export interface PhaseTimerDef<S, P> {
-  readonly schema: z.ZodType<P>;
+  readonly schema: StandardSchema<unknown, P>;
   handler(state: S, payload: P, ctx: never): PhaseResult<S>;
 }
 
@@ -174,13 +181,13 @@ export type ExitContext<TEnv, E, SD extends StateDecls, P> = HookContext<TEnv, E
 
 /** Any message or timer of a state with shared state S, whatever its payload (for `states` records). */
 export interface StatePart<S> {
-  readonly schema: { safeParse(data: unknown): unknown };
+  readonly schema: StandardSchema;
   handler(state: S, payload: never, ctx: never): PhaseResult<S>;
 }
 
 /** A state, as the actor's `states` holds it. */
 export interface StateDef<S> {
-  readonly local?: z.ZodType;
+  readonly local?: StandardSchema;
   enter?(shared: S, input: never, ctx: never): unknown;
   exit?(shared: S, ctx: never): S;
   readonly messages?: Record<string, StatePart<S>>;
@@ -218,7 +225,7 @@ type PhaseGuardCtx<TEnv, SD extends StateDecls, P> = GuardContext<TEnv> & {
  */
 export interface PhaseHelpers<SD extends StateDecls, E, P, TEnvDefault = unknown> {
   message<Pay, S, TEnv = TEnvDefault>(
-    schema: z.ZodType<Pay>,
+    schema: StandardSchema<unknown, Pay>,
     handler:
       | Handler<S, Pay, PhaseCtx<TEnv, E, SD, P, S>, PhaseResult<S>>
       | {
@@ -229,7 +236,7 @@ export interface PhaseHelpers<SD extends StateDecls, E, P, TEnvDefault = unknown
         },
   ): PhaseMessageDef<S, Pay>;
   timer<Pay, S, TEnv = TEnvDefault>(
-    schema: z.ZodType<Pay>,
+    schema: StandardSchema<unknown, Pay>,
     handler: Handler<S, Pay, PhaseTimerCtx<TEnv, E, SD, P, S>, PhaseResult<S>>,
   ): PhaseTimerDef<S, Pay>;
   /**
@@ -258,7 +265,7 @@ export interface PhaseHelpers<SD extends StateDecls, E, P, TEnvDefault = unknown
 }
 
 /** What handlers see as `ctx.env`: the `env` schema's output (ADR-016 §4), or `unknown` without one. */
-export type SetupEnv<TEnvSchema> = TEnvSchema extends z.ZodType<infer TEnv> ? TEnv : unknown;
+export type SetupEnv<TEnvSchema> = TEnvSchema extends StandardSchema ? SchemaOutput<TEnvSchema> : unknown;
 
 export interface Setup<ES extends EventSchemas, SD extends StateDecls, TEnvSchema = undefined> {
   /** The declared events, for the actor's `events`. */
@@ -268,7 +275,7 @@ export interface Setup<ES extends EventSchemas, SD extends StateDecls, TEnvSchem
   /** The declared env schema (ADR-016 §4), for the actor's `env`; it types ctx.env in every helper. */
   readonly env: TEnvSchema;
   message<P, S, TEnv = SetupEnv<TEnvSchema>>(
-    schema: z.ZodType<P>,
+    schema: StandardSchema<unknown, P>,
     handler:
       | Handler<S, P, EmittingMessageContext<TEnv, EventPayloads<ES>>>
       | {
@@ -279,7 +286,7 @@ export interface Setup<ES extends EventSchemas, SD extends StateDecls, TEnvSchem
         },
   ): MessageDef<S, P, TEnv>;
   timer<P, S, TEnv = SetupEnv<TEnvSchema>>(
-    schema: z.ZodType<P>,
+    schema: StandardSchema<unknown, P>,
     handler: Handler<S, P, EmittingTimerContext<TEnv, EventPayloads<ES>>>,
   ): TimerDef<S, P, TEnv>;
   /**
@@ -317,7 +324,7 @@ export interface Setup<ES extends EventSchemas, SD extends StateDecls, TEnvSchem
    */
   actor<
     TName extends string,
-    TDef extends { input: z.ZodType; init(...args: never[]): unknown },
+    TDef extends { input: StandardSchema; init(...args: never[]): unknown },
     TState = unknown,
     TErrors extends Record<string, unknown> = Record<never, never>,
   >(
@@ -376,8 +383,8 @@ export interface KitServiceDef<
   E = Record<never, never>,
   SD extends StateDecls = Record<never, never>,
 > {
-  readonly errors?: z.ZodType<TDeclared>;
-  readonly result?: z.ZodType<TResult>;
+  readonly errors?: StandardSchema<unknown, TDeclared>;
+  readonly result?: StandardSchema<unknown, TResult>;
   readonly maxResultBytes?: number;
   readonly delivery?: "at-least-once" | "at-most-once";
   fn(input: unknown, env: TEnv, effect: EffectInfo): Promise<unknown>;
@@ -427,13 +434,13 @@ function typed<S, P, Ctx extends { readonly emit: (name: string, payload: unknow
 export function setup<
   const ES extends EventSchemas,
   const SD extends StateDecls = Record<never, never>,
-  TEnvSchema extends z.ZodType | undefined = undefined,
+  TEnvSchema extends StandardSchema | undefined = undefined,
 >(declarations: { events: ES; states?: SD; env?: TEnvSchema }): Setup<ES, SD, TEnvSchema>;
 export function setup<
   const SD extends StateDecls = Record<never, never>,
-  TEnvSchema extends z.ZodType | undefined = undefined,
+  TEnvSchema extends StandardSchema | undefined = undefined,
 >(declarations: { events?: undefined; states?: SD; env?: TEnvSchema }): Setup<Record<never, never>, SD, TEnvSchema>;
-export function setup<const SD extends StateDecls, TEnvSchema extends z.ZodType | undefined>(declarations: {
+export function setup<const SD extends StateDecls, TEnvSchema extends StandardSchema | undefined>(declarations: {
   events?: EventSchemas | undefined;
   states?: SD;
   env?: TEnvSchema;

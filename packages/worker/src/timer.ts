@@ -11,8 +11,7 @@
  * handler gets `ctx.key`, `ctx.lateBy` and the effect verbs (execute, forward, schedule, cancel).
  */
 
-import type { TimerContext, TimerDef } from "@actor-kit/core";
-import type { z } from "zod";
+import type { StandardSchema, TimerContext, TimerDef } from "@actor-kit/core";
 import type { TypedEmit } from "./setup";
 
 /** A standalone timer's context: no declared events, so `emit` accepts none (ADR-018 A). */
@@ -21,7 +20,7 @@ export type PlainTimerContext<TEnv = unknown> = Omit<TimerContext<TEnv>, "emit">
 };
 
 export function timer<TPayload, TState, TEnv = unknown>(
-  schema: z.ZodType<TPayload>,
+  schema: StandardSchema<unknown, TPayload>,
   handler: (state: TState, payload: TPayload, ctx: PlainTimerContext<TEnv>) => TState,
 ): TimerDef<TState, TPayload, TEnv> {
   return { schema, handler };
