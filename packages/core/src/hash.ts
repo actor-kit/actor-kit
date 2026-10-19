@@ -30,7 +30,8 @@ const TWO32 = 0x1_0000_0000;
 function add(ah: number, al: number, bh: number, bl: number): void {
   const lo = al + bl;
   rl = lo >>> 0;
-  rh = (ah + bh + (lo >= TWO32 ? 1 : 0)) >>> 0;
+  // The carry, exactly 0 or 1: what the low half lost when it wrapped.
+  rh = (ah + bh + (lo - rl) / TWO32) >>> 0;
 }
 
 /** The high 32 bits of the 64-bit product of two uint32s (16-bit limbs keep every step below 2^32). */
@@ -133,7 +134,8 @@ export function xxh64(input: string): string {
     hl = P5L;
   }
 
-  add(hh, hl, Math.floor(len / TWO32), len >>> 0);
+  // The length as a 64-bit word: its high half is 0 (no string reaches 2^32 UTF-8 bytes).
+  add(hh, hl, 0, len);
   hh = rh;
   hl = rl;
 
