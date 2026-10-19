@@ -90,13 +90,13 @@ TAllMessages ← union of all message types across all roles (what the client se
 standalone `message()` is the same for code outside a kit.
 
 ```typescript
-function message<TSchema extends z.ZodType, TState>(
+function message<TSchema extends StandardSchema, TState>(
   schema: TSchema,
   handler: (state: TState, payload: z.infer<TSchema>, ctx: MessageContext) => TState,
 ): MessageDef<z.infer<TSchema>, TState>;
 ```
 
-Every message handler must be wrapped in `message()` to pair a Zod schema with the handler. The schema is used at runtime for boundary parsing — invalid payloads are rejected before the handler runs.
+Every message handler must be wrapped in `message()` to pair a schema with the handler. The schema is any Standard Schema (zod 3.24+, zod 4, zod/mini, valibot: ADR-024), parsed with `parseSchema()` at the boundary — invalid payloads are rejected before the handler runs. actor-kit's browser packages import no validator; the game's choice is the only one its pages ship.
 
 ### MessageContext
 
@@ -173,7 +173,7 @@ if (view.role === "owner") {
 3. Worker forwards to DO via stub.fetch(stampedRequest)
 4. DO activates (or wakes from hibernation)
 5. If first spawn:
-   a. Validate input against Zod schema
+   a. Validate input against its schema (`parseSchema`, ADR-024)
    b. Run init(input) → initial state
    c. Persist state to SQLite
    d. Persist actor metadata (name, id, version)
@@ -186,7 +186,7 @@ if (view.role === "owner") {
 1. WebSocket frame (or send() RPC) arrives; the frame is parsed: an object with a string `type`
 2. Caller identity from the socket's tags (stamped by the Worker via withCallerIdentity)
 3. Resolve caller role: iterate roles top-to-bottom, first match wins
-4. admitMessage(): the message exists for the role, the payload parses with its Zod schema, the guard passes
+4. admitMessage(): the message exists for the role, the payload parses with its schema, the guard passes
 5. step(): run the handler with { caller, callerType, role, env, now, id, random, execute, link, unlink, forward },
    then onUnlink for each unlink → { state, effects, event }
 6. commit(): BEGIN

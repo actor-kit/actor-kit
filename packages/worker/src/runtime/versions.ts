@@ -24,7 +24,8 @@
  * contract's definition (and refuses the old `version` / `migrate` options: there is no shim).
  */
 
-import { ActorKitError } from "@actor-kit/core";
+import type { ParseableSchema, SchemaOutput, StandardSchema } from "@actor-kit/core";
+import { ActorKitError, parseSchema } from "@actor-kit/core";
 import { z } from "zod";
 
 type Payload = Record<string, unknown>;
@@ -44,13 +45,13 @@ export interface VersionOptions<S, P> {
 
 export interface VersionDef<N extends number = number, S = unknown, P = unknown> extends VersionOptions<S, P> {
   readonly version: N;
-  readonly schema: z.ZodType<S>;
+  readonly schema: StandardSchema<unknown, S>;
 }
 
 /** One version of an actor's state. Steps are typed against the previous version's state. */
 export function version<const N extends number, S, P = unknown>(
   n: N,
-  schema: z.ZodType<S>,
+  schema: StandardSchema<unknown, S>,
   options: VersionOptions<S, P> = {},
 ): VersionDef<N, S, P> {
   return { version: n, schema, ...options };
@@ -58,7 +59,7 @@ export function version<const N extends number, S, P = unknown>(
 
 // --- Chain typing (checked by defineActor) ---
 
-type StateOf<V> = V extends { readonly schema: z.ZodType<infer S> } ? S : never;
+type StateOf<V> = V extends { readonly schema: infer S extends StandardSchema } ? SchemaOutput<S> : never;
 type PreviousOf<V> = V extends { readonly state?: (previous: infer P) => unknown } ? P : unknown;
 
 /** true when every step's `state` takes the previous version's state. */
@@ -75,19 +76,19 @@ export type CurrentState<T extends readonly unknown[]> = T extends readonly [...
 
 // --- Runtime ---
 
-interface SafeParser {
-  safeParse(data: unknown): { success: true; data: unknown } | { success: false; error: { message: string } };
-}
+type SafeParser = ParseableSchema;
 
 const isFunction = (value: unknown): value is (input: never) => unknown => typeof value === "function";
 const isRecord = (value: unknown): value is Payload =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 const isSchema = (value: unknown): value is SafeParser =>
-  typeof value === "object" && value !== null && typeof Reflect.get(value, "safeParse") === "function";
+  typeof value === "object" &&
+  value !== null &&
+  (typeof Reflect.get(value, "~standard") === "object" || typeof Reflect.get(value, "safeParse") === "function");
 
 const StepSchema = z.object({
   version: z.number().int().min(1),
-  schema: z.custom<SafeParser>(isSchema, "schema must be a Zod schema"),
+  schema: z.custom<SafeParser>(isSchema, "schema must be a Zod schema or any Standard Schema"),
   state: z.custom<(previous: unknown) => unknown>(isFunction).optional(),
   events: z.record(z.string(), z.custom<(payload: Payload) => Payload>(isFunction)).optional(),
   emitted: z.record(z.string(), z.custom<(payload: Payload) => Payload>(isFunction)).optional(),
@@ -118,12 +119,9 @@ export interface EmittedUpcast {
 }
 
 function parseAt(step: Step, state: unknown): unknown {
-  const parsed = step.schema.safeParse(state);
+  const parsed = parseSchema(step.schema, state);
   if (!parsed.success)
-    throw new ActorKitError(
-      "invalid_versions",
-      `State does not match version ${step.version}: ${parsed.error.message}`,
-    );
+    throw new ActorKitError("invalid_versions", `State does not match version ${step.version}: ${parsed.message}`);
   return parsed.data;
 }
 

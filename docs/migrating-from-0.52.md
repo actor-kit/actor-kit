@@ -228,8 +228,8 @@ guarded `after` needs a little more than a flat table:
 - An OGS-profile join test that failed twice on 0.52 in the same setup passes on 0.3.
 - First real use found three codemod bugs, now fixed: it scrambled package.json's key order, left
   out `@actor-kit/test`, and copied every tarball instead of the pinned ones.
-- It also showed that zod 3 games must move to zod 4 and that token signing needs `jose`; the
-  codemod now does both.
+- It also showed that token signing needs `jose`, and (then) that zod 3 games had to move to zod 4;
+  the codemod does both. Since ADR-024 a game may stay on zod 3.25 instead (see §1).
 
 **codebreakers (0.0.1 → 0.3)**, the 0.3 end state:
 

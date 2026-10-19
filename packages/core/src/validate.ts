@@ -6,6 +6,7 @@
 import { ActorKitError } from "./errors";
 import { valueMetaOf } from "./meta";
 import type { EnumValue, PrimitiveTypeName, ValueMeta } from "./schema";
+import { issuePath, parseSchema } from "./standard";
 
 // --- StandardSchemaV1 (https://standardschema.dev), declared here so core has no dependency for it ---
 
@@ -128,8 +129,8 @@ function checkUnion(meta: UnionMeta, value: unknown, path: Path): Issues {
 }
 
 function checkJson(meta: JsonMeta, value: unknown, path: Path): Issues {
-  const parsed = meta.json.safeParse(value);
-  return parsed.success ? [] : parsed.error.issues.map((i) => ({ message: i.message, path: [...path, ...i.path] }));
+  const parsed = parseSchema(meta.json, value);
+  return parsed.success ? [] : parsed.issues.map((i) => ({ message: i.message, path: [...path, ...issuePath(i)] }));
 }
 
 function checkValue(meta: ValueMeta, value: unknown, path: Path): Issues {

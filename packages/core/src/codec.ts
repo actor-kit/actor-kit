@@ -18,6 +18,8 @@ import type {
   VariantMeta,
 } from "./schema";
 import { show, valueMetaOf } from "./schema";
+import { issuePath, parseSchema, type StandardSchema } from "./standard";
+import { SchemaValidationError } from "./validate";
 
 export type AnySchema = SchemaDefinition<Record<string, FieldDescriptor>>;
 
@@ -408,12 +410,19 @@ function readLeaf(meta: LeafMeta, c: Cursor): unknown {
     case "string":
       return readText(c);
     case "json":
-      return meta.json.parse(JSON.parse(readText(c)));
+      return parseJsonField(meta.json, JSON.parse(readText(c)));
     case "enum":
       return readEnum(meta.values, c);
     default:
       return readFixed(c, meta.type);
   }
+}
+
+/** A decoded json() field, parsed by its schema (any Standard Schema, ADR-024); throws listing the issues. */
+function parseJsonField(json: StandardSchema, value: unknown): unknown {
+  const parsed = parseSchema(json, value);
+  if (parsed.success) return parsed.data;
+  throw new SchemaValidationError(parsed.issues.map((i) => ({ message: i.message, path: issuePath(i) })));
 }
 
 /** Reads a string key (varint length + UTF-8), as record keys are written. */

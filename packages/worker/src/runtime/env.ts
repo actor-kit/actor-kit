@@ -7,6 +7,7 @@
  * each missing or wrong binding, logs one structured line, and never runs a handler.
  */
 
+import { issuePath, type ParseableSchema, parseSchema } from "@actor-kit/core";
 import { z } from "zod";
 
 const isObject = (value: unknown): value is object => typeof value === "object" && value !== null;
@@ -48,14 +49,8 @@ export function d1() {
   return binding<D1Database>("a D1 database", ["prepare", "batch", "exec"]);
 }
 
-/** The structural slice of a Zod object schema the runtime parses the env with. */
-export interface EnvParser {
-  safeParse(
-    env: unknown,
-  ):
-    | { success: true; data: unknown }
-    | { success: false; error: { issues: ReadonlyArray<{ path: ReadonlyArray<PropertyKey>; message: string }> } };
-}
+/** The schema the runtime parses the env with (any Standard Schema, ADR-024). */
+export type EnvParser = ParseableSchema;
 
 /** One binding that did not parse: its name (the first path segment) and why. */
 export interface EnvIssue {
@@ -70,10 +65,10 @@ export type ParsedEnv =
 /** Parse the Worker env against the actor's `env` schema. Without one, the env passes as it is. */
 export function parseActorEnv(schema: EnvParser | undefined, env: unknown): ParsedEnv {
   if (schema === undefined) return { ok: true, env };
-  const parsed = schema.safeParse(env);
+  const parsed = parseSchema(schema, env);
   if (parsed.success) return { ok: true, env: parsed.data };
-  const issues = parsed.error.issues.map((issue) => ({
-    binding: issue.path.length === 0 ? "(env)" : String(issue.path[0]),
+  const issues = parsed.issues.map((issue) => ({
+    binding: issuePath(issue).length === 0 ? "(env)" : String(issuePath(issue)[0]),
     message: issue.message,
   }));
   return { ok: false, issues };
