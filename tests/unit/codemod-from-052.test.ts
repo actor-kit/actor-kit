@@ -99,6 +99,17 @@ describe("manualWork", () => {
     expect(work[1]?.hint).toContain("client.view");
   });
 
+  it("lists zod records keyed by an enum: zod 4 makes every key required", () => {
+    const source = [
+      "covers: z.record(CoverKindSchema, z.array(ImageSchema)),",
+      "poses: z.record(z.enum(POSES), ImageSchema),",
+      "hats: z.record(z.string(), HatSchema),",
+    ].join("\n");
+    const work = manualWork("src/manifest.ts", source);
+    expect(work.map((w) => `${w.line} ${w.what}`)).toEqual(["1 z.record(enum)", "2 z.record(enum)"]);
+    expect(work[0]?.hint).toContain("z.partialRecord");
+  });
+
   it("finds nothing in 0.3 code", () => {
     expect(manualWork("a.ts", 'import { defineActor } from "@actor-kit/worker";')).toEqual([]);
   });
