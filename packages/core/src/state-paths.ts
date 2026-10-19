@@ -9,13 +9,13 @@
  * zod-free. @actor-kit/worker re-exports all of it.
  */
 
-import type { z } from "zod";
 import { ActorKitError } from "./errors";
+import type { SchemaOutput, StandardSchema } from "./standard";
 
 /** A declared state: its local's schema, its enter input's schema and its child states, all optional. */
 export interface StateDecl {
-  readonly local?: z.ZodType;
-  readonly input?: z.ZodType;
+  readonly local?: StandardSchema;
+  readonly input?: StandardSchema;
   readonly states?: StateDecls;
 }
 
@@ -65,9 +65,9 @@ export type DeclAt<SD, P> = P extends readonly [infer H, ...infer R]
   : never;
 
 /** The local of a state (null when it declares none). */
-export type LocalOf<D> = D extends { local: z.ZodType<infer L> } ? L : null;
+export type LocalOf<D> = D extends { local: infer S extends StandardSchema } ? SchemaOutput<S> : null;
 /** goto's input argument: required when the target declares `input`, absent otherwise. */
-export type InputArgs<D> = D extends { input: z.ZodType<infer I> } ? [input: I] : [];
+export type InputArgs<D> = D extends { input: infer S extends StandardSchema } ? [input: SchemaOutput<S>] : [];
 /** What `enter` receives as its input. */
 export type InputOf<D> = InputArgs<D> extends [infer I] ? I : undefined;
 

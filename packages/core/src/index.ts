@@ -65,6 +65,9 @@ export {
   uint32,
   union,
 } from "./schema";
+// Standard Schema at the boundary (ADR-024)
+export type { ParseableSchema, Parsed, SchemaInput, SchemaIssue, SchemaOutput, StandardSchema } from "./standard";
+export { issuePath, parseSchema } from "./standard";
 // State paths (ADR-019 A): typed paths and merged locals, and the zod-free view/role helpers
 // (Run Set Jimmy feedback 15); @actor-kit/worker re-exports them.
 export type {

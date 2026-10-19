@@ -8,7 +8,7 @@
  * plain `shared` (stay). The transition table is in docs/adrs/019-hierarchical-states-and-history-at-scale.md.
  */
 
-import { ActorKitError, mergeLocals } from "@actor-kit/core";
+import { ActorKitError, mergeLocals, type ParseableSchema, parseSchema } from "@actor-kit/core";
 import { z } from "zod";
 
 /** A state's path: a top-level name, or the names from the root down. */
@@ -104,9 +104,8 @@ export function upgradePhased(def: { readonly states?: unknown }, state: unknown
   return phasedState(state);
 }
 
-export interface SafeParser {
-  safeParse(data: unknown): { success: true; data: unknown } | { success: false; error: { message: string } };
-}
+/** A schema the runtime parses with (any Standard Schema, ADR-024). */
+export type SafeParser = ParseableSchema;
 
 /** A state as the runtime holds it (unknown-typed, bivariant methods). */
 export interface StepStateDef {
@@ -148,9 +147,9 @@ export function pathOf(target: PathInput): string[] {
 /** A local, parsed by the level's schema (a level without one has a null local). */
 export function parseLocal(path: readonly string[], def: StepStateDef, local: unknown): unknown {
   if (def.local === undefined) return null;
-  const parsed = def.local.safeParse(local);
+  const parsed = parseSchema(def.local, local);
   if (!parsed.success) {
-    throw new ActorKitError("invalid_local", `State "${dotted(path)}": invalid local: ${parsed.error.message}`);
+    throw new ActorKitError("invalid_local", `State "${dotted(path)}": invalid local: ${parsed.message}`);
   }
   return parsed.data;
 }

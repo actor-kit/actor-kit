@@ -13,7 +13,7 @@
  *   Defect.
  */
 
-import { ActorKitError } from "@actor-kit/core";
+import { ActorKitError, issuePath, type ParseableSchema, parseSchema, type SchemaIssue } from "@actor-kit/core";
 import { z } from "zod";
 import type { AttemptResult } from "./attempt";
 import { idempotencyKey } from "./effect-info";
@@ -24,15 +24,8 @@ export const DEFAULT_MAX_RESULT_BYTES = 128 * 1024;
 
 export type Delivery = "at-least-once" | "at-most-once";
 
-/** The structural slice of a Zod schema a result needs. */
-export interface ResultParser {
-  safeParse(value: unknown):
-    | { success: true; data: unknown }
-    | {
-        success: false;
-        error: { message: string; issues?: readonly { path: readonly PropertyKey[]; message: string }[] };
-      };
-}
+/** The schema a service's result parses with (any Standard Schema, ADR-024). */
+export type ResultParser = ParseableSchema;
 
 export interface ServiceOptions {
   readonly delivery: Delivery;
@@ -90,12 +83,8 @@ export function resolveServiceOptions(name: string, service: Readonly<Record<str
   };
 }
 
-function issuesText(error: {
-  message: string;
-  issues?: readonly { path: readonly PropertyKey[]; message: string }[];
-}): string {
-  if (error.issues === undefined) return error.message;
-  return error.issues.map((issue) => `${issue.path.map(String).join(".")}: ${issue.message}`).join("; ");
+function issuesText(issues: readonly SchemaIssue[]): string {
+  return issues.map((issue) => `${issuePath(issue).map(String).join(".")}: ${issue.message}`).join("; ");
 }
 
 /** The JSON text of a value ("" for undefined), or null when it cannot be serialized. */
@@ -115,12 +104,12 @@ export function parseServiceResult(
 ): { ok: true; value: unknown } | { ok: false; error: DefectError } {
   let parsed = value;
   if (options.result !== undefined) {
-    const result = options.result.safeParse(value);
+    const result = parseSchema(options.result, value);
     if (!result.success) {
       return {
         ok: false,
         error: defectError(
-          `Service "${name}" returned a result that does not match its result schema (${issuesText(result.error)}). Return a value that parses with result.`,
+          `Service "${name}" returned a result that does not match its result schema (${result.issues.length === 0 ? result.message : issuesText(result.issues)}). Return a value that parses with result.`,
         ),
       };
     }

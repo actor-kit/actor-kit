@@ -201,6 +201,10 @@ export const ERROR_CODES = {
     title: "`createRef` was called with the wrong arguments.",
     fix: "Call `createRef(contract, env, id)` or `createRef(contract, ctx.exports, env, id)` with a string id.",
   },
+  async_schema: {
+    title: "A schema validated asynchronously (ADR-024): actor-kit parses synchronously.",
+    fix: "Use a schema without async refinements or transforms for messages, timers, input and views.",
+  },
   invalid_input: {
     title: "The spawn input does not match the actor's `input` schema, or the actor needs input it was not given.",
     fix: "Pass an input that parses with `input` (spawn it with `spawn({ input })` before connecting).",

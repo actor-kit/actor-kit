@@ -5,8 +5,8 @@
  * and @actor-kit/client can depend on them without circular dependencies.
  */
 
-import type { z } from "zod";
 import type { Infer, SchemaDefinition } from "./schema";
+import type { SchemaOutput, StandardSchema } from "./standard";
 
 // --- Service execution types for execute() ---
 
@@ -147,7 +147,7 @@ export interface TimerContext<TEnv = unknown> extends DeterministicContext {
 }
 
 export interface TimerDef<TState = unknown, TPayload = unknown, TEnv = unknown> {
-  readonly schema: z.ZodType<TPayload>;
+  readonly schema: StandardSchema<unknown, TPayload>;
   readonly handler: (state: TState, payload: TPayload, ctx: TimerContext<TEnv>) => TState;
 }
 
@@ -164,7 +164,7 @@ export interface GuardContext<TEnv = unknown> {
 // --- MessageDef ---
 
 export interface MessageDef<TState = unknown, TPayload = unknown, TEnv = unknown> {
-  readonly schema: z.ZodType<TPayload>;
+  readonly schema: StandardSchema<unknown, TPayload>;
   readonly handler: (state: TState, payload: TPayload, ctx: MessageContext<TEnv>) => TState;
   readonly guard?: (state: TState, payload: TPayload, ctx: GuardContext<TEnv>) => boolean;
   /** The roles that may send it; any other role is refused with `wrong_role` (all roles when absent). */
@@ -183,7 +183,9 @@ export type MessageEvent<K extends string, P> = string extends keyof P ? { type:
 
 /** The wire messages of one `messages` record. */
 type MessagesOf<M> = {
-  [K in keyof M & string]: M[K] extends { schema: { _output: infer P } } ? MessageEvent<K, P> : { type: K };
+  [K in keyof M & string]: M[K] extends { schema: infer S extends StandardSchema }
+    ? MessageEvent<K, SchemaOutput<S>>
+    : { type: K };
 }[keyof M & string];
 
 /** The messages of one state: its own `messages`. */

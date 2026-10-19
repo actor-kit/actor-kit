@@ -19,9 +19,10 @@ import type {
   DeterministicContext,
   ExecuteOptions,
   GuardContext,
+  ParseableSchema,
   ScheduleOptions,
 } from "@actor-kit/core";
-import { ActorKitError } from "@actor-kit/core";
+import { ActorKitError, parseSchema } from "@actor-kit/core";
 import { parseDuration } from "./duration";
 import { createReplayFacts, type Facts, type JournalDraft, type LiveFacts } from "./journal";
 import { createOutbox, type UnlinkCall } from "./outbox";
@@ -36,13 +37,7 @@ import type { Trace } from "./trace";
 // --- Definition (runtime-shaped: unknown-typed, bivariant methods) ---
 
 export interface StepMessageSlot {
-  readonly schema: {
-    safeParse(
-      data: unknown,
-    ):
-      | { success: true; data: unknown }
-      | { success: false; error: { message: string; issues?: readonly ParseIssue[] | undefined } };
-  };
+  readonly schema: ParseableSchema;
   handler(state: unknown, payload: unknown, ctx: unknown): unknown;
   guard?(state: unknown, payload: unknown, ctx: GuardContext): boolean;
   /** The roles that may send it (all when absent); any other is refused with `wrong_role`. */
@@ -110,9 +105,7 @@ export interface StepDef {
   ): { readonly name: string; readonly payload: unknown };
 }
 
-interface SafeParser {
-  safeParse(data: unknown): { success: true; data: unknown } | { success: false; error: { message: string } };
-}
+type SafeParser = ParseableSchema;
 
 interface LifecycleCallEvent {
   caller: string;
@@ -348,9 +341,9 @@ export function admitMessage<M extends Pick<StepMessageSlot, "schema" | "guard" 
     return { ok: false, error: "wrong_role", roles: message.roles };
   }
   const { type: _type, ...payload } = event;
-  const parsed = message.schema.safeParse(payload);
+  const parsed = parseSchema(message.schema, payload);
   if (!parsed.success) {
-    return { ok: false, error: "validation_failed", detail: parsed.error.message, issues: parsed.error.issues };
+    return { ok: false, error: "validation_failed", detail: parsed.message, issues: parsed.issues };
   }
   if (message.guard !== undefined && !message.guard(state, parsed.data, { ...ctx, role })) {
     return { ok: false, error: "guard_failed" };
@@ -434,9 +427,9 @@ function emitVerb(def: StepDef, effects: StepEffects): (name: string, payload: u
         `Event "${name}" is not declared on this actor. Declare it in setup({ events }) and define the actor with kit.actor().`,
       );
     }
-    const parsed = schema.safeParse(payload);
+    const parsed = parseSchema(schema, payload);
     if (!parsed.success) {
-      throw new ActorKitError("invalid_event_payload", `Event "${name}": invalid payload: ${parsed.error.message}`);
+      throw new ActorKitError("invalid_event_payload", `Event "${name}": invalid payload: ${parsed.message}`);
     }
     effects.emit(name, parsed.data);
   };
@@ -477,9 +470,9 @@ function timerVerbs(
           `Timer "${name}" is not declared on this actor. Declare it in timers: { ${name}: timer(schema, handler) }.`,
         );
       }
-      const parsed = timer.schema.safeParse(options.payload);
+      const parsed = parseSchema(timer.schema, options.payload);
       if (!parsed.success) {
-        throw new ActorKitError("invalid_timer_payload", `Timer "${name}": invalid payload: ${parsed.error.message}`);
+        throw new ActorKitError("invalid_timer_payload", `Timer "${name}": invalid payload: ${parsed.message}`);
       }
       effects.schedule(
         // The payload as given (validated above): the step core parses it once when the timer fires

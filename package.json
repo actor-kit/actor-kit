@@ -18,7 +18,8 @@
     "typecheck:types": "tsc -p tests/unit/tsconfig.types.json",
     "typecheck:budget": "node scripts/type-budget.mts",
     "docs:gen": "node scripts/gen-docs.mts",
-    "docs:check": "node scripts/gen-docs.mts --check"
+    "docs:check": "node scripts/gen-docs.mts --check",
+    "bundle-size": "node scripts/browser-bundle.mts"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.5.14",
@@ -35,6 +36,7 @@
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
     "@vitest/coverage-v8": "~4.1.11",
+    "esbuild": "^0.28.2",
     "fast-check": "^4.10.2",
     "husky": "^9.1.7",
     "jose": "^6.2.12",
@@ -45,7 +47,8 @@
     "tsdown": "^0.23.0",
     "typescript": "^7.0.2",
     "vitest": "^4.1.11",
-    "zod": "^4.6.5"
+    "zod": "^4.6.5",
+    "zod3": "npm:zod@3.25.76"
   },
   "packageManager": "pnpm@9.15.0",
   "engines": {

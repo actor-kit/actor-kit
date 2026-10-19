@@ -4,7 +4,7 @@
  * this checks the shape at runtime before simulate() uses it.
  */
 
-import { ActorKitError } from "@actor-kit/core";
+import { ActorKitError, type ParseableSchema } from "@actor-kit/core";
 import type {
   EnvParser,
   JournalOption,
@@ -22,9 +22,7 @@ import {
 } from "@actor-kit/worker/testing";
 
 export interface SimDef extends StepDef {
-  readonly input: {
-    safeParse(value: unknown): { success: true; data: unknown } | { success: false; error: { message: string } };
-  };
+  readonly input: ParseableSchema;
   readonly roles: Record<string, RolePredicate<unknown>>;
   readonly views: Record<string, { fn(state: unknown, caller: string): unknown }>;
   readonly messages?: Record<string, Record<string, StepMessageSlot>>;

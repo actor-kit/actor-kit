@@ -54,6 +54,7 @@ Every error actor-kit throws is an `ActorKitError` with a stable `code` and a `d
 | [`link_unavailable`](/errors/link_unavailable/) | A link could not be made or read: the target is unreachable or has no role/view for the linking actor. |
 | [`actor_not_found`](/errors/actor_not_found/) | No Durable Object namespace was found for an actor type, or the binding is not an actor-kit Durable Object. |
 | [`invalid_ref`](/errors/invalid_ref/) | `createRef` was called with the wrong arguments. |
+| [`async_schema`](/errors/async_schema/) | A schema validated asynchronously (ADR-024): actor-kit parses synchronously. |
 | [`invalid_input`](/errors/invalid_input/) | The spawn input does not match the actor's `input` schema, or the actor needs input it was not given. |
 | [`no_view`](/errors/no_view/) | The caller's role has no view. |
 | [`invalid_token`](/errors/invalid_token/) | The JWT is not valid for this actor (wrong actor id or type, missing `sub`, or an invalid `act`). |

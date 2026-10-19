@@ -20,8 +20,15 @@
  *   type Messages = keyof typeof Counter.def.messages;
  */
 
-import type { CancelFn, DeterministicContext, ExecuteFn, ForwardFn, ScheduleFn } from "@actor-kit/core";
-import type { ZodType } from "zod";
+import type {
+  CancelFn,
+  DeterministicContext,
+  ExecuteFn,
+  ForwardFn,
+  ScheduleFn,
+  SchemaOutput,
+  StandardSchema,
+} from "@actor-kit/core";
 import type { DeterminismMode } from "./runtime/determinism";
 import type { EffectInfo } from "./runtime/effect-info";
 import type { BuiltInError } from "./runtime/service-error";
@@ -48,12 +55,12 @@ export interface ActorContract<TName extends string = string, TDef = unknown> {
 export function defineActor<
   TName extends string,
   TDef extends {
-    input: ZodType;
+    input: StandardSchema;
     init(...args: never[]): unknown;
   },
   TState = unknown,
   TErrors extends Record<string, unknown> = Record<never, never>,
-  TEnvSchema extends ZodType | undefined = undefined,
+  TEnvSchema extends StandardSchema | undefined = undefined,
 >(
   name: TName,
   def: TDef &
@@ -70,7 +77,7 @@ export function defineActor<
   ES extends EventSchemas,
   SD extends StateDecls,
   TEnvSchema,
-  TDef extends { input: ZodType; init(...args: never[]): unknown },
+  TDef extends { input: StandardSchema; init(...args: never[]): unknown },
   TState = unknown,
   TErrors extends Record<string, unknown> = Record<never, never>,
 >(
@@ -98,7 +105,7 @@ function isKit(value: unknown): value is { actor(name: string, def: unknown): Ac
 export type ServiceErrorOf<TDeclared> = unknown extends TDeclared ? BuiltInError : TDeclared | BuiltInError;
 
 /** What handlers see as `env`: the `env` schema's output (ADR-016 §4), or `unknown` without one. */
-export type EnvOf<TEnvSchema> = TEnvSchema extends ZodType<infer TEnv> ? TEnv : unknown;
+export type EnvOf<TEnvSchema> = TEnvSchema extends StandardSchema ? SchemaOutput<TEnvSchema> : unknown;
 
 /**
  * What a service's onDone / onError get as their last argument: the call's effect id (ADR-018 G) and
@@ -155,12 +162,12 @@ export interface ServiceDef<
   C = ServiceCallbackContext<TEnv, E>,
 > {
   /** Declared failures: a `z.discriminatedUnion("_tag", [...])`. `throw fail(error)` values parse against it. */
-  readonly errors?: ZodType<TDeclared>;
+  readonly errors?: StandardSchema<unknown, TDeclared>;
   /**
    * Parses `fn`'s return (ADR-018 G): only the parsed value is journaled and passed to onDone. A result that
    * does not parse fails the try as a Defect.
    */
-  readonly result?: ZodType<TResult>;
+  readonly result?: StandardSchema<unknown, TResult>;
   /** Largest result accepted, as JSON bytes (default 128 KiB); larger fails the try as a Defect. */
   readonly maxResultBytes?: number;
   /**
@@ -211,7 +218,9 @@ export type PublishCheck<TDef> = TDef extends { publish: unknown }
 
 type PublishEvents<TDef> = TDef extends { events: infer E } ? keyof E & string : never;
 
-type PublishQueue<TDef> = TDef extends { env: ZodType<infer TEnv> } ? keyof TEnv & string : string;
+type PublishQueue<TDef> = TDef extends { env: infer S extends StandardSchema }
+  ? keyof SchemaOutput<S> & string
+  : string;
 
 type InitState<TDef> = TDef extends { init(...args: never[]): infer S } ? Awaited<S> : never;
 

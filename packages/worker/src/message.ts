@@ -21,8 +21,7 @@
  *   );
  */
 
-import type { GuardContext, MessageContext, MessageDef } from "@actor-kit/core";
-import type { z } from "zod";
+import type { GuardContext, MessageContext, MessageDef, StandardSchema } from "@actor-kit/core";
 import type { TypedEmit } from "./setup";
 
 /**
@@ -61,19 +60,19 @@ interface GuardedHandler<TState, TPayload, TEnv = unknown> {
 
 // Overload 1: bare handler (no guard)
 export function message<TPayload, TState, TEnv = unknown>(
-  zodSchema: z.ZodType<TPayload>,
+  zodSchema: StandardSchema<unknown, TPayload>,
   handler: MessageHandler<TState, TPayload, TEnv>,
 ): MessageDef<TState, TPayload, TEnv>;
 
 // Overload 2: guarded handler
 export function message<TPayload, TState, TEnv = unknown>(
-  zodSchema: z.ZodType<TPayload>,
+  zodSchema: StandardSchema<unknown, TPayload>,
   config: GuardedHandler<TState, TPayload, TEnv>,
 ): MessageDef<TState, TPayload, TEnv>;
 
 // Implementation
 export function message<TPayload, TState, TEnv = unknown>(
-  zodSchema: z.ZodType<TPayload>,
+  zodSchema: StandardSchema<unknown, TPayload>,
   handlerOrConfig: MessageHandler<TState, TPayload, TEnv> | GuardedHandler<TState, TPayload, TEnv>,
 ): MessageDef<TState, TPayload, TEnv> {
   if (typeof handlerOrConfig === "function") {

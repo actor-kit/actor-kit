@@ -15,9 +15,10 @@ import type {
   Infer,
   ScheduleOptions,
   SchemaDefinition,
+  StandardSchema,
   TimelineEntry,
 } from "@actor-kit/core";
-import { ActorKitError, RefusalError, xxh64 } from "@actor-kit/core";
+import { ActorKitError, parseSchema, RefusalError, xxh64 } from "@actor-kit/core";
 import type {
   EnvParser,
   LifecycleEvent,
@@ -42,13 +43,12 @@ import {
   step,
   withDeterminismGuard,
 } from "@actor-kit/worker/testing";
-import type { z } from "zod";
 import type { ContractState } from "./contract-types";
 
 // --- Actor definition shape (minimal for testing) ---
 
 interface TestableActorDef<TState, TInput> {
-  input: z.ZodType<TInput>;
+  input: StandardSchema<unknown, TInput>;
   init: (input: TInput, ctx?: { env: unknown; link: (name: string, id: string) => Promise<unknown> }) => TState;
   roles: Record<string, RolePredicate<TState>>;
   messages: Record<
@@ -56,7 +56,7 @@ interface TestableActorDef<TState, TInput> {
     Record<
       string,
       {
-        readonly schema: z.ZodType;
+        readonly schema: StandardSchema;
         handler(state: TState, payload: unknown, ctx: unknown): TState;
         guard?(state: TState): boolean;
       }
@@ -81,7 +81,7 @@ interface TestableActorDef<TState, TInput> {
     ): void;
   };
   /** Domain events (ADR-017 §2): emit() parses payloads by these schemas. */
-  events?: Record<string, z.ZodType>;
+  events?: Record<string, StandardSchema>;
 }
 
 // --- Contract type inference helpers ---
@@ -197,14 +197,14 @@ function roleNestedMessages(
 interface ContractShape {
   readonly name: string;
   readonly def: Omit<StepDef, "messages" | "init"> & {
-    input: z.ZodType;
+    input: StandardSchema;
     /** The typed env schema (ADR-016 §4). */
     env?: EnvParser;
     init: (input: unknown, ctx?: { env: unknown; link: (name: string, id: string) => Promise<unknown> }) => unknown;
     roles: Record<string, RolePredicate<unknown>>;
     messages?: Record<string, unknown>;
     views: Record<string, { readonly fn: (state: unknown, caller: string) => unknown }>;
-    events?: Record<string, z.ZodType>;
+    events?: Record<string, StandardSchema>;
     observe?: {
       onTransition?(
         prevState: unknown,
@@ -344,9 +344,9 @@ export function testActor(
 
   return {
     init(input: unknown): unknown {
-      const parsed = def.input.safeParse(input);
+      const parsed = parseSchema(def.input, input);
       if (!parsed.success) {
-        throw new ActorKitError("invalid_input", `Invalid input: ${parsed.error.message}`);
+        throw new ActorKitError("invalid_input", `Invalid input: ${parsed.message}`);
       }
       const shared = withDeterminismGuard(() =>
         def.init(parsed.data, {
